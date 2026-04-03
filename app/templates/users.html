@@ -44,6 +44,8 @@
         <a href="/dashboard/" class="nav-link d-inline ms-3">📊 דשבורד</a>
         <a href="/dashboard/decisions" class="nav-link d-inline ms-3">📋 החלטות</a>
         <a href="/dashboard/users" class="nav-link d-inline ms-3 fw-bold">👥 משתמשים</a>
+        <span class="text-muted small ms-3">👤 {{ current_user.username }}</span>
+        <a href="/logout" class="nav-link d-inline ms-3" style="color:#dc3545 !important;">🚪 התנתקות</a>
     </div>
 </nav>
 
@@ -139,12 +141,14 @@
                                     <br><span class="text-muted small">{{ user.email }}</span>
                                     {% endif %}
                                     {% if user.role %}
-                                    <br><span class="badge bg-secondary small">{{ role_labels.get(user.role.value, user.role.value) }}</span>
+                                    {% set hlevel = {'division_manager': 1, 'deputy_division_manager': 2, 'department_manager': 3, 'project_manager': 4} %}
+                                    <br><span class="badge bg-secondary small">{{ role_labels.get(user.role.value, user.role.value) }} ({{ hlevel.get(user.role.value, '?') }})</span>
                                     {% endif %}
                                 </td>
                                 <td>
-                                    {% if user.hierarchy_level %}
-                                    <span class="badge" style="background:#2d3047; color:#8b9cf4;">רמה {{ user.hierarchy_level }}</span>
+                                    {% if user.role %}
+                                    {% set hlevel = {'division_manager': 1, 'deputy_division_manager': 2, 'department_manager': 3, 'project_manager': 4} %}
+                                    <span class="badge" style="background:#2d3047; color:#8b9cf4;">{{ hlevel.get(user.role.value, '?') }}</span>
                                     {% else %}
                                     <span class="text-muted small">—</span>
                                     {% endif %}
@@ -178,7 +182,7 @@
                                 <td>
                                     <!-- Edit button -->
                                     <button class="btn btn-sm btn-outline-primary mb-1"
-                                            onclick="openEdit({{ user.id }}, '{{ user.username }}', '{{ user.telegram_id or '' }}', '{{ user.role.value if user.role else '' }}', '{{ user.job_title or '' }}', {{ user.hierarchy_level or 'null' }}, {{ user.manager_id or 'null' }})">
+                                            onclick="openEdit({{ user.id }}, '{{ user.username }}', '{{ user.telegram_id or '' }}', '{{ user.role.value if user.role else '' }}', '{{ user.job_title or '' }}', {{ user.manager_id or 'null' }})">
                                         ✏️
                                     </button>
                                     <!-- Delete button -->
@@ -238,11 +242,6 @@
                                placeholder="לדוגמה: מהנדס חשמל בכיר">
                     </div>
                     <div class="mb-3">
-                        <label class="form-label small" style="color:#a0a8c0;">מקום בהיררכיה (מספר)</label>
-                        <input type="number" name="hierarchy_level" id="edit_hierarchy" class="form-control" min="1"
-                               placeholder="1 = הכי גבוה">
-                    </div>
-                    <div class="mb-3">
                         <label class="form-label small" style="color:#a0a8c0;">מנהל ישיר</label>
                         <select name="manager_id" id="edit_manager" class="form-select">
                             <option value="">— ללא מנהל —</option>
@@ -250,6 +249,13 @@
                             <option value="{{ u.id }}">{{ u.username }}{% if u.job_title %} — {{ u.job_title }}{% endif %}</option>
                             {% endfor %}
                         </select>
+                    </div>
+                    <hr style="border-color:#2d3047;">
+                    <div class="mb-3">
+                        <label class="form-label small" style="color:#a0a8c0;">סיסמה חדשה (אופציונלי)</label>
+                        <input type="password" name="password" id="edit_password" class="form-control"
+                               placeholder="השאר ריק לשמירה על הסיסמה הקיימת">
+                        <small class="text-muted">💡 אם תרצה להגדיר סיסמה חדשה, הזן אותה כאן</small>
                     </div>
                 </div>
                 <div class="modal-footer">
@@ -263,13 +269,12 @@
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 <script>
-function openEdit(id, username, telegramId, role, jobTitle, hierarchyLevel, managerId) {
+function openEdit(id, username, telegramId, role, jobTitle, managerId) {
     document.getElementById('editForm').action = '/dashboard/users/' + id + '/edit';
     document.getElementById('edit_username').value = username;
     document.getElementById('edit_telegram_id').value = telegramId;
     document.getElementById('edit_role').value = role;
     document.getElementById('edit_job_title').value = jobTitle;
-    document.getElementById('edit_hierarchy').value = hierarchyLevel || '';
     document.getElementById('edit_manager').value = managerId || '';
     new bootstrap.Modal(document.getElementById('editModal')).show();
 }

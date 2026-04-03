@@ -5,7 +5,7 @@ import random
 import string
 import secrets
 from datetime import datetime, timedelta
-from fastapi import APIRouter, Depends, Request, Form
+from fastapi import APIRouter, Depends, Request, Form, HTTPException, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,6 +14,7 @@ from typing import Optional
 
 from app.database import get_db_session
 from app.models import Decision, User, DecisionTypeEnum, DecisionStatusEnum, RoleEnum, DecisionDistribution, DistributionTypeEnum, DistributionStatusEnum
+from app.routers.login import get_current_user
 
 
 def _generate_code(length: int = 6) -> str:
@@ -22,12 +23,23 @@ def _generate_code(length: int = 6) -> str:
 def _generate_token() -> str:
     return secrets.token_hex(16)
 
+_ROLE_HIERARCHY = {
+    "division_manager": 1,
+    "deputy_division_manager": 2,
+    "department_manager": 3,
+    "project_manager": 4,
+}
+
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 templates = Jinja2Templates(directory="app/templates")
 
 
 @router.get("/", response_class=HTMLResponse)
-async def dashboard(request: Request, session: AsyncSession = Depends(get_db_session)):
+async def dashboard(
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+    current_user: User = Depends(get_current_user),
+):
 
     # --- Counts by type ---
     type_counts_q = await session.execute(
@@ -121,6 +133,7 @@ async def dashboard(request: Request, session: AsyncSession = Depends(get_db_ses
 
     return templates.TemplateResponse("dashboard.html", {
         "request": request,
+        "current_user": current_user,
         "total_decisions": total_decisions,
         "total_users": total_users,
         "avg_feedback": avg_feedback,
@@ -149,12 +162,18 @@ ROLE_LABELS = {
 
 
 @router.get("/users", response_class=HTMLResponse)
-async def users_page(request: Request, session: AsyncSession = Depends(get_db_session),
-                     msg: str = None, error: str = None):
+async def users_page(
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+    current_user: User = Depends(get_current_user),
+    msg: str = None,
+    error: str = None,
+):
     result = await session.execute(select(User).order_by(User.created_at.desc()))
     users = result.scalars().all()
     return templates.TemplateResponse("users.html", {
         "request": request,
+        "current_user": current_user,
         "users": users,
         "roles": [r.value for r in RoleEnum],
         "role_labels": ROLE_LABELS,
@@ -171,7 +190,10 @@ async def create_user(
     role: str = Form(...),
     manager_id: str = Form(""),
     session: AsyncSession = Depends(get_db_session),
+    current_user: User = Depends(get_current_user),
 ):
+    from app.utils.auth import get_default_password_hash
+
     # Check duplicate username
     existing = await session.scalar(select(User).where(User.username == username))
     if existing:
@@ -186,8 +208,10 @@ async def create_user(
 
     user = User(
         username=username,
+        password_hash=get_default_password_hash(),
         job_title=job_title or None,
         role=RoleEnum(role),
+        hierarchy_level=_ROLE_HIERARCHY.get(role),
         manager_id=int(manager_id) if manager_id.strip() else None,
         registration_code=code,
         profile_token=_generate_token(),
@@ -202,6 +226,7 @@ async def set_role(
     user_id: int,
     role: str = Form(...),
     session: AsyncSession = Depends(get_db_session),
+    current_user: User = Depends(get_current_user),
 ):
     user = await session.get(User, user_id)
     if user:
@@ -211,7 +236,11 @@ async def set_role(
 
 
 @router.post("/users/{user_id}/delete")
-async def delete_user(user_id: int, session: AsyncSession = Depends(get_db_session)):
+async def delete_user(
+    user_id: int,
+    session: AsyncSession = Depends(get_db_session),
+    current_user: User = Depends(get_current_user),
+):
     user = await session.get(User, user_id)
     if user:
         await session.delete(user)
@@ -220,7 +249,11 @@ async def delete_user(user_id: int, session: AsyncSession = Depends(get_db_sessi
 
 
 @router.post("/users/{user_id}/regen-code")
-async def regen_code(user_id: int, session: AsyncSession = Depends(get_db_session)):
+async def regen_code(
+    user_id: int,
+    session: AsyncSession = Depends(get_db_session),
+    current_user: User = Depends(get_current_user),
+):
     user = await session.get(User, user_id)
     if user:
         for _ in range(10):
@@ -241,10 +274,13 @@ async def edit_user(
     telegram_id: str = Form(""),
     role: str = Form(""),
     job_title: str = Form(""),
-    hierarchy_level: str = Form(""),
     manager_id: str = Form(""),
+    password: str = Form(""),
     session: AsyncSession = Depends(get_db_session),
+    current_user: User = Depends(get_current_user),
 ):
+    from app.utils.auth import hash_password
+
     user = await session.get(User, user_id)
     if not user:
         return RedirectResponse("/dashboard/users?error=משתמש+לא+נמצא", status_code=303)
@@ -253,9 +289,11 @@ async def edit_user(
     user.telegram_id = int(telegram_id) if telegram_id.strip() else None
     if role:
         user.role = RoleEnum(role)
+        user.hierarchy_level = _ROLE_HIERARCHY.get(role)
     user.job_title = job_title or None
-    user.hierarchy_level = int(hierarchy_level) if hierarchy_level.strip() else None
     user.manager_id = int(manager_id) if manager_id.strip() else None
+    if password.strip():
+        user.password_hash = hash_password(password)
     await session.commit()
     return RedirectResponse("/dashboard/users?msg=פרטי+משתמש+עודכנו", status_code=303)
 
@@ -287,6 +325,7 @@ MEASURABILITY_LABELS = {
 async def decisions_page(
     request: Request,
     session: AsyncSession = Depends(get_db_session),
+    current_user: User = Depends(get_current_user),
     msg: str = None,
     error: str = None,
     filter_status: str = None,
@@ -343,6 +382,7 @@ async def decisions_page(
 
     return templates.TemplateResponse("decisions.html", {
         "request": request,
+        "current_user": current_user,
         "decisions": decisions,
         "users": users,
         "users_json": users_json,
@@ -366,6 +406,7 @@ async def update_decision(
     summary: str = Form(""),
     recommended_action: str = Form(""),
     session: AsyncSession = Depends(get_db_session),
+    current_user: User = Depends(get_current_user),
 ):
     d = await session.get(Decision, decision_id)
     if not d:
@@ -387,7 +428,11 @@ async def update_decision(
 
 
 @router.post("/decisions/{decision_id}/delete")
-async def delete_decision(decision_id: int, session: AsyncSession = Depends(get_db_session)):
+async def delete_decision(
+    decision_id: int,
+    session: AsyncSession = Depends(get_db_session),
+    current_user: User = Depends(get_current_user),
+):
     d = await session.get(Decision, decision_id)
     if d:
         await session.delete(d)
@@ -396,7 +441,11 @@ async def delete_decision(decision_id: int, session: AsyncSession = Depends(get_
 
 
 @router.get("/decisions/{decision_id}/suggest-distribution")
-async def suggest_distribution_api(decision_id: int, session: AsyncSession = Depends(get_db_session)):
+async def suggest_distribution_api(
+    decision_id: int,
+    session: AsyncSession = Depends(get_db_session),
+    current_user: User = Depends(get_current_user),
+):
     from fastapi.responses import JSONResponse
     from app.services.distribution_service import suggest_distribution
     d = await session.get(Decision, decision_id)
@@ -416,6 +465,7 @@ async def distribute_decision(
     decision_id: int,
     request: Request,
     session: AsyncSession = Depends(get_db_session),
+    current_user: User = Depends(get_current_user),
 ):
     from app.services.distribution_service import send_distribution
     from app.services.telegram_polling import telegram_bot
@@ -448,7 +498,11 @@ async def distribute_decision(
 
 
 @router.get("/decisions/{decision_id}/distribution-status")
-async def distribution_status(decision_id: int, session: AsyncSession = Depends(get_db_session)):
+async def distribution_status(
+    decision_id: int,
+    session: AsyncSession = Depends(get_db_session),
+    current_user: User = Depends(get_current_user),
+):
     from fastapi.responses import JSONResponse
     rows = await session.execute(
         select(DecisionDistribution, User.username, User.job_title)
