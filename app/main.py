@@ -33,16 +33,27 @@ app.include_router(profile_router)
 @app.on_event("startup")
 async def startup():
     """Initialize database tables and start Telegram bot polling."""
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    print("Database tables initialized.")
+    import asyncio
+    # Retry DB connection up to 10 times (Railway internal DNS may take a moment)
+    for attempt in range(10):
+        try:
+            async with engine.begin() as conn:
+                await conn.run_sync(Base.metadata.create_all)
+            print("Database tables initialized.")
+            break
+        except Exception as e:
+            if attempt < 9:
+                print(f"DB connection attempt {attempt + 1}/10 failed: {e}. Retrying in 5s...")
+                await asyncio.sleep(5)
+            else:
+                print(f"DB connection failed after 10 attempts: {e}")
+                raise
 
     # Start Telegram bot polling in the background
     try:
         await telegram_bot.initialize()
         print("Telegram bot initialized.")
         # Start polling in background task
-        import asyncio
         asyncio.create_task(telegram_bot.start_polling())
         print("Telegram bot polling started in background.")
 
