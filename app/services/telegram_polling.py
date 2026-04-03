@@ -16,6 +16,10 @@ from sqlalchemy import select
 
 logger = logging.getLogger(__name__)
 
+# Global polling control
+_polling_should_run = False
+_polling_event = asyncio.Event()  # Signals when polling can proceed
+
 # In-memory state: tracks superiors waiting to provide rejection notes
 # { telegram_id (int): decision_id (int) }
 _awaiting_rejection_note: dict[int, int] = {}
@@ -29,6 +33,7 @@ class TelegramPollingBot:
 
     def __init__(self):
         self.application = None
+        self._polling_task = None
 
     async def error_handler(self, update: object, context: ContextTypes.DEFAULT_TYPE):
         """Log all handler errors to stdout."""
@@ -125,6 +130,7 @@ class TelegramPollingBot:
             user.telegram_id = telegram_id
             user.registration_code = None
             await session.commit()
+            await session.refresh(user)  # Re-load attributes after commit
 
             ROLE_LABELS = {
                 "project_manager": "מנהל פרויקט",
@@ -133,12 +139,13 @@ class TelegramPollingBot:
                 "division_manager": "מנהל אגף",
             }
             role_label = ROLE_LABELS.get(user.role.value, user.role.value) if user.role else "—"
-            profile_link = f"http://localhost:8000/profile/{user.profile_token}" if user.profile_token else None
+            from app.config import settings as _settings
+            profile_link = f"{_settings.BASE_URL}/profile/{user.profile_token}" if user.profile_token else None
             profile_line = f'\n\n🔗 <a href="{profile_link}">עדכן את הפרופיל שלך</a>' if profile_link else ""
             await update.message.reply_text(
-                f"\u200F✅ <b>ההרשמה הצליחה!</b>\n\n"
-                f"ברוך הבא, {_html.escape(user.username)}!\n"
-                f"תפקיד: {_html.escape(role_label)}\n\n"
+                f"\u200F✅ <b>ברוך הבא, {_html.escape(user.username)}!</b>\n\n"
+                f"ההרשמה הצליחה!\n"
+                f"תפקיד: <b>{_html.escape(role_label)}</b>\n\n"
                 f"כעת תוכל לשלוח החלטות לניתוח."
                 f"{profile_line}",
                 parse_mode="HTML",
@@ -325,24 +332,69 @@ class TelegramPollingBot:
     # ------------------------------------------------------------------
 
     async def start_polling(self):
-        """Start polling for updates."""
-        if not self.application:
-            await self.initialize()
+        """Start polling for updates (ensures only one instance)."""
+        global _polling_should_run, _polling_event
 
         logger.info("Starting Telegram bot polling...")
-        async with self.application:
-            await self.application.start()
-            await self.application.updater.start_polling(allowed_updates=Update.ALL_TYPES)
-            logger.info("Bot polling started successfully")
-            # Keep the context alive so polling continues until task is cancelled
-            await asyncio.Event().wait()
+        _polling_should_run = True
+        _polling_event.clear()
+
+        # Close any old app context
+        if self.application:
+            try:
+                await self.application.stop()
+                await asyncio.sleep(0.5)  # Brief delay to release Telegram connection
+            except Exception as e:
+                logger.warning(f"Error stopping old application: {e}")
+            self.application = None
+
+        # Reinitialize fresh
+        await self.initialize()
+
+        try:
+            async with self.application:
+                await self.application.start()
+                # Add all handlers again (in case they were lost)
+                self.application.add_handler(CommandHandler("start", self.handle_start))
+                self.application.add_handler(CommandHandler("register", self.handle_register))
+                self.application.add_handler(CommandHandler("status", self.handle_status))
+                self.application.add_handler(CallbackQueryHandler(self.handle_callback))
+                self.application.add_handler(
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_message)
+                )
+                self.application.add_error_handler(self.error_handler)
+
+                await self.application.updater.start_polling(allowed_updates=Update.ALL_TYPES)
+                logger.info("Bot polling started successfully")
+                _polling_event.set()
+
+                # Wait until we're told to stop
+                while _polling_should_run:
+                    try:
+                        await asyncio.sleep(1)
+                    except asyncio.CancelledError:
+                        logger.info("Polling cancelled")
+                        _polling_should_run = False
+                        raise
+
+                logger.info("Stopping polling...")
+                await self.application.updater.stop()
+                await self.application.stop()
+
+        except asyncio.CancelledError:
+            logger.info("Polling task cancelled")
+            _polling_should_run = False
+            raise
+        except Exception as e:
+            logger.error(f"Polling error: {e}", exc_info=True)
+            _polling_should_run = False
+            raise
 
     async def stop_polling(self):
-        """Stop polling."""
-        if self.application:
-            await self.application.updater.stop()
-            await self.application.stop()
-            logger.info("Bot polling stopped")
+        """Stop polling gracefully."""
+        global _polling_should_run
+        _polling_should_run = False
+        logger.info("Signalled polling to stop")
 
 
 # Global bot instance

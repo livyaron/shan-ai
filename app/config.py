@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     # Groq API
     GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "")
 
+    # Public base URL (for profile links etc.)
+    BASE_URL: str = os.getenv("BASE_URL", "http://localhost:8000")
+
     class Config:
         env_file = ".env"
 
