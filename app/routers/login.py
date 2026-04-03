@@ -15,35 +15,35 @@ router = APIRouter(tags=["auth"])
 templates = Jinja2Templates(directory="app/templates")
 
 @router.get("/login", response_class=HTMLResponse)
-async def login_page(request: Request, session: AsyncSession = Depends(get_db_session), error: str = None):
-    """Display login page with list of users."""
-    result = await session.execute(select(User).order_by(User.username))
-    users = result.scalars().all()
-
+async def login_page(request: Request, error: str = None):
+    """Display login page."""
     return templates.TemplateResponse("login.html", {
         "request": request,
-        "users": users,
         "error": error,
     })
 
 @router.post("/login")
 async def login(
-    user_id: int = Form(...),
+    username: str = Form(...),
+    password: str = Form(...),
     session: AsyncSession = Depends(get_db_session),
 ):
-    """Authenticate user from list selection."""
-    user = await session.get(User, user_id)
+    """Authenticate user with username and password."""
+    from app.utils.auth import verify_password
+
+    result = await session.execute(select(User).where(User.username == username))
+    user = result.scalar_one_or_none()
 
     if not user:
-        return RedirectResponse(
-            "/login?error=משתמש+לא+נמצא",
-            status_code=303
-        )
+        return RedirectResponse("/login?error=שם+משתמש+לא+נמצא", status_code=303)
 
-    # Create JWT token
+    if not user.password_hash:
+        return RedirectResponse("/login?error=סיסמה+לא+הוגדרה.+פנה+למנהל", status_code=303)
+
+    if not verify_password(password, user.password_hash):
+        return RedirectResponse("/login?error=סיסמה+שגויה", status_code=303)
+
     token = create_access_token(user.id, user.username)
-
-    # Redirect to dashboard with token in cookie
     response = RedirectResponse(url="/dashboard", status_code=303)
     response.set_cookie("access_token", token, max_age=7*24*60*60, httponly=True)
     return response
