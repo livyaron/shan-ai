@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Shan-AI — דשבורד ניהול החלטות</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <style>
+        body { background: #0f1117; color: #e0e0e0; font-family: 'Segoe UI', sans-serif; }
+        .navbar { background: #1a1d2e !important; border-bottom: 1px solid #2d3047; }
+        .card { background: #1a1d2e; border: 1px solid #2d3047; border-radius: 12px; }
+        .card-title { color: #8b9cf4; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 1px; }
+        .stat-value { font-size: 2.5rem; font-weight: 700; color: #fff; }
+        .stat-label { color: #6c757d; font-size: 0.9rem; }
+        .badge-info    { background: #17a2b8; }
+        .badge-normal  { background: #28a745; }
+        .badge-critical { background: #dc3545; }
+        .badge-uncertain { background: #ffc107; color: #000; }
+        .badge-pending  { background: #6c757d; }
+        .badge-approved { background: #28a745; }
+        .badge-rejected { background: #dc3545; }
+        .badge-executed { background: #17a2b8; }
+        .table { color: #e0e0e0; }
+        .table th { color: #8b9cf4; border-color: #2d3047; }
+        .table td { border-color: #2d3047; vertical-align: middle; }
+        .table tbody tr:hover { background: #22263a; }
+        .progress { background: #2d3047; height: 8px; border-radius: 4px; }
+        .section-title { color: #8b9cf4; font-size: 1.1rem; font-weight: 600; margin-bottom: 1rem; border-right: 3px solid #8b9cf4; padding-right: 10px; }
+        canvas { max-height: 260px; }
+    </style>
+</head>
+<body>
+
+<nav class="navbar navbar-dark px-4 py-3">
+    <span class="navbar-brand fw-bold fs-5">
+        🧠 Shan-AI — דשבורד ניהול החלטות
+    </span>
+    <div class="d-flex align-items-center gap-3">
+        <a href="/dashboard/" class="nav-link fw-bold" style="color:#8b9cf4 !important;">📊 דשבורד</a>
+        <a href="/dashboard/decisions" class="nav-link" style="color:#8b9cf4 !important;">📋 החלטות</a>
+        <a href="/dashboard/users" class="nav-link" style="color:#8b9cf4 !important;">👥 משתמשים</a>
+        <span class="text-muted small">עודכן: {{ now().strftime("%d/%m/%Y %H:%M") if now else "" }}</span>
+    </div>
+</nav>
+
+<div class="container-fluid py-4 px-4">
+
+    <!-- KPI Cards -->
+    <div class="row g-3 mb-4">
+        <div class="col-6 col-md-3">
+            <div class="card p-3 text-center">
+                <div class="card-title">סה"כ החלטות</div>
+                <div class="stat-value">{{ total_decisions }}</div>
+            </div>
+        </div>
+        <div class="col-6 col-md-3">
+            <div class="card p-3 text-center">
+                <div class="card-title">משתמשים רשומים</div>
+                <div class="stat-value">{{ total_users }}</div>
+            </div>
+        </div>
+        <div class="col-6 col-md-3">
+            <div class="card p-3 text-center">
+                <div class="card-title">ממוצע פידבק</div>
+                <div class="stat-value">{{ avg_feedback if avg_feedback else "—" }}{% if avg_feedback %}<span class="fs-4">/5</span>{% endif %}</div>
+            </div>
+        </div>
+        <div class="col-6 col-md-3">
+            <div class="card p-3 text-center">
+                <div class="card-title">קריטיות</div>
+                <div class="stat-value" style="color:#dc3545;">{{ type_counts.get('critical', 0) }}</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Charts Row -->
+    <div class="row g-3 mb-4">
+
+        <!-- Decisions by type - Doughnut -->
+        <div class="col-md-4">
+            <div class="card p-3 h-100">
+                <div class="section-title">החלטות לפי סוג</div>
+                <canvas id="typeChart"></canvas>
+            </div>
+        </div>
+
+        <!-- Status breakdown - Doughnut -->
+        <div class="col-md-4">
+            <div class="card p-3 h-100">
+                <div class="section-title">התפלגות סטטוס</div>
+                <canvas id="statusChart"></canvas>
+            </div>
+        </div>
+
+        <!-- Daily trend - Line -->
+        <div class="col-md-4">
+            <div class="card p-3 h-100">
+                <div class="section-title">החלטות — 7 ימים אחרונים</div>
+                <canvas id="dailyChart"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <!-- Confidence + Role Row -->
+    <div class="row g-3 mb-4">
+
+        <!-- Avg confidence per type -->
+        <div class="col-md-6">
+            <div class="card p-3">
+                <div class="section-title">ביטחון ממוצע לפי סוג (%)</div>
+                {% for type, pct in avg_confidence.items() %}
+                <div class="mb-2">
+                    <div class="d-flex justify-content-between mb-1">
+                        <span class="small">{{ type_labels_he.get(type, type) }}</span>
+                        <span class="small fw-bold">{{ pct }}%</span>
+                    </div>
+                    <div class="progress">
+                        <div class="progress-bar bg-primary" style="width: {{ pct }}%"></div>
+                    </div>
+                </div>
+                {% endfor %}
+                {% if not avg_confidence %}
+                <p class="text-muted small text-center mt-3">אין נתונים עדיין</p>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- Decisions per role -->
+        <div class="col-md-6">
+            <div class="card p-3">
+                <div class="section-title">החלטות לפי תפקיד</div>
+                {% set role_labels = {
+                    'project_manager': 'מנהל פרויקט',
+                    'department_manager': 'מנהל מחלקה',
+                    'deputy_division_manager': 'סגן מנהל אגף',
+                    'division_manager': 'מנהל אגף'
+                } %}
+                {% for role, cnt in role_counts.items() %}
+                <div class="mb-2">
+                    <div class="d-flex justify-content-between mb-1">
+                        <span class="small">{{ role_labels.get(role, role) }}</span>
+                        <span class="small fw-bold">{{ cnt }}</span>
+                    </div>
+                    <div class="progress">
+                        {% set max_cnt = role_counts.values() | max if role_counts else 1 %}
+                        <div class="progress-bar bg-info" style="width: {{ (cnt / max_cnt * 100) | int }}%"></div>
+                    </div>
+                </div>
+                {% endfor %}
+                {% if not role_counts %}
+                <p class="text-muted small text-center mt-3">אין נתונים עדיין</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <!-- Recent Decisions Table -->
+    <div class="card p-3">
+        <div class="section-title">החלטות אחרונות</div>
+        <div class="table-responsive">
+            <table class="table table-hover mb-0">
+                <thead>
+                    <tr>
+                        <th>#</th>
+                        <th>סוג</th>
+                        <th>סטטוס</th>
+                        <th>סיכום</th>
+                        <th>מגיש</th>
+                        <th>ביטחון</th>
+                        <th>פידבק</th>
+                        <th>תאריך</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for d in recent_decisions %}
+                    <tr>
+                        <td class="text-muted">{{ d.id }}</td>
+                        <td><span class="badge badge-{{ d.type }}">{{ type_labels_he.get(d.type, d.type) }}</span></td>
+                        <td><span class="badge badge-{{ d.status }}">{{ status_labels_he.get(d.status, d.status) }}</span></td>
+                        <td style="max-width:300px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{{ d.summary or '—' }}</td>
+                        <td>{{ d.username }}</td>
+                        <td>
+                            <div class="progress" style="width:60px; display:inline-block; vertical-align:middle;">
+                                <div class="progress-bar {% if d.confidence >= 80 %}bg-success{% elif d.confidence >= 50 %}bg-warning{% else %}bg-danger{% endif %}"
+                                     style="width:{{ d.confidence }}%"></div>
+                            </div>
+                            <span class="small ms-1">{{ d.confidence }}%</span>
+                        </td>
+                        <td>{% if d.feedback_score %}⭐ {{ d.feedback_score }}/5{% else %}<span class="text-muted">—</span>{% endif %}</td>
+                        <td class="text-muted small">{{ d.created_at }}</td>
+                    </tr>
+                    {% endfor %}
+                    {% if not recent_decisions %}
+                    <tr><td colspan="8" class="text-center text-muted py-4">אין החלטות עדיין</td></tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+</div>
+
+<script>
+const COLORS = { info:'#17a2b8', normal:'#28a745', critical:'#dc3545', uncertain:'#ffc107' };
+const STATUS_COLORS = { pending:'#6c757d', approved:'#28a745', rejected:'#dc3545', executed:'#17a2b8' };
+
+// Type doughnut
+const typeData = {{ type_counts | tojson }};
+new Chart(document.getElementById('typeChart'), {
+    type: 'doughnut',
+    data: {
+        labels: Object.keys(typeData).map(k => ({ info:'מידע', normal:'רגיל', critical:'קריטי', uncertain:'לא ודאי' })[k] || k),
+        datasets: [{ data: Object.values(typeData), backgroundColor: Object.keys(typeData).map(k => COLORS[k] || '#888'), borderWidth: 0 }]
+    },
+    options: { plugins: { legend: { labels: { color: '#e0e0e0' } } }, cutout: '65%' }
+});
+
+// Status doughnut
+const statusData = {{ status_counts | tojson }};
+new Chart(document.getElementById('statusChart'), {
+    type: 'doughnut',
+    data: {
+        labels: Object.keys(statusData).map(k => ({ pending:'ממתין', approved:'מאושר', rejected:'נדחה', executed:'בוצע' })[k] || k),
+        datasets: [{ data: Object.values(statusData), backgroundColor: Object.keys(statusData).map(k => STATUS_COLORS[k] || '#888'), borderWidth: 0 }]
+    },
+    options: { plugins: { legend: { labels: { color: '#e0e0e0' } } }, cutout: '65%' }
+});
+
+// Daily trend line
+new Chart(document.getElementById('dailyChart'), {
+    type: 'line',
+    data: {
+        labels: {{ daily_labels | safe }},
+        datasets: [{
+            label: 'החלטות',
+            data: {{ daily_data | safe }},
+            borderColor: '#8b9cf4',
+            backgroundColor: 'rgba(139,156,244,0.15)',
+            tension: 0.4,
+            fill: true,
+            pointBackgroundColor: '#8b9cf4'
+        }]
+    },
+    options: {
+        plugins: { legend: { labels: { color: '#e0e0e0' } } },
+        scales: {
+            x: { ticks: { color: '#6c757d' }, grid: { color: '#2d3047' } },
+            y: { ticks: { color: '#6c757d', stepSize: 1 }, grid: { color: '#2d3047' }, beginAtZero: true }
+        }
+    }
+});
+</script>
+</body>
+</html>
