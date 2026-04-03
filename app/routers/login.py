@@ -14,28 +14,38 @@ from app.utils.session import create_access_token
 router = APIRouter(tags=["auth"])
 templates = Jinja2Templates(directory="app/templates")
 
+ROLE_LABELS = {
+    "project_manager": "מנהל פרויקט",
+    "department_manager": "מנהל מחלקה",
+    "deputy_division_manager": "סגן מנהל אגף",
+    "division_manager": "מנהל אגף",
+}
+
 @router.get("/login", response_class=HTMLResponse)
-async def login_page(request: Request, error: str = None):
-    """Display login page."""
+async def login_page(request: Request, session: AsyncSession = Depends(get_db_session), error: str = None):
+    """Display login page with user list."""
+    result = await session.execute(select(User).where(User.role.isnot(None)).order_by(User.username))
+    users = result.scalars().all()
     return templates.TemplateResponse("login.html", {
         "request": request,
+        "users": users,
+        "role_labels": ROLE_LABELS,
         "error": error,
     })
 
 @router.post("/login")
 async def login(
-    username: str = Form(...),
+    user_id: int = Form(...),
     password: str = Form(...),
     session: AsyncSession = Depends(get_db_session),
 ):
-    """Authenticate user with username and password."""
+    """Authenticate user selected from list."""
     from app.utils.auth import verify_password
 
-    result = await session.execute(select(User).where(User.username == username))
-    user = result.scalar_one_or_none()
+    user = await session.get(User, user_id)
 
     if not user:
-        return RedirectResponse("/login?error=שם+משתמש+לא+נמצא", status_code=303)
+        return RedirectResponse("/login?error=משתמש+לא+נמצא", status_code=303)
 
     if not user.password_hash:
         return RedirectResponse("/login?error=סיסמה+לא+הוגדרה.+פנה+למנהל", status_code=303)
