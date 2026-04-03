@@ -38,6 +38,7 @@ async def startup():
     for attempt in range(10):
         try:
             async with engine.begin() as conn:
+                await conn.execute(__import__("sqlalchemy").text("CREATE EXTENSION IF NOT EXISTS vector"))
                 await conn.run_sync(Base.metadata.create_all)
             print("Database tables initialized.")
             break
