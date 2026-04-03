@@ -104,9 +104,13 @@
 
         <form method="post" action="/login">
             <div class="form-group">
-                <label for="username">שם משתמש</label>
-                <input type="text" id="username" name="username" required autofocus
-                       placeholder="הזן שם משתמש">
+                <label for="user_id">בחר משתמש</label>
+                <select id="user_id" name="user_id" required autofocus>
+                    <option value="">-- בחר משתמש --</option>
+                    {% for user in users %}
+                    <option value="{{ user.id }}">{{ user.username }}{% if user.role %} ({{ role_labels.get(user.role.value, user.role.value) }}){% endif %}</option>
+                    {% endfor %}
+                </select>
             </div>
             <div class="form-group">
                 <label for="password">סיסמה</label>
