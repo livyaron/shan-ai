@@ -114,7 +114,7 @@ async def shutdown():
 @app.get("/")
 async def root(request: Request):
     """Redirect to login or dashboard depending on authentication."""
-    from app.routers.login import verify_token
+    from app.utils.session import verify_token
 
     token = request.cookies.get("access_token")
     if token and verify_token(token):
