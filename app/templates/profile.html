@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Shan-AI — פרופיל אישי</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body { background: #0f1117; color: #e0e0e0; font-family: 'Segoe UI', sans-serif; }
+        .navbar { background: #1a1d2e !important; border-bottom: 1px solid #2d3047; }
+        .card { background: #1a1d2e; border: 1px solid #2d3047; border-radius: 12px; }
+        .form-control, .form-select {
+            background: #0f1117; border: 1px solid #2d3047;
+            color: #e0e0e0; border-radius: 8px;
+        }
+        .form-control:focus, .form-select:focus {
+            background: #0f1117; color: #e0e0e0;
+            border-color: #8b9cf4; box-shadow: 0 0 0 0.2rem rgba(139,156,244,0.25);
+        }
+        .form-select option { background: #1a1d2e; }
+        .form-label { color: #a0a8c0; font-size: 0.9rem; }
+        .section-title { color: #8b9cf4; font-size: 1.1rem; font-weight: 600;
+            border-right: 3px solid #8b9cf4; padding-right: 10px; }
+        .info-badge { background: #2d3047; border-radius: 8px; padding: 6px 14px;
+            color: #8b9cf4; font-weight: 600; display: inline-block; }
+    </style>
+</head>
+<body>
+
+<nav class="navbar navbar-dark px-4 py-3">
+    <span class="navbar-brand fw-bold fs-5">🧠 Shan-AI</span>
+    <span class="text-muted small">פרופיל אישי</span>
+</nav>
+
+<div class="container py-5" style="max-width: 600px;">
+
+    {% if msg %}
+    <div class="alert alert-success alert-dismissible fade show">
+        ✅ {{ msg }}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+    {% endif %}
+    {% if error %}
+    <div class="alert alert-danger alert-dismissible fade show">
+        ❌ {{ error }}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+    {% endif %}
+
+    <div class="card p-4">
+        <div class="section-title mb-4">👤 הפרופיל שלי</div>
+
+        <!-- Read-only info -->
+        <div class="mb-4 p-3" style="background:#0f1117; border-radius:8px;">
+            <div class="row g-2">
+                <div class="col-6">
+                    <div class="text-muted small">שם משתמש</div>
+                    <div class="fw-semibold">{{ user.username }}</div>
+                </div>
+                <div class="col-6">
+                    <div class="text-muted small">תפקיד במערכת</div>
+                    <div class="fw-semibold">{{ role_labels.get(user.role.value, user.role.value) if user.role else "—" }}</div>
+                </div>
+                {% if user.email %}
+                <div class="col-12">
+                    <div class="text-muted small">אימייל</div>
+                    <div>{{ user.email }}</div>
+                </div>
+                {% endif %}
+                <div class="col-6">
+                    <div class="text-muted small">טלגרם</div>
+                    <div>{% if user.telegram_id %}<span style="color:#28a745;">✅ מחובר</span>{% else %}<span class="text-muted">לא מחובר</span>{% endif %}</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Editable fields -->
+        <form method="POST" action="/profile/{{ token }}">
+            <div class="mb-3">
+                <label class="form-label">שם תפקיד <span class="text-muted small">(ניתן לעריכה)</span></label>
+                <input type="text" name="job_title" class="form-control"
+                       value="{{ user.job_title or '' }}"
+                       placeholder="לדוגמה: מהנדס חשמל בכיר">
+            </div>
+            <div class="mb-3">
+                <label class="form-label">מקום בהיררכיה <span class="text-muted small">(מספר — 1 = הכי גבוה)</span></label>
+                <input type="number" name="hierarchy_level" class="form-control" min="1"
+                       value="{{ user.hierarchy_level or '' }}"
+                       placeholder="לדוגמה: 3">
+            </div>
+            <div class="mb-4">
+                <label class="form-label">מנהל ישיר</label>
+                <select name="manager_id" class="form-select">
+                    <option value="">— ללא מנהל —</option>
+                    {% for u in all_users %}
+                    <option value="{{ u.id }}" {% if user.manager_id == u.id %}selected{% endif %}>
+                        {{ u.username }}{% if u.job_title %} — {{ u.job_title }}{% endif %}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+            <button type="submit" class="btn btn-primary w-100">💾 שמור שינויים</button>
+        </form>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

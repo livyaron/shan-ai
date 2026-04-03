@@ -1,0 +1,332 @@
+"""Decision routing service - stores decisions and routes them per the spec."""
+
+import json
+import logging
+import html
+from datetime import datetime
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application
+
+from app.models import User, Decision, DecisionTypeEnum, DecisionStatusEnum, RoleEnum
+from app.services.claude_service import ClaudeService
+from app.services import embedding_service
+
+logger = logging.getLogger(__name__)
+
+# Role hierarchy: each role's immediate superior
+SUPERIOR_ROLE = {
+    RoleEnum.PROJECT_MANAGER: RoleEnum.DEPARTMENT_MANAGER,
+    RoleEnum.DEPARTMENT_MANAGER: RoleEnum.DEPUTY_DIVISION_MANAGER,
+    RoleEnum.DEPUTY_DIVISION_MANAGER: RoleEnum.DIVISION_MANAGER,
+    RoleEnum.DIVISION_MANAGER: None,
+}
+
+TYPE_EMOJI = {
+    "INFO": "ℹ️",
+    "NORMAL": "✅",
+    "CRITICAL": "🚨",
+    "UNCERTAIN": "❓",
+}
+
+
+class DecisionService:
+    def __init__(self, session: AsyncSession, application: Application):
+        self.session = session
+        self.application = application
+        self.claude = ClaudeService()
+
+    async def process(self, user: User, text: str) -> str:
+        """
+        Full pipeline: Claude → store → route.
+        Returns the reply message to send back to the submitter.
+        """
+        role_str = user.role.value if user.role else "unknown"
+
+        # --- 1. Fetch similar past decisions for context (RAG) ---
+        similar = await embedding_service.get_similar_decisions(self.session, text)
+        past_context = embedding_service.format_past_context(similar)
+        if past_context:
+            logger.info(f"נמצאו {len(similar)} החלטות דומות מהעבר")
+
+        # --- 2. Analyze with Groq (with injected context) ---
+        try:
+            result = await self.claude.analyze(text, role_str, past_context)
+        except Exception as e:
+            logger.error(f"Claude analysis failed: {e}")
+            return "\u200F⚠️ מנוע ההחלטות אינו זמין כרגע. אנא נסה שוב."
+
+        # --- 2. Store Decision in DB ---
+        decision = Decision(
+            submitter_id=user.id,
+            type=DecisionTypeEnum(result["type"].lower()),
+            status=DecisionStatusEnum.PENDING,
+            summary=result["summary"],
+            problem_description=text,
+            recommended_action=result["recommended_action"],
+            confidence=result["confidence"],
+            requires_approval=result["requires_approval"],
+            assumptions=json.dumps(result["self_critique"].get("assumptions", [])),
+            risks=json.dumps(result["self_critique"].get("risks", [])),
+            measurability=result["measurability"],
+        )
+        self.session.add(decision)
+        await self.session.commit()
+        await self.session.refresh(decision)
+
+        logger.info(f"Decision #{decision.id} stored: type={result['type']}, confidence={result['confidence']}")
+
+        # --- 4. Generate and store embedding ---
+        try:
+            embed_text = f"{text} {result['summary']} {result['recommended_action']}"
+            decision.embedding = await embedding_service.embed(embed_text)
+            await self.session.commit()
+        except Exception as e:
+            logger.warning(f"Embedding generation failed for decision #{decision.id}: {e}")
+
+        # --- 3. Route ---
+        dtype = result["type"]
+
+        if dtype == "INFO":
+            decision.status = DecisionStatusEnum.EXECUTED
+            decision.completed_at = datetime.utcnow()
+            await self.session.commit()
+            return self._format_info_reply(decision, result)
+
+        elif dtype == "NORMAL":
+            decision.status = DecisionStatusEnum.EXECUTED
+            decision.completed_at = datetime.utcnow()
+            await self.session.commit()
+            return self._format_normal_reply(decision, result)
+
+        elif dtype == "CRITICAL":
+            reply = await self._handle_critical(user, decision, result)
+            return reply
+
+        elif dtype == "UNCERTAIN":
+            reply = await self._handle_uncertain(user, decision, result)
+            return reply
+
+        return "Decision processed."
+
+    # ------------------------------------------------------------------
+    # Reply formatters
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _e(text) -> str:
+        """Escape text for Telegram HTML."""
+        return html.escape(str(text or ""))
+
+    def _format_info_reply(self, decision: Decision, result: dict) -> str:
+        e = self._e
+        return (
+            f"\u200Fℹ️ <b>החלטה #{decision.id} — מידע בלבד</b>\n\n"
+            f"📋 <b>סיכום:</b> {e(result['summary'])}\n"
+            f"🎯 <b>פעולה מומלצת:</b> {e(result['recommended_action'])}\n"
+            f"📊 <b>רמת ביטחון:</b> {int(result['confidence'] * 100)}%\n"
+            f"📏 <b>מדידות:</b> {e(result['measurability'])}\n\n"
+            f"<i>נרשם במערכת. אין צורך בפעולה נוספת.</i>"
+        )
+
+    def _format_normal_reply(self, decision: Decision, result: dict) -> str:
+        e = self._e
+        risks = result["self_critique"].get("risks", [])
+        risk_text = "\n".join(f"\u200F  • {e(r)}" for r in risks) if risks else "  לא זוהו סיכונים"
+        return (
+            f"\u200F✅ <b>החלטה #{decision.id} — רגיל</b>\n\n"
+            f"📋 <b>סיכום:</b> {e(result['summary'])}\n"
+            f"🎯 <b>פעולה מומלצת:</b> {e(result['recommended_action'])}\n"
+            f"📊 <b>רמת ביטחון:</b> {int(result['confidence'] * 100)}%\n"
+            f"📏 <b>מדידות:</b> {e(result['measurability'])}\n\n"
+            f"⚠️ <b>סיכונים:</b>\n{risk_text}\n\n"
+            f"<i>ההחלטה נרשמה ובוצעה.</i>"
+        )
+
+    def _format_critical_pending(self, decision: Decision, result: dict) -> str:
+        e = self._e
+        return (
+            f"\u200F🚨 <b>החלטה #{decision.id} — קריטי</b>\n\n"
+            f"📋 <b>סיכום:</b> {e(result['summary'])}\n"
+            f"🎯 <b>פעולה מומלצת:</b> {e(result['recommended_action'])}\n"
+            f"📊 <b>רמת ביטחון:</b> {int(result['confidence'] * 100)}%\n\n"
+            f"⏳ <b>ממתין לאישור מנהל בכיר.</b>\n"
+            f"תקבל הודעה ברגע שתתקבל החלטה."
+        )
+
+    def _format_uncertain_pending(self, decision: Decision, result: dict) -> str:
+        e = self._e
+        return (
+            f"\u200F❓ <b>החלטה #{decision.id} — לא ודאי</b>\n\n"
+            f"📋 <b>סיכום:</b> {e(result['summary'])}\n\n"
+            f"הבינה המלאכותית לא הצליחה לסווג את ההחלטה בביטחון מספיק.\n"
+            f"המנהל הבכיר קיבל הודעה ויסווג את ההחלטה באופן ידני.\n\n"
+            f"⏳ <b>ממתין לסיווג ידני.</b>"
+        )
+
+    # ------------------------------------------------------------------
+    # Routing handlers
+    # ------------------------------------------------------------------
+
+    async def _handle_critical(self, submitter: User, decision: Decision, result: dict) -> str:
+        superior = await self._get_superior(submitter)
+        e = self._e
+        if not superior:
+            decision.status = DecisionStatusEnum.APPROVED
+            decision.completed_at = datetime.utcnow()
+            await self.session.commit()
+            return (
+                f"\u200F🚨 <b>החלטה #{decision.id} — קריטי</b>\n\n"
+                f"📋 <b>סיכום:</b> {e(result['summary'])}\n"
+                f"🎯 <b>פעולה מומלצת:</b> {e(result['recommended_action'])}\n\n"
+                f"<i>אתה בראש ההיררכיה. ההחלטה אושרה אוטומטית.</i>"
+            )
+
+        keyboard = InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("✅ אישור", callback_data=f"approve:{decision.id}"),
+                InlineKeyboardButton("❌ דחייה", callback_data=f"reject:{decision.id}"),
+            ]
+        ])
+
+        risks_html = "\n".join(f"  • {e(r)}" for r in result["self_critique"].get("risks", ["לא זוהו"]))
+        superior_msg = (
+            f"\u200F🚨 <b>החלטה קריטית — נדרש אישור</b>\n\n"
+            f"<b>הוגש על ידי:</b> {e(submitter.username)} ({e(submitter.role.value)})\n"
+            f"<b>החלטה #{decision.id}</b>\n\n"
+            f"📋 <b>סיכום:</b> {e(result['summary'])}\n"
+            f"🎯 <b>פעולה מומלצת:</b> {e(result['recommended_action'])}\n"
+            f"📊 <b>רמת ביטחון:</b> {int(result['confidence'] * 100)}%\n"
+            f"📏 <b>מדידות:</b> {e(result['measurability'])}\n\n"
+            f"⚠️ <b>סיכונים:</b>\n{risks_html}\n\n"
+            f"<b>אנא אשר או דחה החלטה זו:</b>"
+        )
+
+        try:
+            await self.application.bot.send_message(
+                chat_id=superior.telegram_id,
+                text=superior_msg,
+                parse_mode="HTML",
+                reply_markup=keyboard,
+            )
+            logger.info(f"Sent CRITICAL approval request to {superior.username} for decision #{decision.id}")
+        except Exception as e:
+            logger.error(f"Failed to notify superior {superior.username}: {e}")
+
+        return self._format_critical_pending(decision, result)
+
+    async def _handle_uncertain(self, submitter: User, decision: Decision, result: dict) -> str:
+        superior = await self._get_superior(submitter)
+        if not superior:
+            return self._format_uncertain_pending(decision, result)
+
+        e = self._e
+        superior_msg = (
+            f"\u200F❓ <b>החלטה לא ודאית — נדרש סיווג ידני</b>\n\n"
+            f"<b>הוגש על ידי:</b> {e(submitter.username)} ({e(submitter.role.value)})\n"
+            f"<b>החלטה #{decision.id}</b>\n\n"
+            f"📋 <b>סיכום:</b> {e(result['summary'])}\n"
+            f"🎯 <b>הצעת הבינה המלאכותית:</b> {e(result['recommended_action'])}\n"
+            f"📊 <b>רמת ביטחון:</b> {int(result['confidence'] * 100)}%\n\n"
+            f"<i>הבינה המלאכותית לא הצליחה לסווג החלטה זו בביטחון. אנא בדוק וסווג באופן ידני.</i>"
+        )
+
+        try:
+            await self.application.bot.send_message(
+                chat_id=superior.telegram_id,
+                text=superior_msg,
+                parse_mode="HTML",
+            )
+            logger.info(f"Sent UNCERTAIN notification to {superior.username} for decision #{decision.id}")
+        except Exception as e:
+            logger.error(f"Failed to notify superior {superior.username}: {e}")
+
+        return self._format_uncertain_pending(decision, result)
+
+    # ------------------------------------------------------------------
+    # Approval / rejection (called from callback handler in bot)
+    # ------------------------------------------------------------------
+
+    async def approve_decision(self, decision_id: int, approver: User) -> tuple[bool, str]:
+        """Approve a CRITICAL decision. Returns (success, message)."""
+        decision = await self.session.get(Decision, decision_id)
+        if not decision:
+            return False, f"Decision #{decision_id} not found."
+        if decision.status != DecisionStatusEnum.PENDING:
+            return False, f"Decision #{decision_id} is already {decision.status.value}."
+
+        decision.status = DecisionStatusEnum.APPROVED
+        decision.approver_id = approver.id
+        decision.completed_at = datetime.utcnow()
+        await self.session.commit()
+
+        # Notify submitter
+        submitter = await self.session.get(User, decision.submitter_id)
+        if submitter:
+            try:
+                await self.application.bot.send_message(
+                    chat_id=submitter.telegram_id,
+                    text=(
+                        f"\u200F✅ <b>החלטה #{decision.id} אושרה</b>\n\n"
+                        f"📋 <b>סיכום:</b> {html.escape(decision.summary or '')}\n"
+                        f"🎯 <b>פעולה לביצוע:</b> {html.escape(decision.recommended_action or '')}\n\n"
+                        f"אושר על ידי: {html.escape(approver.username)}\n"
+                        f"<i>אנא המשך לביצוע הפעולה המומלצת.</i>"
+                    ),
+                    parse_mode="HTML",
+                )
+            except Exception as e:
+                logger.error(f"Failed to notify submitter: {e}")
+
+        logger.info(f"Decision #{decision_id} approved by {approver.username}")
+        return True, f"החלטה #{decision_id} אושרה. המגיש קיבל הודעה."
+
+    async def reject_decision(self, decision_id: int, approver: User, notes: str) -> tuple[bool, str]:
+        """Reject a CRITICAL decision with notes."""
+        decision = await self.session.get(Decision, decision_id)
+        if not decision:
+            return False, f"Decision #{decision_id} not found."
+        if decision.status != DecisionStatusEnum.PENDING:
+            return False, f"Decision #{decision_id} is already {decision.status.value}."
+
+        decision.status = DecisionStatusEnum.REJECTED
+        decision.approver_id = approver.id
+        decision.feedback_notes = notes
+        decision.completed_at = datetime.utcnow()
+        await self.session.commit()
+
+        # Notify submitter
+        submitter = await self.session.get(User, decision.submitter_id)
+        if submitter:
+            try:
+                await self.application.bot.send_message(
+                    chat_id=submitter.telegram_id,
+                    text=(
+                        f"\u200F❌ <b>החלטה #{decision.id} נדחתה</b>\n\n"
+                        f"📋 <b>סיכום:</b> {html.escape(decision.summary or '')}\n\n"
+                        f"<b>סיבת הדחייה:</b>\n{html.escape(notes or '')}\n\n"
+                        f"נדחה על ידי: {html.escape(approver.username)}\n"
+                        f"<i>אנא בדוק ושלח מחדש במידת הצורך.</i>"
+                    ),
+                    parse_mode="HTML",
+                )
+            except Exception as e:
+                logger.error(f"Failed to notify submitter: {e}")
+
+        logger.info(f"Decision #{decision_id} rejected by {approver.username}: {notes}")
+        return True, f"החלטה #{decision_id} נדחתה. המגיש קיבל הודעה."
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    async def _get_superior(self, user: User) -> User | None:
+        """Find the immediate superior user in the DB."""
+        if not user.role:
+            return None
+        superior_role = SUPERIOR_ROLE.get(user.role)
+        if not superior_role:
+            return None
+        stmt = select(User).where(User.role == superior_role)
+        return await self.session.scalar(stmt)

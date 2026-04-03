@@ -1,0 +1,6 @@
+
+BOT_TOKEN = "8751082226:AAErUDjZCqneyrWfN0MHSR7R-gGkGclIdTA"
+
+BASE_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
+
+Shan-AI_Key = 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

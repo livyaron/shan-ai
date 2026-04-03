@@ -1,0 +1,41 @@
+version: '3.9'
+
+services:
+  postgres:
+    image: pgvector/pgvector:0.7.0-pg16
+    container_name: shan-ai-postgres
+    environment:
+      POSTGRES_DB: shan_ai
+      POSTGRES_USER: shan_user
+      POSTGRES_PASSWORD: shan_secure_pass_2025
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U shan_user -d shan_ai"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  fastapi:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: shan-ai-api
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://shan_user:shan_secure_pass_2025@postgres:5432/shan_ai
+      PYTHONUNBUFFERED: "1"
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+volumes:
+  postgres_data:
