@@ -43,6 +43,7 @@ class User(Base):
     id = Column(Integer, primary_key=True, index=True)
     telegram_id = Column(BigInteger, unique=True, index=True, nullable=True)
     username = Column(String(255), unique=True, index=True)
+    password_hash = Column(String(255), nullable=False, default="$2b$12$KIXxPfIPJ0hwi0pYjZlVBe82rJmDreXxB0E8hSXIWkIV9O8Y3bPha")  # default: bcrypt("1234")
     role = Column(Enum(RoleEnum), nullable=True, default=None)
     email = Column(String(255), nullable=True)
     registration_code = Column(String(10), unique=True, nullable=True, index=True)
