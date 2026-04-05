@@ -1383,6 +1383,75 @@ async def get_all_users(
     })
 
 
+@router.post("/decisions/analyze/preview")
+async def analyze_preview(
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Combined endpoint: Analyze decision + get RACI suggestions in one JSON response.
+    For use by Dashboard modal — returns analysis results + RACI suggestions + all users.
+    """
+    from fastapi.responses import JSONResponse
+    from app.services.claude_service import ClaudeService
+    from app.services import embedding_service
+    from app.services.raci_service import get_ai_raci_suggestions_from_text
+
+    body = await request.json()
+    problem_text = body.get("problem_description", "").strip()
+
+    if not problem_text:
+        return JSONResponse({"error": "תיאור בעיה ריק"}, status_code=400)
+
+    try:
+        # 1. Pre-classify
+        claude = ClaudeService()
+        classify_result = await claude.classify(problem_text)
+        verdict = classify_result.get("verdict", "DECISION")
+
+        if verdict != "DECISION":
+            return JSONResponse({
+                "verdict": verdict,
+                "message": classify_result.get("reply", "לא זוהתה החלטה"),
+                "analysis": None,
+                "raci_suggestions": {},
+                "users": [],
+            })
+
+        # 2. Full AI analysis
+        role_str = current_user.role.value if current_user.role else "unknown"
+        similar = await embedding_service.get_similar_decisions(session, problem_text)
+        past_context = embedding_service.format_past_context(similar)
+        result = await claude.analyze(problem_text, role_str, past_context)
+
+        # 3. Get RACI suggestions
+        raci_suggestions = await get_ai_raci_suggestions_from_text(problem_text)
+        raci_dict = {str(s["user_id"]): s["role"] for s in raci_suggestions}
+
+        # 4. Get all users for dropdown
+        all_users = (await session.execute(select(User).order_by(User.username))).scalars().all()
+        users_list = [
+            {"id": u.id, "username": u.username, "job_title": u.job_title or "", "role": u.role.value if u.role else ""}
+            for u in all_users
+        ]
+
+        return JSONResponse({
+            "verdict": "DECISION",
+            "analysis": result,
+            "raci_suggestions": raci_dict,
+            "users": users_list,
+        })
+
+    except Exception as e:
+        from groq import RateLimitError
+        if isinstance(e, RateLimitError) or "429" in str(e) or "rate limit" in str(e).lower():
+            msg = "מגבלת קצב Groq הושגה. נסה שוב בעוד מספר שניות."
+        else:
+            msg = f"שגיאה בניתוח AI: {str(e)[:60]}"
+        return JSONResponse({"error": msg}, status_code=500)
+
+
 @router.post("/decisions/analyze/raci-suggest")
 async def suggest_raci_from_text(
     request: Request,

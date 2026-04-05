@@ -578,3 +578,61 @@ async def get_raci_counts_for_decisions(decision_ids: list[int], session: AsyncS
         result.setdefault(decision_id, {"R": 0, "A": 0, "C": 0, "I": 0})
         result[decision_id][role.value] = cnt
     return result
+
+
+async def save_raci_and_notify_changes(
+    decision_id: int,
+    new_assignments: dict[int, str],
+    session: AsyncSession,
+) -> None:
+    """
+    Save RACI assignments to database and notify only users whose roles changed.
+
+    Args:
+        decision_id: The decision to assign RACI for
+        new_assignments: Dict of {user_id: role} to assign
+        session: Database session
+    """
+    logger.info(f"save_raci_and_notify_changes: decision_id={decision_id}, new_assignments={new_assignments}")
+
+    try:
+        # 1. Get existing assignments (old state)
+        old_rows = await session.execute(
+            select(DecisionRaciRole)
+            .where(DecisionRaciRole.decision_id == decision_id)
+        )
+        old_assignments: dict[int, str] = {}
+        for row in old_rows.scalars():
+            old_assignments[row.user_id] = row.role.value
+            # Delete old assignment
+            await session.delete(row)
+
+        # 2. Insert new assignments
+        for user_id, role in new_assignments.items():
+            try:
+                role_enum = RaciRoleEnum(role.upper())
+                new_raci = DecisionRaciRole(
+                    decision_id=decision_id,
+                    user_id=user_id,
+                    role=role_enum,
+                )
+                session.add(new_raci)
+            except (ValueError, KeyError):
+                logger.warning(f"save_raci_and_notify_changes: invalid role '{role}' for user {user_id}")
+                continue
+
+        await session.commit()
+        logger.info(f"save_raci_and_notify_changes: saved {len(new_assignments)} RACI assignments for decision {decision_id}")
+
+        # 3. Notify changed users
+        await notify_changed_raci_users(
+            decision_id=decision_id,
+            old_assignments=old_assignments,
+            new_assignments=new_assignments,
+            session=session,
+        )
+
+    except Exception as e:
+        logger.error(f"save_raci_and_notify_changes failed for decision {decision_id}: {e}", exc_info=True)
+        await session.rollback()
+        raise

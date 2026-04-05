@@ -42,15 +42,92 @@ def extract_text(file_path: str, file_type: str) -> str:
         return "\n".join(p.text for p in doc.paragraphs if p.text.strip())
 
     elif file_type == "xlsx":
-        import openpyxl
-        wb = openpyxl.load_workbook(path, data_only=True)
+        import pandas as pd
+        try:
+            # Read Excel with UTF-8 encoding
+            xls = pd.ExcelFile(path, engine='openpyxl')
+            rows = []
+
+            for sheet_name in xls.sheet_names:
+                df = pd.read_excel(path, sheet_name=sheet_name, engine='openpyxl')
+
+                # Smart column filtering: keep only meaningful columns
+                meaningful_cols = []
+                for col in df.columns:
+                    col_str = str(col).lower()
+                    # Include columns with meaningful data
+                    if any(keyword in col_str for keyword in [
+                        'project', 'name', 'status', 'risk', 'barrier', 'wbs', 'week',
+                        'update', 'comment', 'note', 'issue', 'action', 'owner',
+                        'due', 'date', 'budget', 'progress', 'deliverable'
+                    ]):
+                        meaningful_cols.append(col)
+
+                # If no meaningful columns found, use all non-empty columns
+                if not meaningful_cols:
+                    meaningful_cols = [c for c in df.columns if df[c].notna().sum() > 0]
+
+                # Get project name if available
+                project_name = None
+                wbs_id = None
+                for col in df.columns:
+                    if 'project' in str(col).lower() and not project_name:
+                        project_name = df[col].iloc[0] if len(df) > 0 else None
+                    if 'wbs' in str(col).lower() and not wbs_id:
+                        wbs_id = df[col].iloc[0] if len(df) > 0 else None
+
+                # Process rows with context
+                for idx, row in df.iterrows():
+                    row_data = {}
+                    for col in meaningful_cols:
+                        val = row[col]
+                        if pd.notna(val):
+                            row_data[str(col)] = str(val).strip()
+
+                    if row_data:
+                        # Build context prefix
+                        context_prefix = ""
+                        if project_name and pd.notna(project_name):
+                            context_prefix += f"Project: {project_name}, "
+                        if wbs_id and pd.notna(wbs_id):
+                            context_prefix += f"WBS: {wbs_id}, "
+
+                        row_text = context_prefix + " | ".join(f"{k}: {v}" for k, v in row_data.items())
+                        rows.append(row_text)
+
+            return "\n".join(rows)
+        except Exception as e:
+            logger.warning(f"Failed to read XLSX with pandas, falling back: {e}")
+            # Fallback to basic openpyxl
+            import openpyxl
+            wb = openpyxl.load_workbook(path, data_only=True)
+            rows = []
+            for sheet in wb.worksheets:
+                for row in sheet.iter_rows(values_only=True):
+                    row_text = " | ".join(str(c) for c in row if c is not None)
+                    if row_text.strip():
+                        rows.append(row_text)
+            return "\n".join(rows)
+
+    elif file_type == "csv":
+        import csv
         rows = []
-        for sheet in wb.worksheets:
-            for row in sheet.iter_rows(values_only=True):
-                row_text = " | ".join(str(c) for c in row if c is not None)
-                if row_text.strip():
-                    rows.append(row_text)
-        return "\n".join(rows)
+        try:
+            with open(path, 'r', encoding='utf-8-sig') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    # Filter meaningful columns
+                    row_data = {}
+                    for key, val in row.items():
+                        if val and str(val).strip():
+                            row_data[key] = str(val).strip()
+                    if row_data:
+                        row_text = " | ".join(f"{k}: {v}" for k, v in row_data.items())
+                        rows.append(row_text)
+            return "\n".join(rows)
+        except Exception as e:
+            logger.warning(f"CSV read failed: {e}")
+            return ""
 
     return ""
 

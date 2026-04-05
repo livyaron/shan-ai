@@ -91,6 +91,14 @@
     </div>
     {% endif %}
 
+    <!-- New Decision Button -->
+    <div class="mb-4">
+        <button type="button" class="btn btn-primary btn-lg" style="background: #8b9cf4; border: none; color: #0f1117; font-weight: 700;"
+                data-bs-toggle="modal" data-bs-target="#newDecisionModal">
+            ➕ החלטה חדשה
+        </button>
+    </div>
+
     <!-- KPI Cards -->
     <div class="row g-3 mb-4">
         <div class="col-6 col-md-3">
@@ -392,5 +400,222 @@ new Chart(document.getElementById('dailyChart'), {
     }
 });
 </script>
+
+<!-- ========== NEW DECISION MODAL ========== -->
+<div class="modal fade" id="newDecisionModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header" style="flex-direction: row-reverse; border-color: #2d3047;">
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                <h5 class="modal-title" style="color: #8b9cf4; font-weight: 700;">➕ החלטה חדשה</h5>
+            </div>
+            <div class="modal-body" style="max-height: 70vh; overflow-y: auto;">
+                <form id="newDecisionForm" method="POST" action="/decisions/confirm">
+                    <!-- Problem Description -->
+                    <div class="mb-3">
+                        <label class="form-label" style="color: #d0d8f0;">📝 תיאור הבעיה / ההחלטה *</label>
+                        <textarea id="decisionProblem" name="problem_description" class="form-control" rows="4"
+                                  style="background: #0f1117; border: 1px solid #2d3047; color: #e0e0e0;"
+                                  placeholder="תאר את ההחלטה שלך בפירוט..."required></textarea>
+                    </div>
+
+                    <!-- Hidden: Analysis Results (populated by Analyze) -->
+                    <div id="analysisResults" style="display: none;">
+                        <input type="hidden" id="decisionType" name="type" value="">
+                        <input type="hidden" id="decisionSummary" name="summary" value="">
+                        <input type="hidden" id="decisionAction" name="recommended_action" value="">
+                        <input type="hidden" id="decisionApproval" name="requires_approval" value="">
+                        <input type="hidden" id="decisionMeasurable" name="measurability" value="">
+                        <input type="hidden" id="decisionAssumptions" name="assumptions" value="">
+                        <input type="hidden" id="decisionRisks" name="risks" value="">
+
+                        <!-- Analysis Preview -->
+                        <div id="aiPreview" style="display: none; background: #0f1117; border: 1px solid #8b9cf4; border-radius: 8px; padding: 12px; margin-bottom: 16px;">
+                            <div style="color: #8b9cf4; font-weight: 600; margin-bottom: 8px;">🤖 תוצאות AI:</div>
+                            <div style="color: #d0d8f0; font-size: 0.9rem; line-height: 1.5;">
+                                <div><strong>סוג:</strong> <span id="previewType">—</span></div>
+                                <div><strong>סיכום:</strong> <span id="previewSummary">—</span></div>
+                                <div><strong>פעולה:</strong> <span id="previewAction">—</span></div>
+                            </div>
+                        </div>
+
+                        <!-- RACI Assignment Section -->
+                        <div style="background: #0f1117; border: 1px solid #2d3047; border-radius: 8px; padding: 12px;">
+                            <div style="color: #8b9cf4; font-weight: 600; margin-bottom: 12px;">👥 הקצאת RACI</div>
+                            <div style="overflow-x: auto;">
+                                <table class="table table-sm" style="color: #e0e0e0; margin-bottom: 0;">
+                                    <thead style="background: #1a1d2e; border-bottom: 1px solid #2d3047;">
+                                        <tr>
+                                            <th style="color: #8b9cf4; text-align: right;">משתמש</th>
+                                            <th style="color: #8b9cf4; text-align: center; min-width: 60px;">R</th>
+                                            <th style="color: #dc3545; text-align: center; min-width: 60px;">A</th>
+                                            <th style="color: #ffc107; text-align: center; min-width: 60px;">C</th>
+                                            <th style="color: #17a2b8; text-align: center; min-width: 60px;">I</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="raciTableBody" style="border-color: #2d3047;">
+                                        <!-- Populated by JavaScript -->
+                                    </tbody>
+                                </table>
+                            </div>
+                            <div id="raciMessage" style="color: #dc3545; font-size: 0.85rem; margin-top: 8px; text-align: center;">
+                                ⚠️ חייב להיות בעל סמכות אחד (A)
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- RACI Hidden Inputs -->
+                    <input type="hidden" id="raci_r" name="raci_r" value="">
+                    <input type="hidden" id="raci_a" name="raci_a" value="">
+                    <input type="hidden" id="raci_c" name="raci_c" value="">
+                    <input type="hidden" id="raci_i" name="raci_i" value="">
+                </form>
+            </div>
+            <div class="modal-footer" style="border-color: #2d3047;">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">ביטול</button>
+                <button type="button" id="analyzeBtn" class="btn btn-primary" onclick="analyzeDecision()">
+                    🔍 נתח
+                </button>
+                <button type="button" id="submitBtn" class="btn btn-success" onclick="submitDecision()" style="display: none;">
+                    ✅ צור החלטה
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+// Global state for decision modal
+let allUsers = [];
+let currentAnalysis = null;
+
+async function analyzeDecision() {
+    const problem = document.getElementById('decisionProblem').value.trim();
+    if (!problem) {
+        alert('אנא הכנס תיאור בעיה');
+        return;
+    }
+
+    document.getElementById('analyzeBtn').disabled = true;
+    try {
+        // Call the combined analyze/preview endpoint
+        const response = await fetch('/dashboard/decisions/analyze/preview', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ problem_description: problem })
+        });
+
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const data = await response.json();
+
+        if (data.error) {
+            alert('❌ ' + data.error);
+            return;
+        }
+
+        if (data.verdict !== 'DECISION') {
+            alert('⚠️ ' + (data.message || 'לא זוהתה החלטה'));
+            return;
+        }
+
+        // Store analysis and users
+        currentAnalysis = data.analysis;
+        allUsers = data.users || [];
+
+        // Populate hidden fields
+        document.getElementById('decisionType').value = currentAnalysis.type || '';
+        document.getElementById('decisionSummary').value = currentAnalysis.summary || '';
+        document.getElementById('decisionAction').value = currentAnalysis.recommended_action || '';
+        document.getElementById('decisionApproval').value = currentAnalysis.requires_approval ? 'true' : 'false';
+        document.getElementById('decisionMeasurable').value = currentAnalysis.measurability || '';
+        document.getElementById('decisionAssumptions').value = JSON.stringify(currentAnalysis.self_critique?.assumptions || []);
+        document.getElementById('decisionRisks').value = JSON.stringify(currentAnalysis.self_critique?.risks || []);
+
+        // Show analysis preview
+        document.getElementById('aiPreview').style.display = 'block';
+        document.getElementById('previewType').textContent = currentAnalysis.type || '—';
+        document.getElementById('previewSummary').textContent = (currentAnalysis.summary || '—').substring(0, 80) + '...';
+        document.getElementById('previewAction').textContent = (currentAnalysis.recommended_action || '—').substring(0, 80) + '...';
+
+        // Populate RACI table
+        populateRaciTable(allUsers, data.raci_suggestions || {});
+
+        // Show analysis results and submit button
+        document.getElementById('analysisResults').style.display = 'block';
+        document.getElementById('submitBtn').style.display = 'inline-block';
+        document.getElementById('analyzeBtn').textContent = '🔄 נתח מחדש';
+    } catch (e) {
+        alert('❌ שגיאה בניתוח: ' + e.message);
+    } finally {
+        document.getElementById('analyzeBtn').disabled = false;
+    }
+}
+
+function populateRaciTable(users, suggestions) {
+    const tbody = document.getElementById('raciTableBody');
+    tbody.innerHTML = '';
+
+    for (const user of users) {
+        const tr = document.createElement('tr');
+        tr.style.borderBottom = '1px solid #2d3047';
+
+        let html = '<td style="text-align: right;">' + user.username + '</td>';
+        for (const role of ['R', 'A', 'C', 'I']) {
+            const checked = suggestions[user.id] === role ? 'checked' : '';
+            html += `<td style="text-align: center;">
+                <input type="radio" name="raci_${user.id}" value="${role}" class="raci-radio"
+                       data-user="${user.id}" data-role="${role}" ${checked}>
+            </td>`;
+        }
+        tr.innerHTML = html;
+        tbody.appendChild(tr);
+    }
+
+    // Add change listeners
+    document.querySelectorAll('.raci-radio').forEach(el => {
+        el.addEventListener('change', validateRaci);
+    });
+
+    validateRaci();
+}
+
+function validateRaci() {
+    const checked = Array.from(document.querySelectorAll('.raci-radio:checked'));
+    const aCount = checked.filter(el => el.value === 'A').length;
+    const msg = document.getElementById('raciMessage');
+
+    if (aCount === 0) {
+        msg.textContent = '⚠️ חייב להיות בעל סמכות אחד (A)';
+        msg.style.color = '#dc3545';
+        document.getElementById('submitBtn').disabled = true;
+    } else if (aCount === 1) {
+        msg.textContent = '✅ הקצאת RACI תקינה';
+        msg.style.color = '#28a745';
+        document.getElementById('submitBtn').disabled = false;
+    } else {
+        msg.textContent = '❌ רק בעל סמכות אחד (A)';
+        msg.style.color = '#dc3545';
+        document.getElementById('submitBtn').disabled = true;
+    }
+}
+
+function submitDecision() {
+    // Collect RACI assignments
+    const raci = { R: [], A: [], C: [], I: [] };
+    document.querySelectorAll('.raci-radio:checked').forEach(el => {
+        raci[el.value].push(el.dataset.user);
+    });
+
+    // Populate hidden fields
+    document.getElementById('raci_r').value = raci.R.join(',');
+    document.getElementById('raci_a').value = raci.A.join(',');
+    document.getElementById('raci_c').value = raci.C.join(',');
+    document.getElementById('raci_i').value = raci.I.join(',');
+
+    // Submit form
+    document.getElementById('newDecisionForm').submit();
+}
+</script>
+
 </body>
 </html>
