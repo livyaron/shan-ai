@@ -10,7 +10,7 @@ from app.models import Decision, DecisionStatusEnum
 logger = logging.getLogger(__name__)
 
 EMBEDDING_DIM = 384
-MODEL_NAME = "intfloat/multilingual-e5-small"
+MODEL_NAME = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 
 _model = None
 

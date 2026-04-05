@@ -1,5 +1,3 @@
-version: '3.9'
-
 services:
   postgres:
     image: pgvector/pgvector:0.7.0-pg16
@@ -35,7 +33,9 @@ services:
       - "8000:8000"
     volumes:
       - .:/app
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+      - uploads_data:/app/uploads
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
 
 volumes:
   postgres_data:
+  uploads_data:

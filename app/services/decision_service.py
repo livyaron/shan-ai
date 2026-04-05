@@ -44,15 +44,47 @@ class DecisionService:
         """
         role_str = user.role.value if user.role else "unknown"
 
-        # --- 1. Fetch similar past decisions for context (RAG) ---
+        # --- 1. Fetch similar past decisions + lessons for context (RAG) ---
         similar = await embedding_service.get_similar_decisions(self.session, text)
         past_context = embedding_service.format_past_context(similar)
         if past_context:
             logger.info(f"נמצאו {len(similar)} החלטות דומות מהעבר")
 
+        lessons_context = ""
+        try:
+            from app.services.lessons_service import (
+                get_relevant_lessons, format_lessons_context,
+                get_risk_patterns, get_calibration_hint,
+            )
+            lessons = await get_relevant_lessons(text, self.session, limit=3)
+            lessons_context = format_lessons_context(lessons)
+            if lessons_context:
+                logger.info(f"נמצאו {len(lessons)} לקחים רלוונטיים")
+
+            # Infer probable decision type from similar past decisions
+            probable_type = None
+            if similar:
+                from collections import Counter
+                type_counts = Counter(d.type.value for d in similar)
+                probable_type = type_counts.most_common(1)[0][0]
+
+            risk_context = ""
+            calib_context = ""
+            if probable_type:
+                risk_context  = await get_risk_patterns(probable_type, self.session)
+                calib_context = await get_calibration_hint(probable_type, self.session)
+
+        except Exception as e:
+            logger.warning(f"Lessons/patterns context fetch failed: {e}")
+            risk_context = calib_context = ""
+
+        combined_context = "\n\n".join(filter(None, [
+            past_context, lessons_context, risk_context, calib_context
+        ]))
+
         # --- 2. Analyze with Groq (with injected context) ---
         try:
-            result = await self.claude.analyze(text, role_str, past_context)
+            result = await self.claude.analyze(text, role_str, combined_context)
         except Exception as e:
             logger.error(f"Claude analysis failed: {e}")
             return "\u200F⚠️ מנוע ההחלטות אינו זמין כרגע. אנא נסה שוב."
@@ -65,7 +97,6 @@ class DecisionService:
             summary=result["summary"],
             problem_description=text,
             recommended_action=result["recommended_action"],
-            confidence=result["confidence"],
             requires_approval=result["requires_approval"],
             assumptions=json.dumps(result["self_critique"].get("assumptions", [])),
             risks=json.dumps(result["self_critique"].get("risks", [])),
@@ -75,7 +106,7 @@ class DecisionService:
         await self.session.commit()
         await self.session.refresh(decision)
 
-        logger.info(f"Decision #{decision.id} stored: type={result['type']}, confidence={result['confidence']}")
+        logger.info(f"Decision #{decision.id} stored: type={result['type']}")
 
         # --- 4. Generate and store embedding ---
         try:
@@ -84,6 +115,15 @@ class DecisionService:
             await self.session.commit()
         except Exception as e:
             logger.warning(f"Embedding generation failed for decision #{decision.id}: {e}")
+
+        # --- 5. Fire RACI assignment in background for non-CRITICAL (synchronous for CRITICAL in _handle_critical) ---
+        if result["type"] != "CRITICAL":
+            try:
+                import asyncio
+                from app.services.raci_service import assign_raci_from_ai
+                asyncio.get_event_loop().create_task(assign_raci_from_ai(decision.id))
+            except Exception as e:
+                logger.warning(f"RACI background task could not be scheduled for decision #{decision.id}: {e}")
 
         # --- 3. Route ---
         dtype = result["type"]
@@ -125,7 +165,6 @@ class DecisionService:
             f"\u200Fℹ️ <b>החלטה #{decision.id} — מידע בלבד</b>\n\n"
             f"📋 <b>סיכום:</b> {e(result['summary'])}\n"
             f"🎯 <b>פעולה מומלצת:</b> {e(result['recommended_action'])}\n"
-            f"📊 <b>רמת ביטחון:</b> {int(result['confidence'] * 100)}%\n"
             f"📏 <b>מדידות:</b> {e(result['measurability'])}\n\n"
             f"<i>נרשם במערכת. אין צורך בפעולה נוספת.</i>"
         )
@@ -138,7 +177,6 @@ class DecisionService:
             f"\u200F✅ <b>החלטה #{decision.id} — רגיל</b>\n\n"
             f"📋 <b>סיכום:</b> {e(result['summary'])}\n"
             f"🎯 <b>פעולה מומלצת:</b> {e(result['recommended_action'])}\n"
-            f"📊 <b>רמת ביטחון:</b> {int(result['confidence'] * 100)}%\n"
             f"📏 <b>מדידות:</b> {e(result['measurability'])}\n\n"
             f"⚠️ <b>סיכונים:</b>\n{risk_text}\n\n"
             f"<i>ההחלטה נרשמה ובוצעה.</i>"
@@ -149,8 +187,7 @@ class DecisionService:
         return (
             f"\u200F🚨 <b>החלטה #{decision.id} — קריטי</b>\n\n"
             f"📋 <b>סיכום:</b> {e(result['summary'])}\n"
-            f"🎯 <b>פעולה מומלצת:</b> {e(result['recommended_action'])}\n"
-            f"📊 <b>רמת ביטחון:</b> {int(result['confidence'] * 100)}%\n\n"
+            f"🎯 <b>פעולה מומלצת:</b> {e(result['recommended_action'])}\n\n"
             f"⏳ <b>ממתין לאישור מנהל בכיר.</b>\n"
             f"תקבל הודעה ברגע שתתקבל החלטה."
         )
@@ -170,9 +207,19 @@ class DecisionService:
     # ------------------------------------------------------------------
 
     async def _handle_critical(self, submitter: User, decision: Decision, result: dict) -> str:
-        superior = await self._get_superior(submitter)
+        # Assign RACI synchronously for CRITICAL decisions
+        from app.services.raci_service import assign_raci_from_ai, get_accountable_user_id
+        await assign_raci_from_ai(decision.id)
+
+        # Route to RACI A user; fallback to role-hierarchy superior if A not found
+        accountable_id = await get_accountable_user_id(decision.id, self.session)
+        if accountable_id:
+            approver = await self.session.get(User, accountable_id)
+        else:
+            approver = await self._get_superior(submitter)
+
         e = self._e
-        if not superior:
+        if not approver:
             decision.status = DecisionStatusEnum.APPROVED
             decision.completed_at = datetime.utcnow()
             await self.session.commit()
@@ -197,7 +244,6 @@ class DecisionService:
             f"<b>החלטה #{decision.id}</b>\n\n"
             f"📋 <b>סיכום:</b> {e(result['summary'])}\n"
             f"🎯 <b>פעולה מומלצת:</b> {e(result['recommended_action'])}\n"
-            f"📊 <b>רמת ביטחון:</b> {int(result['confidence'] * 100)}%\n"
             f"📏 <b>מדידות:</b> {e(result['measurability'])}\n\n"
             f"⚠️ <b>סיכונים:</b>\n{risks_html}\n\n"
             f"<b>אנא אשר או דחה החלטה זו:</b>"
@@ -205,14 +251,14 @@ class DecisionService:
 
         try:
             await self.application.bot.send_message(
-                chat_id=superior.telegram_id,
+                chat_id=approver.telegram_id,
                 text=superior_msg,
                 parse_mode="HTML",
                 reply_markup=keyboard,
             )
-            logger.info(f"Sent CRITICAL approval request to {superior.username} for decision #{decision.id}")
+            logger.info(f"Sent CRITICAL approval request to {approver.username} for decision #{decision.id}")
         except Exception as e:
-            logger.error(f"Failed to notify superior {superior.username}: {e}")
+            logger.error(f"Failed to notify approver {approver.username}: {e}")
 
         return self._format_critical_pending(decision, result)
 
@@ -227,9 +273,8 @@ class DecisionService:
             f"<b>הוגש על ידי:</b> {e(submitter.username)} ({e(submitter.role.value)})\n"
             f"<b>החלטה #{decision.id}</b>\n\n"
             f"📋 <b>סיכום:</b> {e(result['summary'])}\n"
-            f"🎯 <b>הצעת הבינה המלאכותית:</b> {e(result['recommended_action'])}\n"
-            f"📊 <b>רמת ביטחון:</b> {int(result['confidence'] * 100)}%\n\n"
-            f"<i>הבינה המלאכותית לא הצליחה לסווג החלטה זו בביטחון. אנא בדוק וסווג באופן ידני.</i>"
+            f"🎯 <b>הצעת הבינה המלאכותית:</b> {e(result['recommended_action'])}\n\n"
+            f"<i>הבינה המלאכותית לא הצליחה לסווג החלטה זו. אנא בדוק וסווג באופן ידני.</i>"
         )
 
         try:
@@ -256,8 +301,17 @@ class DecisionService:
         if decision.status != DecisionStatusEnum.PENDING:
             return False, f"Decision #{decision_id} is already {decision.status.value}."
 
+        # RACI enforcement: only Accountable can approve (if assigned and reachable)
+        from app.services.raci_service import get_accountable_user_id
+        accountable_id = await get_accountable_user_id(decision_id, self.session)
+        if accountable_id is not None and approver.id != accountable_id:
+            accountable_user = await self.session.get(User, accountable_id)
+            if accountable_user and accountable_user.telegram_id:
+                name = html.escape(accountable_user.username)
+                return False, f"⛔ רק {name} (Accountable) יכול לאשר החלטה זו."
+            # Accountable has no telegram_id — fall through to existing logic
+
         decision.status = DecisionStatusEnum.APPROVED
-        decision.approver_id = approver.id
         decision.completed_at = datetime.utcnow()
         await self.session.commit()
 
@@ -290,8 +344,16 @@ class DecisionService:
         if decision.status != DecisionStatusEnum.PENDING:
             return False, f"Decision #{decision_id} is already {decision.status.value}."
 
+        # RACI enforcement: only Accountable can reject (if assigned and reachable)
+        from app.services.raci_service import get_accountable_user_id
+        accountable_id = await get_accountable_user_id(decision_id, self.session)
+        if accountable_id is not None and approver.id != accountable_id:
+            accountable_user = await self.session.get(User, accountable_id)
+            if accountable_user and accountable_user.telegram_id:
+                name = html.escape(accountable_user.username)
+                return False, f"⛔ רק {name} (Accountable) יכול לדחות החלטה זו."
+
         decision.status = DecisionStatusEnum.REJECTED
-        decision.approver_id = approver.id
         decision.feedback_notes = notes
         decision.completed_at = datetime.utcnow()
         await self.session.commit()

@@ -27,6 +27,26 @@ _awaiting_rejection_note: dict[int, int] = {}
 # { telegram_id (int): distribution_id (int) }  — waiting for rejection reason on a distribution
 _awaiting_dist_rejection: dict[int, int] = {}
 
+# { telegram_id (int): original_text (str) }  — waiting for clarification on an UNCLEAR message
+_awaiting_clarification: dict[int, str] = {}
+
+# Hebrew question prefixes — messages starting with these are treated as data queries, never decisions
+_QUESTION_PREFIXES = (
+    "כמה", "מה ", "מי ", "מתי", "איך ", "האם ", "האם?",
+    "תן לי", "תראה לי", "הצג", "סכם", "רשום לי",
+    "מהם", "מהן", "מאיזה", "מה ה", "מהו", "מהי",
+    "what", "how many", "how much", "show me", "list",
+)
+
+
+def _is_data_question(text: str) -> bool:
+    """Return True if this looks like a data/info query rather than a decision."""
+    t = text.strip()
+    return (
+        t.endswith("?") or
+        any(t.startswith(kw) for kw in _QUESTION_PREFIXES)
+    )
+
 
 class TelegramPollingBot:
     """Telegram bot that polls for updates."""
@@ -48,7 +68,11 @@ class TelegramPollingBot:
         self.application.add_handler(CommandHandler("start", self.handle_start))
         self.application.add_handler(CommandHandler("register", self.handle_register))
         self.application.add_handler(CommandHandler("status", self.handle_status))
+        self.application.add_handler(CommandHandler("ask", self.handle_ask))
         self.application.add_handler(CallbackQueryHandler(self.handle_callback))
+        self.application.add_handler(
+            MessageHandler(filters.Document.ALL, self.handle_document)
+        )
         self.application.add_handler(
             MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_message)
         )
@@ -168,6 +192,117 @@ class TelegramPollingBot:
             )
 
     # ------------------------------------------------------------------
+    # /ask command — knowledge base Q&A
+    # ------------------------------------------------------------------
+
+    async def handle_ask(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """/ask <question> — search knowledge base and answer with AI."""
+        telegram_id = update.effective_user.id
+        question = " ".join(context.args).strip() if context.args else ""
+
+        if not question:
+            await update.message.reply_text(
+                "\u200Fשימוש: /ask <שאלה>\n\nדוגמה: /ask מה הנהלים להחלפת טרנספורמטור?",
+                parse_mode="HTML",
+            )
+            return
+
+        async with async_session_maker() as session:
+            # Verify user is registered
+            user = await session.scalar(select(User).where(User.telegram_id == telegram_id))
+            if not user or not user.role:
+                await update.message.reply_text("\u200F⏳ יש להירשם תחילה. השתמש ב-/register")
+                return
+
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+
+        async with async_session_maker() as session:
+            from app.services.knowledge_service import search_knowledge, format_knowledge_context, answer_question
+            chunks = await search_knowledge(question, session, limit=5)
+
+        if not chunks:
+            await update.message.reply_text(
+                "\u200F📂 לא נמצא מידע רלוונטי בבסיס הידע.\n\nנסה להעלות קבצים רלוונטיים דרך לוח הניהול.",
+            )
+            return
+
+        context_text = format_knowledge_context(chunks)
+        answer = await answer_question(question, context_text)
+
+        await update.message.reply_text(
+            f"\u200F🤖 <b>תשובה מבסיס הידע:</b>\n\n{_html.escape(answer)}",
+            parse_mode="HTML",
+        )
+
+    # ------------------------------------------------------------------
+    # Document handler — file upload to knowledge base
+    # ------------------------------------------------------------------
+
+    async def handle_document(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle file uploads — add to knowledge base."""
+        telegram_id = update.effective_user.id
+        document = update.message.document
+
+        async with async_session_maker() as session:
+            user = await session.scalar(select(User).where(User.telegram_id == telegram_id))
+            if not user or not user.role:
+                await update.message.reply_text(
+                    "\u200F⏳ יש להירשם תחילה כדי להעלות קבצים."
+                )
+                return
+
+        # Check file type
+        filename = document.file_name or ""
+        ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+        if ext not in ("pdf", "docx", "xlsx"):
+            await update.message.reply_text(
+                "\u200F❌ סוג קובץ לא נתמך.\nמותרים: PDF, DOCX, XLSX בלבד."
+            )
+            return
+
+        await update.message.reply_text(
+            f"\u200F📁 הקובץ <b>{_html.escape(filename)}</b> התקבל ומעובד...\nתקבל אישור בסיום.",
+            parse_mode="HTML",
+        )
+
+        try:
+            from pathlib import Path
+            import uuid as _uuid
+            UPLOAD_DIR = Path("uploads")
+            UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+            safe_name = f"{_uuid.uuid4().hex}_{filename}"
+            file_path = UPLOAD_DIR / safe_name
+
+            tg_file = await context.bot.get_file(document.file_id)
+            await tg_file.download_to_drive(str(file_path))
+
+            from app.models import KnowledgeFile
+            from app.database import async_session_maker as _sm
+            async with _sm() as session:
+                kf = KnowledgeFile(
+                    original_name=filename,
+                    file_path=str(file_path),
+                    file_type=ext,
+                    file_size=document.file_size or 0,
+                    uploader_id=user.id,
+                    status="processing",
+                )
+                session.add(kf)
+                await session.commit()
+                await session.refresh(kf)
+                file_id = kf.id
+
+            context.application.create_task(_process_and_notify(
+                file_id, telegram_id, filename, context.bot
+            ))
+
+        except Exception as e:
+            logger.error(f"Document upload error: {e}", exc_info=True)
+            await update.message.reply_text(
+                f"\u200F❌ שגיאה בהעלאת הקובץ: {str(e)[:80]}"
+            )
+
+    # ------------------------------------------------------------------
     # Message handler — routes through Claude if user has a role
     # ------------------------------------------------------------------
 
@@ -258,7 +393,80 @@ class TelegramPollingBot:
                 chat_id=update.effective_chat.id, action="typing"
             )
 
-            # Process through decision engine
+            # --- Keyword pre-filter: data questions bypass LLM classification ---
+            if _is_data_question(text):
+                from app.services.knowledge_service import answer_with_full_context
+                try:
+                    qa_result = await answer_with_full_context(text, session, user.id)
+                    reply = f"\u200F🤖 <b>תשובה:</b>\n\n{_html.escape(qa_result['answer'])}"
+                    if qa_result.get("sources_text"):
+                        reply += f"\n\n<i>{_html.escape(qa_result['sources_text'])}</i>"
+                except Exception as e:
+                    logger.warning(f"answer_with_full_context failed: {e}")
+                    reply = "\u200Fלא הצלחתי למצוא תשובה. נסה לנסח אחרת."
+                await update.message.reply_text(reply, parse_mode="HTML")
+                return
+
+            # --- Check if this is a clarification response ---
+            if telegram_id in _awaiting_clarification:
+                original_text = _awaiting_clarification.pop(telegram_id)
+                combined_text = f"{original_text}\n\nפרטים נוספים: {text}"
+                # If original was a question, answer it; otherwise process as decision
+                if _is_data_question(original_text):
+                    from app.services.knowledge_service import answer_with_full_context
+                    try:
+                        qa = await answer_with_full_context(combined_text, session, user.id)
+                        reply = f"\u200F🤖 <b>תשובה:</b>\n\n{_html.escape(qa['answer'])}"
+                        if qa.get("sources_text"):
+                            reply += f"\n\n<i>{_html.escape(qa['sources_text'])}</i>"
+                    except Exception:
+                        reply = "\u200Fלא הצלחתי למצוא תשובה. נסה לנסח אחרת."
+                    await update.message.reply_text(reply, parse_mode="HTML")
+                else:
+                    decision_svc = DecisionService(session, self.application)
+                    reply = await decision_svc.process(user, combined_text)
+                    await update.message.reply_text(reply, parse_mode="HTML")
+                return
+
+            # --- LLM classify for everything else ---
+            from app.services.claude_service import ClaudeService as _CS
+            try:
+                classify_result = await _CS().classify(text)
+                verdict = classify_result.get("verdict", "DECISION")
+                logger.info(f"Classification verdict for user {telegram_id}: {verdict}")
+            except Exception as e:
+                logger.error(f"Classification failed: {e}", exc_info=True)
+                await update.message.reply_text(
+                    "\u200F⚠️ שגיאה בניתוח הטקסט. נסה שוב.",
+                    parse_mode="HTML",
+                )
+                return
+
+            if verdict == "NOT_DECISION":
+                # Answer from knowledge base + decisions data
+                try:
+                    from app.services.knowledge_service import answer_with_full_context
+                    qa_result = await answer_with_full_context(text, session, user.id)
+                    reply = f"\u200F🤖 <b>תשובה:</b>\n\n{_html.escape(qa_result['answer'])}"
+                    if qa_result.get("sources_text"):
+                        reply += f"\n\n<i>{_html.escape(qa_result['sources_text'])}</i>"
+                except Exception as e:
+                    logger.warning(f"answer_with_full_context failed: {e}")
+                    ai_reply = classify_result.get("reply", "")
+                    reply = f"\u200F{_html.escape(ai_reply)}" if ai_reply else "\u200Fשאל שאלות עבודה או שלח החלטה לניתוח."
+                await update.message.reply_text(reply, parse_mode="HTML")
+                return
+
+            if verdict == "UNCLEAR":
+                _awaiting_clarification[telegram_id] = text
+                question = classify_result.get("clarifying_question", "אנא פרט את ההחלטה.")
+                await update.message.reply_text(
+                    f"\u200F🔍 <b>נדרש פרט נוסף:</b>\n\n{_html.escape(question)}",
+                    parse_mode="HTML",
+                )
+                return
+
+            # DECISION — process through decision engine
             decision_svc = DecisionService(session, self.application)
             reply = await decision_svc.process(user, text)
 
@@ -354,15 +562,6 @@ class TelegramPollingBot:
         try:
             async with self.application:
                 await self.application.start()
-                # Add all handlers again (in case they were lost)
-                self.application.add_handler(CommandHandler("start", self.handle_start))
-                self.application.add_handler(CommandHandler("register", self.handle_register))
-                self.application.add_handler(CommandHandler("status", self.handle_status))
-                self.application.add_handler(CallbackQueryHandler(self.handle_callback))
-                self.application.add_handler(
-                    MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_message)
-                )
-                self.application.add_error_handler(self.error_handler)
 
                 await self.application.updater.start_polling(allowed_updates=Update.ALL_TYPES)
                 logger.info("Bot polling started successfully")
@@ -395,6 +594,31 @@ class TelegramPollingBot:
         global _polling_should_run
         _polling_should_run = False
         logger.info("Signalled polling to stop")
+
+
+async def _process_and_notify(file_id: int, telegram_id: int, filename: str, bot) -> None:
+    """Process a knowledge file and send Telegram notification when done."""
+    from app.services.knowledge_service import process_file
+    await process_file(file_id)
+    # Re-read updated record
+    from app.database import async_session_maker as _sm
+    from app.models import KnowledgeFile as _KF
+    async with _sm() as session:
+        kf = await session.get(_KF, file_id)
+        if kf and kf.status == "ready":
+            msg = (
+                f"\u200F✅ <b>הקובץ עובד בהצלחה!</b>\n"
+                f"📄 {_html.escape(filename)}\n"
+                f"🔢 {kf.chunk_count} קטעי ידע נוצרו\n\n"
+                f"כעת תוכל לשאול: /ask שאלה"
+            )
+        else:
+            summary = kf.summary if kf else ""
+            msg = f"\u200F❌ שגיאה בעיבוד הקובץ <b>{_html.escape(filename)}</b>.\n{_html.escape(summary or '')}"
+    try:
+        await bot.send_message(chat_id=telegram_id, text=msg, parse_mode="HTML")
+    except Exception as e:
+        logger.warning(f"Failed to notify user {telegram_id}: {e}")
 
 
 # Global bot instance

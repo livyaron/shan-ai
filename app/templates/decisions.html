@@ -6,50 +6,369 @@
     <title>Shan-AI — ניהול החלטות</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
-        body { background: #0f1117; color: #e0e0e0; font-family: 'Segoe UI', sans-serif; }
-        .navbar { background: #1a1d2e !important; border-bottom: 1px solid #2d3047; }
-        .card { background: #1a1d2e; border: 1px solid #2d3047; border-radius: 12px; }
-        .table { color: #e0e0e0; }
-        .table th { color: #8b9cf4; border-color: #2d3047; font-size: 0.82rem; text-transform: uppercase; letter-spacing: .5px; }
-        .table td { border-color: #2d3047; vertical-align: middle; }
-        .table tbody tr:hover { background: #22263a; cursor: pointer; }
+        /* ── Base ── */
+        *, *::before, *::after { box-sizing: border-box; }
+        body { background: #080a12; color: #e0e0e0; font-family: 'Segoe UI', sans-serif; min-height: 100vh; }
+
+        /* ── Navbar ── */
+        .navbar { background: #0e1020 !important; border-bottom: 1px solid #1a1e38; }
+        .nav-link { color: #8b9cf4 !important; transition: color .2s; }
+        .nav-link:hover { color: #fff !important; }
+
+        /* ── Forms (used in modals) ── */
         .form-control, .form-select {
             background: #0f1117; border: 1px solid #2d3047;
-            color: #e0e0e0; border-radius: 8px;
+            color: #e0e0e0; border-radius: 8px; transition: border-color .2s, box-shadow .2s;
         }
         .form-control:focus, .form-select:focus {
             background: #0f1117; color: #e0e0e0;
-            border-color: #8b9cf4; box-shadow: 0 0 0 0.2rem rgba(139,156,244,0.25);
+            border-color: #8b9cf4; box-shadow: 0 0 0 .2rem rgba(139,156,244,.2);
         }
         .form-select option { background: #1a1d2e; }
-        .form-label { color: #a0a8c0; font-size: 0.88rem; }
-        .section-title { color: #8b9cf4; font-size: 1.1rem; font-weight: 600; border-right: 3px solid #8b9cf4; padding-right: 10px; }
-        .nav-link { color: #8b9cf4 !important; }
+        .form-label { color: #a0a8c0; font-size: .88rem; }
+        textarea.form-control { min-height: 80px; }
+
+        /* ── Modals ── */
         .modal-content { background: #1a1d2e; border: 1px solid #2d3047; color: #e0e0e0; }
         .modal-header, .modal-footer { border-color: #2d3047; }
-        .btn-close { filter: invert(1); }
-        .progress { background: #2d3047; height: 6px; border-radius: 3px; }
-        .badge-info     { background:#17a2b8; color:#fff; }
-        .badge-normal   { background:#28a745; color:#fff; }
-        .badge-critical { background:#dc3545; color:#fff; }
-        .badge-uncertain{ background:#ffc107; color:#000; }
-        .badge-pending  { background:#6c757d; color:#fff; }
-        .badge-approved { background:#28a745; color:#fff; }
-        .badge-rejected { background:#dc3545; color:#fff; }
-        .badge-executed { background:#17a2b8; color:#fff; }
-        .filter-bar { background:#1a1d2e; border:1px solid #2d3047; border-radius:10px; padding:14px 18px; margin-bottom:18px; }
-        .stat-pill { background:#2d3047; border-radius:20px; padding:4px 14px; font-size:0.82rem; color:#8b9cf4; display:inline-block; }
-        .detail-block { background:#0f1117; border-radius:8px; padding:12px 16px; margin-bottom:10px; }
-        .detail-label { color:#8b9cf4; font-size:0.8rem; text-transform:uppercase; letter-spacing:.5px; margin-bottom:4px; }
-        .tag { display:inline-block; background:#2d3047; border-radius:6px; padding:2px 10px; font-size:0.82rem; margin:2px; color:#c0c8e0; }
-        textarea.form-control { min-height: 80px; }
-        .dist-row { background:#12151f; border-radius:8px; padding:8px 12px; margin-bottom:6px; display:flex; align-items:center; gap:10px; }
-        .dist-row .user-name { flex:1; font-size:0.9rem; }
-        .dist-status-pending    { color:#6c757d; }
-        .dist-status-acknowledged { color:#8b9cf4; }
-        .dist-status-approved   { color:#28a745; }
-        .dist-status-rejected   { color:#dc3545; }
-        .dist-status-done       { color:#17a2b8; }
+        .modal-header { flex-direction: row-reverse; }
+        .btn-close {
+            filter: none; background: none; border: none; opacity: 1;
+            color: #8b9cf4; font-size: 1.8rem; font-weight: 300;
+            line-height: 1; cursor: pointer; padding: .25rem 0; width: auto; height: auto;
+        }
+        .btn-close:hover { color: #5865f2; }
+        .section-title { color: #8b9cf4; font-size: 1.1rem; font-weight: 600; border-right: 3px solid #8b9cf4; padding-right: 10px; }
+        .detail-block { background: #0f1117; border-radius: 8px; padding: 12px 16px; margin-bottom: 10px; }
+        .detail-label { color: #8b9cf4; font-size: .8rem; text-transform: uppercase; letter-spacing: .5px; margin-bottom: 4px; }
+        .tag { display: inline-block; background: #2d3047; border-radius: 6px; padding: 2px 10px; font-size: .82rem; margin: 2px; color: #c0c8e0; }
+        .dist-row { background: #12151f; border-radius: 8px; padding: 8px 12px; margin-bottom: 6px; display: flex; align-items: center; gap: 10px; }
+        .dist-row .user-name { flex: 1; font-size: .9rem; }
+        .text-muted { color: #a0a8c0 !important; }
+        .small.text-muted { color: #8b9cf4 !important; }
+        .dist-status-pending    { color: #a0a8c0; }
+        .dist-status-acknowledged { color: #8b9cf4; }
+        .dist-status-approved   { color: #28a745; }
+        .dist-status-rejected   { color: #dc3545; }
+        .dist-status-done       { color: #17a2b8; }
+
+        /* ── Type / Status Badges ── */
+        .badge-info      { background: #0e3d47; color: #17d8f5; border: 1px solid rgba(23,162,184,.35); }
+        .badge-normal    { background: #0d3320; color: #36e273; border: 1px solid rgba(40,167,69,.35); }
+        .badge-critical  { background: #3d1018; color: #ff6b7a; border: 1px solid rgba(220,53,69,.4); }
+        .badge-uncertain { background: #3a2e00; color: #ffd700; border: 1px solid rgba(255,193,7,.4); }
+        .badge-pending   { background: #222536; color: #a0a8c0; border: 1px solid rgba(108,117,125,.3); }
+        .badge-approved  { background: #0d3320; color: #36e273; border: 1px solid rgba(40,167,69,.35); }
+        .badge-rejected  { background: #3d1018; color: #ff6b7a; border: 1px solid rgba(220,53,69,.4); }
+        .badge-executed  { background: #0e3d47; color: #17d8f5; border: 1px solid rgba(23,162,184,.35); }
+
+        /* ── Stats Row ── */
+        .stats-row {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+        .stat-card {
+            background: #0e1020;
+            border: 1px solid #1a1e38;
+            border-radius: 14px;
+            padding: 14px 16px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            transition: transform .2s, box-shadow .2s;
+            animation: fadeUp .5s ease both;
+            cursor: default;
+        }
+        .stat-card:hover { transform: translateY(-3px); }
+        .stat-icon { font-size: 1.5rem; }
+        .stat-label { font-size: .68rem; color: #6b7599; text-transform: uppercase; letter-spacing: .6px; line-height: 1.2; }
+        .stat-value { font-size: 1.6rem; font-weight: 800; line-height: 1; }
+        .stat-total   .stat-value { color: #8b9cf4; }
+        .stat-pending .stat-value { color: #ffc107; }
+        .stat-critical .stat-value { color: #ff6b7a; }
+        .stat-approved .stat-value { color: #36e273; }
+        .stat-executed .stat-value { color: #17d8f5; }
+        .stat-total:hover   { box-shadow: 0 6px 24px rgba(139,156,244,.15); border-color: rgba(139,156,244,.25); }
+        .stat-pending:hover { box-shadow: 0 6px 24px rgba(255,193,7,.12); border-color: rgba(255,193,7,.2); }
+        .stat-critical:hover{ box-shadow: 0 6px 24px rgba(220,53,69,.12); border-color: rgba(220,53,69,.2); }
+        .stat-approved:hover{ box-shadow: 0 6px 24px rgba(40,167,69,.12); border-color: rgba(40,167,69,.2); }
+        .stat-executed:hover{ box-shadow: 0 6px 24px rgba(23,162,184,.12); border-color: rgba(23,162,184,.2); }
+
+        /* ── Approval Banner ── */
+        .approval-banner {
+            background: linear-gradient(135deg, #0a180a, #0d1f0d);
+            border: 1px solid rgba(54,226,115,.35);
+            border-radius: 12px;
+            padding: 14px 20px;
+            margin-bottom: 16px;
+            font-size: .88rem;
+            color: #a0ffb0;
+            animation: fadeUp .5s ease .1s both, approvalPulse 3s ease-in-out 1s infinite;
+        }
+        @keyframes approvalPulse {
+            0%, 100% { box-shadow: 0 0 10px rgba(40,167,69,.1); }
+            50%       { box-shadow: 0 0 24px rgba(40,167,69,.3); }
+        }
+
+        /* ── Filter Bar ── */
+        .filter-bar {
+            background: #0e1020;
+            border: 1px solid #1a1e38;
+            border-radius: 12px;
+            padding: 12px 16px;
+            margin-bottom: 22px;
+            display: flex;
+            align-items: flex-end;
+            gap: 14px;
+            flex-wrap: wrap;
+        }
+
+        /* ── Cards Grid ── */
+        .decisions-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(370px, 1fr));
+            gap: 16px;
+        }
+
+        /* ── Decision Card ── */
+        .decision-card {
+            background: #0e1020;
+            border: 1px solid #1e2240;
+            border-radius: 16px;
+            padding: 18px 18px 14px;
+            position: relative;
+            overflow: hidden;
+            transition: transform .22s ease, box-shadow .22s ease, border-color .22s ease;
+            animation: fadeUp .42s ease both;
+        }
+        /* Status-based card background tints */
+        .decision-card[data-status="pending"]  { background: #131209; border-color: #2a2510; }
+        .decision-card[data-status="approved"] { background: #0a1410; border-color: #1a2e1e; }
+        .decision-card[data-status="rejected"] { background: #150b0c; border-color: #301418; }
+        .decision-card[data-status="executed"] { background: #090f18; border-color: #142038; }
+        /* type accent strip on the right (RTL) */
+        .decision-card::after {
+            content: '';
+            position: absolute;
+            top: 0; right: 0;
+            width: 4px; height: 100%;
+            border-radius: 0 16px 16px 0;
+            transition: width .22s ease;
+        }
+        .decision-card[data-type="info"]::after      { background: linear-gradient(180deg,#17a2b8,#0e6a7a); }
+        .decision-card[data-type="normal"]::after    { background: linear-gradient(180deg,#28a745,#145c26); }
+        .decision-card[data-type="critical"]::after  { background: linear-gradient(180deg,#dc3545,#8b0f1b); }
+        .decision-card[data-type="uncertain"]::after { background: linear-gradient(180deg,#ffc107,#9a7200); }
+
+        .decision-card:hover { transform: translateY(-5px); }
+        .decision-card:hover::after { width: 6px; }
+        .decision-card[data-type="info"]:hover      { box-shadow: 0 12px 40px rgba(23,162,184,.22); border-color: rgba(23,162,184,.3); }
+        .decision-card[data-type="normal"]:hover    { box-shadow: 0 12px 40px rgba(40,167,69,.22); border-color: rgba(40,167,69,.3); }
+        .decision-card[data-type="critical"]:hover  { box-shadow: 0 12px 40px rgba(220,53,69,.22); border-color: rgba(220,53,69,.3); }
+        .decision-card[data-type="uncertain"]:hover { box-shadow: 0 12px 40px rgba(255,193,7,.18); border-color: rgba(255,193,7,.25); }
+
+        /* critical + pending: pulsing border */
+        .decision-card[data-type="critical"][data-status="pending"] {
+            animation: fadeUp .42s ease both, criticalPulse 2.8s ease-in-out .6s infinite;
+        }
+        @keyframes criticalPulse {
+            0%, 100% { border-color: #301418; }
+            50%       { border-color: rgba(220,53,69,.6); box-shadow: 0 0 22px rgba(220,53,69,.18); }
+        }
+
+        /* ── Card Header ── */
+        .card-top {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 11px;
+        }
+        .card-badges { display: flex; gap: 5px; flex-wrap: wrap; align-items: center; }
+        .card-num { font-size: .72rem; color: #5a6490; font-weight: 700; letter-spacing: .3px; white-space: nowrap; padding-top: 3px; }
+
+        /* ── Card Summary ── */
+        .card-summary {
+            font-size: 1rem;
+            font-weight: 600;
+            color: #e8eeff;
+            line-height: 1.5;
+            margin-bottom: 10px;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+            cursor: pointer;
+        }
+        .card-summary:hover { color: #fff; }
+
+        /* ── Card Meta ── */
+        .card-meta {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            font-size: .8rem;
+            color: #8b9ab8;
+            margin-bottom: 8px;
+            align-items: center;
+        }
+        .meta-item { display: flex; align-items: center; gap: 4px; }
+        .meta-item .dot { width: 5px; height: 5px; border-radius: 50%; background: #3a4070; display: inline-block; }
+
+        /* my RACI role chip */
+        .raci-my-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            font-size: .7rem;
+            font-weight: 700;
+            padding: 2px 9px;
+            border-radius: 20px;
+            letter-spacing: .3px;
+        }
+        .raci-R { background: rgba(88,101,242,.2); color: #8b9cf4; border: 1px solid rgba(88,101,242,.3); }
+        .raci-A { background: rgba(220,53,69,.18); color: #ff6b7a; border: 1px solid rgba(220,53,69,.3); }
+        .raci-C { background: rgba(255,193,7,.18); color: #ffd700; border: 1px solid rgba(255,193,7,.3); }
+        .raci-I { background: rgba(23,162,184,.18); color: #17d8f5; border: 1px solid rgba(23,162,184,.3); }
+
+        /* accountable chip */
+        .accountable-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            background: rgba(255,193,7,.08);
+            border: 1px solid rgba(255,193,7,.25);
+            border-radius: 20px;
+            padding: 4px 12px;
+            font-size: .78rem;
+            color: #d4b84a;
+            margin-bottom: 8px;
+        }
+
+        /* feedback star */
+        .feedback-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 3px;
+            font-size: .73rem;
+            color: #ffc107;
+            font-weight: 700;
+        }
+
+        /* ── Approve / Reject Banner ── */
+        .approve-section {
+            margin-top: 12px;
+            border-radius: 10px;
+            border: 1px solid rgba(54,226,115,.3);
+            background: rgba(20,40,20,.6);
+            padding: 10px 12px 10px;
+            animation: approvePulse 2.5s ease-in-out infinite;
+        }
+        @keyframes approvePulse {
+            0%, 100% { box-shadow: 0 0 6px rgba(40,167,69,.1); }
+            50%       { box-shadow: 0 0 18px rgba(40,167,69,.28); }
+        }
+        .approve-section-label {
+            font-size: .72rem;
+            font-weight: 700;
+            color: #5cdb8a;
+            text-transform: uppercase;
+            letter-spacing: .6px;
+            margin-bottom: 8px;
+        }
+        .approve-btns { display: flex; gap: 8px; }
+        .btn-approve-card {
+            flex: 1;
+            padding: 9px 0;
+            background: rgba(40,167,69,.18);
+            border: 1px solid rgba(40,167,69,.55);
+            color: #a0ffb0;
+            border-radius: 9px;
+            font-size: .85rem;
+            font-weight: 700;
+            cursor: pointer;
+            transition: background .18s, transform .15s, box-shadow .18s;
+        }
+        .btn-approve-card:hover {
+            background: #28a745;
+            color: #fff;
+            box-shadow: 0 4px 18px rgba(40,167,69,.4);
+            transform: translateY(-1px);
+        }
+        .btn-reject-card {
+            flex: 1;
+            padding: 9px 0;
+            background: rgba(220,53,69,.12);
+            border: 1px solid rgba(220,53,69,.45);
+            color: #ffb0b0;
+            border-radius: 9px;
+            font-size: .85rem;
+            font-weight: 700;
+            cursor: pointer;
+            transition: background .18s, transform .15s, box-shadow .18s;
+        }
+        .btn-reject-card:hover {
+            background: #dc3545;
+            color: #fff;
+            box-shadow: 0 4px 18px rgba(220,53,69,.35);
+            transform: translateY(-1px);
+        }
+
+        /* ── Card Action Buttons ── */
+        .card-actions {
+            display: flex;
+            gap: 6px;
+            align-items: center;
+            flex-wrap: wrap;
+            margin-top: 10px;
+            padding-top: 10px;
+            border-top: 1px solid #151828;
+        }
+        .card-actions .btn {
+            font-size: .76rem;
+            padding: 3px 9px;
+            border-radius: 8px;
+            transition: all .18s;
+        }
+        .card-actions .btn:hover { transform: translateY(-1px); }
+        .card-actions .spacer { flex: 1; }
+
+        /* ── Approve/Reject in legacy modals ── */
+        .btn-approve { background:#1e3a1e; border:1px solid #28a745; color:#a0ffb0; font-size:.78rem; padding:2px 8px; border-radius:5px; cursor:pointer; }
+        .btn-approve:hover { background:#28a745; color:#fff; }
+        .btn-reject  { background:#3a1e1e; border:1px solid #dc3545; color:#ffb0b0; font-size:.78rem; padding:2px 8px; border-radius:5px; cursor:pointer; }
+        .btn-reject:hover  { background:#dc3545; color:#fff; }
+
+        /* ── Empty State ── */
+        .empty-state {
+            text-align: center;
+            padding: 70px 20px;
+            color: #363d60;
+            grid-column: 1 / -1;
+            animation: fadeUp .5s ease both;
+        }
+        .empty-state .empty-icon { font-size: 3.5rem; margin-bottom: 14px; opacity: .4; }
+        .empty-state h5 { font-size: 1.1rem; font-weight: 600; margin-bottom: 6px; }
+
+        /* ── Animations ── */
+        @keyframes fadeUp {
+            from { opacity: 0; transform: translateY(18px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes shimmer {
+            0%   { background-position: -400px 0; }
+            100% { background-position: 400px 0; }
+        }
+
+        /* ── Responsive ── */
+        @media (max-width: 900px) {
+            .stats-row { grid-template-columns: repeat(3, 1fr); }
+        }
+        @media (max-width: 600px) {
+            .stats-row { grid-template-columns: repeat(2, 1fr); }
+            .decisions-grid { grid-template-columns: 1fr; }
+        }
     </style>
 </head>
 <body>
@@ -58,8 +377,11 @@
     <span class="navbar-brand fw-bold fs-5">🧠 Shan-AI</span>
     <div>
         <a href="/dashboard/" class="nav-link d-inline ms-3">📊 דשבורד</a>
-        <a href="/dashboard/decisions" class="nav-link d-inline ms-3 fw-bold">📋 החלטות</a>
+        <a href="/dashboard/decisions" class="nav-link d-inline ms-3 fw-bold position-relative">📋 החלטות{% if pending_approvals %} <span class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger" style="font-size:.65rem;">{{ pending_approvals }}</span>{% endif %}</a>
         <a href="/dashboard/users" class="nav-link d-inline ms-3">👥 משתמשים</a>
+        <a href="/dashboard/files" class="nav-link d-inline ms-3">📁 קבצים</a>
+        <a href="/dashboard/ask" class="nav-link d-inline ms-3">💬 שאל</a>
+        <a href="/dashboard/learning" class="nav-link d-inline ms-3">🎓 למידה</a>
         <span class="text-muted small ms-3">👤 {{ current_user.username }}</span>
         <a href="/logout" class="nav-link d-inline ms-3" style="color:#dc3545 !important;">🚪 התנתקות</a>
     </div>
@@ -68,34 +390,71 @@
 <div class="container-fluid py-4 px-4">
 
     {% if msg %}
-    <div class="alert alert-success alert-dismissible fade show">
+    <div class="alert alert-success alert-dismissible fade show" style="background:#0d1f0d;border-color:rgba(40,167,69,.4);color:#a0ffb0;">
         ✅ {{ msg }} <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
     </div>
     {% endif %}
     {% if error %}
-    <div class="alert alert-danger alert-dismissible fade show">
+    <div class="alert alert-danger alert-dismissible fade show" style="background:#1f0d0d;border-color:rgba(220,53,69,.4);color:#ffb0b0;">
         ❌ {{ error }} <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
     </div>
     {% endif %}
 
-    <!-- Stats -->
-    <div class="mb-3">
-        {% set pending  = decisions | selectattr("status","equalto","pending")  | list | length %}
-        {% set critical = decisions | selectattr("type","equalto","critical")    | list | length %}
-        {% set approved = decisions | selectattr("status","equalto","approved")  | list | length %}
-        {% set executed = decisions | selectattr("status","equalto","executed")  | list | length %}
-        <span class="stat-pill me-2">סה"כ: {{ decisions|length }}</span>
-        <span class="stat-pill me-2" style="color:#ffc107;">⏳ ממתין: {{ pending }}</span>
-        <span class="stat-pill me-2" style="color:#dc3545;">🚨 קריטי: {{ critical }}</span>
-        <span class="stat-pill me-2" style="color:#28a745;">✅ מאושר: {{ approved }}</span>
-        <span class="stat-pill me-2" style="color:#17a2b8;">⚡ בוצע: {{ executed }}</span>
+    <!-- Header -->
+    <div class="d-flex justify-content-between align-items-center mb-4" style="animation: fadeUp .4s ease both;">
+        <div>
+            <h4 class="mb-0 fw-bold" style="color:#d8e0fa;">📋 ניהול החלטות</h4>
+            <div class="text-muted small mt-1">כל ההחלטות שלי ושל הצוות</div>
+        </div>
+        <button class="btn btn-primary px-4" style="border-radius:10px;font-weight:600;" data-bs-toggle="modal" data-bs-target="#addDecisionModal">
+            ➕ החלטה חדשה
+        </button>
     </div>
 
+    <!-- Stats -->
+    {% set pending_count  = decisions | selectattr("status","equalto","pending")  | list | length %}
+    {% set critical_count = decisions | selectattr("type","equalto","critical")    | list | length %}
+    {% set approved_count = decisions | selectattr("status","equalto","approved")  | list | length %}
+    {% set executed_count = decisions | selectattr("status","equalto","executed")  | list | length %}
+    <div class="stats-row">
+        <div class="stat-card stat-total" style="animation-delay:.05s;">
+            <div class="stat-icon">📊</div>
+            <div><div class="stat-label">סה"כ</div><div class="stat-value">{{ decisions|length }}</div></div>
+        </div>
+        <div class="stat-card stat-pending" style="animation-delay:.1s;">
+            <div class="stat-icon">⏳</div>
+            <div><div class="stat-label">ממתינות</div><div class="stat-value">{{ pending_count }}</div></div>
+        </div>
+        <div class="stat-card stat-critical" style="animation-delay:.15s;">
+            <div class="stat-icon">🚨</div>
+            <div><div class="stat-label">קריטיות</div><div class="stat-value">{{ critical_count }}</div></div>
+        </div>
+        <div class="stat-card stat-approved" style="animation-delay:.2s;">
+            <div class="stat-icon">✅</div>
+            <div><div class="stat-label">מאושרות</div><div class="stat-value">{{ approved_count }}</div></div>
+        </div>
+        <div class="stat-card stat-executed" style="animation-delay:.25s;">
+            <div class="stat-icon">⚡</div>
+            <div><div class="stat-label">בוצעו</div><div class="stat-value">{{ executed_count }}</div></div>
+        </div>
+    </div>
+
+    <!-- Approval Banner -->
+    {% set my_pending_approvals = decisions | selectattr("can_approve", "equalto", true) | list %}
+    {% if my_pending_approvals %}
+    <div class="approval-banner">
+        ⏳ <strong>{{ my_pending_approvals | length }} החלטות ממתינות לאישורך</strong> —
+        {% for d in my_pending_approvals %}
+        <a href="#card-{{ d.id }}" class="fw-semibold text-decoration-none" style="color:#36e273;">#{{ d.id }}</a>{% if not loop.last %}, {% endif %}
+        {% endfor %}
+    </div>
+    {% endif %}
+
     <!-- Filters -->
-    <form method="GET" action="/dashboard/decisions" class="filter-bar d-flex gap-3 align-items-end flex-wrap">
+    <form method="GET" action="/dashboard/decisions" class="filter-bar">
         <div>
-            <label class="form-label mb-1">סטטוס</label>
-            <select name="filter_status" class="form-select form-select-sm" style="min-width:130px;">
+            <label class="form-label mb-1" style="font-size:.75rem;">סטטוס</label>
+            <select name="filter_status" class="form-select form-select-sm" style="min-width:120px;">
                 <option value="">— הכל —</option>
                 {% for s in statuses %}
                 <option value="{{ s }}" {% if filter_status == s %}selected{% endif %}>{{ status_labels.get(s,s) }}</option>
@@ -103,82 +462,166 @@
             </select>
         </div>
         <div>
-            <label class="form-label mb-1">סוג</label>
-            <select name="filter_type" class="form-select form-select-sm" style="min-width:130px;">
+            <label class="form-label mb-1" style="font-size:.75rem;">סוג</label>
+            <select name="filter_type" class="form-select form-select-sm" style="min-width:120px;">
                 <option value="">— הכל —</option>
                 {% for t in types %}
                 <option value="{{ t }}" {% if filter_type == t %}selected{% endif %}>{{ type_labels.get(t,t) }}</option>
                 {% endfor %}
             </select>
         </div>
-        <div class="d-flex gap-2">
-            <button type="submit" class="btn btn-sm btn-primary">סנן</button>
-            <a href="/dashboard/decisions" class="btn btn-sm btn-outline-secondary">נקה</a>
+        <div class="d-flex gap-2 align-items-end">
+            <button type="submit" class="btn btn-sm btn-primary" style="border-radius:8px;">סנן</button>
+            <a href="/dashboard/decisions" class="btn btn-sm btn-outline-secondary" style="border-radius:8px;border-color:#2d3047;color:#8b9cf4;">נקה</a>
+        </div>
+        <div class="ms-auto d-flex align-items-end">
+            <span style="color:#3a4070; font-size:.8rem;">{{ decisions|length }} תוצאות</span>
         </div>
     </form>
 
-    <!-- Table -->
-    <div class="card p-3">
-        <div class="section-title mb-3">📋 רשימת החלטות ({{ decisions|length }})</div>
-        <div class="table-responsive">
-            <table class="table table-hover mb-0">
-                <thead>
-                    <tr>
-                        <th>#</th>
-                        <th>סוג</th>
-                        <th>סטטוס</th>
-                        <th>סיכום</th>
-                        <th>מגיש</th>
-                        <th>אחראי</th>
-                        <th>הפצה</th>
-                        <th>ביטחון</th>
-                        <th>פידבק</th>
-                        <th>תאריך</th>
-                        <th>פעולות</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for d in decisions %}
-                    <tr onclick="openDetail({{ loop.index0 }})" id="row-{{ d.id }}">
-                        <td class="text-muted small">{{ d.id }}</td>
-                        <td><span class="badge badge-{{ d.type }}">{{ type_labels.get(d.type, d.type) }}</span></td>
-                        <td><span class="badge badge-{{ d.status }}">{{ status_labels.get(d.status, d.status) }}</span></td>
-                        <td style="max-width:230px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{{ d.summary }}</td>
-                        <td class="small">{{ d.submitter_name }}</td>
-                        <td class="small">{{ d.approver_name or '—' }}</td>
-                        <td onclick="event.stopPropagation()">
-                            <button class="btn btn-sm btn-outline-info" onclick="openDistribute({{ loop.index0 }})" title="הפץ">
-                                📤
-                            </button>
-                            <button class="btn btn-sm btn-outline-secondary ms-1" onclick="openDistStatus({{ d.id }})" title="סטטוס הפצה">
-                                📊
-                            </button>
-                        </td>
-                        <td>
-                            <div class="d-flex align-items-center gap-1">
-                                <div class="progress" style="width:45px;">
-                                    <div class="progress-bar {% if d.confidence >= 80 %}bg-success{% elif d.confidence >= 50 %}bg-warning{% else %}bg-danger{% endif %}"
-                                         style="width:{{ d.confidence }}%"></div>
-                                </div>
-                                <span class="small">{{ d.confidence }}%</span>
-                            </div>
-                        </td>
-                        <td class="small">{% if d.feedback_score %}⭐ {{ d.feedback_score }}/5{% else %}<span class="text-muted">—</span>{% endif %}</td>
-                        <td class="text-muted small">{{ d.created_at }}</td>
-                        <td onclick="event.stopPropagation()">
-                            <button class="btn btn-sm btn-outline-primary" onclick="openEdit({{ loop.index0 }})">✏️</button>
-                            <form method="POST" action="/dashboard/decisions/{{ d.id }}/delete"
-                                  onsubmit="return confirm('למחוק החלטה #{{ d.id }}?')" class="d-inline">
-                                <button type="submit" class="btn btn-sm btn-outline-danger">🗑️</button>
-                            </form>
-                        </td>
-                    </tr>
-                    {% endfor %}
-                    {% if not decisions %}
-                    <tr><td colspan="11" class="text-center text-muted py-5">אין החלטות עדיין</td></tr>
+    <!-- Cards Grid -->
+    <div class="decisions-grid">
+        {% for d in decisions %}
+        {% set delay = [loop.index0 * 0.05, 0.6] | min %}
+        <div class="decision-card" id="card-{{ d.id }}"
+             data-type="{{ d.type }}" data-status="{{ d.status }}"
+             style="animation-delay: {{ delay }}s;">
+
+            <!-- Top row: badges + id -->
+            <div class="card-top">
+                <div class="card-badges">
+                    <span class="badge badge-{{ d.type }}" style="font-size:.72rem; padding:3px 9px; border-radius:6px;">{{ type_labels.get(d.type, d.type) }}</span>
+                    <span class="badge badge-{{ d.status }}" style="font-size:.72rem; padding:3px 9px; border-radius:6px;">{{ status_labels.get(d.status, d.status) }}</span>
+                    {% if d.can_approve %}
+                    <!-- I need to approve this -->
+                    <span class="badge" style="font-size:.65rem;background:rgba(255,107,107,.2);color:#ff6b7a;border:1px solid rgba(255,107,107,.4);border-radius:6px;padding:3px 7px;">⏳ אני צריך לאשר</span>
+                    {% elif d.requires_approval %}
+                    <!-- General approval required (not by me) -->
+                    <span class="badge" style="font-size:.65rem;background:rgba(255,193,7,.15);color:#ffd700;border:1px solid rgba(255,193,7,.3);border-radius:6px;padding:3px 7px;">🔐 דורש אישור</span>
                     {% endif %}
-                </tbody>
-            </table>
+                </div>
+                <span class="card-num">#{{ d.id }}</span>
+            </div>
+
+            <!-- Summary (clickable → detail modal) -->
+            <div class="card-summary" onclick="openDetail({{ loop.index0 }})">{{ d.summary }}</div>
+
+            <!-- Meta row -->
+            <div class="card-meta">
+                <span class="meta-item">👤 {{ d.submitter_name }}</span>
+                <span class="meta-item"><span class="dot"></span>{{ d.created_at[:10] }}</span>
+                {% if d.feedback_score %}
+                <span class="feedback-chip">⭐ {{ d.feedback_score }}/5</span>
+                {% endif %}
+                {% if d.my_raci_role %}
+                {% set raci_names = {'R': 'ביצוע', 'A': 'סמכות', 'C': 'יועץ', 'I': 'לידיעה'} %}
+                <span class="raci-my-chip raci-{{ d.my_raci_role }}">{{ d.my_raci_role }} — {{ raci_names.get(d.my_raci_role, '') }}</span>
+                {% endif %}
+                {% if d.raci_summary != '—' %}
+                <span style="font-size:.7rem;color:#363d60;" title="RACI">RACI {{ d.raci_summary }}</span>
+                {% endif %}
+            </div>
+
+            <!-- Accountable chip (pending only, only when accountable ≠ submitter) -->
+            {% if d.accountable_name and d.status == 'pending' and d.accountable_id != d.submitter_id %}
+            <div class="accountable-chip">⏳ יש לאשר: <strong>{{ d.accountable_name }}</strong></div>
+            {% endif %}
+
+            <!-- Approve / Reject (for RACI A who isn't submitter) -->
+            {% if d.can_approve %}
+            <div class="approve-section" onclick="event.stopPropagation()" style="
+                background: linear-gradient(135deg, rgba(40,167,69,0.25) 0%, rgba(40,167,69,0.15) 100%);
+                border: 2px solid #28a745;
+                box-shadow: 0 0 20px rgba(40,167,69,0.3);
+                animation: approvePulse 2s ease-in-out infinite;
+            ">
+                <div class="approve-section-label" style="color: #28a745; font-weight: 800;">⏳ ממתין לאישורך</div>
+                <div class="approve-btns" style="gap: 10px;">
+                    <form method="POST" action="/dashboard/decisions/{{ d.id }}/status" style="flex:1; display:contents;">
+                        <input type="hidden" name="new_status" value="approved">
+                        <button type="submit" class="btn-approve-card" style="
+                            background: #28a745;
+                            color: #fff;
+                            font-weight: 700;
+                            border: none;
+                            box-shadow: 0 4px 12px rgba(40,167,69,0.4);
+                            font-size: 1rem;
+                            padding: 12px 0;
+                        ">✅ אשר</button>
+                    </form>
+                    <button class="btn-reject-card" onclick="openReject({{ d.id }})" style="
+                        background: #dc3545;
+                        color: #fff;
+                        font-weight: 700;
+                        border: none;
+                        box-shadow: 0 4px 12px rgba(220,53,69,0.4);
+                        font-size: 1rem;
+                        padding: 12px 0;
+                    ">❌ דחה</button>
+                </div>
+            </div>
+            {% endif %}
+
+            <!-- Action buttons -->
+            <div class="card-actions" onclick="event.stopPropagation()">
+                <button class="btn btn-outline-secondary btn-sm" onclick="openDetail({{ loop.index0 }})" title="פרטים">🔍</button>
+                {% if d.can_edit %}
+                <button class="btn btn-outline-primary btn-sm" onclick="openEdit({{ loop.index0 }})" title="עריכה">✏️</button>
+                {% endif %}
+                <button class="btn btn-outline-info btn-sm" onclick="openDecisionAI({{ d.id }})" title="ניתוח AI">🤖</button>
+                {% if d.can_edit_raci %}
+                <button class="btn btn-outline-primary btn-sm" onclick="openRaciEdit({{ d.id }})" title="הקצאת RACI">👥</button>
+                {% endif %}
+                <button class="btn btn-outline-secondary btn-sm" onclick="openDistStatus({{ d.id }})" title="סטטוס הפצה">📊</button>
+                {% if d.can_feedback %}
+                <button class="btn btn-sm {% if d.my_feedback_score %}btn-warning{% else %}btn-outline-warning{% endif %}"
+                        onclick="openFeedback({{ loop.index0 }})"
+                        title="{% if d.my_feedback_score %}עדכן משוב{% else %}תן משוב{% endif %}">
+                    {% if d.my_feedback_score %}⭐ {{ d.my_feedback_score }}{% else %}💬{% endif %}
+                </button>
+                {% endif %}
+                <span class="spacer"></span>
+                {% if d.can_delete %}
+                <form method="POST" action="/dashboard/decisions/{{ d.id }}/delete"
+                      onsubmit="return confirm('למחוק החלטה #{{ d.id }}?')" class="d-inline">
+                    <button type="submit" class="btn btn-outline-danger btn-sm" title="מחק">🗑️</button>
+                </form>
+                {% endif %}
+            </div>
+
+        </div>
+        {% endfor %}
+
+        {% if not decisions %}
+        <div class="empty-state">
+            <div class="empty-icon">📋</div>
+            <h5>אין החלטות עדיין</h5>
+            <p class="text-muted small">לחץ על "החלטה חדשה" כדי להתחיל</p>
+        </div>
+        {% endif %}
+    </div>
+
+</div>
+
+<!-- ===== Reject Modal ===== -->
+<div class="modal fade" id="rejectModal" tabindex="-1">
+    <div class="modal-dialog modal-sm">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h6 class="modal-title" style="color:#dc3545;">❌ דחיית החלטה</h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form id="rejectForm" method="POST">
+                <input type="hidden" name="new_status" value="rejected">
+                <div class="modal-body">
+                    <label class="form-label">סיבת דחייה <span class="text-muted small">(אופציונלי)</span></label>
+                    <textarea name="rejection_note" class="form-control" rows="3" placeholder="הסבר מדוע ההחלטה נדחית..."></textarea>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">ביטול</button>
+                    <button type="submit" class="btn btn-danger btn-sm">❌ דחה</button>
+                </div>
+            </form>
         </div>
     </div>
 </div>
@@ -201,30 +644,31 @@
 
 <!-- ===== Edit Modal ===== -->
 <div class="modal fade" id="editModal" tabindex="-1">
-    <div class="modal-dialog">
+    <div class="modal-dialog modal-lg">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title" style="color:#8b9cf4;">✏️ עדכון החלטה</h5>
+                <h5 class="modal-title" style="color:#8b9cf4;">✏️ עדכון החלטה <span id="editModalDecisionId" class="text-muted small"></span></h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <form id="editForm" method="POST">
                 <div class="modal-body">
-                    <div class="mb-3">
-                        <label class="form-label">סטטוס</label>
-                        <select name="status" id="edit_status" class="form-select">
-                            {% for s in statuses %}
-                            <option value="{{ s }}">{{ status_labels.get(s,s) }}</option>
-                            {% endfor %}
-                        </select>
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">אחראי / מאשר</label>
-                        <select name="approver_id" id="edit_approver" class="form-select">
-                            <option value="">— ללא —</option>
-                            {% for u in users %}
-                            <option value="{{ u.id }}">{{ u.username }}{% if u.job_title %} — {{ u.job_title }}{% endif %}</option>
-                            {% endfor %}
-                        </select>
+                    <div class="row g-3 mb-3">
+                        <div class="col-6">
+                            <label class="form-label">סוג</label>
+                            <select name="type" id="edit_type" class="form-select">
+                                {% for t in types %}
+                                <option value="{{ t }}">{{ type_labels.get(t,t) }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-6" id="statusEditContainer" style="display:none;">
+                            <label class="form-label">סטטוס</label>
+                            <select name="status" id="edit_status" class="form-select">
+                                {% for s in statuses %}
+                                <option value="{{ s }}">{{ status_labels.get(s,s) }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
                     </div>
                     <div class="mb-3">
                         <label class="form-label">סיכום</label>
@@ -234,10 +678,26 @@
                         <label class="form-label">פעולה מומלצת</label>
                         <textarea name="recommended_action" id="edit_action" class="form-control"></textarea>
                     </div>
+
+                    <!-- RACI Section -->
+                    <div id="raciEditSection">
+                        <hr style="border-color:#2d3047;">
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <label class="form-label mb-0" style="color:#8b9cf4;">🎯 שיוך RACI</label>
+                            <button type="button" class="btn btn-sm btn-outline-info" id="aiSuggestRaciBtn" onclick="aiSuggestRaci()">
+                                🤖 הצע AI
+                            </button>
+                        </div>
+                        <div id="editRaciMsg" class="small mb-2" style="display:none;"></div>
+                        <div id="editRaciTable">
+                            <div class="text-muted small text-center py-2">טוען...</div>
+                        </div>
+                        <div class="small text-muted mt-1">R=ביצוע · A=סמכות (רק אחד!) · C=יועץ · I=לידיעה</div>
+                    </div>
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">ביטול</button>
-                    <button type="submit" class="btn btn-primary">💾 שמור</button>
+                    <button type="submit" class="btn btn-primary" id="editSaveBtn" onclick="return onEditSave(event)">💾 שמור</button>
                 </div>
             </form>
         </div>
@@ -300,9 +760,285 @@
     </div>
 </div>
 
+<!-- RACI Edit Modal -->
+<div class="modal fade" id="raciEditModal" tabindex="-1">
+    <div class="modal-dialog modal-xl">
+        <div class="modal-content" style="background:#1a1d2e; color:#e0e0e0; border:1px solid #2d3047;">
+            <div class="modal-header" style="border-color:#2d3047; background: linear-gradient(135deg, #0e1020, #1a1d2e);">
+                <h5 class="modal-title" style="color:#8b9cf4; font-weight: 800;">👥 הקצאת RACI — <span id="raciEditTitle" style="color:#17a2b8;"></span></h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" style="padding: 20px;">
+                <!-- RACI Rules Box -->
+                <div style="
+                    background: #0f1117;
+                    border: 1px solid #2d3047;
+                    border-radius: 8px;
+                    padding: 12px;
+                    margin-bottom: 16px;
+                    font-size: 0.85rem;
+                    color: #a0a8c0;
+                ">
+                    <strong style="color: #8b9cf4;">📌 כללי RACI:</strong>
+                    <div style="margin-top: 8px; line-height: 1.6;">
+                        • <strong>R</strong> (אחראי ביצוע): רק אחד<br/>
+                        • <strong>A</strong> (בעל סמכות): רק אחד בדיוק<br/>
+                        • <strong>C</strong> (יועץ): ניתן למספר אנשים<br/>
+                        • <strong>I</strong> (לידיעה): ניתן למספר אנשים
+                    </div>
+                </div>
+
+                <!-- RACI Table -->
+                <form id="raciForm" novalidate style="overflow-x: auto;">
+                    <table class="table table-sm" style="color: #e0e0e0; margin-bottom: 0; background: #0f1117; border-radius: 8px; overflow: hidden;">
+                        <thead style="background: #1a1d2e; border-bottom: 2px solid #2d3047;">
+                            <tr>
+                                <th style="color: #8b9cf4; text-align: right; font-weight: 700; padding: 12px;">משתמש</th>
+                                <th style="color: #8b9cf4; text-align: center; font-weight: 700; padding: 12px; min-width: 80px;">👤 R<br/><span style="font-size: 0.75rem; color: #a0a8c0;">ביצוע</span></th>
+                                <th style="color: #dc3545; text-align: center; font-weight: 700; padding: 12px; min-width: 80px;">🧠 A<br/><span style="font-size: 0.75rem; color: #a0a8c0;">סמכות</span></th>
+                                <th style="color: #ffc107; text-align: center; font-weight: 700; padding: 12px; min-width: 80px;">💬 C<br/><span style="font-size: 0.75rem; color: #a0a8c0;">יועץ</span></th>
+                                <th style="color: #17a2b8; text-align: center; font-weight: 700; padding: 12px; min-width: 80px;">📢 I<br/><span style="font-size: 0.75rem; color: #a0a8c0;">לידיעה</span></th>
+                                <th style="padding: 12px; min-width: 60px;"></th>
+                            </tr>
+                        </thead>
+                        <tbody id="raciEditBody" style="border-color: #2d3047;">
+                            <!-- Filled by JavaScript -->
+                        </tbody>
+                    </table>
+                </form>
+
+                <!-- Validation Messages -->
+                <div id="raciValidationMsg" style="margin-top: 12px; font-size: 0.9rem; display: none;">
+                    <div id="raciValidationContent"></div>
+                </div>
+            </div>
+            <div class="modal-footer" style="border-color:#2d3047; background: #0e1020;">
+                <div class="text-muted small me-auto">בחר תפקיד אחד לכל משתמש. השאר ריק לאי-הכללה.</div>
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">ביטול</button>
+                <button type="button" class="btn btn-success" onclick="saveRaci()" style="font-weight: 700;">💾 שמור RACI</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="feedbackModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" style="color:#8b9cf4;">💬 משוב על החלטה — <span id="feedbackDecisionTitle"></span></h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p class="text-muted small mb-3">כיצד הסתיים ביצוע ההחלטה? דירוג ופרטים יעזרו לשפר ניתוחים עתידיים.</p>
+
+                <div class="mb-4">
+                    <label class="form-label">דירוג תוצאה</label>
+                    <div class="d-flex gap-2 flex-wrap" id="starButtons">
+                        <button type="button" class="btn btn-outline-warning star-btn" data-score="1" onclick="selectStar(1)">1 ⭐ — כישלון</button>
+                        <button type="button" class="btn btn-outline-warning star-btn" data-score="2" onclick="selectStar(2)">2 ⭐ — חלקי</button>
+                        <button type="button" class="btn btn-outline-warning star-btn" data-score="3" onclick="selectStar(3)">3 ⭐ — בסדר</button>
+                        <button type="button" class="btn btn-outline-warning star-btn" data-score="4" onclick="selectStar(4)">4 ⭐ — טוב</button>
+                        <button type="button" class="btn btn-outline-warning star-btn" data-score="5" onclick="selectStar(5)">5 ⭐ — מצוין</button>
+                    </div>
+                    <input type="hidden" id="feedbackScore" value="">
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label">הערות (אופציונלי) — מה קרה בפועל?</label>
+                    <textarea id="feedbackNotes" class="form-control" rows="3"
+                              placeholder="לדוגמה: הטרנספורמטור הוחלף בהצלחה, אך לקח שבוע נוסף בגלל עיכוב בספקים..."></textarea>
+                </div>
+
+                <div id="feedbackMsg" class="mt-2"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">ביטול</button>
+                <button type="button" class="btn btn-warning" onclick="submitFeedback()" id="feedbackSubmitBtn">💾 שמור משוב</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- AI Analysis Modal -->
+<div class="modal fade" id="aiDecisionModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" style="color:#8b9cf4;">🤖 ניתוח AI — <span id="aiDecisionModalTitle"></span></h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" id="aiDecisionModalBody"></div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">סגור</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Add Decision Modal -->
+<div class="modal fade" id="addDecisionModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" style="color:#8b9cf4;">➕ הוסף החלטה חדשה</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form method="POST" action="/dashboard/decisions/analyze">
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label" for="newDecisionText">תאר את הבעיה / ההחלטה</label>
+                        <textarea id="newDecisionText" name="problem_description" class="form-control" rows="6" required
+                            placeholder="לדוגמה: יש צורך להחליף טרנספורמטור 150KV בתחנת משנה X בשל בלאי חריג שהתגלה בבדיקה אחרונה..."></textarea>
+                        <small class="text-muted">הבינה המלאכותית תנתח את ההחלטה ותסווג אותה אוטומטית.</small>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">ביטול</button>
+                    <button type="submit" class="btn btn-primary">🤖 שלח לניתוח AI</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 <script>
+let _feedbackDecisionId = null;
+
+function openReject(decisionId) {
+    document.getElementById('rejectForm').action = `/dashboard/decisions/${decisionId}/status`;
+    document.querySelector('#rejectForm textarea[name="rejection_note"]').value = '';
+    new bootstrap.Modal(document.getElementById('rejectModal')).show();
+}
+
+function openFeedback(idx) {
+    const d = DECISIONS[idx];
+    _feedbackDecisionId = d.id;
+    document.getElementById('feedbackDecisionTitle').textContent = `#${d.id} — ${d.summary.substring(0,40)}`;
+    document.getElementById('feedbackNotes').value = d.my_feedback_notes || '';
+    document.getElementById('feedbackMsg').innerHTML = '';
+    document.getElementById('feedbackSubmitBtn').disabled = false;
+    document.querySelectorAll('.star-btn').forEach(b => b.classList.replace('btn-warning','btn-outline-warning'));
+    document.getElementById('feedbackScore').value = '';
+    if (d.my_feedback_score) selectStar(d.my_feedback_score);
+    new bootstrap.Modal(document.getElementById('feedbackModal')).show();
+}
+
+function selectStar(score) {
+    document.getElementById('feedbackScore').value = score;
+    document.querySelectorAll('.star-btn').forEach(b => {
+        if (parseInt(b.dataset.score) <= score) {
+            b.classList.replace('btn-outline-warning','btn-warning');
+        } else {
+            b.classList.replace('btn-warning','btn-outline-warning');
+        }
+    });
+}
+
+async function submitFeedback() {
+    const score = document.getElementById('feedbackScore').value;
+    if (!score) { document.getElementById('feedbackMsg').innerHTML = '<div class="text-danger small">בחר דירוג תחילה</div>'; return; }
+    const notes = document.getElementById('feedbackNotes').value;
+    const btn = document.getElementById('feedbackSubmitBtn');
+    btn.disabled = true;
+    btn.textContent = 'שומר...';
+
+    const body = new FormData();
+    body.append('score', score);
+    body.append('notes', notes);
+    try {
+        const resp = await fetch(`/dashboard/decisions/${_feedbackDecisionId}/feedback`, { method:'POST', body });
+        const data = await resp.json();
+        if (data.ok) {
+            document.getElementById('feedbackMsg').innerHTML = `<div class="text-success small">✅ המשוב נשמר! ממוצע נוכחי: ${data.avg_score}/5</div>`;
+            setTimeout(() => location.reload(), 1200);
+        } else {
+            document.getElementById('feedbackMsg').innerHTML = `<div class="text-danger small">❌ ${data.error}</div>`;
+            btn.disabled = false; btn.textContent = '💾 שמור משוב';
+        }
+    } catch(e) {
+        document.getElementById('feedbackMsg').innerHTML = '<div class="text-danger small">❌ שגיאת רשת</div>';
+        btn.disabled = false; btn.textContent = '💾 שמור משוב';
+    }
+}
+
+const COLOR_MAP = {
+    blue:   { bg: '#0d1b2a', border: '#17a2b8' },
+    green:  { bg: '#0d1f0d', border: '#28a745' },
+    yellow: { bg: '#1f1a0a', border: '#ffc107' },
+    purple: { bg: '#140d2a', border: '#8b9cf4' },
+};
+
+function renderAISections(sections) {
+    return sections.map(s => {
+        const c = COLOR_MAP[s.color] || COLOR_MAP.purple;
+        return `
+        <div style="background:${c.bg}; border:1px solid ${c.border}; border-radius:10px; padding:16px 20px; margin-bottom:14px;">
+            <div style="color:${c.border}; font-weight:700; font-size:.95rem; margin-bottom:8px;">${s.icon || ''} ${s.title}</div>
+            <div style="color:#d0d8f0; font-size:.92rem; line-height:1.7; white-space:pre-wrap;">${s.content}</div>
+        </div>`;
+    }).join('');
+}
+
+async function loadAIInline(decisionId, summary) {
+    const el = document.getElementById('aiInlineSection');
+    if (!el) return;
+    el.innerHTML = `
+        <div class="detail-block mt-3">
+            <div class="detail-label mb-2">🤖 ניתוח AI</div>
+            <div class="text-center py-3" style="color:#8b9cf4;">
+                <div style="font-size:1.5rem;">🤖</div><div>מנתח...</div>
+            </div>
+        </div>`;
+    try {
+        const resp = await fetch(`/dashboard/decisions/${decisionId}/ai-analysis`);
+        const data = await resp.json();
+        if (data.error) {
+            el.innerHTML = `<div class="alert alert-danger mt-3">❌ ${data.error}</div>`;
+            return;
+        }
+        el.innerHTML = `
+            <div class="detail-block mt-3">
+                <div class="detail-label mb-1">🤖 ניתוח AI</div>
+                <div class="small text-muted mb-3" style="font-style:italic;">📋 ${summary || 'החלטה #' + decisionId}</div>
+                ${renderAISections(data.sections || [])}
+            </div>`;
+        el.scrollIntoView({behavior:'smooth', block:'nearest'});
+    } catch(e) {
+        el.innerHTML = `<div class="alert alert-danger mt-3">❌ שגיאה בטעינת הניתוח</div>`;
+    }
+}
+
+async function openDecisionAI(decisionId) {
+    const d = DECISIONS.find(x => x.id === decisionId) || {};
+    const summary = d.summary || `החלטה #${decisionId}`;
+    document.getElementById('aiDecisionModalTitle').textContent = `#${decisionId} — ${summary}`;
+    document.getElementById('aiDecisionModalBody').innerHTML = `
+        <div class="text-center py-5" style="color:#8b9cf4;">
+            <div style="font-size:2rem; margin-bottom:12px;">🤖</div>
+            <div>מנתח החלטה...</div>
+        </div>`;
+    new bootstrap.Modal(document.getElementById('aiDecisionModal')).show();
+    try {
+        const resp = await fetch(`/dashboard/decisions/${decisionId}/ai-analysis`);
+        const data = await resp.json();
+        if (data.error) {
+            document.getElementById('aiDecisionModalBody').innerHTML =
+                `<div class="alert alert-danger">❌ ${data.error}</div>`;
+            return;
+        }
+        document.getElementById('aiDecisionModalBody').innerHTML =
+            `<div class="small text-muted mb-3" style="font-style:italic;">📋 ${summary}</div>` +
+            renderAISections(data.sections || []);
+    } catch(e) {
+        document.getElementById('aiDecisionModalBody').innerHTML =
+            `<div class="alert alert-danger">❌ שגיאה בטעינת הניתוח</div>`;
+    }
+}
+
 const DECISIONS = {{ decisions | tojson }};
+const CURRENT_USER_ID = {{ current_user.id }};
+const CURRENT_USER_IS_ADMIN = {{ 'true' if current_user.is_admin else 'false' }};
 const TYPE_LABELS = {{ type_labels | tojson }};
 const STATUS_LABELS = {{ status_labels | tojson }};
 const MEAS_LABELS = {{ measurability_labels | tojson }};
@@ -316,18 +1052,78 @@ const DIST_STATUS_LABELS = { pending:'⏳ ממתין', acknowledged:'👁️ נ�
 
 function badge(cls, text) { return `<span class="badge badge-${cls}">${text}</span>`; }
 
+function canEditRaci(decision) {
+    return CURRENT_USER_IS_ADMIN || decision.submitter_id === CURRENT_USER_ID;
+}
+
 // ---- Detail Modal ----
+let _currentDetailId = null;
 function openDetail(idx) {
     const d = DECISIONS[idx];
-    const conf_color = d.confidence >= 80 ? '#28a745' : d.confidence >= 50 ? '#ffc107' : '#dc3545';
+    _currentDetailId = d.id;
     const assumptions = d.assumptions.length ? d.assumptions.map(a => `<span class="tag">${a}</span>`).join(' ') : '<span class="text-muted small">—</span>';
     const risks = d.risks.length ? d.risks.map(r => `<span class="tag" style="border-right:2px solid #dc3545;">${r}</span>`).join(' ') : '<span class="text-muted small">—</span>';
 
+    const RACI_ROLE_LABELS = {R:'👤 אחראי ביצוע', A:'🧠 בעל סמכות', C:'💬 יועץ', I:'📢 לידיעה'};
+    const RACI_ROLE_COLORS = {R:'primary', A:'danger', C:'warning', I:'info'};
+
+    let approvalBanner = '';
+    if (d.can_approve) {
+        approvalBanner = `
+            <div style="
+                background: linear-gradient(135deg, #0a1410 0%, #0d3320 100%);
+                border: 2px solid #28a745;
+                border-radius: 10px;
+                padding: 16px;
+                margin-bottom: 16px;
+                box-shadow: 0 0 20px rgba(40,167,69,0.3);
+            ">
+                <div style="color: #28a745; font-weight: 800; font-size: 1.1rem; margin-bottom: 12px;">
+                    ⏳ אתה צריך לאשר החלטה זו!
+                </div>
+                <div style="display: flex; gap: 10px;">
+                    <form method="POST" action="/dashboard/decisions/${d.id}/status" style="flex: 1;">
+                        <input type="hidden" name="new_status" value="approved">
+                        <button type="submit" style="
+                            width: 100%;
+                            background: #28a745;
+                            color: #fff;
+                            border: none;
+                            padding: 12px;
+                            font-weight: 700;
+                            font-size: 1rem;
+                            border-radius: 6px;
+                            cursor: pointer;
+                            box-shadow: 0 4px 12px rgba(40,167,69,0.4);
+                        ">✅ אשר</button>
+                    </form>
+                    <button onclick="openReject(${d.id})" style="
+                        flex: 1;
+                        background: #dc3545;
+                        color: #fff;
+                        border: none;
+                        padding: 12px;
+                        font-weight: 700;
+                        font-size: 1rem;
+                        border-radius: 6px;
+                        cursor: pointer;
+                        box-shadow: 0 4px 12px rgba(220,53,69,0.4);
+                    ">❌ דחה</button>
+                </div>
+            </div>
+        `;
+    }
+
     document.getElementById('detailBody').innerHTML = `
-        <div class="d-flex gap-2 mb-3 flex-wrap">
-            ${badge(d.type, TYPE_LABELS[d.type]||d.type)}
-            ${badge(d.status, STATUS_LABELS[d.status]||d.status)}
-            ${d.requires_approval ? '<span class="badge bg-warning text-dark">דורש אישור</span>' : ''}
+        ${approvalBanner}
+        <div class="d-flex justify-content-between align-items-start mb-3">
+            <div class="d-flex gap-2 flex-wrap">
+                ${badge(d.type, TYPE_LABELS[d.type]||d.type)}
+                ${badge(d.status, STATUS_LABELS[d.status]||d.status)}
+                ${d.requires_approval ? '<span class="badge bg-warning text-dark">דורש אישור</span>' : ''}
+                ${d.my_raci_role ? `<span class="badge bg-${RACI_ROLE_COLORS[d.my_raci_role]||'secondary'}">תפקידי: ${RACI_ROLE_LABELS[d.my_raci_role]||d.my_raci_role}</span>` : ''}
+            </div>
+            <button class="btn btn-sm btn-outline-info flex-shrink-0" onclick="loadAIInline(${d.id}, \`${(d.summary||'').replace(/`/g,"'")}\`)">🤖 ניתוח AI</button>
         </div>
         <div class="detail-block"><div class="detail-label">סיכום</div><div>${d.summary}</div></div>
         ${d.problem_description ? `<div class="detail-block"><div class="detail-label">תיאור הבעיה</div><div>${d.problem_description}</div></div>` : ''}
@@ -337,31 +1133,404 @@ function openDetail(idx) {
             <div class="col-6"><div class="detail-block h-100"><div class="detail-label">סיכונים</div><div>${risks}</div></div></div>
         </div>
         <div class="row g-3">
-            <div class="col-4"><div class="detail-block"><div class="detail-label">ביטחון</div><div style="color:${conf_color}; font-size:1.3rem; font-weight:700;">${d.confidence}%</div></div></div>
-            <div class="col-4"><div class="detail-block"><div class="detail-label">מדידות</div><div>${MEAS_LABELS[d.measurability]||d.measurability||'—'}</div></div></div>
-            <div class="col-4"><div class="detail-block"><div class="detail-label">פידבק</div><div>${d.feedback_score ? '⭐ '+d.feedback_score+'/5' : '—'}</div>${d.feedback_notes ? `<div class="text-muted small mt-1">${d.feedback_notes}</div>` : ''}</div></div>
+            <div class="col-6"><div class="detail-block"><div class="detail-label">מדידות</div><div>${MEAS_LABELS[d.measurability]||d.measurability||'—'}</div></div></div>
+            <div class="col-6"><div class="detail-block"><div class="detail-label">פידבק</div><div>${d.feedback_score ? '⭐ '+d.feedback_score+'/5' : '—'}</div>${d.feedback_notes ? `<div class="text-muted small mt-1">${d.feedback_notes}</div>` : ''}</div></div>
         </div>
         <div class="row g-3 mt-0">
             <div class="col-6"><div class="detail-block"><div class="detail-label">מגיש</div><div>${d.submitter_name}</div></div></div>
-            <div class="col-6"><div class="detail-block"><div class="detail-label">אחראי / מאשר</div><div>${d.approver_name||'—'}</div></div></div>
         </div>
         <div class="detail-block mt-2">
             <div class="detail-label">תאריכים</div>
             <div class="small">נוצר: ${d.created_at}${d.completed_at ? ' | הושלם: '+d.completed_at : ''}</div>
         </div>
+        <div class="detail-block mt-2" id="raciDetailBlock">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+                <div class="detail-label mb-0">📋 RACI</div>
+                ${canEditRaci(d) ? '<button class="btn btn-sm btn-outline-primary" onclick="openRaciEdit('+d.id+'); bootstrap.Modal.getInstance(document.getElementById(\'detailModal\')).hide();">✏️ עריכה</button>' : ''}
+            </div>
+            <div id="raciDetailContent"><span class="text-muted small">טוען...</span></div>
+        </div>
+        <div class="detail-block mt-2" id="feedbackDetailBlock">
+            <div class="detail-label mb-2">💬 משובים מהמשתמשים</div>
+            <div id="feedbackDetailContent"><span class="text-muted small">טוען...</span></div>
+        </div>
+        <div id="aiInlineSection"></div>
     `;
     new bootstrap.Modal(document.getElementById('detailModal')).show();
+    loadRaciDetail(d.id);
+    loadFeedbackDetail(d.id);
+}
+
+async function loadRaciDetail(decisionId) {
+    try {
+        const res = await fetch(`/dashboard/decisions/${decisionId}/raci`);
+        const data = await res.json();
+        const roleLabels = {R: '👤 ביצוע', A: '🧠 סמכות', C: '💬 יועץ', I: '📢 לידיעה'};
+        const byRole = {R:[], A:[], C:[], I:[]};
+        for (const [uid, role] of Object.entries(data.assignments)) {
+            const u = data.users.find(x => x.id == uid);
+            if (u) byRole[role].push(u.username);
+        }
+        let html = '';
+        for (const [role, label] of Object.entries(roleLabels)) {
+            if (byRole[role].length) {
+                html += `<div class="small mb-1"><strong style="color:#8b9cf4;">${label}:</strong> ${byRole[role].join(', ')}</div>`;
+            }
+        }
+        document.getElementById('raciDetailContent').innerHTML = html || '<span class="text-muted small">לא הוקצה RACI</span>';
+    } catch(e) {
+        document.getElementById('raciDetailContent').innerHTML = '<span class="text-muted small">שגיאה בטעינה</span>';
+    }
+}
+
+async function loadFeedbackDetail(decisionId) {
+    try {
+        const res = await fetch(`/dashboard/decisions/${decisionId}/feedbacks`);
+        const data = await res.json();
+        const feedbacks = data.feedbacks || [];
+
+        if (feedbacks.length === 0) {
+            document.getElementById('feedbackDetailContent').innerHTML = '<span class="text-muted small">אין משובים עדיין</span>';
+            return;
+        }
+
+        let html = '';
+        feedbacks.forEach(fb => {
+            const stars = '⭐'.repeat(fb.score) + '☆'.repeat(5 - fb.score);
+            html += `
+                <div style="background:#1a1d2e; border-radius:8px; padding:12px; margin-bottom:10px; border-left:4px solid #28a745; border-right:none;">
+                    <div class="d-flex justify-content-between align-items-start mb-2">
+                        <span class="fw-bold" style="color:#8b9cf4; font-size:.95rem;">${fb.username}</span>
+                        <span style="color:#ffc107; font-weight:bold;">${stars} ${fb.score}/5</span>
+                    </div>
+                    ${fb.notes ? `<div style="color:#e0e0e0; font-size:.9rem; line-height:1.5;">${fb.notes}</div>` : '<div style="color:#6c757d; font-style:italic; font-size:.9rem;">ללא הערות</div>'}
+                </div>
+            `;
+        });
+
+        document.getElementById('feedbackDetailContent').innerHTML = html;
+    } catch(e) {
+        document.getElementById('feedbackDetailContent').innerHTML = '<span class="text-muted small">שגיאה בטעינת משובים</span>';
+    }
+}
+
+// ---- RACI Edit Modal ----
+let _raciEditDecisionId = null;
+let _raciPreviousState = {}; // Track which radio was checked for each user
+
+function clearUserRole(userId) {
+    // Uncheck all radios for this user
+    document.querySelectorAll(`input[name="role-${userId}"]`).forEach(radio => {
+        radio.checked = false;
+    });
+    validateRaci();
+}
+
+async function openRaciEdit(decisionId) {
+    _raciEditDecisionId = decisionId;
+    document.getElementById('raciEditTitle').textContent = `#${decisionId}`;
+    document.getElementById('raciEditBody').innerHTML = '<tr><td colspan="6" class="text-center text-muted py-3">טוען...</td></tr>';
+    document.getElementById('raciValidationMsg').style.display = 'none';
+    document.getElementById('raciForm').setAttribute('novalidate', '');
+    new bootstrap.Modal(document.getElementById('raciEditModal')).show();
+    try {
+        console.log('📡 Fetching RACI data for decision #' + decisionId);
+        const res = await fetch(`/dashboard/decisions/${decisionId}/raci`);
+        console.log('✅ Response status: ' + res.status);
+
+        if (res.status === 403) {
+            console.log('❌ 403 Forbidden - User does not have permission');
+            document.getElementById('raciEditBody').innerHTML = '<tr><td colspan="6" style="text-align: center; padding: 20px; color: #dc3545;"><strong>⛔ אין הרשאה</strong><br/>רק מגיש ההחלטה או מנהל יכול לערוך RACI</td></tr>';
+            return;
+        }
+
+        if (res.status === 404) {
+            console.log('❌ 404 Not Found - Decision does not exist');
+            document.getElementById('raciEditBody').innerHTML = '<tr><td colspan="6" style="text-align: center; padding: 20px; color: #dc3545;">⛔ החלטה לא נמצאה</td></tr>';
+            return;
+        }
+
+        if (!res.ok) {
+            console.log('❌ Response not OK: ' + res.status + ' ' + res.statusText);
+            document.getElementById('raciEditBody').innerHTML = '<tr><td colspan="6" style="text-align: center; padding: 20px; color: #dc3545;">❌ שגיאה בטעינת נתוני RACI (HTTP ' + res.status + ')</td></tr>';
+            return;
+        }
+
+        const data = await res.json();
+        console.log('✅ RACI data loaded:', data);
+        _raciPreviousState = {};
+
+        let rows = data.users.map(u => {
+            const current = data.assignments[u.id] || '';
+            _raciPreviousState[u.id] = data.assignments[u.id] || '';
+            return `<tr style="border-bottom: 1px solid #2d3047; hover-background: #1a1d2e;">
+                <td style="text-align: right; padding: 12px; vertical-align: middle;">
+                    <span style="color: #e0e0e0; font-weight: 600;">${u.username}</span>
+                    ${u.job_title ? `<br/><span style="color: #8b9cf4; font-size: 0.85rem;">${u.job_title}</span>` : ''}
+                </td>
+                <td style="text-align: center; padding: 12px; vertical-align: middle;">
+                    <input type="radio" class="raci-role-select" data-uid="${u.id}" data-role="R" name="role-${u.id}"
+                           value="R" ${current === 'R' ? 'checked' : ''}
+                           aria-label="R - ${u.username}"
+                           style="cursor: pointer; width: 20px; height: 20px; accent-color: #5865f2;">
+                </td>
+                <td style="text-align: center; padding: 12px; vertical-align: middle;">
+                    <input type="radio" class="raci-role-select" data-uid="${u.id}" data-role="A" name="role-${u.id}"
+                           value="A" ${current === 'A' ? 'checked' : ''}
+                           aria-label="A - ${u.username}"
+                           style="cursor: pointer; width: 20px; height: 20px; accent-color: #dc3545;">
+                </td>
+                <td style="text-align: center; padding: 12px; vertical-align: middle;">
+                    <input type="radio" class="raci-role-select" data-uid="${u.id}" data-role="C" name="role-${u.id}"
+                           value="C" ${current === 'C' ? 'checked' : ''}
+                           aria-label="C - ${u.username}"
+                           style="cursor: pointer; width: 20px; height: 20px; accent-color: #ffc107;">
+                </td>
+                <td style="text-align: center; padding: 12px; vertical-align: middle;">
+                    <input type="radio" class="raci-role-select" data-uid="${u.id}" data-role="I" name="role-${u.id}"
+                           value="I" ${current === 'I' ? 'checked' : ''}
+                           aria-label="I - ${u.username}"
+                           style="cursor: pointer; width: 20px; height: 20px; accent-color: #17a2b8;">
+                </td>
+                <td style="text-align: center; padding: 12px; vertical-align: middle;">
+                    ${current ? `<button type="button" class="btn btn-sm btn-outline-danger" onclick="clearUserRole(${u.id})" style="font-size: 0.75rem; padding: 2px 6px;">✕ בטל</button>` : ''}
+                </td>
+            </tr>`;
+        }).join('');
+        document.getElementById('raciEditBody').innerHTML = rows;
+        console.log('✅ RACI modal UI populated with ' + data.users.length + ' users');
+
+        // Add change listeners for validation
+        document.querySelectorAll('.raci-role-select').forEach(el => {
+            el.addEventListener('change', validateRaci);
+        });
+
+    } catch(e) {
+        console.error('❌ Exception in openRaciEdit:', e);
+        document.getElementById('raciEditBody').innerHTML = '<tr><td colspan="5" class="text-danger">שגיאה בטעינת נתוני RACI: ' + e.message + '</td></tr>';
+    }
+}
+
+function validateRaci() {
+    const assignments = {};
+    document.querySelectorAll('.raci-role-select:checked').forEach(sel => {
+        assignments[sel.dataset.uid] = sel.dataset.role;
+    });
+
+    const msgEl = document.getElementById('raciValidationMsg');
+    const contentEl = document.getElementById('raciValidationContent');
+
+    const aCount = Object.values(assignments).filter(r => r === 'A').length;
+    const rCount = Object.values(assignments).filter(r => r === 'R').length;
+
+    let msgs = [];
+    let hasErrors = false;
+
+    if (aCount === 0) {
+        msgs.push('⚠️ <strong>חובה</strong>: חייב להיות בעל סמכות אחד (A)');
+        hasErrors = true;
+    } else if (aCount === 1) {
+        msgs.push('✅ בעל סמכות: 1 אדם');
+    } else {
+        msgs.push('❌ שגיאה: רק בעל סמכות אחד (A) מותר');
+        hasErrors = true;
+    }
+
+    if (rCount <= 1) {
+        if (rCount === 1) msgs.push('✅ אחראי ביצוע: 1 אדם');
+    } else {
+        msgs.push(`⚠️ אחראי ביצוע: ${rCount} אנשים (אפשרי)`);
+    }
+
+    const cCount = Object.values(assignments).filter(r => r === 'C').length;
+    if (cCount > 0) msgs.push(`ℹ️ יועץ: ${cCount} אנשים`);
+
+    const iCount = Object.values(assignments).filter(r => r === 'I').length;
+    if (iCount > 0) msgs.push(`ℹ️ לידיעה: ${iCount} אנשים`);
+
+    if (msgs.length > 0) {
+        contentEl.innerHTML = msgs.map(m => `<div style="margin: 4px 0; color: ${m.includes('❌') ? '#dc3545' : (m.includes('⚠️') ? '#ffc107' : '#28a745')};">${m}</div>`).join('');
+        msgEl.style.display = 'block';
+        msgEl.style.color = hasErrors ? '#dc3545' : '#28a745';
+    }
+}
+
+async function saveRaci() {
+    if (!_raciEditDecisionId) return;
+    const assignments = {};
+    document.querySelectorAll('.raci-role-select:checked').forEach(sel => {
+        assignments[sel.dataset.uid] = sel.dataset.role;
+    });
+
+    const aCount = Object.values(assignments).filter(r => r === 'A').length;
+    if (aCount !== 1) {
+        alert('שגיאה: חייב להיות בעל סמכות אחד בדיוק (A)');
+        return;
+    }
+
+    try {
+        const res = await fetch(`/dashboard/decisions/${_raciEditDecisionId}/raci`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({assignments})
+        });
+        const data = await res.json();
+
+        if (res.status === 403) {
+            alert('❌ אין לך הרשאה לעדכן RACI להחלטה זו\n\nרק מגיש ההחלטה או מנהל יכול לערוך RACI');
+            return;
+        }
+
+        if (res.ok) {
+            bootstrap.Modal.getInstance(document.getElementById('raciEditModal')).hide();
+            location.reload();
+        } else {
+            alert(data.error || 'שגיאה בשמירה');
+        }
+    } catch(e) {
+        alert('שגיאה בשמירה: ' + e.message);
+    }
 }
 
 // ---- Edit Modal ----
+let _editDecisionId = null;
+
 function openEdit(idx) {
     const d = DECISIONS[idx];
+    _editDecisionId = d.id;
     document.getElementById('editForm').action = '/dashboard/decisions/' + d.id + '/update';
+    document.getElementById('editModalDecisionId').textContent = '#' + d.id;
+    document.getElementById('edit_type').value = d.type;
     document.getElementById('edit_status').value = d.status;
-    document.getElementById('edit_approver').value = d.approver_id || '';
     document.getElementById('edit_summary').value = d.summary !== '—' ? d.summary : '';
     document.getElementById('edit_action').value = d.recommended_action || '';
+    document.getElementById('statusEditContainer').style.display = d.can_change_status ? 'block' : 'none';
+    document.getElementById('raciEditSection').style.display = d.can_edit_raci ? 'block' : 'none';
+    document.getElementById('editRaciMsg').style.display = 'none';
+    document.getElementById('aiSuggestRaciBtn').disabled = !d.can_edit_raci;
+    document.getElementById('aiSuggestRaciBtn').textContent = '🤖 הצע AI';
+    if (d.can_edit_raci) {
+        loadEditRaci(d.id);
+    }
     new bootstrap.Modal(document.getElementById('editModal')).show();
+}
+
+async function loadEditRaci(decisionId) {
+    document.getElementById('editRaciTable').innerHTML = '<div class="text-muted small text-center py-2">טוען...</div>';
+    try {
+        const res = await fetch(`/dashboard/decisions/${decisionId}/raci`);
+        const data = await res.json();
+        renderEditRaciTable(data);
+    } catch(e) {
+        document.getElementById('editRaciTable').innerHTML = '<div class="text-danger small">שגיאה בטעינת RACI</div>';
+    }
+}
+
+function renderEditRaciTable(data) {
+    const roleOptions = ['', 'R', 'A', 'C', 'I'];
+    const roleLabels = {'': '— ללא —', 'R': '👤 R — ביצוע', 'A': '🧠 A — סמכות', 'C': '💬 C — יועץ', 'I': '📢 I — לידיעה'};
+    let rows = data.users.map(u => {
+        const current = data.assignments[u.id] || '';
+        const opts = roleOptions.map(r =>
+            `<option value="${r}" ${r===current?'selected':''}>${roleLabels[r]}</option>`
+        ).join('');
+        return `<tr>
+            <td class="small py-1">${u.username}</td>
+            <td class="small text-muted py-1">${u.job_title||'—'}</td>
+            <td class="py-1"><select class="form-select form-select-sm edit-raci-select" data-uid="${u.id}"
+                style="background:#0f1117;color:#e0e0e0;border-color:#2d3047;">${opts}</select></td>
+        </tr>`;
+    }).join('');
+    document.getElementById('editRaciTable').innerHTML = rows
+        ? `<table class="table table-sm mb-0" style="color:#e0e0e0;">
+               <thead><tr><th style="color:#8b9cf4;font-size:.78rem;">משתמש</th><th style="color:#8b9cf4;font-size:.78rem;">תפקיד</th><th style="color:#8b9cf4;font-size:.78rem;">RACI</th></tr></thead>
+               <tbody>${rows}</tbody>
+           </table>`
+        : '<div class="text-muted small">אין משתמשים</div>';
+}
+
+async function aiSuggestRaci() {
+    if (!_editDecisionId) return;
+    const btn = document.getElementById('aiSuggestRaciBtn');
+    btn.disabled = true;
+    btn.textContent = '⏳ מחשב...';
+    const msg = document.getElementById('editRaciMsg');
+    msg.style.display = 'block';
+    msg.style.color = '#8b9cf4';
+    msg.textContent = 'ה-AI מחשב הצעת RACI...';
+    try {
+        await fetch(`/dashboard/decisions/${_editDecisionId}/raci/suggest`, { method: 'POST' });
+        let polls = 0;
+        const interval = setInterval(async () => {
+            polls++;
+            const res = await fetch(`/dashboard/decisions/${_editDecisionId}/raci`);
+            const data = await res.json();
+            const hasAssignments = Object.keys(data.assignments).length > 0;
+            if (hasAssignments || polls > 5) {
+                clearInterval(interval);
+                renderEditRaciTable(data);
+                btn.textContent = '✓ הוצע';
+                msg.style.color = '#28a745';
+                msg.textContent = hasAssignments ? '✓ ה-AI הציע שיוך RACI — ניתן לערוך לפני השמירה' : '⚠️ לא הוחזרו תוצאות, נסה שוב';
+            }
+        }, 3000);
+    } catch(e) {
+        btn.disabled = false;
+        btn.textContent = '🤖 הצע AI';
+        msg.style.color = '#dc3545';
+        msg.textContent = 'שגיאה בהצעת RACI';
+    }
+}
+
+async function onEditSave(event) {
+    event.preventDefault();
+    if (!_editDecisionId) return;
+
+    const assignments = {};
+    document.querySelectorAll('.edit-raci-select').forEach(sel => {
+        if (sel.value) assignments[sel.dataset.uid] = sel.value;
+    });
+
+    const aCount = Object.values(assignments).filter(r => r === 'A').length;
+    if (aCount > 1) {
+        alert('שגיאה: ניתן להגדיר רק אחראי סמכות אחד (A) להחלטה');
+        return false;
+    }
+
+    const d = DECISIONS.find(x => x.id === _editDecisionId);
+    const newType = document.getElementById('edit_type').value;
+    const newStatus = document.getElementById('edit_status').value;
+    const newSummary = document.getElementById('edit_summary').value.trim();
+    const newAction = document.getElementById('edit_action').value.trim();
+
+    const hasDecisionChanges =
+        newType !== d.type ||
+        newStatus !== d.status ||
+        newSummary !== (d.summary !== '—' ? d.summary : '') ||
+        newAction !== (d.recommended_action || '');
+
+    let raciSaveSuccess = true;
+    try {
+        const raciRes = await fetch(`/dashboard/decisions/${_editDecisionId}/raci`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({assignments})
+        });
+        if (!raciRes.ok) {
+            const data = await raciRes.json();
+            alert(data.error || 'שגיאה בשמירת RACI');
+            raciSaveSuccess = false;
+        }
+    } catch(e) {
+        raciSaveSuccess = false;
+    }
+
+    if (hasDecisionChanges) {
+        document.getElementById('editForm').submit();
+    } else if (raciSaveSuccess) {
+        bootstrap.Modal.getInstance(document.getElementById('editModal')).hide();
+        location.reload();
+    }
 }
 
 // ---- Distribute Modal ----
@@ -375,14 +1544,12 @@ async function openDistribute(idx) {
     const modal = new bootstrap.Modal(document.getElementById('distributeModal'));
     modal.show();
 
-    // Fetch AI suggestion
     let suggested = {};
     let aiPowered = false;
     try {
         const resp = await fetch(`/dashboard/decisions/${d.id}/suggest-distribution`);
         const data = await resp.json();
         aiPowered = data.ai_powered || false;
-        // Override decision type if AI suggests a different one
         if (data.decision_type) {
             document.getElementById('dist_override_type').value = data.decision_type;
         }
@@ -392,13 +1559,12 @@ async function openDistribute(idx) {
     } catch(e) { console.error(e); }
 
     const aiLabel = aiPowered
-        ? '<span style="color:#8b9cf4;font-size:0.8rem;">🤖 הוצע על ידי AI — ניתן לשינוי</span>'
-        : '<span style="color:#6c757d;font-size:0.8rem;">📋 הוצע לפי כללים</span>';
+        ? '<span style="color:#8b9cf4;font-size:.8rem;">🤖 הוצע על ידי AI — ניתן לשינוי</span>'
+        : '<span style="color:#6c757d;font-size:.8rem;">📋 הוצע לפי כללים</span>';
 
     let html = `<div class="mb-2">${aiLabel}</div>`;
     let hasSuggested = false;
 
-    // First show AI-suggested users (checked)
     for (const u of ALL_USERS) {
         if (u.id === d.submitter_id) continue;
         const suggestedType = suggested[u.id] || '';
@@ -411,7 +1577,6 @@ async function openDistribute(idx) {
         html += '<div class="my-2" style="border-top:1px solid #2d3047;padding-top:8px;"><span class="text-muted small">משתמשים נוספים (לא נבחרו)</span></div>';
     }
 
-    // Then show rest (unchecked)
     for (const u of ALL_USERS) {
         if (u.id === d.submitter_id) continue;
         if (suggested[u.id]) continue;
@@ -486,6 +1651,14 @@ async function openDistStatus(decisionId) {
         document.getElementById('distStatusBody').innerHTML = '<div class="text-danger">שגיאה בטעינת הנתונים</div>';
     }
 }
+
+// Auto-open RACI modal for newly created decisions
+function checkAutoOpenRaci() {
+    // RACI is now handled on decision_review.html, not in decisions.html
+    // This function is kept for backward compatibility but does nothing.
+}
+
+document.addEventListener('DOMContentLoaded', checkAutoOpenRaci);
 </script>
 </body>
 </html>

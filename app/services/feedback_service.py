@@ -83,12 +83,36 @@ async def save_feedback_text(session, decision_id: int, notes: str):
 
     decision.feedback_notes = notes
 
-    # Re-embed with feedback context for better future similarity
+    # Phase G — append all RACI roles to embedding for future learning
+    raci_context = ""
+    try:
+        from app.models import DecisionRaciRole, RaciRoleEnum, User as _User
+        from sqlalchemy import select as _select
+        role_labels = {
+            RaciRoleEnum.RESPONSIBLE:  "Responsible",
+            RaciRoleEnum.ACCOUNTABLE:  "Accountable",
+            RaciRoleEnum.CONSULTED:    "Consulted",
+            RaciRoleEnum.INFORMED:     "Informed",
+        }
+        for raci_role, label in role_labels.items():
+            names = (await session.execute(
+                _select(_User.username)
+                .join(DecisionRaciRole, DecisionRaciRole.user_id == _User.id)
+                .where(DecisionRaciRole.decision_id == decision_id)
+                .where(DecisionRaciRole.role == raci_role)
+            )).scalars().all()
+            if names:
+                raci_context += f" {label}: {', '.join(names)}"
+    except Exception as e:
+        logger.warning(f"RACI context fetch failed for decision #{decision_id}: {e}")
+
+    # Re-embed with feedback + RACI context for better future similarity
     combined = (
         f"{decision.problem_description or ''} "
         f"{decision.summary or ''} "
         f"{decision.recommended_action or ''} "
         f"פידבק: {notes}"
+        f"{raci_context}"
     )
     try:
         decision.embedding = await embed(combined)
@@ -97,6 +121,15 @@ async def save_feedback_text(session, decision_id: int, notes: str):
 
     await session.commit()
     logger.info(f"פידבק נשמר להחלטה #{decision_id}: ציון={decision.feedback_score}, הערות={notes[:50]}")
+
+    # Fire lesson extraction in background (own session, non-blocking)
+    try:
+        import asyncio
+        from app.services.lessons_service import extract_and_save_lesson
+        asyncio.get_event_loop().create_task(extract_and_save_lesson(decision_id))
+    except Exception as e:
+        logger.warning(f"Lesson extraction task could not be scheduled for decision #{decision_id}: {e}")
+
     return True
 
 

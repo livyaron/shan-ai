@@ -135,7 +135,6 @@ async def suggest_distribution(decision: Decision, submitter: User, session: Asy
 סוג החלטה: {type_he}
 סיכום: {decision.summary}
 פעולה מומלצת: {decision.recommended_action or '—'}
-ביטחון AI: {int((decision.confidence or 0) * 100)}%
 
 משתמשים זמינים:
 {chr(10).join(users_desc)}
@@ -146,13 +145,11 @@ async def suggest_distribution(decision: Decision, submitter: User, session: Asy
 כלול רק משתמשים רלוונטיים. אל תוסיף טקסט מחוץ ל-JSON."""
 
     try:
-        client = AsyncGroq(api_key=settings.GROQ_API_KEY)
-        response = await client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
+        from app.services.groq_client import groq_chat
+        raw = await groq_chat(
             messages=[{"role": "user", "content": prompt}],
             temperature=0.1,
         )
-        raw = response.choices[0].message.content.strip()
 
         # Extract JSON array from response
         start = raw.find("[")
@@ -325,8 +322,7 @@ async def _send_telegram_notification(bot, recipient: User, decision: Decision, 
         f"<b>סוג:</b> {e(dtype_he)}\n"
         f"<b>מגיש:</b> {submitter_line}\n\n"
         f"📋 <b>סיכום:</b>\n{e(decision.summary or '')}\n\n"
-        f"🎯 <b>פעולה מומלצת:</b>\n{e(decision.recommended_action or '—')}\n\n"
-        f"📊 ביטחון AI: {int((decision.confidence or 0) * 100)}%"
+        f"🎯 <b>פעולה מומלצת:</b>\n{e(decision.recommended_action or '—')}"
     )
 
     if dist.distribution_type == DistributionTypeEnum.INFO:
@@ -385,18 +381,30 @@ async def handle_dist_response(
         return f"✅ מצוין! דווח כבוצע עבור החלטה #{decision.id}."
 
     elif action == "approve":
+        # RACI enforcement: only Accountable can approve (if assigned and reachable)
+        from app.services.raci_service import get_accountable_user_id
+        accountable_id = await get_accountable_user_id(decision.id, session)
+        if accountable_id is not None and responder.id != accountable_id:
+            accountable_user = await session.get(User, accountable_id)
+            if accountable_user and accountable_user.telegram_id:
+                return f"⛔ רק {_html.escape(accountable_user.username)} (Accountable) יכול לאשר החלטה זו."
         dist.status = DistributionStatusEnum.APPROVED
         decision.status = DecisionStatusEnum.APPROVED
-        decision.approver_id = responder.id
         decision.completed_at = datetime.utcnow()
         await session.commit()
         await _notify_submitter(bot, submitter, decision, responder, "✅ אושרה", notes)
         return f"✅ החלטה #{decision.id} אושרה. המגיש קיבל הודעה."
 
     elif action == "reject":
+        # RACI enforcement: only Accountable can reject (if assigned and reachable)
+        from app.services.raci_service import get_accountable_user_id
+        accountable_id = await get_accountable_user_id(decision.id, session)
+        if accountable_id is not None and responder.id != accountable_id:
+            accountable_user = await session.get(User, accountable_id)
+            if accountable_user and accountable_user.telegram_id:
+                return f"⛔ רק {_html.escape(accountable_user.username)} (Accountable) יכול לדחות החלטה זו."
         dist.status = DistributionStatusEnum.REJECTED
         decision.status = DecisionStatusEnum.REJECTED
-        decision.approver_id = responder.id
         decision.completed_at = datetime.utcnow()
         await session.commit()
         await _notify_submitter(bot, submitter, decision, responder, "❌ נדחתה", notes)

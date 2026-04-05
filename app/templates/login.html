@@ -1,126 +1,172 @@
 <!DOCTYPE html>
-<html dir="rtl" lang="he">
+<html lang="he" dir="rtl">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>כניסה - Shan-AI</title>
+    <title>כניסה - Shan-Ai</title>
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
+        /* General Page Background */
         body {
+            background-color: #0d1117;
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
-            min-height: 100vh;
             display: flex;
             justify-content: center;
             align-items: center;
-            padding: 20px;
+            height: 100vh;
+            margin: 0;
+            color: white;
         }
+
+        /* The Dark Card (Container) */
         .login-container {
-            background: #1e2340;
-            border: 1px solid #2d3047;
-            border-radius: 12px;
-            box-shadow: 0 20px 60px rgba(0,0,0,0.5);
-            width: 100%;
-            max-width: 420px;
+            background-color: #00020a;
             padding: 40px;
-        }
-        .login-header {
+            border-radius: 24px;
+            width: 100%;
+            max-width: 400px;
             text-align: center;
-            margin-bottom: 32px;
+            box-shadow: 0 0 40px rgba(88, 101, 242, 0.3);
+            border: 1px solid rgba(88, 101, 242, 0.2);
         }
-        .login-header h1 {
-            font-size: 26px;
-            color: #8b9cf4;
-            margin-bottom: 6px;
+
+        /* Elegant Breathing + Glow Animation */
+        @keyframes elegantBreath {
+            0%, 100% {
+                transform: scale(1);
+                opacity: 0.85;
+                filter: drop-shadow(0 0 20px rgba(88, 101, 242, 0.2));
+            }
+            50% {
+                transform: scale(1.03);
+                opacity: 1;
+                filter: drop-shadow(0 0 30px rgba(88, 101, 242, 0.4));
+            }
         }
-        .login-header p {
-            color: #a0a8c0;
-            font-size: 13px;
+
+        .logo-img {
+            width: 405px;
+            height: auto;
+            border-radius: 0;
+            box-shadow: none;
+            filter: drop-shadow(0 0 20px rgba(88, 101, 242, 0.2));
+            margin-bottom: 20px;
+            animation: elegantBreath 4s ease-in-out infinite;
+            cursor: default;
         }
+
+        h2 {
+            color: #7d8cc4;
+            font-size: 1.2rem;
+            margin-bottom: 30px;
+        }
+
         .form-group {
-            margin-bottom: 18px;
+            text-align: right;
+            margin-bottom: 20px;
         }
+
         label {
             display: block;
-            color: #a0a8c0;
-            font-size: 13px;
-            margin-bottom: 6px;
+            margin-bottom: 8px;
+            font-size: 0.9rem;
+            color: #8b949e;
         }
-        input, select {
-            width: 100%;
-            padding: 10px 14px;
-            background: #2d3047;
-            border: 1px solid #3d4060;
-            border-radius: 6px;
-            color: #e0e6ff;
-            font-size: 14px;
-        }
-        input:focus, select:focus {
-            outline: none;
-            border-color: #8b9cf4;
-        }
-        select option { background: #2d3047; }
-        .login-button {
+
+        /* Input Styling */
+        select, input {
             width: 100%;
             padding: 12px;
-            background: #8b9cf4;
+            background-color: #0d1117;
+            border: 1px solid #30363d;
+            border-radius: 12px;
             color: white;
+            font-size: 1rem;
+            box-sizing: border-box;
+        }
+
+        select option {
+            background-color: #1a222d;
+            color: white;
+        }
+
+        /* The Submit Button */
+        .login-btn {
+            width: 100%;
+            padding: 14px;
+            background-color: #5865f2;
             border: none;
-            border-radius: 6px;
-            font-size: 15px;
+            border-radius: 12px;
+            color: white;
+            font-weight: bold;
+            font-size: 1.1rem;
             cursor: pointer;
-            margin-top: 8px;
-            transition: background 0.2s;
+            margin-top: 10px;
+            box-shadow: 0 4px 15px rgba(88, 101, 242, 0.4);
+            transition: background-color 0.3s;
         }
-        .login-button:hover { background: #7a8be3; }
-        .error-message {
-            background: rgba(255, 100, 100, 0.15);
-            border: 1px solid rgba(255, 100, 100, 0.3);
-            color: #ff9a9a;
-            padding: 10px 14px;
-            border-radius: 6px;
-            margin-bottom: 18px;
-            font-size: 13px;
+
+        .login-btn:hover {
+            background-color: #4751d6;
         }
-        .hint {
-            text-align: center;
-            color: #6a7290;
-            font-size: 12px;
-            margin-top: 20px;
+
+        .login-btn:disabled {
+            background-color: #6c757d;
+            cursor: not-allowed;
         }
-        .hint strong { color: #8b9cf4; }
+
+        .footer-text {
+            margin-top: 25px;
+            font-size: 0.8rem;
+            color: #5865f2;
+        }
+
+        .alert {
+            padding: 10px;
+            margin-bottom: 20px;
+            border-radius: 8px;
+            font-size: 0.9rem;
+        }
+
+        .alert-danger {
+            background-color: #dc3545;
+            color: white;
+        }
     </style>
 </head>
 <body>
+
     <div class="login-container">
-        <div class="login-header">
-            <h1>🔐 Shan-AI</h1>
-            <p>פלטפורמת קבלת החלטות חכמה</p>
-        </div>
+        <img src="/static/logo.png" alt="Shan-Ai Logo" class="logo-img">
+
+        <h2>פלטפורמת קבלת החלטות חכמה</h2>
 
         {% if error %}
-        <div class="error-message">⚠️ {{ error }}</div>
+        <div class="alert alert-danger">❌ {{ error }}</div>
         {% endif %}
 
-        <form method="post" action="/login">
+        <form method="POST" action="/login">
             <div class="form-group">
-                <label for="user_id">בחר משתמש</label>
-                <select id="user_id" name="user_id" required autofocus>
+                <label>בחר משתמש</label>
+                <select name="user_id" required>
                     <option value="">-- בחר משתמש --</option>
-                    {% for user in users %}
-                    <option value="{{ user.id }}">{{ user.username }}{% if user.role %} ({{ role_labels.get(user.role.value, user.role.value) }}){% endif %}</option>
+                    {% for u in users %}
+                    <option value="{{ u.id }}">{{ u.username }}{% if u.job_title %} — {{ u.job_title }}{% endif %}</option>
                     {% endfor %}
                 </select>
             </div>
+
             <div class="form-group">
-                <label for="password">סיסמה</label>
-                <input type="password" id="password" name="password" required
-                       placeholder="הזן סיסמה">
+                <label>סיסמה</label>
+                <input type="password" name="password" placeholder="הזן סיסמה" required>
             </div>
-            <button type="submit" class="login-button">כניסה למערכת</button>
+
+            <button type="submit" class="login-btn">כניסה למערכת</button>
         </form>
 
-        <p class="hint">סיסמה ברירת מחדל: <strong>1234</strong></p>
+        <div class="footer-text">
+            סיסמה ברירת מחדל: 1234
+        </div>
     </div>
+
 </body>
 </html>

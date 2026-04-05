@@ -29,7 +29,10 @@
 
 <nav class="navbar navbar-dark px-4 py-3">
     <span class="navbar-brand fw-bold fs-5">🧠 Shan-AI</span>
-    <span class="text-muted small">פרופיל אישי</span>
+    <div class="d-flex align-items-center gap-3">
+        <span class="text-muted small">פרופיל אישי</span>
+        <a href="/dashboard/" class="btn btn-sm btn-outline-secondary" style="border-color:#2d3047; color:#8b9cf4;">← חזרה לדשבורד</a>
+    </div>
 </nav>
 
 <div class="container py-5" style="max-width: 600px;">
@@ -80,7 +83,13 @@
                 <label class="form-label">שם תפקיד <span class="text-muted small">(ניתן לעריכה)</span></label>
                 <input type="text" name="job_title" class="form-control"
                        value="{{ user.job_title or '' }}"
-                       placeholder="לדוגמה: מהנדס חשמל בכיר">
+                       placeholder="לדוגמה: מנהל מגזר פיקוח">
+            </div>
+            <div class="mb-3">
+                <label class="form-label">🎯 תחומי אחריות <span class="badge bg-info text-dark" style="font-size:0.65rem;">משמש ל-RACI AI</span></label>
+                <textarea name="responsibilities" class="form-control" rows="3"
+                          placeholder="לדוגמה: מכרזים ורכש, חוזי קבלנים, ניהול ספקים&#10;פירוט תחומי האחריות המרכזיים שלך — ה-AI ישתמש בזה לשיוך RACI חכם">{{ user.responsibilities or '' }}</textarea>
+                <small class="text-muted">💡 ככל שהתיאור מדויק יותר, שיוך ה-RACI יהיה חכם יותר</small>
             </div>
             <div class="mb-3">
                 <label class="form-label">מקום בהיררכיה <span class="text-muted small">(מספר — 1 = הכי גבוה)</span></label>

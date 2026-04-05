@@ -1,0 +1,513 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Shan-AI — סקירת החלטה</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body { background: #0f1117; color: #e0e0e0; font-family: 'Segoe UI', sans-serif; }
+        .navbar { background: #1a1d2e !important; border-bottom: 1px solid #2d3047; }
+        .card { background: #1a1d2e; border: 1px solid #2d3047; border-radius: 12px; }
+        .nav-link { color: #8b9cf4 !important; }
+        .section-title { color: #8b9cf4; font-size: 1.1rem; font-weight: 600; border-right: 3px solid #8b9cf4; padding-right: 10px; margin-bottom: 1rem; }
+        .detail-block { background: #0f1117; border-radius: 8px; padding: 14px 18px; margin-bottom: 12px; }
+        .detail-label { color: #8b9cf4; font-size: 0.78rem; text-transform: uppercase; letter-spacing: .5px; margin-bottom: 6px; }
+        .tag { display: inline-block; background: #2d3047; border-radius: 6px; padding: 3px 12px; font-size: 0.83rem; margin: 3px; color: #c0c8e0; }
+        .badge-info     { background:#17a2b8; color:#fff; }
+        .badge-normal   { background:#28a745; color:#fff; }
+        .badge-critical { background:#dc3545; color:#fff; }
+        .badge-uncertain{ background:#ffc107; color:#000; }
+        .ai-header { background: linear-gradient(135deg, #1a1d2e 0%, #12192e 100%);
+                     border: 1px solid #8b9cf4; border-radius: 12px; padding: 20px 24px; margin-bottom: 24px; }
+        .ai-header-warn { background: linear-gradient(135deg, #1a1d2e 0%, #1a1200 100%);
+                          border: 1px solid #ffc107; border-radius: 12px; padding: 20px 24px; margin-bottom: 24px; }
+        .ai-header-info { background: linear-gradient(135deg, #1a1d2e 0%, #001a1a 100%);
+                          border: 1px solid #17a2b8; border-radius: 12px; padding: 20px 24px; margin-bottom: 24px; }
+        .btn-publish { background: #8b9cf4; border: none; color: #0f1117; font-weight: 700;
+                       padding: 12px 36px; border-radius: 10px; font-size: 1.05rem; }
+        .btn-publish:hover { background: #7a8de3; color: #0f1117; }
+        .btn-reanalyze { background: #ffc107; border: none; color: #0f1117; font-weight: 700;
+                         padding: 12px 36px; border-radius: 10px; font-size: 1.05rem; }
+        .btn-reanalyze:hover { background: #e0ac00; color: #0f1117; }
+        .problem-box { background: #0a0c14; border-right: 3px solid #2d3047;
+                       border-radius: 0 8px 8px 0; padding: 12px 16px; color: #a0a8c0; font-style: italic; }
+        .clarify-input { background: #0f1117; border: 1px solid #2d3047; color: #e0e0e0;
+                         border-radius: 8px; padding: 12px; width: 100%; resize: vertical; }
+        .clarify-input:focus { outline: none; border-color: #ffc107; }
+        .reply-box { background: #0a0c14; border-right: 3px solid #17a2b8;
+                     border-radius: 0 8px 8px 0; padding: 14px 18px; color: #c0e8f0; line-height: 1.7; }
+        .text-muted { color: #a0a8c0 !important; }
+        .small.text-muted { color: #8b9cf4 !important; }
+    </style>
+</head>
+<body>
+
+<nav class="navbar navbar-dark px-4 py-3">
+    <span class="navbar-brand fw-bold fs-5">🧠 Shan-AI</span>
+    <div>
+        <a href="/dashboard/" class="nav-link d-inline ms-3">📊 דשבורד</a>
+        <a href="/dashboard/decisions" class="nav-link d-inline ms-3">📋 החלטות</a>
+        <a href="/dashboard/users" class="nav-link d-inline ms-3">👥 משתמשים</a>
+        <a href="/dashboard/files" class="nav-link d-inline ms-3">📁 קבצים</a>
+        <a href="/dashboard/ask" class="nav-link d-inline ms-3">💬 שאל</a>
+        <a href="/dashboard/learning" class="nav-link d-inline ms-3">🎓 למידה</a>
+        <span class="text-muted small ms-3">👤 {{ current_user.username }}</span>
+        <a href="/logout" class="nav-link d-inline ms-3" style="color:#dc3545 !important;">🚪 התנתקות</a>
+    </div>
+</nav>
+
+<div class="container py-4" style="max-width: 860px;">
+
+{% if mode == "not_decision" %}
+<!-- ============================================================ -->
+<!-- NOT_DECISION MODE                                            -->
+<!-- ============================================================ -->
+<div class="ai-header-info">
+    <div class="d-flex align-items-center gap-3 mb-2">
+        <span style="font-size: 2rem;">💬</span>
+        <div>
+            <div class="fw-bold fs-5" style="color: #17a2b8;">לא זוהתה החלטה ארגונית</div>
+            <div class="text-muted small">הטקסט שהוגש אינו מכיל החלטה הדורשת ניתוח. הנה תשובת ה-AI:</div>
+        </div>
+    </div>
+    <div class="problem-box mt-3">{{ problem_description }}</div>
+</div>
+
+<div class="card p-4 mb-4">
+    <div class="section-title">🤖 תשובת ה-AI</div>
+    <div class="reply-box">{{ ai_reply }}</div>
+</div>
+
+<div class="d-flex justify-content-start">
+    <a href="/dashboard/decisions" class="btn btn-outline-secondary px-4">← חזור להחלטות</a>
+</div>
+
+{% elif mode == "unclear" %}
+<!-- ============================================================ -->
+<!-- UNCLEAR MODE — ask clarifying question                       -->
+<!-- ============================================================ -->
+<div class="ai-header-warn">
+    <div class="d-flex align-items-center gap-3 mb-2">
+        <span style="font-size: 2rem;">🔍</span>
+        <div>
+            <div class="fw-bold fs-5" style="color: #ffc107;">נדרש מידע נוסף לניתוח</div>
+            <div class="text-muted small">ה-AI זיהה רלוונטיות אך צריך פרט נוסף כדי לנתח את ההחלטה.</div>
+        </div>
+    </div>
+    <div class="problem-box mt-3">{{ problem_description }}</div>
+</div>
+
+<div class="card p-4 mb-4">
+    <div class="section-title">❓ שאלת הבהרה</div>
+    <div class="detail-block" style="border-right: 3px solid #ffc107; padding-right: 16px;">
+        <div class="fs-6" style="color: #ffe066;">{{ clarifying_question }}</div>
+    </div>
+
+    <form method="POST" action="/dashboard/decisions/analyze" class="mt-3">
+        <!-- Combined problem_description will include original + clarification -->
+        <input type="hidden" name="_original" value="{{ problem_description | e }}" id="originalText">
+        <div class="mb-3">
+            <label class="detail-label">תשובתך</label>
+            <textarea class="clarify-input" id="clarificationInput" rows="3"
+                      placeholder="ענה על השאלה לעיל כדי שה-AI יוכל לנתח את ההחלטה..."></textarea>
+        </div>
+        <input type="hidden" name="problem_description" id="combinedInput">
+        <div class="d-flex justify-content-between">
+            <a href="/dashboard/decisions" class="btn btn-outline-secondary px-4">← חזור</a>
+            <button type="submit" class="btn btn-reanalyze" onclick="combineProblem(event)">
+                🔄 נתח מחדש
+            </button>
+        </div>
+    </form>
+</div>
+
+<script>
+function combineProblem(e) {
+    const original = document.getElementById('originalText').value;
+    const clarification = document.getElementById('clarificationInput').value.trim();
+    if (!clarification) {
+        e.preventDefault();
+        document.getElementById('clarificationInput').style.borderColor = '#dc3545';
+        return;
+    }
+    document.getElementById('combinedInput').value = original + '\n\nפרטים נוספים: ' + clarification;
+}
+</script>
+
+{% else %}
+<!-- ============================================================ -->
+<!-- DECISION MODE — normal analysis results                      -->
+<!-- ============================================================ -->
+<div class="ai-header">
+    <div class="d-flex align-items-center gap-3 mb-2">
+        <span style="font-size: 2rem;">🤖</span>
+        <div>
+            <div class="fw-bold fs-5" style="color: #8b9cf4;">ניתוח AI הושלם</div>
+            <div class="text-muted small">בינה מלאכותית ניתחה את ההחלטה שלך. בדוק את התוצאות ואשר פרסום.</div>
+        </div>
+    </div>
+    <div class="problem-box mt-3">{{ problem_description }}</div>
+</div>
+
+<form id="decisionForm" method="POST" action="/dashboard/decisions/confirm">
+    <input type="hidden" name="problem_description" value="{{ problem_description | e }}">
+
+    <!-- AI Results / Editable Fields -->
+    <div class="card p-4 mb-4">
+        <div class="section-title">📊 תוצאות הניתוח — ערוך לפני פרסום</div>
+
+        <!-- Type selector -->
+        <div class="detail-block">
+            <div class="detail-label">סוג החלטה</div>
+            <select name="type" class="form-select form-select-sm mt-2" style="background: #0f1117; border: 1px solid #2d3047; color: #e0e0e0;">
+                <option value="info" {% if result.type|lower == 'info' %}selected{% endif %}>📘 מידע (Info)</option>
+                <option value="normal" {% if result.type|lower == 'normal' %}selected{% endif %}>📗 רגיל (Normal)</option>
+                <option value="critical" {% if result.type|lower == 'critical' %}selected{% endif %}>🔴 קריטי (Critical)</option>
+                <option value="uncertain" {% if result.type|lower == 'uncertain' %}selected{% endif %}>❓ לא ודאי (Uncertain)</option>
+            </select>
+        </div>
+
+        <!-- Requires approval -->
+        <div class="detail-block">
+            <div class="detail-label">דורש אישור?</div>
+            <div class="form-check mt-2">
+                <input class="form-check-input" type="checkbox" id="requiresApprovalCheck"
+                       {% if result.requires_approval %}checked{% endif %} style="width: 1.3em; height: 1.3em; cursor: pointer;">
+                <label class="form-check-label" for="requiresApprovalCheck" style="cursor: pointer;">
+                    זה החלטה שדורשת אישור מנהלי
+                </label>
+            </div>
+            <input type="hidden" name="requires_approval" id="requiresApprovalHidden" value="false">
+        </div>
+
+        <!-- Measurability -->
+        <div class="detail-block">
+            <div class="detail-label">מדידות</div>
+            <select name="measurability" class="form-select form-select-sm mt-2" style="background: #0f1117; border: 1px solid #2d3047; color: #e0e0e0;">
+                <option value="MEASURABLE" {% if result.measurability == 'MEASURABLE' %}selected{% endif %}>✅ מדיד</option>
+                <option value="PARTIAL" {% if result.measurability == 'PARTIAL' %}selected{% endif %}>🔶 חלקי</option>
+                <option value="NOT_MEASURABLE" {% if result.measurability == 'NOT_MEASURABLE' %}selected{% endif %}>❌ לא מדיד</option>
+            </select>
+        </div>
+
+        <!-- Summary -->
+        <div class="detail-block">
+            <div class="detail-label">סיכום</div>
+            <textarea name="summary" class="form-control form-control-sm mt-2" rows="2"
+                      style="background: #0f1117; border: 1px solid #2d3047; color: #e0e0e0; resize: vertical;">{{ result.summary }}</textarea>
+        </div>
+
+        <!-- Recommended action -->
+        <div class="detail-block">
+            <div class="detail-label">פעולה מומלצת</div>
+            <textarea name="recommended_action" class="form-control form-control-sm mt-2" rows="2"
+                      style="background: #0f1117; border: 1px solid #2d3047; color: #e0e0e0; resize: vertical;">{{ result.recommended_action }}</textarea>
+        </div>
+
+        <!-- Assumptions -->
+        <div class="detail-block">
+            <div class="detail-label">הנחות בסיס (אחת בשורה)</div>
+            <textarea name="assumptions_text" class="form-control form-control-sm mt-2" rows="3"
+                      style="background: #0f1117; border: 1px solid #2d3047; color: #e0e0e0; resize: vertical;"
+                      placeholder="הנחה 1&#10;הנחה 2&#10;הנחה 3">{% if result.self_critique.assumptions %}{{ result.self_critique.assumptions | join('\n') }}{% endif %}</textarea>
+            <input type="hidden" name="assumptions" id="assumptionsHidden">
+        </div>
+
+        <!-- Risks -->
+        <div class="detail-block">
+            <div class="detail-label">סיכונים (אחד בשורה)</div>
+            <textarea name="risks_text" class="form-control form-control-sm mt-2" rows="3"
+                      style="background: #0f1117; border: 1px solid #2d3047; color: #e0e0e0; resize: vertical;"
+                      placeholder="סיכון 1&#10;סיכון 2&#10;סיכון 3">{% if result.self_critique.risks %}{{ result.self_critique.risks | join('\n') }}{% endif %}</textarea>
+            <input type="hidden" name="risks" id="risksHidden">
+        </div>
+    </div>
+
+    <!-- RACI Assignment Section -->
+    <div class="card p-4 mb-4">
+        <div class="section-title d-flex justify-content-between align-items-center">
+            <div>👥 הקצאת RACI</div>
+            <div style="display: flex; gap: 8px;">
+                <button type="button" class="btn btn-sm btn-primary" id="suggestRaciBtn" onclick="suggestRaciFromAnalysis()">
+                    🤖 הצע RACI
+                </button>
+                <button type="button" class="btn btn-sm btn-warning" id="cancelRaciBtn" onclick="clearRaciSuggestions()" style="display: none;">
+                    ✕ בטל
+                </button>
+            </div>
+        </div>
+
+        <div style="overflow-x: auto; margin-top: 16px;">
+            <table class="table table-sm" style="color: #e0e0e0; background: #0f1117; border-radius: 8px;">
+                <thead style="background: #1a1d2e; border-bottom: 2px solid #2d3047;">
+                    <tr>
+                        <th style="color: #8b9cf4; text-align: right; padding: 12px;">משתמש</th>
+                        <th style="color: #8b9cf4; text-align: center; padding: 12px; min-width: 80px;">👤 R</th>
+                        <th style="color: #dc3545; text-align: center; padding: 12px; min-width: 80px;">🧠 A</th>
+                        <th style="color: #ffc107; text-align: center; padding: 12px; min-width: 80px;">💬 C</th>
+                        <th style="color: #17a2b8; text-align: center; padding: 12px; min-width: 80px;">📢 I</th>
+                    </tr>
+                </thead>
+                <tbody id="raciTableBody" style="border-color: #2d3047;">
+                    <!-- Filled by JavaScript on page load -->
+                </tbody>
+            </table>
+        </div>
+        <div id="raciSuggestMsg" style="margin-top: 12px; font-size: 0.9rem; color: #a0a8c0;"></div>
+    </div>
+
+    <!-- Hidden inputs for form submission - filled by JavaScript -->
+    <input type="hidden" name="raci_r" id="raci_rHidden" value="">
+    <input type="hidden" name="raci_a" id="raci_aHidden" value="">
+    <input type="hidden" name="raci_c" id="raci_cHidden" value="">
+    <input type="hidden" name="raci_i" id="raci_iHidden" value="">
+
+    <style>
+        .raci-checkbox {
+            transition: transform 0.15s ease;
+        }
+        .raci-checkbox:hover {
+            transform: scale(1.15);
+        }
+        .raci-checkbox:checked {
+            background-color: #5865f2;
+            border-color: #5865f2;
+        }
+    </style>
+
+    <script>
+        // RACI checkbox logic
+        document.querySelectorAll('.raci-checkbox').forEach(checkbox => {
+            checkbox.addEventListener('change', function() {
+                const userId = this.dataset.user;
+                const role = this.dataset.role;
+
+                if (this.checked) {
+                    // Uncheck other roles for this user
+                    document.querySelectorAll(`.raci-checkbox[data-user="${userId}"]`).forEach(cb => {
+                        if (cb !== this) cb.checked = false;
+                    });
+
+                    // If this is A (Accountable), uncheck A for all other users
+                    if (role === 'A') {
+                        document.querySelectorAll('.raci-accountable').forEach(cb => {
+                            if (cb !== this) cb.checked = false;
+                        });
+                    }
+                }
+            });
+        });
+    </script>
+
+    <!-- Buttons -->
+    <div class="d-flex justify-content-between align-items-center">
+        <a href="/dashboard/decisions" class="btn btn-outline-secondary px-4">← חזור</a>
+        <button type="submit" class="btn btn-publish">
+            ✅ אשר ופרסם החלטה
+        </button>
+    </div>
+
+    <script>
+        // Load all users and build RACI table on page load
+        async function initRaciTable() {
+            try {
+                console.log('initRaciTable: starting...');
+                const res = await fetch('/dashboard/get-all-users');
+                console.log('initRaciTable: fetch response status', res.status);
+                if (!res.ok) {
+                    console.error('initRaciTable: bad response status', res.status);
+                    return;
+                }
+                const data = await res.json();
+                const users = data.users || [];
+                console.log('initRaciTable: got', users.length, 'users');
+
+                let html = '';
+                for (const user of users) {
+                    html += `<tr style="border-bottom: 1px solid #2d3047;">
+                        <td style="text-align: right; padding: 12px; vertical-align: middle;">
+                            <span style="color: #e0e0e0;">${user.username}</span>
+                        </td>
+                        <td style="text-align: center; padding: 12px;">
+                            <label><input type="radio" class="raci-role" data-user="${user.id}" data-role="R" name="raci_role_${user.id}" style="width: 20px; height: 20px; cursor: pointer;" aria-label="R"></label>
+                        </td>
+                        <td style="text-align: center; padding: 12px;">
+                            <label><input type="radio" class="raci-role" data-user="${user.id}" data-role="A" name="raci_role_${user.id}" style="width: 20px; height: 20px; cursor: pointer;" aria-label="A"></label>
+                        </td>
+                        <td style="text-align: center; padding: 12px;">
+                            <label><input type="radio" class="raci-role" data-user="${user.id}" data-role="C" name="raci_role_${user.id}" style="width: 20px; height: 20px; cursor: pointer;" aria-label="C"></label>
+                        </td>
+                        <td style="text-align: center; padding: 12px;">
+                            <label><input type="radio" class="raci-role" data-user="${user.id}" data-role="I" name="raci_role_${user.id}" style="width: 20px; height: 20px; cursor: pointer;" aria-label="I"></label>
+                        </td>
+                    </tr>`;
+                }
+                document.getElementById('raciTableBody').innerHTML = html;
+                console.log('initRaciTable: table populated');
+
+                // Add change listeners
+                document.querySelectorAll('.raci-role').forEach(el => {
+                    el.addEventListener('change', validateRaciTable);
+                });
+                console.log('initRaciTable: done');
+            } catch(e) {
+                console.error('initRaciTable failed:', e);
+                document.getElementById('raciSuggestMsg').textContent = '❌ שגיאה בטעינת משתמשים: ' + e.message;
+            }
+        }
+
+        async function suggestRaciFromAnalysis() {
+            console.log('suggestRaciFromAnalysis: starting...');
+            const msgEl = document.getElementById('raciSuggestMsg');
+            const problemText = document.querySelector('input[name="problem_description"]').value.trim();
+            const summary = document.querySelector('textarea[name="summary"]').value.trim();
+            const action = document.querySelector('textarea[name="recommended_action"]').value.trim();
+
+            console.log('suggestRaciFromAnalysis: problemText length=', problemText.length, 'summary length=', summary.length);
+
+            if (!problemText && !summary) {
+                msgEl.textContent = '❌ אין מספיק מידע לניתוח';
+                console.warn('suggestRaciFromAnalysis: no problem text or summary');
+                return;
+            }
+
+            msgEl.textContent = '🤖 מחשב הצעות RACI...';
+            document.getElementById('suggestRaciBtn').disabled = true;
+
+            try {
+                const payload = { problem_description: problemText || summary };
+                console.log('suggestRaciFromAnalysis: sending to API:', payload);
+
+                const res = await fetch('/dashboard/decisions/analyze/raci-suggest', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload),
+                });
+
+                console.log('suggestRaciFromAnalysis: response status', res.status);
+
+                if (!res.ok) {
+                    throw new Error(`HTTP ${res.status}`);
+                }
+
+                const data = await res.json();
+                console.log('suggestRaciFromAnalysis: response data', data);
+                const suggestions = data.suggestions || {};
+
+                if (Object.keys(suggestions).length === 0) {
+                    msgEl.textContent = '⚠️ לא הצליח לחלץ הצעות';
+                    document.getElementById('suggestRaciBtn').disabled = false;
+                    console.warn('suggestRaciFromAnalysis: no suggestions returned');
+                    return;
+                }
+
+                console.log('suggestRaciFromAnalysis: applying', Object.keys(suggestions).length, 'suggestions');
+
+                // Clear previous selections
+                document.querySelectorAll('.raci-role').forEach(radio => {
+                    radio.checked = false;
+                });
+
+                // Apply suggestions to radios
+                for (const [userId, role] of Object.entries(suggestions)) {
+                    const radio = document.querySelector(`input[data-user="${userId}"][data-role="${role}"]`);
+                    console.log(`suggestRaciFromAnalysis: looking for radio user=${userId} role=${role}, found=${!!radio}`);
+                    if (radio) radio.checked = true;
+                }
+
+                msgEl.textContent = '✅ הצעות RACI טעונות בהצלחה';
+                document.getElementById('cancelRaciBtn').style.display = 'inline-block';
+                document.getElementById('suggestRaciBtn').disabled = false;
+                validateRaciTable();
+            } catch(e) {
+                msgEl.textContent = `❌ שגיאה בהצעה: ${e.message}`;
+                document.getElementById('suggestRaciBtn').disabled = false;
+                console.error('suggestRaciFromAnalysis failed:', e);
+            }
+        }
+
+        function clearRaciSuggestions() {
+            // Uncheck all RACI radios
+            document.querySelectorAll('.raci-role').forEach(radio => {
+                radio.checked = false;
+            });
+
+            // Hide cancel button and reset message
+            document.getElementById('cancelRaciBtn').style.display = 'none';
+            document.getElementById('raciSuggestMsg').textContent = '';
+            document.getElementById('suggestRaciBtn').disabled = false;
+            validateRaciTable();
+        }
+
+        function validateRaciTable() {
+            const assignments = {};
+            document.querySelectorAll('.raci-role:checked').forEach(el => {
+                assignments[el.dataset.user] = el.dataset.role;
+            });
+
+            const aCount = Object.values(assignments).filter(r => r === 'A').length;
+            const msgEl = document.getElementById('raciSuggestMsg');
+
+            if (aCount === 0) {
+                msgEl.textContent = '⚠️ חייב להיות בעל סמכות אחד (A)';
+                msgEl.style.color = '#dc3545';
+            } else if (aCount === 1) {
+                msgEl.textContent = '✅ הקצאת RACI תקינה';
+                msgEl.style.color = '#36e273';
+            } else {
+                msgEl.textContent = '❌ רק בעל סמכות אחד (A) מותר';
+                msgEl.style.color = '#dc3545';
+            }
+        }
+
+        function prepareFormData() {
+            // Convert newline-separated assumptions/risks to JSON arrays
+            const assumptionsText = document.querySelector('textarea[name="assumptions_text"]').value || '';
+            const risksText = document.querySelector('textarea[name="risks_text"]').value || '';
+
+            const assumptions = assumptionsText.split('\n').map(s => s.trim()).filter(s => s);
+            const risks = risksText.split('\n').map(s => s.trim()).filter(s => s);
+
+            document.getElementById('assumptionsHidden').value = JSON.stringify(assumptions);
+            document.getElementById('risksHidden').value = JSON.stringify(risks);
+
+            // Handle checkbox for requires_approval
+            const checkbox = document.getElementById('requiresApprovalCheck');
+            document.getElementById('requiresApprovalHidden').value = checkbox.checked ? 'true' : 'false';
+
+            // Collect RACI from radios
+            const assignments = {};
+            document.querySelectorAll('.raci-role:checked').forEach(el => {
+                assignments[el.dataset.user] = el.dataset.role;
+            });
+
+            ['r', 'a', 'c', 'i'].forEach(role => {
+                const userIds = Object.entries(assignments)
+                    .filter(([_, r]) => r === role.toUpperCase())
+                    .map(([uid, _]) => uid);
+                document.getElementById(`raci_${role}Hidden`).value = userIds.join(',');
+            });
+        }
+
+        // Initialize on page load
+        document.addEventListener('DOMContentLoaded', () => {
+            initRaciTable();
+            validateRaciTable();
+        });
+
+        // Prepare RACI data before form submission
+        document.getElementById('decisionForm').addEventListener('submit', (e) => {
+            prepareFormData();
+        });
+    </script>
+</form>
+
+<!-- Confirm / Back -->
+<div class="d-flex justify-content-between align-items-center mt-4">
+</div>
+{% endif %}
+
+</div>
+</body>
+</html>

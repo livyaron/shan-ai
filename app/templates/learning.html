@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Shan-AI — מרכז למידה וכיול</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <style>
+        body { background: #0f1117; color: #e0e0e0; font-family: 'Segoe UI', sans-serif; }
+        .navbar { background: #1a1d2e !important; border-bottom: 1px solid #2d3047; }
+        .card { background: #1a1d2e; border: 1px solid #2d3047; border-radius: 12px; }
+        .card-title { color: #8b9cf4; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 1px; }
+        .stat-value { font-size: 2.2rem; font-weight: 700; color: #fff; }
+        .stat-label { color: #6c757d; font-size: 0.9rem; }
+        .table { color: #e0e0e0; }
+        .table th { color: #8b9cf4; border-color: #2d3047; font-size: 0.82rem; }
+        .table td { border-color: #2d3047; vertical-align: middle; font-size: 0.88rem; }
+        .table tbody tr:hover { background: #22263a; }
+        .section-title { color: #8b9cf4; font-size: 1.05rem; font-weight: 600; margin-bottom: 1rem; border-right: 3px solid #8b9cf4; padding-right: 10px; }
+        .badge-info    { background: #17a2b8; }
+        .badge-normal  { background: #28a745; }
+        .badge-critical{ background: #dc3545; }
+        .badge-uncertain{background: #ffc107; color:#000; }
+        .status-ok   { color: #28a745; }
+        .status-over { color: #ffc107; }
+        .status-under{ color: #17a2b8; }
+        .status-no_data { color: #6c757d; }
+        .calib-bar { height: 8px; border-radius: 4px; }
+        .lesson-card { background: #1e2235; border: 1px solid #2d3047; border-radius: 10px; padding: 1rem; margin-bottom: 0.75rem; }
+        .lesson-text { color: #e0e0e0; font-size: 0.9rem; line-height: 1.6; }
+        .tag-badge { background: #2d3047; color: #8b9cf4; font-size: 0.72rem; border-radius: 20px; padding: 2px 8px; margin-left: 4px; }
+        canvas { max-height: 240px; }
+        .diff-arrow { font-size: 1.1rem; }
+        .progress { background: #2d3047; height: 6px; border-radius: 3px; }
+        .worst-row { border-right: 3px solid #dc3545 !important; }
+        .best-row  { border-right: 3px solid #28a745 !important; }
+    </style>
+</head>
+<body>
+
+<nav class="navbar navbar-dark px-4 py-3">
+    <span class="navbar-brand fw-bold fs-5">🧠 Shan-AI — מרכז למידה וכיול</span>
+    <div class="d-flex align-items-center gap-3">
+        <a href="/dashboard/" class="nav-link" style="color:#8b9cf4 !important;">📊 דשבורד</a>
+        <a href="/dashboard/decisions" class="nav-link position-relative" style="color:#8b9cf4 !important;">
+            📋 החלטות
+            {% if pending_approvals %}
+            <span class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger" style="font-size:0.65rem;">{{ pending_approvals }}</span>
+            {% endif %}
+        </a>
+        <a href="/dashboard/users" class="nav-link" style="color:#8b9cf4 !important;">👥 משתמשים</a>
+        <a href="/dashboard/files" class="nav-link" style="color:#8b9cf4 !important;">📁 קבצים</a>
+        <a href="/dashboard/ask" class="nav-link" style="color:#8b9cf4 !important;">💬 שאל</a>
+        <a href="/dashboard/learning" class="nav-link fw-bold" style="color:#8b9cf4 !important;">🎓 למידה</a>
+        <div class="d-flex align-items-center gap-2 ps-3" style="border-right: 1px solid #2d3047; padding-right: 15px;">
+            <span class="text-muted">👤 {{ current_user.username }}</span>
+            <a href="/logout" class="nav-link text-muted small" style="color:#dc3545 !important;">🚪 התנתקות</a>
+        </div>
+    </div>
+</nav>
+
+<div class="container-fluid py-4 px-4">
+
+    <!-- Phase 4: Batch Extraction Banner -->
+    <div id="batchBanner" class="alert d-flex align-items-center justify-content-between mb-4"
+         style="background:#1a2535; border:1px solid #2d4a6e; border-radius:10px;">
+        <div class="d-flex align-items-center gap-3">
+            <span style="font-size:1.5rem;">🔄</span>
+            <div>
+                <strong>חילוץ ידע אוטומטי</strong>
+                <div class="text-muted small mt-1">
+                    <span id="pendingCount">{{ pending_extraction }}</span> החלטות עם פידבק ממתינות לחילוץ לקח •
+                    <span id="totalLessonsCount">{{ total_lessons }}</span> לקחים בבסיס הידע
+                </div>
+            </div>
+        </div>
+        <div class="d-flex gap-2">
+            {% if pending_extraction > 0 %}
+            <button id="batchBtn" class="btn btn-sm btn-primary" onclick="runBatchExtract()">
+                ▶ חלץ לקחים ({{ pending_extraction }})
+            </button>
+            {% else %}
+            <span class="badge bg-success py-2 px-3">✓ הכל עודכן</span>
+            {% endif %}
+            <button class="btn btn-sm btn-outline-secondary" onclick="refreshBatchStatus()">↻ רענן</button>
+        </div>
+    </div>
+
+    <!-- Overall Stats Row -->
+    <div class="row g-3 mb-4">
+        <div class="col-md-4">
+            <div class="card p-4 text-center">
+                <div class="card-title">סה"כ לקחים שנלמדו</div>
+                <div class="stat-value text-info">{{ total_lessons }}</div>
+                <div class="stat-label">לקחים ארגוניים בבסיס הידע</div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card p-4 text-center">
+                <div class="card-title">ביטחון AI ממוצע (כלל הסוגים)</div>
+                <div class="stat-value" style="color: #ffc107;">
+                    {% if overall_stats.avg_conf %}{{ overall_stats.avg_conf }}%{% else %}—{% endif %}
+                </div>
+                <div class="stat-label">
+                    {% if overall_stats.avg_fb %}פידבק ממוצע: {{ overall_stats.avg_fb }}/5 ({{ overall_stats.total_with_feedback }} החלטות){% else %}אין נתוני פידבק עדיין{% endif %}
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card p-4 text-center">
+                <div class="card-title">כיול מערכת</div>
+                {% set all_ok = calibration | selectattr("status", "eq", "ok") | list | length %}
+                {% set all_over = calibration | selectattr("status", "eq", "over") | list | length %}
+                {% set all_under = calibration | selectattr("status", "eq", "under") | list | length %}
+                {% if all_over > 0 %}
+                <div class="stat-value" style="color:#ffc107;">⚠️</div>
+                <div class="stat-label">{{ all_over }} סוג/ים — AI בטוח מדי</div>
+                {% elif all_under > 0 %}
+                <div class="stat-value" style="color:#17a2b8;">📉</div>
+                <div class="stat-label">{{ all_under }} סוג/ים — AI זהיר מדי</div>
+                {% elif all_ok > 0 %}
+                <div class="stat-value" style="color:#28a745;">✅</div>
+                <div class="stat-label">כל הסוגים מכוילים היטב</div>
+                {% else %}
+                <div class="stat-value text-muted">—</div>
+                <div class="stat-label">אין מספיק נתונים</div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <!-- Calibration Table + Trend Chart -->
+    <div class="row g-3 mb-4">
+        <div class="col-lg-7">
+            <div class="card p-4">
+                <div class="section-title">🎯 כיול AI לפי סוג החלטה</div>
+                <p class="text-muted small mb-3">השוואה בין ביטחון ה-AI לפידבק שהתקבל. פער > 15 נקודות מצביע על בעיית כיול.</p>
+                <table class="table table-sm">
+                    <thead>
+                        <tr>
+                            <th>סוג</th>
+                            <th>סה"כ</th>
+                            <th>עם פידבק</th>
+                            <th>ביטחון AI</th>
+                            <th>פידבק (scaled)</th>
+                            <th>פער</th>
+                            <th>סטטוס</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in calibration %}
+                        <tr>
+                            <td>
+                                <span class="badge badge-{{ row.type }}">{{ row.type_he }}</span>
+                            </td>
+                            <td>{{ row.total }}</td>
+                            <td>{{ row.feedback_count }}</td>
+                            <td>
+                                {% if row.avg_conf %}
+                                <div class="d-flex align-items-center gap-2">
+                                    <span>{{ row.avg_conf }}%</span>
+                                    <div class="progress flex-grow-1" style="width:60px;">
+                                        <div class="progress-bar bg-warning" style="width:{{ row.avg_conf }}%;"></div>
+                                    </div>
+                                </div>
+                                {% else %}—{% endif %}
+                            </td>
+                            <td>
+                                {% if row.scaled_feedback %}
+                                <div class="d-flex align-items-center gap-2">
+                                    <span>{{ row.scaled_feedback }}%</span>
+                                    <div class="progress flex-grow-1" style="width:60px;">
+                                        <div class="progress-bar bg-success" style="width:{{ row.scaled_feedback }}%;"></div>
+                                    </div>
+                                </div>
+                                {% else %}—{% endif %}
+                            </td>
+                            <td>
+                                {% if row.diff is not none %}
+                                    <span class="status-{{ row.status }} fw-bold">
+                                        {% if row.diff > 0 %}+{% endif %}{{ row.diff }}
+                                        {% if row.status == "over" %} ↑{% elif row.status == "under" %} ↓{% endif %}
+                                    </span>
+                                {% else %}—{% endif %}
+                            </td>
+                            <td>
+                                {% if row.status == "ok" %}<span class="badge bg-success">מכוייל ✓</span>
+                                {% elif row.status == "over" %}<span class="badge bg-warning text-dark">בטוח מדי ⚠️</span>
+                                {% elif row.status == "under" %}<span class="badge bg-info">זהיר מדי 📉</span>
+                                {% else %}<span class="badge bg-secondary">אין נתונים</span>{% endif %}
+                            </td>
+                        </tr>
+                        {% else %}
+                        <tr><td colspan="7" class="text-center text-muted py-4">אין החלטות עם פידבק עדיין</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                <p class="text-muted small mt-2">
+                    <strong>פירוש:</strong> ביטחון AI מחושב 0-100%. פידבק (1-5) ממופה ל-0-100% לצורך השוואה. פער חיובי = AI בטוח יותר מהתוצאה בפועל.
+                </p>
+            </div>
+        </div>
+        <div class="col-lg-5">
+            <div class="card p-4">
+                <div class="section-title">📈 מגמת החלטות ופידבק (6 חודשים)</div>
+                <canvas id="trendChart"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <!-- Worst + Best Decisions -->
+    <div class="row g-3 mb-4">
+        <div class="col-md-6">
+            <div class="card p-4">
+                <div class="section-title">🔴 החלטות כושלות (ביטחון גבוה + פידבק נמוך)</div>
+                <p class="text-muted small mb-3">החלטות שבהן ה-AI היה בטוח מדי אך התוצאה הייתה גרועה — מקורות עיקריים ללמידה.</p>
+                {% if worst_decisions %}
+                <table class="table table-sm">
+                    <thead><tr><th>#</th><th>סוג</th><th>סיכום</th><th>פידבק</th></tr></thead>
+                    <tbody>
+                        {% for d in worst_decisions %}
+                        <tr class="worst-row">
+                            <td><a href="/dashboard/decisions" class="text-muted small">#{{ d.id }}</a></td>
+                            <td><span class="badge badge-{{ d.type }}">{{ d.type_he }}</span></td>
+                            <td class="text-truncate" style="max-width:150px;" title="{{ d.summary }}">{{ d.summary }}</td>
+                            <td>
+                                <span class="badge bg-danger">{{ d.feedback_score }}/5</span>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                {% else %}
+                <div class="text-center text-muted py-4">אין עדיין החלטות עם פער גבוה</div>
+                {% endif %}
+            </div>
+        </div>
+        <div class="col-md-6">
+            <div class="card p-4">
+                <div class="section-title">🟢 החלטות מצוינות (ביטחון גבוה + פידבק גבוה)</div>
+                <p class="text-muted small mb-3">מקרים שבהם ה-AI צדק — מהם נלמדים דפוסים מוצלחים לעתיד.</p>
+                {% if best_decisions %}
+                <table class="table table-sm">
+                    <thead><tr><th>#</th><th>סוג</th><th>סיכום</th><th>פידבק</th></tr></thead>
+                    <tbody>
+                        {% for d in best_decisions %}
+                        <tr class="best-row">
+                            <td><a href="/dashboard/decisions" class="text-muted small">#{{ d.id }}</a></td>
+                            <td><span class="badge badge-{{ d.type }}">{{ d.type_he }}</span></td>
+                            <td class="text-truncate" style="max-width:150px;" title="{{ d.summary }}">{{ d.summary }}</td>
+                            <td>
+                                <span class="badge bg-success">{{ d.feedback_score }}/5</span>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                {% else %}
+                <div class="text-center text-muted py-4">אין עדיין החלטות מצוינות עם פידבק</div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <!-- Knowledge Summaries (Phase 4) -->
+    <div class="card p-4 mb-4">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <div class="section-title mb-0">🧠 ידע ארגוני מובנה לפי סוג החלטה</div>
+            <div class="text-muted small">מסונתז על ידי AI מכלל הלקחים שנלמדו</div>
+        </div>
+        {% if knowledge_summaries %}
+        <div class="row g-3">
+            {% for ks in knowledge_summaries %}
+            <div class="col-md-6">
+                <div class="lesson-card" style="border-right: 3px solid {% if ks.decision_type == 'critical' %}#dc3545{% elif ks.decision_type == 'normal' %}#28a745{% elif ks.decision_type == 'info' %}#17a2b8{% else %}#ffc107{% endif %}">
+                    <div class="d-flex justify-content-between align-items-start mb-3">
+                        <div>
+                            <span class="badge badge-{{ ks.decision_type }} me-2">{{ ks.type_he }}</span>
+                            <span class="text-muted small">{{ ks.lesson_count }} לקחים • עודכן {{ ks.updated_at }}</span>
+                        </div>
+                        <button class="btn btn-sm btn-outline-secondary py-0" style="font-size:0.72rem;"
+                                onclick="resummary('{{ ks.decision_type }}', this)" title="עדכן סיכום">↺</button>
+                    </div>
+
+                    {% if ks.principles %}
+                    <div class="mb-2">
+                        <div style="color:#8b9cf4; font-size:0.78rem; font-weight:600; margin-bottom:4px;">📌 עקרונות מפתח</div>
+                        <ul class="mb-0 ps-3" style="font-size:0.85rem;">
+                            {% for p in ks.principles %}<li>{{ p }}</li>{% endfor %}
+                        </ul>
+                    </div>
+                    {% endif %}
+
+                    {% if ks.risks %}
+                    <div class="mb-2">
+                        <div style="color:#dc3545; font-size:0.78rem; font-weight:600; margin-bottom:4px;">⚠️ סיכונים נפוצים</div>
+                        <ul class="mb-0 ps-3" style="font-size:0.85rem; color:#e0a0a0;">
+                            {% for r in ks.risks %}<li>{{ r }}</li>{% endfor %}
+                        </ul>
+                    </div>
+                    {% endif %}
+
+                    {% if ks.success_factors %}
+                    <div class="mb-2">
+                        <div style="color:#28a745; font-size:0.78rem; font-weight:600; margin-bottom:4px;">✅ גורמי הצלחה</div>
+                        <ul class="mb-0 ps-3" style="font-size:0.85rem; color:#a0e0a0;">
+                            {% for sf in ks.success_factors %}<li>{{ sf }}</li>{% endfor %}
+                        </ul>
+                    </div>
+                    {% endif %}
+
+                    {% if ks.ai_guidance %}
+                    <div class="mt-2 p-2 rounded" style="background:#0f1117; font-size:0.82rem; color:#b0b8e0;">
+                        🤖 <em>{{ ks.ai_guidance }}</em>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div class="text-center text-muted py-4">
+            <div style="font-size:2.5rem;">📋</div>
+            <div class="mt-2">אין עדיין סיכומי ידע. לחץ על "חלץ לקחים" לאחר שהתקבל פידבק על החלטות.</div>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Lessons Learned -->
+    <div class="card p-4 mb-4">
+        <div class="section-title">📚 לקחים ארגוניים שנלמדו ({{ total_lessons }} סה"כ)</div>
+        <p class="text-muted small mb-3">לקחים שחולצו אוטומטית על ידי ה-AI לאחר קבלת פידבק על החלטות שהושלמו.</p>
+        {% if lessons %}
+        <div class="row g-3">
+            {% for lesson in lessons %}
+            <div class="col-md-6">
+                <div class="lesson-card">
+                    <div class="d-flex justify-content-between align-items-start mb-2">
+                        <div>
+                            <span class="badge badge-{{ lesson.decision_type }} me-1">{{ lesson.type_he }}</span>
+                            <a href="/dashboard/decisions" class="text-muted small">#{{ lesson.decision_id }}</a>
+                            {% if lesson.feedback_score %}
+                            <span class="badge {% if lesson.feedback_score >= 4 %}bg-success{% elif lesson.feedback_score <= 2 %}bg-danger{% else %}bg-secondary{% endif %} ms-1">
+                                {{ lesson.feedback_score }}/5
+                            </span>
+                            {% endif %}
+                        </div>
+                        <span class="text-muted small">{{ lesson.created_at }}</span>
+                    </div>
+                    <div class="lesson-text">{{ lesson.lesson_text }}</div>
+                    {% if lesson.tags %}
+                    <div class="mt-2">
+                        {% for tag in lesson.tags %}
+                        <span class="tag-badge">{{ tag }}</span>
+                        {% endfor %}
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div class="text-center text-muted py-5">
+            <div style="font-size:3rem;">📭</div>
+            <div class="mt-2">עדיין לא נלמדו לקחים. לאחר קבלת פידבק על החלטות, ה-AI יחלץ לקחים אוטומטית.</div>
+        </div>
+        {% endif %}
+    </div>
+
+</div>
+
+<script>
+// Batch extraction
+async function runBatchExtract() {
+    const btn = document.getElementById('batchBtn');
+    if (!btn) return;
+    btn.disabled = true;
+    btn.textContent = '⏳ מחלץ לקחים...';
+    try {
+        const r = await fetch('/dashboard/learning/batch-extract', { method: 'POST' });
+        if (r.ok) {
+            btn.textContent = '✓ מתחיל בעיבוד...';
+            // Poll status every 3s until pending hits 0
+            let polls = 0;
+            const interval = setInterval(async () => {
+                polls++;
+                const s = await fetch('/dashboard/learning/batch-status');
+                const data = await s.json();
+                document.getElementById('pendingCount').textContent = data.pending;
+                document.getElementById('totalLessonsCount').textContent = data.total_lessons;
+                if (data.pending === 0 || polls > 40) {
+                    clearInterval(interval);
+                    location.reload();
+                }
+            }, 3000);
+        }
+    } catch (e) {
+        btn.textContent = '❌ שגיאה';
+        btn.disabled = false;
+    }
+}
+
+async function refreshBatchStatus() {
+    try {
+        const s = await fetch('/dashboard/learning/batch-status');
+        const data = await s.json();
+        document.getElementById('pendingCount').textContent = data.pending;
+        document.getElementById('totalLessonsCount').textContent = data.total_lessons;
+    } catch {}
+}
+
+async function resummary(decisionType, btn) {
+    btn.disabled = true;
+    btn.textContent = '⏳';
+    try {
+        const r = await fetch(`/dashboard/learning/summarize/${decisionType}`, { method: 'POST' });
+        if (r.ok) {
+            btn.textContent = '✓';
+            setTimeout(() => location.reload(), 4000);
+        }
+    } catch {
+        btn.textContent = '↺';
+        btn.disabled = false;
+    }
+}
+
+// Trend Chart
+const trendCtx = document.getElementById('trendChart').getContext('2d');
+const trendLabels = {{ trend_labels | safe }};
+const trendData   = {{ trend_data | safe }};
+const trendFeedback = {{ trend_feedback | safe }};
+
+new Chart(trendCtx, {
+    type: 'bar',
+    data: {
+        labels: trendLabels,
+        datasets: [
+            {
+                label: 'מספר החלטות',
+                data: trendData,
+                backgroundColor: 'rgba(139,156,244,0.5)',
+                borderColor: '#8b9cf4',
+                borderWidth: 1,
+                yAxisID: 'y',
+            },
+            {
+                label: 'פידבק ממוצע',
+                data: trendFeedback,
+                type: 'line',
+                borderColor: '#28a745',
+                backgroundColor: 'transparent',
+                tension: 0.4,
+                pointRadius: 4,
+                yAxisID: 'y2',
+            }
+        ]
+    },
+    options: {
+        responsive: true,
+        plugins: { legend: { labels: { color: '#e0e0e0', font: { size: 11 } } } },
+        scales: {
+            x: { ticks: { color: '#6c757d', font: { size: 10 } }, grid: { color: '#2d3047' } },
+            y: {
+                ticks: { color: '#6c757d', font: { size: 10 } },
+                grid: { color: '#2d3047' },
+                title: { display: true, text: 'החלטות', color: '#6c757d' },
+            },
+            y2: {
+                position: 'left',
+                ticks: { color: '#28a745', font: { size: 10 } },
+                grid: { display: false },
+                min: 0, max: 5,
+                title: { display: true, text: 'פידבק (1-5)', color: '#28a745' },
+            }
+        }
+    }
+});
+</script>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

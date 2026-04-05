@@ -30,6 +30,12 @@ class DistributionTypeEnum(str, enum.Enum):
     EXECUTION = "execution"
     APPROVAL = "approval"
 
+class RaciRoleEnum(str, enum.Enum):
+    RESPONSIBLE = "R"
+    ACCOUNTABLE = "A"
+    CONSULTED = "C"
+    INFORMED = "I"
+
 class DistributionStatusEnum(str, enum.Enum):
     PENDING = "pending"
     ACKNOWLEDGED = "acknowledged"
@@ -48,7 +54,9 @@ class User(Base):
     email = Column(String(255), nullable=True)
     registration_code = Column(String(10), unique=True, nullable=True, index=True)
     profile_token = Column(String(32), unique=True, nullable=True, index=True)
+    is_admin = Column(Boolean, default=False, nullable=False)
     job_title = Column(String(255), nullable=True)
+    responsibilities = Column(Text, nullable=True)   # תחומי אחריות — used for AI RACI assignment
     hierarchy_level = Column(Integer, nullable=True)
     manager_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -57,7 +65,6 @@ class User(Base):
     manager = relationship("User", remote_side="User.id", foreign_keys="User.manager_id", uselist=False)
     messages = relationship("Message", back_populates="user")
     decisions = relationship("Decision", back_populates="submitter", foreign_keys="Decision.submitter_id")
-    approvals = relationship("Decision", back_populates="approver", foreign_keys="Decision.approver_id")
 
 class Message(Base):
     __tablename__ = "messages"
@@ -75,7 +82,6 @@ class Decision(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     submitter_id = Column(Integer, ForeignKey("users.id"), index=True)
-    approver_id = Column(Integer, ForeignKey("users.id"), nullable=True)
 
     type = Column(Enum(DecisionTypeEnum))
     status = Column(Enum(DecisionStatusEnum), default=DecisionStatusEnum.PENDING)
@@ -83,7 +89,6 @@ class Decision(Base):
     summary = Column(Text)
     problem_description = Column(Text)
     recommended_action = Column(Text)
-    confidence = Column(Float, default=0.0)
     requires_approval = Column(Boolean, default=False)
 
     assumptions = Column(Text)  # JSON string of assumptions list
@@ -101,8 +106,8 @@ class Decision(Base):
     completed_at = Column(DateTime, nullable=True)
 
     submitter = relationship("User", back_populates="decisions", foreign_keys=[submitter_id])
-    approver = relationship("User", back_populates="approvals", foreign_keys=[approver_id])
     distributions = relationship("DecisionDistribution", back_populates="decision", cascade="all, delete-orphan")
+    raci_roles = relationship("DecisionRaciRole", back_populates="decision", cascade="all, delete-orphan")
 
 
 class DecisionDistribution(Base):
@@ -119,3 +124,86 @@ class DecisionDistribution(Base):
 
     decision = relationship("Decision", back_populates="distributions")
     user = relationship("User")
+
+
+class DecisionFeedback(Base):
+    __tablename__ = "decision_feedbacks"
+
+    id          = Column(Integer, primary_key=True, index=True)
+    decision_id = Column(Integer, ForeignKey("decisions.id"), index=True)
+    user_id     = Column(Integer, ForeignKey("users.id"), index=True)
+    score       = Column(Integer)           # 1-5
+    notes       = Column(Text, nullable=True)
+    created_at  = Column(DateTime, default=datetime.utcnow)
+
+    decision = relationship("Decision")
+    user     = relationship("User")
+
+
+class KnowledgeFile(Base):
+    __tablename__ = "knowledge_files"
+
+    id            = Column(Integer, primary_key=True, index=True)
+    original_name = Column(String(255))
+    file_path     = Column(String(512))
+    file_type     = Column(String(10))           # pdf | docx | xlsx
+    file_size     = Column(Integer, default=0)
+    uploader_id   = Column(Integer, ForeignKey("users.id"), nullable=True)
+    summary       = Column(Text, nullable=True)
+    chunk_count   = Column(Integer, default=0)
+    status        = Column(String(20), default="processing")  # processing | ready | error
+    created_at    = Column(DateTime, default=datetime.utcnow)
+
+    uploader = relationship("User")
+    chunks   = relationship("KnowledgeChunk", back_populates="file", cascade="all, delete-orphan")
+
+
+class KnowledgeChunk(Base):
+    __tablename__ = "knowledge_chunks"
+
+    id        = Column(Integer, primary_key=True, index=True)
+    file_id   = Column(Integer, ForeignKey("knowledge_files.id"), index=True)
+    chunk_idx = Column(Integer)
+    content   = Column(Text)
+    embedding = Column(Vector(384), nullable=True)
+
+    file = relationship("KnowledgeFile", back_populates="chunks")
+
+
+class LessonLearned(Base):
+    __tablename__ = "lessons_learned"
+
+    id            = Column(Integer, primary_key=True, index=True)
+    decision_id   = Column(Integer, ForeignKey("decisions.id"), nullable=False, index=True)
+    lesson_text   = Column(Text, nullable=False)
+    decision_type = Column(String(20), nullable=True)   # info/normal/critical/uncertain
+    tags          = Column(Text, nullable=True)          # JSON array of keywords
+    embedding     = Column(Vector(384), nullable=True)
+    created_at    = Column(DateTime, default=datetime.utcnow)
+
+    decision = relationship("Decision")
+
+
+class KnowledgeSummary(Base):
+    """Per decision-type aggregated knowledge summary, regenerated after each batch extraction."""
+    __tablename__ = "knowledge_summaries"
+
+    id            = Column(Integer, primary_key=True, index=True)
+    decision_type = Column(String(20), nullable=False, unique=True, index=True)
+    summary_text  = Column(Text, nullable=False)
+    lesson_count  = Column(Integer, default=0)
+    updated_at    = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class DecisionRaciRole(Base):
+    __tablename__ = "decision_raci_roles"
+
+    id             = Column(Integer, primary_key=True, index=True)
+    decision_id    = Column(Integer, ForeignKey("decisions.id"), nullable=False, index=True)
+    user_id        = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    role           = Column(Enum(RaciRoleEnum), nullable=False)
+    assigned_by_ai = Column(Boolean, default=True, nullable=False)
+    created_at     = Column(DateTime, default=datetime.utcnow)
+
+    decision = relationship("Decision", back_populates="raci_roles")
+    user     = relationship("User")

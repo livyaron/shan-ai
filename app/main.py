@@ -6,6 +6,9 @@ import logging
 import asyncio
 from app.config import settings
 
+from fastapi.staticfiles import StaticFiles
+
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -14,6 +17,8 @@ from app.database import engine, get_db_session
 from app.models import Base
 from app.routers import auth, telegram, dashboard, login
 from app.routers.dashboard import profile_router
+from app.routers import files as files_router
+from app.routers import ask as ask_router
 from fastapi.templating import Jinja2Templates
 from app.services.telegram_polling import telegram_bot
 from app.services.feedback_service import run_feedback_scheduler
@@ -30,11 +35,16 @@ app = FastAPI(
     docs_url="/docs",
 )
 
+# Add this line after your app = FastAPI() definition
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
 # Register routers
 app.include_router(auth.router)
 app.include_router(login.router)
 app.include_router(telegram.router)
 app.include_router(dashboard.router)
+app.include_router(files_router.router)
+app.include_router(ask_router.router)
 app.include_router(profile_router)
 
 @app.on_event("startup")
@@ -49,6 +59,52 @@ async def startup():
             async with engine.begin() as conn:
                 await conn.execute(__import__("sqlalchemy").text("CREATE EXTENSION IF NOT EXISTS vector"))
                 await conn.run_sync(Base.metadata.create_all)
+                from sqlalchemy import text as _text
+
+                # Lessons learned table
+                await conn.execute(_text("""
+                    CREATE TABLE IF NOT EXISTS lessons_learned (
+                        id            SERIAL PRIMARY KEY,
+                        decision_id   INTEGER NOT NULL REFERENCES decisions(id) ON DELETE CASCADE,
+                        lesson_text   TEXT NOT NULL,
+                        decision_type VARCHAR(20),
+                        tags          TEXT,
+                        embedding     vector(384),
+                        created_at    TIMESTAMP DEFAULT NOW()
+                    )
+                """))
+                await conn.execute(_text(
+                    "CREATE INDEX IF NOT EXISTS ix_lessons_decision ON lessons_learned (decision_id)"
+                ))
+
+                # Phase 4 — knowledge summaries
+                await conn.execute(_text("""
+                    CREATE TABLE IF NOT EXISTS knowledge_summaries (
+                        id            SERIAL PRIMARY KEY,
+                        decision_type VARCHAR(20) NOT NULL UNIQUE,
+                        summary_text  TEXT NOT NULL,
+                        lesson_count  INTEGER DEFAULT 0,
+                        updated_at    TIMESTAMP DEFAULT NOW()
+                    )
+                """))
+
+                # Phase A — ensure RACI table exists on already-running DBs
+                await conn.execute(_text("""
+                    CREATE TABLE IF NOT EXISTS decision_raci_roles (
+                        id             SERIAL PRIMARY KEY,
+                        decision_id    INTEGER NOT NULL REFERENCES decisions(id) ON DELETE CASCADE,
+                        user_id        INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                        role           VARCHAR(1) NOT NULL,
+                        assigned_by_ai BOOLEAN NOT NULL DEFAULT TRUE,
+                        created_at     TIMESTAMP DEFAULT NOW()
+                    )
+                """))
+                await conn.execute(_text(
+                    "CREATE INDEX IF NOT EXISTS ix_raci_decision ON decision_raci_roles (decision_id)"
+                ))
+                await conn.execute(_text(
+                    "CREATE INDEX IF NOT EXISTS ix_raci_user ON decision_raci_roles (user_id)"
+                ))
             print("Database tables initialized.")
             break
         except Exception as e:
@@ -58,6 +114,10 @@ async def startup():
             else:
                 print(f"DB connection failed after 10 attempts: {e}")
                 raise
+
+    # Ensure uploads directory exists
+    from pathlib import Path
+    Path("uploads").mkdir(exist_ok=True)
 
     # Migrate user passwords (set default for users without password_hash)
     try:
