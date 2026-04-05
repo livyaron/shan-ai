@@ -103,7 +103,7 @@
             line-height: 1.5;
         }
         .question-input:focus { outline: none; border-color: #8b9cf4; }
-        .question-input::placeholder { color: #555; }
+        .question-input::placeholder { color: #888; }
         .btn-send {
             background: #8b9cf4; border: none; color: #0f1117;
             font-weight: 700; padding: 10px 28px;
@@ -115,10 +115,10 @@
         .empty-state {
             flex: 1; display: flex; flex-direction: column;
             align-items: center; justify-content: center;
-            color: #3a3f5c; text-align: center; gap: 10px;
+            color: #7080a0; text-align: center; gap: 10px;
         }
         .empty-state .icon { font-size: 3rem; }
-        .empty-state .hint { font-size: 0.85rem; color: #2d3047; margin-top: 6px; }
+        .empty-state .hint { font-size: 0.85rem; color: #8b9aaa; margin-top: 6px; }
         .suggestions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 16px; }
         .suggestion-chip {
             background: #1a1d2e; border: 1px solid #2d3047;
@@ -151,7 +151,7 @@
     <div class="chat-history" id="chatHistory">
         <div class="empty-state" id="emptyState">
             <div class="icon">💬</div>
-            <div class="fw-semibold" style="color:#5a618c;">שאל שאלה על ההחלטות או הקבצים שלך</div>
+            <div class="fw-semibold" style="color:#8b9aaa;">שאל שאלה על ההחלטות או הקבצים שלך</div>
             <div class="hint">ה-AI יחפש בהחלטות שלך ובמסמכים שהועלו</div>
             <div class="suggestions">
                 <div class="suggestion-chip" onclick="fillQuestion('כמה החלטות קריטיות יש לי?')">כמה החלטות קריטיות יש לי?</div>

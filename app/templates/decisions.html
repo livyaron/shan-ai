@@ -25,7 +25,7 @@
             border-color: #8b9cf4; box-shadow: 0 0 0 .2rem rgba(139,156,244,.2);
         }
         .form-select option { background: #1a1d2e; }
-        .form-label { color: #a0a8c0; font-size: .88rem; }
+        .form-label { color: #d0d8f0; font-size: .88rem; }
         textarea.form-control { min-height: 80px; }
 
         /* ── Modals ── */
@@ -41,12 +41,12 @@
         .section-title { color: #8b9cf4; font-size: 1.1rem; font-weight: 600; border-right: 3px solid #8b9cf4; padding-right: 10px; }
         .detail-block { background: #0f1117; border-radius: 8px; padding: 12px 16px; margin-bottom: 10px; }
         .detail-label { color: #8b9cf4; font-size: .8rem; text-transform: uppercase; letter-spacing: .5px; margin-bottom: 4px; }
-        .tag { display: inline-block; background: #2d3047; border-radius: 6px; padding: 2px 10px; font-size: .82rem; margin: 2px; color: #c0c8e0; }
+        .tag { display: inline-block; background: #2d3047; border-radius: 6px; padding: 2px 10px; font-size: .82rem; margin: 2px; color: #e0e0e0; }
         .dist-row { background: #12151f; border-radius: 8px; padding: 8px 12px; margin-bottom: 6px; display: flex; align-items: center; gap: 10px; }
         .dist-row .user-name { flex: 1; font-size: .9rem; }
-        .text-muted { color: #a0a8c0 !important; }
+        .text-muted { color: #d0d8f0 !important; }
         .small.text-muted { color: #8b9cf4 !important; }
-        .dist-status-pending    { color: #a0a8c0; }
+        .dist-status-pending    { color: #d0d8f0; }
         .dist-status-acknowledged { color: #8b9cf4; }
         .dist-status-approved   { color: #28a745; }
         .dist-status-rejected   { color: #dc3545; }
@@ -83,7 +83,7 @@
         }
         .stat-card:hover { transform: translateY(-3px); }
         .stat-icon { font-size: 1.5rem; }
-        .stat-label { font-size: .68rem; color: #6b7599; text-transform: uppercase; letter-spacing: .6px; line-height: 1.2; }
+        .stat-label { font-size: .68rem; color: #a8b0d0; text-transform: uppercase; letter-spacing: .6px; line-height: 1.2; }
         .stat-value { font-size: 1.6rem; font-weight: 800; line-height: 1; }
         .stat-total   .stat-value { color: #8b9cf4; }
         .stat-pending .stat-value { color: #ffc107; }
@@ -475,7 +475,7 @@
             <a href="/dashboard/decisions" class="btn btn-sm btn-outline-secondary" style="border-radius:8px;border-color:#2d3047;color:#8b9cf4;">נקה</a>
         </div>
         <div class="ms-auto d-flex align-items-end">
-            <span style="color:#3a4070; font-size:.8rem;">{{ decisions|length }} תוצאות</span>
+            <span style="color:#a8b0d0; font-size:.8rem;">{{ decisions|length }} תוצאות</span>
         </div>
     </form>
 
@@ -518,7 +518,7 @@
                 <span class="raci-my-chip raci-{{ d.my_raci_role }}">{{ d.my_raci_role }} — {{ raci_names.get(d.my_raci_role, '') }}</span>
                 {% endif %}
                 {% if d.raci_summary != '—' %}
-                <span style="font-size:.7rem;color:#363d60;" title="RACI">RACI {{ d.raci_summary }}</span>
+                <span style="font-size:.7rem;color:#8b9aaa;" title="RACI">RACI {{ d.raci_summary }}</span>
                 {% endif %}
             </div>
 
@@ -726,7 +726,7 @@
                     <div class="form-label mb-2">👥 נמענים — בחר מי מקבל ומה תפקידו בהחלטה זו:</div>
                     <div id="dist_recipients_list"></div>
 
-                    <div class="mt-3 p-2 small" style="color:#6c757d; background:#0a0c14; border-radius:6px;">
+                    <div class="mt-3 p-2 small" style="color:#a8b0d0; background:#0a0c14; border-radius:6px;">
                         <strong style="color:#8b9cf4;">הסבר:</strong>
                         לידיעה — מקבל הודעה בלבד ✓ |
                         לביצוע — צריך לדווח על ביצוע ⚡ |
