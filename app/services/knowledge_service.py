@@ -526,14 +526,37 @@ async def process_master_file(file_id: int) -> None:
                     if project_name.lower() in ('project', 'שם פרויקט', 'פרויקט'):
                         continue
 
-                    chunk = (
-                        f"🏗️ Project: {project_name} | "
-                        f"WBS: {wbs_val} | "
-                        f"Manager: {manager_val} | "
-                        f"Status: {status_val} | "
-                        f"Update: {weekly_val}"
-                    )
-                    all_chunks.append(chunk)
+                    # Build core fields
+                    core_parts = [
+                        f"🏗️ Project: {project_name}",
+                        f"WBS: {wbs_val}",
+                        f"Manager: {manager_val}",
+                        f"Status: {status_val}",
+                        f"Update: {weekly_val}",
+                    ]
+
+                    # Collect indices that are already included in core fields
+                    _included_idxs = {idx for idx in [project_idx, wbs_idx, manager_idx, status_idx, weekly_idx] if idx is not None}
+
+                    # Append all other non-empty labeled columns
+                    extra_parts = []
+                    for col_i, col_name in enumerate(df.columns):
+                        if col_i in _included_idxs:
+                            continue
+                        col_label = str(col_name).strip()
+                        if not col_label or col_label.startswith('Unnamed') or col_label.lower() == 'nan':
+                            continue
+                        cell_val = row.iloc[col_i]
+                        if pd.isna(cell_val):
+                            continue
+                        cell_str = str(cell_val).strip()
+                        if not cell_str or cell_str.lower() in ('nan', '—', '-', ''):
+                            continue
+                        extra_parts.append(f"{col_label}: {cell_str}")
+
+                    chunk = " | ".join(core_parts + extra_parts) if core_parts else None
+                    if chunk:
+                        all_chunks.append(chunk)
 
             # Process secondary sheets normally
             secondary_sheets = [s for s in xls.sheet_names if s != primary_sheet_name]
@@ -1133,10 +1156,11 @@ def _format_compact_index(
     in multiple files (file_name_map must be provided for this to work).
     """
     _PRIORITY_MARKERS = ('עדכני', 'final', 'Final', 'FINAL')
-    # Regex to extract labeled fields from chunks: Project/Manager/Status (English)
-    # Skip Update field to save tokens. Also support Hebrew field names in legacy chunks.
+    # Regex to extract labeled fields from chunks: Project/Manager/Status/WBS + date fields
+    # Skip Update field to save tokens. Also support date fields like יעד תכנית פיתוח, יעד חשמול
     _fields = re.compile(
         r'((?:Project|Manager|Status|WBS):\s*[^|]+|'
+        r'יעד\s+(?:תכנית|חשמול)[^|]*:\s*[^|]+|'
         r'מנהל[^|]*:\s*[^|]+|מנה"פ[^|]*:\s*[^|]+)',
         re.IGNORECASE,
     )
