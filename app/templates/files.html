@@ -15,11 +15,15 @@
         .table tbody tr:hover { background: #22263a; }
         .form-control, .form-select {
             background: #0f1117; border: 1px solid #2d3047;
-            color: #e0e0e0; border-radius: 8px;
+            color: #ffffff; border-radius: 8px; font-weight: 500;
         }
         .form-control:focus {
-            background: #0f1117; color: #e0e0e0;
+            background: #0f1117; color: #ffffff;
             border-color: #8b9cf4; box-shadow: 0 0 0 0.2rem rgba(139,156,244,0.25);
+        }
+        .form-control::placeholder {
+            color: #7a7a7a;
+            opacity: 1;
         }
         .section-title { color: #8b9cf4; font-size: 1.1rem; font-weight: 600;
             border-right: 3px solid #8b9cf4; padding-right: 10px; }
@@ -36,6 +40,9 @@
         .file-type-xlsx { background: #1d7a3a; }
         .summary-text { color: #d0d8f0; font-size: 0.85rem; font-style: italic; max-width: 260px;
             white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .badge-master { background: #ffc107; color: #000; font-weight: 700; }
+        .btn-master   { border-color: #ffc107; color: #ffc107; }
+        .btn-master:hover { background: #ffc107; color: #000; }
     </style>
 </head>
 <body>
@@ -49,6 +56,7 @@
         <a href="/dashboard/files" class="nav-link d-inline ms-3 fw-bold">📁 קבצים</a>
         <a href="/dashboard/ask" class="nav-link d-inline ms-3">💬 שאל</a>
         <a href="/dashboard/learning" class="nav-link d-inline ms-3">🎓 למידה</a>
+        <a href="/dashboard/logs" class="nav-link d-inline ms-3">📊 לוגים</a>
         <span class="text-muted small ms-3">👤 {{ current_user.username }}</span>
         <a href="/logout" class="nav-link d-inline ms-3" style="color:#dc3545 !important;">🚪 התנתקות</a>
     </div>
@@ -75,7 +83,8 @@
         <div class="col-md-4">
             <div class="card p-4">
                 <div class="section-title mb-3">📤 העלאת קובץ</div>
-                <form method="POST" action="/dashboard/files/upload" enctype="multipart/form-data">
+                <form id="uploadForm" method="POST" action="/dashboard/files/upload" enctype="multipart/form-data">
+                    <input type="hidden" name="is_master" id="isMasterInput" value="false">
                     <div class="upload-zone mb-3" onclick="document.getElementById('fileInput').click()" style="cursor:pointer;">
                         <div style="font-size:2.5rem;">📄</div>
                         <div class="mt-2" style="color:#8b9cf4; font-weight:600;">לחץ לבחירת קובץ</div>
@@ -84,8 +93,27 @@
                     </div>
                     <input type="file" id="fileInput" name="file" accept=".pdf,.docx,.xlsx"
                            class="d-none" onchange="showFileName(this)" required>
-                    <button type="submit" class="btn btn-primary w-100">📤 העלה לבסיס הידע</button>
+                    <button type="button" class="btn btn-primary w-100" onclick="handleUploadClick()">📤 העלה לבסיס הידע</button>
                 </form>
+
+                <!-- Master file confirmation modal -->
+                <div class="modal fade" id="masterModal" tabindex="-1">
+                    <div class="modal-dialog modal-dialog-centered">
+                        <div class="modal-content" style="background:#1a1d2e; border:1px solid #2d3047; color:#e0e0e0;">
+                            <div class="modal-header" style="border-color:#2d3047;">
+                                <h5 class="modal-title" style="color:#ffc107;">⭐ קובץ מאסטר?</h5>
+                            </div>
+                            <div class="modal-body">
+                                <p>האם הקובץ <strong id="modalFileName" style="color:#8b9cf4;"></strong> הוא קובץ המאסטר של הפרויקטים?</p>
+                                <p class="small text-muted">קובץ מאסטר עובר עיבוד מיוחד לחילוץ נתוני פרויקטים (WBS, סטטוס, מנהל, עדכון שבועי).</p>
+                            </div>
+                            <div class="modal-footer" style="border-color:#2d3047;">
+                                <button type="button" class="btn btn-warning" onclick="submitUpload(true)">⭐ כן, קובץ מאסטר</button>
+                                <button type="button" class="btn btn-outline-secondary" onclick="submitUpload(false)">📄 לא, קובץ רגיל</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
 
                 <hr style="border-color:#2d3047; margin: 1.5rem 0;">
                 <div class="small" style="color:#d0d8f0;">
@@ -117,6 +145,7 @@
                                 <th>מעלה</th>
                                 <th>תאריך</th>
                                 <th>סטטוס</th>
+                                <th>Master</th>
                                 <th>פעולות</th>
                             </tr>
                         </thead>
@@ -164,8 +193,25 @@
                                     {% endif %}
                                 </td>
                                 <td>
+                                    {% if f.is_master %}
+                                    <span class="badge badge-master">⭐ Master</span>
+                                    {% elif f.file_type == 'xlsx' and f.status == 'ready' %}
+                                    <form method="POST" action="/dashboard/files/{{ f.id }}/set_master" class="d-inline">
+                                        <button type="submit" class="btn btn-sm btn-master" title="הגדר כ-Master">☆ Set</button>
+                                    </form>
+                                    {% else %}
+                                    <span class="text-muted small">—</span>
+                                    {% endif %}
+                                </td>
+                                <td>
                                     <a href="/dashboard/files/{{ f.id }}/view" target="_blank"
                                        class="btn btn-sm btn-outline-secondary me-1" title="פתח קובץ">👁️</a>
+                                    {% if f.is_master %}
+                                    <form method="POST" action="/dashboard/files/{{ f.id }}/unset_master"
+                                          onsubmit="return confirm('להסיר הגדרת Master?')" class="d-inline">
+                                        <button type="submit" class="btn btn-sm btn-outline-warning me-1" title="הסר Master">⭐</button>
+                                    </form>
+                                    {% endif %}
                                     <form method="POST" action="/dashboard/files/{{ f.id }}/delete"
                                           onsubmit="return confirm('למחוק את {{ f.original_name }}?')" class="d-inline">
                                         <button type="submit" class="btn btn-sm btn-outline-danger">🗑️</button>
@@ -195,6 +241,31 @@ function showFileName(input) {
     if (input.files && input.files[0]) {
         display.textContent = '📄 ' + input.files[0].name;
     }
+}
+
+function handleUploadClick() {
+    const fileInput = document.getElementById('fileInput');
+    if (!fileInput.files || !fileInput.files[0]) {
+        fileInput.click();
+        return;
+    }
+    const filename = fileInput.files[0].name;
+    const ext = filename.split('.').pop().toLowerCase();
+    if (ext === 'xlsx') {
+        // Ask if this is the master file
+        document.getElementById('modalFileName').textContent = filename;
+        new bootstrap.Modal(document.getElementById('masterModal')).show();
+    } else {
+        // PDF/DOCX — upload directly without asking
+        document.getElementById('isMasterInput').value = 'false';
+        document.getElementById('uploadForm').submit();
+    }
+}
+
+function submitUpload(isMaster) {
+    bootstrap.Modal.getInstance(document.getElementById('masterModal')).hide();
+    document.getElementById('isMasterInput').value = isMaster ? 'true' : 'false';
+    document.getElementById('uploadForm').submit();
 }
 
 // Auto-refresh if any files are still processing

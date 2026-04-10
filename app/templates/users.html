@@ -15,11 +15,18 @@
         .table tbody tr:hover { background: #22263a; }
         .form-control, .form-select {
             background: #0f1117; border: 1px solid #2d3047;
-            color: #e0e0e0; border-radius: 8px;
+            color: #ffffff; border-radius: 8px; font-weight: 500;
         }
         .form-control:focus, .form-select:focus {
-            background: #0f1117; color: #e0e0e0;
+            background: #0f1117; color: #ffffff;
             border-color: #8b9cf4; box-shadow: 0 0 0 0.2rem rgba(139,156,244,0.25);
+        }
+        .form-control::placeholder {
+            color: #7a7a7a;
+            opacity: 1;
+        }
+        .form-select {
+            color: #ffffff;
         }
         .form-select option { background: #1a1d2e; }
         .section-title { color: #8b9cf4; font-size: 1.1rem; font-weight: 600;
@@ -47,6 +54,7 @@
         <a href="/dashboard/files" class="nav-link d-inline ms-3">📁 קבצים</a>
         <a href="/dashboard/ask" class="nav-link d-inline ms-3">💬 שאל</a>
         <a href="/dashboard/learning" class="nav-link d-inline ms-3">🎓 למידה</a>
+        <a href="/dashboard/logs" class="nav-link d-inline ms-3">📊 לוגים</a>
         <span class="text-muted small ms-3">👤 {{ current_user.username }}</span>
         <a href="/logout" class="nav-link d-inline ms-3" style="color:#dc3545 !important;">🚪 התנתקות</a>
     </div>
@@ -171,7 +179,6 @@
                                 <td>
                                     {% if user.telegram_id %}
                                     <span class="connected">✅ מחובר</span>
-                                    <br><span class="text-muted small">{{ user.telegram_id }}</span>
                                     {% else %}
                                     <span class="not-connected">⏳ לא מחובר</span>
                                     {% endif %}
@@ -245,10 +252,6 @@
                     <div class="mb-3">
                         <label class="form-label small" style="color:#a0a8c0;">שם משתמש *</label>
                         <input type="text" name="username" id="edit_username" class="form-control" required>
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label small" style="color:#a0a8c0;">טלגרם ID</label>
-                        <input type="number" name="telegram_id" id="edit_telegram_id" class="form-control" placeholder="לדוגמה: 5901795253">
                     </div>
                     <div class="mb-3">
                         <label class="form-label small" style="color:#a0a8c0;">תפקיד במערכת</label>
@@ -369,7 +372,6 @@ function openEdit(idx) {
     const u = USERS_DATA[idx];
     document.getElementById('editForm').action = '/dashboard/users/' + u.id + '/edit';
     document.getElementById('edit_username').value = u.username;
-    document.getElementById('edit_telegram_id').value = u.telegram_id;
     document.getElementById('edit_role').value = u.role;
     document.getElementById('edit_job_title').value = u.job_title;
     document.getElementById('edit_manager').value = u.manager_id || '';

@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, BigInteger, String, Text, DateTime, Float, Boolean, ForeignKey, Enum
+from sqlalchemy import Column, Integer, BigInteger, String, Text, DateTime, Float, Boolean, ForeignKey, Enum, JSON
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 from pgvector.sqlalchemy import Vector
@@ -152,6 +152,7 @@ class KnowledgeFile(Base):
     summary       = Column(Text, nullable=True)
     chunk_count   = Column(Integer, default=0)
     status        = Column(String(20), default="processing")  # processing | ready | error
+    is_master     = Column(Boolean, default=False, nullable=False, server_default="false")
     created_at    = Column(DateTime, default=datetime.utcnow)
 
     uploader = relationship("User")
@@ -207,3 +208,34 @@ class DecisionRaciRole(Base):
 
     decision = relationship("Decision", back_populates="raci_roles")
     user     = relationship("User")
+
+
+class QueryLog(Base):
+    """Logs every RAG query with AI response and user feedback."""
+    __tablename__ = "query_logs"
+
+    id            = Column(Integer, primary_key=True, index=True)
+    question      = Column(Text, nullable=False)
+    ai_response   = Column(Text, nullable=False)
+    sources_used  = Column(JSON, nullable=True)       # [{"file": "name.xlsx"}, ...]
+    user_feedback = Column(Integer, default=0)         # 1=up, -1=down, 0=none
+    admin_note    = Column(Text, nullable=True)
+    is_accurate   = Column(Boolean, nullable=True)
+    analyzed      = Column(Boolean, default=False)     # True after optimization run consumed this log
+    failure_type  = Column(String(20), nullable=True)  # "TERMINOLOGY" | "STRUCTURE" | None
+    fix_suggestion = Column(Text, nullable=True)
+    user_id       = Column(Integer, ForeignKey("users.id"), nullable=True)
+    timestamp     = Column(DateTime, default=datetime.utcnow, index=True)
+
+    user = relationship("User")
+
+
+class QuerySynonym(Base):
+    """Learned synonyms from optimization runs, used to expand future queries."""
+    __tablename__ = "query_synonyms"
+
+    id         = Column(Integer, primary_key=True)
+    original   = Column(String(255), unique=True, nullable=False, index=True)
+    synonyms   = Column(JSON, nullable=False)   # list of strings
+    source     = Column(String(20), default="ai")  # "ai" or "admin"
+    created_at = Column(DateTime, default=datetime.utcnow)

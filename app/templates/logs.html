@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Shan-AI — לוגים ולמידה</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body { background: #0f1117; color: #e0e0e0; font-family: 'Segoe UI', sans-serif; }
+        .navbar { background: #1a1d2e !important; border-bottom: 1px solid #2d3047; }
+        .nav-link { color: #8b9cf4 !important; }
+        .nav-link.active { color: #fff !important; font-weight: 600; }
+
+        .card { background: #1a1d2e; border: 1px solid #2d3047; border-radius: 12px; }
+        .section-title { color: #8b9cf4; font-size: 1.1rem; font-weight: 600;
+                         border-right: 3px solid #8b9cf4; padding-right: 10px; margin-bottom: 1rem; }
+        .table { color: #e0e0e0; }
+        .table th { color: #8b9cf4; border-color: #2d3047; font-size: 0.82rem; }
+        .table td { border-color: #2d3047; vertical-align: top; font-size: 0.88rem; }
+        .table tbody tr:hover { background: #22263a; }
+
+        .feedback-up   { color: #28a745; font-size: 1.1rem; }
+        .feedback-down { color: #dc3545; font-size: 1.1rem; }
+        .feedback-none { color: #6c757d; font-size: 1.1rem; }
+
+        .q-cell { max-width: 260px; }
+        .q-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+                  max-width: 250px; cursor: pointer; color: #c8d0f0; }
+        .q-text:hover { color: #8b9cf4; text-decoration: underline; }
+
+        .ans-cell { max-width: 280px; }
+        .ans-text { max-height: 60px; overflow: hidden; font-size: 0.82rem;
+                    color: #a0a8c0; line-height: 1.5; }
+
+        .note-area { width: 100%; min-width: 180px; background: #0f1117; border: 1px solid #2d3047;
+                     color: #e0e0e0; border-radius: 6px; padding: 6px 8px; font-size: 0.82rem;
+                     resize: vertical; min-height: 48px; }
+        .note-area:focus { border-color: #8b9cf4; outline: none; }
+
+        .btn-save-note { background: #8b9cf4; border: none; color: #0f1117;
+                         font-size: 0.75rem; padding: 3px 10px; border-radius: 6px; }
+        .btn-save-note:hover { background: #7a8de3; }
+        .save-ok { color: #28a745; font-size: 0.75rem; display: none; }
+
+        .filter-btn { border: 1px solid #2d3047; background: #1a1d2e; color: #8b9cf4;
+                      border-radius: 20px; padding: 4px 14px; font-size: 0.82rem; cursor: pointer; }
+        .filter-btn.active, .filter-btn:hover { background: #8b9cf4; color: #0f1117; border-color: #8b9cf4; }
+
+        .btn-optimize { background: #28a745; border: none; color: #fff;
+                        font-weight: 700; padding: 8px 20px; border-radius: 10px; }
+        .btn-optimize:hover { background: #218838; }
+        .btn-optimize:disabled { background: #2d3047; color: #555; cursor: not-allowed; }
+
+        .badge-accurate   { background: #1a3a1a; color: #28a745; border: 1px solid #28a745;
+                            font-size: 0.72rem; padding: 2px 8px; border-radius: 10px; }
+        .badge-inaccurate { background: #3a1a1a; color: #dc3545; border: 1px solid #dc3545;
+                            font-size: 0.72rem; padding: 2px 8px; border-radius: 10px; }
+
+        /* Expand modal */
+        .modal-content { background: #1a1d2e; border: 1px solid #2d3047; color: #e0e0e0; }
+        .modal-header { border-color: #2d3047 !important; flex-direction: row-reverse; }
+        .modal-footer { border-color: #2d3047 !important; }
+        .btn-close-custom { background: none; border: none; color: #8b9cf4;
+                            font-size: 1.5rem; cursor: pointer; }
+        .full-answer { white-space: pre-wrap; font-size: 0.9rem; line-height: 1.7;
+                       color: #d0d8f0; max-height: 70vh; overflow-y: auto; }
+
+        .stat-pill { background: #22263a; border: 1px solid #2d3047; border-radius: 20px;
+                     padding: 4px 14px; font-size: 0.82rem; color: #8b9cf4; }
+        .badge-analyzed { background: #1a2a3a; color: #17a2b8; border: 1px solid #17a2b8;
+                          font-size: 0.7rem; padding: 1px 7px; border-radius: 10px; white-space: nowrap; }
+        .btn-clear { background: #3a1a1a; border: 1px solid #dc3545; color: #dc3545;
+                     font-size: 0.82rem; padding: 5px 14px; border-radius: 8px; cursor: pointer; }
+        .btn-clear:hover { background: #dc3545; color: #fff; }
+
+        /* Failure type badges */
+        .badge-structure   { background: #2a1a00; color: #fd7e14; border: 1px solid #fd7e14;
+                             font-size: 0.72rem; padding: 2px 8px; border-radius: 10px; white-space: nowrap; }
+        .badge-terminology { background: #0d1a3a; color: #8b9cf4; border: 1px solid #8b9cf4;
+                             font-size: 0.72rem; padding: 2px 8px; border-radius: 10px; white-space: nowrap; }
+        /* Orange row for structural failures */
+        .row-structure td { background: #1e1400 !important; }
+        .row-structure { border-right: 3px solid #fd7e14; }
+
+        /* Reprocess button */
+        .btn-reprocess { background: #2a1a00; border: 1px solid #fd7e14; color: #fd7e14;
+                         font-size: 0.75rem; padding: 3px 10px; border-radius: 6px; cursor: pointer; }
+        .btn-reprocess:hover { background: #fd7e14; color: #0f1117; }
+        .btn-reprocess:disabled { opacity: 0.5; cursor: not-allowed; }
+    </style>
+</head>
+<body>
+
+<nav class="navbar navbar-dark px-4 py-3">
+    <span class="navbar-brand fw-bold fs-5">🧠 Shan-AI</span>
+    <div>
+        <a href="/dashboard/" class="nav-link d-inline ms-3">📊 דשבורד</a>
+        <a href="/dashboard/decisions" class="nav-link d-inline ms-3">📋 החלטות</a>
+        <a href="/dashboard/users" class="nav-link d-inline ms-3">👥 משתמשים</a>
+        <a href="/dashboard/files" class="nav-link d-inline ms-3">📁 קבצים</a>
+        <a href="/dashboard/ask" class="nav-link d-inline ms-3">💬 שאל</a>
+        <a href="/dashboard/learning" class="nav-link d-inline ms-3">🎓 למידה</a>
+        <a href="/dashboard/logs" class="nav-link active d-inline ms-3">📊 לוגים</a>
+        <span class="text-muted small ms-3">👤 {{ current_user.username }}</span>
+        <a href="/logout" class="nav-link d-inline ms-3" style="color:#dc3545 !important;">🚪 התנתקות</a>
+    </div>
+</nav>
+
+<div class="container-fluid py-4 px-4">
+
+    <!-- Header row -->
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h4 class="mb-1" style="color:#8b9cf4;">📊 לוגים ולמידה</h4>
+            <div class="d-flex gap-2 flex-wrap mt-2">
+                <span class="stat-pill">{{ logs|length }} רשומות</span>
+                <span class="stat-pill">🧠 {{ synonym_count }} מילים נרדפות נלמדו</span>
+            </div>
+        </div>
+        {% if current_user.is_admin %}
+        <div class="d-flex gap-2">
+            <button class="btn-optimize" id="optimizeBtn" onclick="runOptimize()">
+                ⚡ הפעל אופטימיזציה עצמית
+            </button>
+            <button class="btn-clear" onclick="confirmClear()">🗑️ נקה הכל</button>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Filters -->
+    <div class="d-flex gap-2 mb-3">
+        <a href="/dashboard/logs?filter=all"
+           class="filter-btn {% if active_filter == 'all' %}active{% endif %}">הכל</a>
+        <a href="/dashboard/logs?filter=negative"
+           class="filter-btn {% if active_filter == 'negative' %}active{% endif %}">👎 פידבק שלילי</a>
+        <a href="/dashboard/logs?filter=notes"
+           class="filter-btn {% if active_filter == 'notes' %}active{% endif %}">📝 עם הערות מנהל</a>
+    </div>
+
+    <!-- Logs table -->
+    <div class="card">
+        <div class="card-body p-0">
+            {% if logs %}
+            <div class="table-responsive">
+            <table class="table table-borderless mb-0">
+                <thead>
+                    <tr>
+                        <th style="width:40px;">#</th>
+                        <th style="width:260px;">שאלה</th>
+                        <th style="width:280px;">תשובת AI</th>
+                        <th style="width:60px; text-align:center;">פידבק</th>
+                        <th style="width:110px; text-align:center;">סוג כשל</th>
+                        <th>הערת מנהל</th>
+                        <th style="width:80px; text-align:center;">מדויק?</th>
+                        <th style="width:110px;">תאריך</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for log in logs %}
+                <tr id="row-{{ log.id }}" {% if log.failure_type == 'STRUCTURE' %}class="row-structure"{% endif %}>
+                    <td class="text-muted">{{ log.id }}</td>
+                    <td class="q-cell">
+                        <div class="q-text" title="{{ log.question }}"
+                             onclick="showFull({{ log.id }}, `{{ log.question | replace('`','\\`') | replace('\n','\\n') }}`, `{{ log.ai_response | replace('`','\\`') | replace('\n','\\n') }}`)">
+                            {{ log.question[:80] }}{% if log.question|length > 80 %}...{% endif %}
+                        </div>
+                    </td>
+                    <td class="ans-cell">
+                        <div class="ans-text">{{ log.ai_response[:120] }}{% if log.ai_response|length > 120 %}...{% endif %}</div>
+                    </td>
+                    <td style="text-align:center;">
+                        {% if log.user_feedback == 1 %}
+                            <span class="feedback-up">👍</span>
+                        {% elif log.user_feedback == -1 %}
+                            <span class="feedback-down">👎</span>
+                        {% else %}
+                            <span class="feedback-none">—</span>
+                        {% endif %}
+                    </td>
+                    <td style="text-align:center;">
+                        {% if log.failure_type == 'STRUCTURE' %}
+                            <span class="badge-structure">⚠️ מבנה</span>
+                        {% elif log.failure_type == 'TERMINOLOGY' %}
+                            <span class="badge-terminology">📝 טרמינולוגיה</span>
+                        {% else %}
+                            <span class="text-muted">—</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if current_user.is_admin %}
+                        <textarea class="note-area" id="note-{{ log.id }}" rows="2"
+                  oninput="document.getElementById('ok-{{ log.id }}').style.display='none'">{{ log.admin_note or '' }}</textarea>
+                        <div class="d-flex align-items-center gap-2 mt-1">
+                            <button class="btn-save-note" onclick="saveNote({{ log.id }})">שמור</button>
+                            <span class="save-ok" id="ok-{{ log.id }}">✓ נשמר</span>
+                            {% if log.analyzed %}<span class="badge-analyzed" id="analyzed-{{ log.id }}">נותח ✓</span>{% else %}<span class="badge-analyzed" id="analyzed-{{ log.id }}" style="display:none;">נותח ✓</span>{% endif %}
+                        </div>
+                        {% if log.failure_type == 'STRUCTURE' %}
+                        <div class="mt-1">
+                            <button class="btn-reprocess" id="rp-{{ log.id }}" onclick="reprocessFile({{ log.id }})">🔄 עבד מחדש</button>
+                            <span id="rp-ok-{{ log.id }}" style="display:none; color:#28a745; font-size:0.75rem;">✓ עובד מחדש</span>
+                        </div>
+                        {% endif %}
+                        {% else %}
+                            <span class="text-muted small">{{ log.admin_note or '—' }}</span>
+                            {% if log.analyzed %}<br><span class="badge-analyzed">נותח ✓</span>{% endif %}
+                        {% endif %}
+                    </td>
+                    <td style="text-align:center;">
+                        {% if current_user.is_admin %}
+                        <select class="form-select form-select-sm" style="background:#0f1117;border-color:#2d3047;color:#e0e0e0;width:90px;"
+                                onchange="saveAccurate({{ log.id }}, this.value)">
+                            <option value="" {% if log.is_accurate is none %}selected{% endif %}>—</option>
+                            <option value="true"  {% if log.is_accurate == true %}selected{% endif %}>✓ כן</option>
+                            <option value="false" {% if log.is_accurate == false %}selected{% endif %}>✗ לא</option>
+                        </select>
+                        {% else %}
+                            {% if log.is_accurate == true %}<span class="badge-accurate">✓ כן</span>
+                            {% elif log.is_accurate == false %}<span class="badge-inaccurate">✗ לא</span>
+                            {% else %}<span class="text-muted">—</span>{% endif %}
+                        {% endif %}
+                    </td>
+                    <td class="text-muted small">
+                        {{ log.timestamp.strftime('%d/%m %H:%M') if log.timestamp else '—' }}
+                    </td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+            </div>
+            {% else %}
+            <div class="text-center py-5 text-muted">
+                <div style="font-size:2rem;">📭</div>
+                <div class="mt-2">אין לוגים עדיין. שאל שאלה בדף השאל כדי להתחיל.</div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<!-- Full log modal -->
+<div class="modal fade" id="fullModal" tabindex="-1">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" style="color:#8b9cf4;">פרטי שאלה</h5>
+                <button class="btn-close-custom" onclick="bootstrap.Modal.getInstance(document.getElementById('fullModal')).hide()">✕</button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <div class="small text-muted mb-1">שאלה:</div>
+                    <div id="modalQuestion" style="color:#c8d0f0; font-weight:600;"></div>
+                </div>
+                <hr style="border-color:#2d3047;">
+                <div class="small text-muted mb-1">תשובת AI:</div>
+                <div class="full-answer" id="modalAnswer"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Optimization result modal -->
+<div class="modal fade" id="optimizeModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" style="color:#28a745;">⚡ תוצאות אופטימיזציה</h5>
+                <button class="btn-close-custom" onclick="bootstrap.Modal.getInstance(document.getElementById('optimizeModal')).hide()">✕</button>
+            </div>
+            <div class="modal-body" id="optimizeResult" style="font-size:0.95rem; line-height:1.8;"></div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary btn-sm" onclick="bootstrap.Modal.getInstance(document.getElementById('optimizeModal')).hide()">סגור</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+function showFull(id, question, answer) {
+    document.getElementById('modalQuestion').textContent = question;
+    document.getElementById('modalAnswer').textContent = answer;
+    new bootstrap.Modal(document.getElementById('fullModal')).show();
+}
+
+async function saveNote(logId) {
+    const note = document.getElementById(`note-${logId}`).value;
+    const resp = await fetch(`/dashboard/logs/${logId}/note`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ admin_note: note }),
+    });
+    if (resp.ok) {
+        const ok = document.getElementById(`ok-${logId}`);
+        ok.style.display = 'inline';
+        // Note changed → reset analyzed badge (server already reset the flag)
+        const ab = document.getElementById(`analyzed-${logId}`);
+        if (ab) ab.style.display = 'none';
+    }
+}
+
+async function confirmClear() {
+    if (!confirm('למחוק את כל הלוגים? פעולה זו אינה הפיכה.')) return;
+    const resp = await fetch('/dashboard/logs/clear', { method: 'POST' });
+    if (resp.ok) {
+        window.location.reload();
+    }
+}
+
+async function saveAccurate(logId, value) {
+    const is_accurate = value === '' ? null : value === 'true';
+    await fetch(`/dashboard/logs/${logId}/note`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ admin_note: document.getElementById(`note-${logId}`)?.value || '', is_accurate }),
+    });
+}
+
+async function runOptimize() {
+    const btn = document.getElementById('optimizeBtn');
+    btn.disabled = true;
+    btn.textContent = '⏳ מריץ אופטימיזציה...';
+
+    try {
+        const resp = await fetch('/dashboard/logs/optimize', { method: 'POST' });
+        const data = await resp.json();
+        let html = '';
+        if (data.status === 'ok') {
+            const structureNote = data.structural_issues > 0
+                ? `<br>⚠️ בעיות מבנה שזוהו: <strong style="color:#fd7e14;">${data.structural_issues}</strong> — שורות מסומנות בכתום לעיבוד מחדש`
+                : '';
+            html = `✅ האופטימיזציה הושלמה!<br><br>
+                    📋 לוגים שנותחו: <strong>${data.logs_processed}</strong><br>
+                    ➕ מילים נרדפות חדשות: <strong>${data.synonyms_added}</strong><br>
+                    🔄 מילים נרדפות עודכנו: <strong>${data.synonyms_updated}</strong>
+                    ${structureNote}<br><br>
+                    <span style="color:#8b9cf4; font-size:0.85rem;">
+                        המונחים החדשים יחולו אוטומטית על שאלות עתידיות.
+                    </span>`;
+        } else if (data.status === 'no_data') {
+            html = '📭 אין לוגים עם פידבק שלילי או הערות מנהל לניתוח.';
+        } else {
+            html = `❌ שגיאה: ${data.error || 'לא ידוע'}`;
+        }
+        document.getElementById('optimizeResult').innerHTML = html;
+        new bootstrap.Modal(document.getElementById('optimizeModal')).show();
+        // Refresh page so analyzed badges appear on processed rows
+        if (data.status === 'ok') setTimeout(() => window.location.reload(), 3000);
+    } catch (e) {
+        alert('שגיאה בהפעלת האופטימיזציה');
+    } finally {
+        btn.disabled = false;
+        btn.textContent = '⚡ הפעל אופטימיזציה עצמית';
+    }
+}
+
+async function reprocessFile(logId) {
+    const btn = document.getElementById(`rp-${logId}`);
+    btn.disabled = true;
+    btn.textContent = '⏳...';
+    try {
+        const resp = await fetch(`/dashboard/logs/${logId}/reprocess`, { method: 'POST' });
+        const data = await resp.json();
+        if (data.ok) {
+            btn.style.display = 'none';
+            document.getElementById(`rp-ok-${logId}`).style.display = 'inline';
+        } else {
+            btn.disabled = false;
+            btn.textContent = '🔄 עבד מחדש';
+            alert(data.detail || 'שגיאה בעיבוד מחדש');
+        }
+    } catch (e) {
+        btn.disabled = false;
+        btn.textContent = '🔄 עבד מחדש';
+        alert('שגיאה בעיבוד מחדש');
+    }
+}
+</script>
+</body>
+</html>

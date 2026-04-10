@@ -18,13 +18,17 @@
         /* ── Forms (used in modals) ── */
         .form-control, .form-select {
             background: #0f1117; border: 1px solid #2d3047;
-            color: #e0e0e0; border-radius: 8px; transition: border-color .2s, box-shadow .2s;
+            color: #ffffff; border-radius: 8px; transition: border-color .2s, box-shadow .2s; font-weight: 500;
         }
         .form-control:focus, .form-select:focus {
-            background: #0f1117; color: #e0e0e0;
+            background: #0f1117; color: #ffffff;
             border-color: #8b9cf4; box-shadow: 0 0 0 .2rem rgba(139,156,244,.2);
         }
-        .form-select option { background: #1a1d2e; }
+        .form-control::placeholder {
+            color: #7a7a7a;
+            opacity: 1;
+        }
+        .form-select option { background: #1a1d2e; color: #ffffff; }
         .form-label { color: #d0d8f0; font-size: .88rem; }
         textarea.form-control { min-height: 80px; }
 
@@ -382,6 +386,7 @@
         <a href="/dashboard/files" class="nav-link d-inline ms-3">📁 קבצים</a>
         <a href="/dashboard/ask" class="nav-link d-inline ms-3">💬 שאל</a>
         <a href="/dashboard/learning" class="nav-link d-inline ms-3">🎓 למידה</a>
+        <a href="/dashboard/logs" class="nav-link d-inline ms-3">📊 לוגים</a>
         <span class="text-muted small ms-3">👤 {{ current_user.username }}</span>
         <a href="/logout" class="nav-link d-inline ms-3" style="color:#dc3545 !important;">🚪 התנתקות</a>
     </div>

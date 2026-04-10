@@ -19,6 +19,7 @@ from app.routers import auth, telegram, dashboard, login
 from app.routers.dashboard import profile_router
 from app.routers import files as files_router
 from app.routers import ask as ask_router
+from app.routers import logs as logs_router
 from fastapi.templating import Jinja2Templates
 from app.services.telegram_polling import telegram_bot
 from app.services.feedback_service import run_feedback_scheduler
@@ -45,6 +46,7 @@ app.include_router(telegram.router)
 app.include_router(dashboard.router)
 app.include_router(files_router.router)
 app.include_router(ask_router.router)
+app.include_router(logs_router.router)
 app.include_router(profile_router)
 
 @app.on_event("startup")
@@ -104,6 +106,9 @@ async def startup():
                 ))
                 await conn.execute(_text(
                     "CREATE INDEX IF NOT EXISTS ix_raci_user ON decision_raci_roles (user_id)"
+                ))
+                await conn.execute(_text(
+                    "ALTER TABLE knowledge_files ADD COLUMN IF NOT EXISTS is_master BOOLEAN NOT NULL DEFAULT FALSE;"
                 ))
             print("Database tables initialized.")
             break

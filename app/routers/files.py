@@ -3,7 +3,7 @@
 import os
 import uuid
 from pathlib import Path
-from fastapi import APIRouter, Depends, Request, UploadFile, File, BackgroundTasks, HTTPException
+from fastapi import APIRouter, Depends, Request, UploadFile, File, Form, BackgroundTasks, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -49,6 +49,7 @@ async def files_page(
             "summary": kf.summary or "",
             "chunk_count": kf.chunk_count,
             "status": kf.status,
+            "is_master": kf.is_master,
             "created_at": kf.created_at.strftime("%d/%m/%Y %H:%M"),
         }
         for kf, uploader_name in rows
@@ -68,6 +69,7 @@ async def files_page(
 async def upload_file(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
+    is_master: str = Form("false"),
     session: AsyncSession = Depends(get_db_session),
     current_user: User = Depends(get_current_user),
 ):
@@ -85,6 +87,13 @@ async def upload_file(
     contents = await file.read()
     file_path.write_bytes(contents)
 
+    make_master = is_master.lower() == "true" and ext == "xlsx"
+
+    if make_master:
+        # Unset any existing master before setting the new one
+        from sqlalchemy import update as _update
+        await session.execute(_update(KnowledgeFile).values(is_master=False))
+
     kf = KnowledgeFile(
         original_name=file.filename,
         file_path=str(file_path),
@@ -92,18 +101,75 @@ async def upload_file(
         file_size=len(contents),
         uploader_id=current_user.id,
         status="processing",
+        is_master=make_master,
     )
     session.add(kf)
     await session.commit()
     await session.refresh(kf)
 
-    from app.services.knowledge_service import process_file
-    background_tasks.add_task(process_file, kf.id)
+    if make_master:
+        from app.services.knowledge_service import process_master_file
+        background_tasks.add_task(process_master_file, kf.id)
+        return RedirectResponse(
+            f"/dashboard/files?msg=קובץ+המאסטר+הועלה+ומעובד+בעיבוד+מיוחד.+יופיע+כ%22מוכן%22+בעוד+מספר+שניות.",
+            status_code=303,
+        )
+    else:
+        from app.services.knowledge_service import process_file
+        background_tasks.add_task(process_file, kf.id)
+        return RedirectResponse(
+            f"/dashboard/files?msg=הקובץ+הועלה+ומעובד.+יופיע+כ%22מוכן%22+בעוד+מספר+שניות.",
+            status_code=303,
+        )
+
+
+@router.post("/{file_id}/set_master")
+async def set_master_file(
+    file_id: int,
+    background_tasks: BackgroundTasks,
+    session: AsyncSession = Depends(get_db_session),
+    current_user: User = Depends(get_current_user),
+):
+    """Unset any existing master, mark this file as master, trigger master ETL."""
+    from sqlalchemy import update as _update
+
+    kf = await session.get(KnowledgeFile, file_id)
+    if not kf:
+        raise HTTPException(status_code=404, detail="קובץ לא נמצא")
+    if kf.file_type != "xlsx":
+        return RedirectResponse(
+            "/dashboard/files?error=רק+קבצי+XLSX+יכולים+להיות+Master",
+            status_code=303,
+        )
+
+    # Unset all existing masters atomically
+    await session.execute(_update(KnowledgeFile).values(is_master=False))
+
+    kf.is_master = True
+    kf.status = "processing"
+    await session.commit()
+
+    from app.services.knowledge_service import process_master_file
+    background_tasks.add_task(process_master_file, kf.id)
 
     return RedirectResponse(
-        f"/dashboard/files?msg=הקובץ+הועלה+ומעובד.+יופיע+כ%22מוכן%22+בעוד+מספר+שניות.",
+        f"/dashboard/files?msg=הקובץ+{kf.original_name}+הוגדר+כ-Master+ומעובד.",
         status_code=303,
     )
+
+
+@router.post("/{file_id}/unset_master")
+async def unset_master_file(
+    file_id: int,
+    session: AsyncSession = Depends(get_db_session),
+    current_user: User = Depends(get_current_user),
+):
+    """Remove the master flag from this file."""
+    kf = await session.get(KnowledgeFile, file_id)
+    if kf:
+        kf.is_master = False
+        await session.commit()
+    return RedirectResponse("/dashboard/files?msg=הקובץ+הוסר+מהגדרת+Master.", status_code=303)
 
 
 _MIME = {

@@ -1,0 +1,23 @@
+version: '3.8'
+
+services:
+  db_staging:
+    # שימוש ב-Image שתומך בוקטורים (חיוני ל-RAG)
+    image: pgvector/pgvector:0.7.0-pg15
+    container_name: shan_db_staging
+    environment:
+      - POSTGRES_USER=shan_user
+      - POSTGRES_PASSWORD=shan_secure_pass_2025
+      - POSTGRES_DB=shan_ai_staging
+    ports:
+      - "5433:5432"
+
+  app_staging:
+    build: .
+    container_name: shan_app_staging
+    ports:
+      - "8001:8001"
+    env_file:
+      - .env.staging
+    depends_on:
+      - db_staging

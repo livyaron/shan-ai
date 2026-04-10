@@ -397,7 +397,6 @@ async def regen_code(
 async def edit_user(
     user_id: int,
     username: str = Form(...),
-    telegram_id: str = Form(""),
     role: str = Form(""),
     job_title: str = Form(""),
     responsibilities: str = Form(""),
@@ -416,7 +415,6 @@ async def edit_user(
         return RedirectResponse("/dashboard/users?error=משתמש+לא+נמצא", status_code=303)
 
     user.username = username
-    user.telegram_id = int(telegram_id) if telegram_id.strip() else None
     if role:
         user.role = RoleEnum(role)
         user.hierarchy_level = _ROLE_HIERARCHY.get(role)
