@@ -112,8 +112,8 @@ _RISK_KEYWORDS = (
 )
 
 _MANAGER_KEYWORDS = (
-    'מנה"פ', 'מנה"פים', "מנהל", "מנהלים", "אחראי", "אחראים",
-    "מנהל פרויקט", "מנהל המכלל", "מי אחראי",
+    'מנה"פ', 'מנה"פים', "מנהל", "מנהלת", "מנהלים", "מנהלות", "אחראי", "אחראית", "אחראים",
+    "מנהל פרויקט", "מנהלת פרויקט", "מנהל המכלל", "מי אחראי",
     "manager", "responsible", "in charge", "lead"
 )
 
@@ -244,6 +244,52 @@ def _extract_type_from_count_query(text: str) -> Optional[str]:
     return candidate if candidate and len(candidate) >= 2 else None
 
 
+async def _ai_detect_intent(text: str) -> tuple[Optional[str], Optional[str]]:
+    """
+    Use the LLM to extract query intent and parameter from free-form Hebrew text.
+    Returns (intent, param) or (None, None) on failure — caller falls back to keyword matching.
+    """
+    import json as _json
+    import re as _re
+    from app.services.llm_router import llm_chat
+
+    prompt = (
+        "אתה מחלץ כוונה ופרמטר משאלות על פרויקטים בעברית.\n"
+        "החזר JSON בלבד בפורמט: {\"intent\": \"...\", \"param\": \"...\"}\n\n"
+        "אפשרויות intent:\n"
+        "- by_manager: השאלה עוסקת בפרויקטים שמנהל/ת אדם ספציפי → param = שם מלא של המנהל/ת\n"
+        "- by_identifier: השאלה עוסקת בפרויקט ספציפי לפי שם או מזהה → param = שם/מזהה הפרויקט\n"
+        "- count_by_type: כמה פרויקטים מסוג מסוים יש → param = סוג הפרויקט (או null לספירה כוללת)\n"
+        "- list_risks: השאלה עוסקת בסיכונים/חסמים → param = null\n"
+        "- by_year: פרויקטים שמסתיימים בשנה מסוימת → param = שנה כמחרוזת\n"
+        "- general: כל שאלה כללית אחרת על פרויקטים → param = null\n\n"
+        f"שאלה: {text}\n\nJSON:"
+    )
+
+    try:
+        response = await llm_chat(
+            "intent_detection",
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=80,
+            temperature=0.0,
+        )
+        match = _re.search(r'\{[^}]+\}', response)
+        if match:
+            data = _json.loads(match.group())
+            intent = data.get("intent") or None
+            param = data.get("param") or None
+            if param in ("null", "", "None"):
+                param = None
+            valid_intents = {"by_manager", "by_identifier", "count_by_type", "list_risks", "by_year", "general"}
+            if intent in valid_intents:
+                logger.info(f"AI intent detection: intent={intent}, param={param!r}")
+                return (intent, param)
+    except Exception as e:
+        logger.warning(f"AI intent detection failed: {e}")
+
+    return (None, None)
+
+
 def _detect_intent(text: str, user_data: dict) -> tuple[str, Optional[str]]:
     """
     Detect query intent from text.
@@ -260,15 +306,17 @@ def _detect_intent(text: str, user_data: dict) -> tuple[str, Optional[str]]:
             if " של " in text:
                 name = text.split(" של ", 1)[-1].strip().rstrip("?").strip()
             else:
-                name = text.rstrip("?").strip()
-                for kw in _COUNT_KEYWORDS:
-                    name = name.replace(kw, "").strip()
-                for kw in (*_MANAGER_KEYWORDS, "פרויקטים", "פרויקטי", "פרויקט", "יש"):
-                    name = name.replace(kw, "").strip()
-                # Keep ALL remaining words — supports full names like "טובה ברחד"
+                # Word-level filtering — avoids corrupting words that contain keyword substrings
+                # e.g. "מנהלת" must not be mangled by removing "מנהל" as a substring
+                _remove_words = (
+                    set(_COUNT_KEYWORDS)
+                    | set(_MANAGER_KEYWORDS)
+                    | {"פרויקטים", "פרויקטי", "פרויקט", "יש"}
+                )
                 words = [
-                    w.strip("?.,;:!") for w in name.split()
+                    w.strip("?.,;:!") for w in text.split()
                     if w.strip("?.,;:!") and w.strip("?.,;:!") not in _SKIP_WORDS
+                    and w.strip("?.,;:!") not in _remove_words
                 ]
                 name = " ".join(words)
             if name and len(name) > 1:
@@ -350,7 +398,13 @@ async def answer_project_query(
     Updates user_data["last_project"] for conversation context.
     Writes a QueryLog entry so the question appears in the dashboard logs tab.
     """
-    intent, param = _detect_intent(text, user_data)
+    # Primary: ask the LLM to understand the question
+    intent, param = await _ai_detect_intent(text)
+    # Fallback: keyword-based detection if AI failed or returned nothing useful
+    if not intent or intent == "general":
+        kw_intent, kw_param = _detect_intent(text, user_data)
+        if kw_intent != "general" or not intent:
+            intent, param = kw_intent, kw_param
 
     # Detect if this is a bare name lookup (no question words, just a name)
     _q = text.strip().rstrip("?").strip()
