@@ -96,6 +96,8 @@ intent (רק כש-route="project", אחרת "general"):
 דוגמאות:
 "מה סטטוס רעות?"                        → {"route":"project","intent":"by_identifier","param":"רעות"}
 "מה תאריך תכנית הפיתוח של רעות?"        → {"route":"project","intent":"by_identifier","param":"רעות"}
+"מי מנהל את פרויקט רמת חובב?"           → {"route":"project","intent":"by_identifier","param":"רמת חובב"}
+"מה העדכון השבועי של פרויקט X?"         → {"route":"project","intent":"by_identifier","param":"X"}
 "כמה פרויקטים מנהלת ענת אוברקוביץ?"     → {"route":"project","intent":"by_manager","param":"אוברקוביץ, ענת"}
 "אילו פרויקטים מסתיימים ב-2026?"        → {"route":"project","intent":"by_year","param":"2026"}
 "מה הסיכונים בפרויקטים?"                → {"route":"project","intent":"list_risks","param":null}
@@ -109,10 +111,57 @@ intent (רק כש-route="project", אחרת "general"):
 JSON:"""
 
 
-async def _ai_route_message(text: str) -> dict:
-    """One LLM call: classify route (project/knowledge/decision) + extract intent+param."""
+def _parse_routing_response(response: str) -> dict:
+    """
+    Robustly extract route/intent/param from an LLM response.
+    Tries json.loads first; falls back to per-field regex extraction
+    so that invalid JSON (bad quotes, Hebrew chars) doesn't cause total failure.
+    """
     import json as _json
     import re as _re
+
+    valid_routes = {"project", "knowledge", "decision"}
+    valid_intents = {"by_identifier", "by_manager", "count_by_type", "list_risks", "by_year", "general"}
+
+    # Try standard JSON parse on the first {...} block
+    match = _re.search(r'\{[^}]+\}', response, _re.DOTALL)
+    if match:
+        try:
+            data = _json.loads(match.group())
+            route = data.get("route")
+            intent = data.get("intent") or "general"
+            param = data.get("param")
+            if param in (None, "null", "", "None"):
+                param = None
+            if route in valid_routes and intent in valid_intents:
+                return {"route": route, "intent": intent, "param": param}
+        except Exception:
+            pass  # fall through to regex extraction
+
+    # Fallback: extract each field individually with regex
+    def _field(name: str) -> str | None:
+        m = _re.search(rf'"{name}"\s*:\s*"([^"]*)"', response)
+        if m:
+            return m.group(1).strip()
+        m = _re.search(rf'"{name}"\s*:\s*null', response)
+        if m:
+            return None
+        return None
+
+    route = _field("route")
+    intent = _field("intent") or "general"
+    param = _field("param")
+    if param in (None, "null", "", "None"):
+        param = None
+
+    if route in valid_routes:
+        return {"route": route, "intent": intent if intent in valid_intents else "general", "param": param}
+
+    return {"route": None, "intent": None, "param": None}
+
+
+async def _ai_route_message(text: str) -> dict:
+    """One LLM call: classify route (project/knowledge/decision) + extract intent+param."""
     from app.services.llm_router import llm_chat
     prompt = _ROUTING_PROMPT.replace("{text}", text)
     try:
@@ -122,17 +171,10 @@ async def _ai_route_message(text: str) -> dict:
             max_tokens=100,
             temperature=0.0,
         )
-        match = _re.search(r'\{[^}]+\}', response)
-        if match:
-            data = _json.loads(match.group())
-            route = data.get("route")
-            intent = data.get("intent") or "general"
-            param = data.get("param")
-            if param in (None, "null", "", "None"):
-                param = None
-            if route in {"project", "knowledge", "decision"}:
-                logger.info(f"_ai_route_message: route={route!r} intent={intent!r} param={param!r}")
-                return {"route": route, "intent": intent, "param": param}
+        result = _parse_routing_response(response)
+        if result["route"]:
+            logger.info(f"_ai_route_message: route={result['route']!r} intent={result['intent']!r} param={result['param']!r}")
+            return result
         logger.warning(f"_ai_route_message: could not parse response: {response!r}")
     except Exception as e:
         logger.warning(f"_ai_route_message failed: {e}")
