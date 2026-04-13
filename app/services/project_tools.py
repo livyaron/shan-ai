@@ -515,24 +515,18 @@ async def answer_project_query(
 
     # Call LLM to analyze and summarize in Hebrew
     try:
-        _DELIM_OPEN = "%%%תשובה%%%"
-        _DELIM_CLOSE = "%%%סוף%%%"
-
         instructions_addon = ""
         if learned_instructions:
             instructions_text = "\n".join(f"- {inst}" for inst in learned_instructions)
             instructions_addon = (
-                "\n\n## הוראות שנלמדו מפידבק קודם (חובה לקיים):\n"
+                "\n\nהוראות נוספות (חובה לקיים):\n"
                 + instructions_text
             )
 
         if _bare_name:
             system_content = (
                 "אתה עוזר מומחה בניהול פרויקטים תשתיות חשמל. "
-                "המשתמש כתב שם פרויקט בלבד — הצג כרטיס סטטוס מלא. "
-                f"כתוב את התשובה הסופית בין הסמנים {_DELIM_OPEN} ו-{_DELIM_CLOSE} בלבד. "
-                "כל מחשבה, הכנה, או בדיקה — לפני הסמן הראשון בלבד (לא בפלט). "
-                "בין הסמנים: עברית בלבד, ישירות, ללא הקדמות. "
+                "ענה בעברית בלבד, ישירות וקצר. אל תוסיף הקדמות, סיכומים, או סימנים מיוחדים. "
                 "הצג את כל השדות הקיימים:\n"
                 "• שם הפרויקט ומזהה\n"
                 "• שלב / סטטוס\n"
@@ -548,10 +542,8 @@ async def answer_project_query(
         else:
             system_content = (
                 "אתה עוזר מומחה בניהול פרויקטים תשתיות חשמל. "
-                "קיבלת נתוני פרויקט מהמסד. "
-                f"כתוב את התשובה הסופית בין הסמנים {_DELIM_OPEN} ו-{_DELIM_CLOSE} בלבד. "
-                "כל מחשבה, הכנה, או בדיקה — לפני הסמן הראשון בלבד (לא בפלט). "
-                "בין הסמנים: עברית בלבד, ישירות, ממוקד. "
+                "ענה בעברית בלבד, ישירות וקצר — משפט אחד עד כמה שורות. "
+                "אל תוסיף הקדמות, מילות סיום, או סימנים מיוחדים. "
                 "אם יש סיכונים — הדגש אותם. אם יש עדכון שבועי — סכם בשורה אחת. "
                 "אל תמציא מידע שלא קיים בנתונים."
                 + instructions_addon
@@ -620,17 +612,11 @@ def _strip_thinking(text: str) -> str:
     """
     import re
 
-    _DELIM_OPEN = "%%%תשובה%%%"
-    _DELIM_CLOSE = "%%%סוף%%%"
-
-    # 1. Extract delimited answer block (most reliable — model wrote between markers)
-    if _DELIM_OPEN in text:
-        start = text.index(_DELIM_OPEN) + len(_DELIM_OPEN)
-        end = text.index(_DELIM_CLOSE) if _DELIM_CLOSE in text else len(text)
-        return text[start:end].strip()
-
-    # 2. Strip explicit <think>...</think> blocks (DeepSeek / some Gemma models)
+    # 1. Strip explicit <think>...</think> blocks (DeepSeek / some Gemma models)
     text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
+
+    # 2. Strip any %%%...%%% delimiter artifacts (legacy or corrupted markers from any model)
+    text = re.sub(r"%%%[^%]*%%%", "", text).strip()
 
     # 3. Discard leading reasoning blocks.
     #    Strategy: find the LAST contiguous block of Hebrew-dominant lines.
