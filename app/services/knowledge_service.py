@@ -15,6 +15,41 @@ from app.database import async_session_maker
 logger = logging.getLogger(__name__)
 
 UPLOAD_DIR = Path("uploads")
+
+# ─── Hebrew Normalization ───────────────────────────────────────────────────
+
+import unicodedata
+
+_FINAL_LETTERS = {"ך": "כ", "ם": "מ", "ן": "נ", "ף": "פ", "ץ": "צ"}
+_HEBREW_PREFIXES = frozenset("והבכלמש")
+
+
+def normalize_hebrew(text: str) -> str:
+    """Normalize Hebrew text for fuzzy matching:
+    - Strip nikud (vowel marks U+05B0–U+05C7)
+    - Convert final letters (ך,ם,ן,ף,ץ) to standard forms
+    - Lowercase
+    """
+    text = unicodedata.normalize("NFC", text)
+    text = re.sub(r"[\u05B0-\u05C7]", "", text)
+    return "".join(_FINAL_LETTERS.get(c, c) for c in text).lower()
+
+
+def _word_forms(word: str) -> set[str]:
+    """Return normalized forms of a word: with and without common Hebrew prefix."""
+    norm = normalize_hebrew(word)
+    forms = {norm}
+    if len(norm) > 2 and norm[0] in _HEBREW_PREFIXES:
+        forms.add(norm[1:])  # strip single-letter prefix (ו,ה,ב,כ,ל,מ,ש)
+    return forms
+
+
+def _question_word_forms(text: str) -> set[str]:
+    """Build a set of all word forms (with/without prefix) from a question string."""
+    forms: set[str] = set()
+    for word in text.split():
+        forms |= _word_forms(word)
+    return forms
 CHUNK_SIZE = 600
 CHUNK_OVERLAP = 100
 
@@ -25,6 +60,9 @@ HEBREW_ABBREVS = {
     'תו"ב': 'תכנון ובנייה',
     "מנה''פ": 'מנהל פרויקט',
     "פ''מ": 'מנהל פרויקט',
+    # Spelling variants: user writes חישמול, data stores חשמול
+    'חישמול': 'חשמול',
+    'חישמל': 'חשמול',
 }
 
 
@@ -235,9 +273,9 @@ def chunk_text(text: str, chunk_size: int = CHUNK_SIZE, overlap: int = CHUNK_OVE
 async def _generate_summary(text_snippet: str, filename: str) -> str:
     """Generate a short Hebrew summary of the file using Groq."""
     try:
-        from app.services.groq_client import groq_chat
+        from app.services.llm_router import llm_chat
         snippet = text_snippet[:2000]
-        return await groq_chat(
+        return await llm_chat("file_summary",
             messages=[
                 {
                     "role": "system",
@@ -789,8 +827,9 @@ DOMAIN_KEYWORD_MAP = [
     (['היתר', 'היתר בניה', 'רישיון בניה'], ['היתר בניה', 'היתר']),
     # Development plan date queries
     (['תוכנית פיתוח', 'תאריך תוכנית', 'פיתוח'], ['תאריך תוכנית הפיתוח', 'תוכנית פיתוח']),
-    # Electrification date queries
-    (['חישמול', 'תאריך חישמול'], ['תאריך חישמול', 'חישמול']),
+    # Electrification date queries — note: data stores "חשמול" (no י), user often writes "חישמול" (with י)
+    (['חישמול', 'חשמול', 'תאריך חישמול', 'תאריך חשמול'],
+     ['יעד חשמול', 'יעד חשמול מסתמן', 'חשמול']),
 ]
 
 
@@ -1098,6 +1137,25 @@ def _dedup_fragment_lines(contents: list[str]) -> list[str]:
     return result_lines
 
 
+def _trim_chunk_for_specific(content: str, max_update_chars: int = 300) -> str:
+    """Trim a master-file chunk for specific queries.
+
+    Keeps all structured fields (Project, WBS, Manager, Status, dates, etc.) but
+    truncates the Update: field to `max_update_chars` to prevent context explosion.
+    Single chunks now contain full weekly history which can be thousands of chars.
+    """
+    # Split on pipe delimiters, keep all parts, but truncate the Update field
+    parts = content.split(" | ")
+    trimmed_parts = []
+    for part in parts:
+        if part.strip().startswith("Update:") or part.strip().startswith("🏗️ Project:"):
+            # Keep Update but cap length; keep Project field always
+            if part.strip().startswith("Update:") and len(part) > max_update_chars:
+                part = part[:max_update_chars] + "…"
+        trimmed_parts.append(part)
+    return " | ".join(trimmed_parts)
+
+
 def format_knowledge_context(
     chunks: list[KnowledgeChunk],
     compact: bool = False,
@@ -1115,11 +1173,17 @@ def format_knowledge_context(
     if compact:
         return _format_compact_index(chunks, file_name_map=file_name_map)
 
+    # ── Trim chunks to prevent context explosion ──────────────────────────
+    # Each master-file chunk now contains full weekly history in the Update field.
+    # Trim to keep structured fields (Project, WBS, Manager, Status, dates) but
+    # cap the Update text at 300 chars so context stays under Groq's token limit.
+    trimmed_contents = [_trim_chunk_for_specific(c.content) for c in chunks]
+
     # ── Group chunks by project name ──────────────────────────────────────
     groups: dict[str, list[str]] = {}
-    for chunk in chunks:
-        project = _extract_project_name(chunk.content) or "_ungrouped"
-        groups.setdefault(project, []).append(chunk.content)
+    for content in trimmed_contents:
+        project = _extract_project_name(content) or "_ungrouped"
+        groups.setdefault(project, []).append(content)
 
     # ── Build context blocks ───────────────────────────────────────────────
     lines = [
@@ -1263,36 +1327,85 @@ def _extract_wbs_and_projects_from_chunks(chunks) -> tuple:
 # Q&A
 # ---------------------------------------------------------------------------
 
-_TELEGRAM_FORMAT_RULES = (
+# Used when the user asks for details about a specific project
+_TELEGRAM_FORMAT_RULES_DETAIL = (
     "\n\nפורמט חובה (Telegram-safe):"
     "\n- אסור בהחלט: טבלאות Markdown, תווי pipe (|), כותרות ###"
     "\n- חובה לכל פרויקט:"
     "\n  🏗️ **[שם הפרויקט]**"
     "\n  • WBS: [קוד]"
     "\n  • 👤 מנהל: [שם]"
-    "\n  • 📅 תאריך: [DD/MM/YYYY]"
     "\n  • סטטוס: 🟢/🟡/🔴 [תיאור]"
     "\n  • פירוט: [עדכון]"
     "\n- הפרד בין פרויקטים בשורה ריקה"
     "\n- נתונים כלליים: נקודות תבליט רגילות"
 )
 
-async def answer_question(question: str, context: str, full_list: bool = False, specific: bool = False) -> str:
+# Used when the user asks for a list of projects (without requesting details)
+_TELEGRAM_FORMAT_RULES_LIST = (
+    "\n\nפורמט חובה (Telegram-safe):"
+    "\n- אסור בהחלט: טבלאות Markdown, תווי pipe (|), כותרות ###"
+    "\n- כאשר מציגים רשימה של פרויקטים ללא בקשת פירוט — הצג לכל פרויקט שורה אחת בלבד:"
+    "\n  🏗️ **[שם הפרויקט]** | WBS: [קוד]"
+    "\n- אין להוסיף מנהל, סטטוס, פירוט, תאריכים או כל שדה אחר אלא אם נשאל במפורש"
+    "\n- הפרד בין פרויקטים בשורה ריקה"
+    "\n- נתונים כלליים (סכומים, ספירות): נקודות תבליט רגילות"
+)
+
+# Back-compat alias — replaced by the two variants above in answer_question()
+_TELEGRAM_FORMAT_RULES = _TELEGRAM_FORMAT_RULES_DETAIL
+
+async def answer_question(
+    question: str,
+    context: str,
+    full_list: bool = False,
+    specific: bool = False,
+    learned_instructions: list[str] | None = None,
+    bare_name: bool = False,
+) -> str:
     """Use Groq to answer a question based on knowledge context."""
     try:
-        from app.services.groq_client import groq_chat
+        from app.services.llm_router import llm_chat
+
+        # Build the learned-instructions addon (injected at end of system prompt)
+        instructions_addon = ""
+        if learned_instructions:
+            instructions_text = "\n".join(f"- {inst}" for inst in learned_instructions)
+            instructions_addon = (
+                "\n\n## הוראות שנלמדו מפידבק קודם (חובה לקיים):\n"
+                + instructions_text
+            )
+            logger.info(f"Injecting {len(learned_instructions)} learned instructions into system prompt:")
+            for i, inst in enumerate(learned_instructions):
+                logger.info(f"  [{i + 1}] {inst[:120]}")
+
+        # Detect whether the question asks for project details or just a list
+        _DETAIL_KEYWORDS = {'פרטים', 'פירוט', 'פרטי', 'מידע', 'נתונים', 'הכל', 'כל', 'דווח', 'תאר', 'ספר', 'סקור'}
+        _question_words = set(question.split())
+        wants_details = specific or bare_name or any(w in _DETAIL_KEYWORDS for w in _question_words)
+        format_rules = _TELEGRAM_FORMAT_RULES_DETAIL if wants_details else _TELEGRAM_FORMAT_RULES_LIST
 
         if specific:
             system_prompt = (
                 "אתה מומחה לבקרת פרויקטים הנדסיים. "
                 "קיבלת שאלה ספציפית הדורשת תשובה ממוקדת וקצרה."
+                "\n\n## מדריך שמות שדות — מיפוי בין שמות טכניים בנתונים לשמות בשאלות:"
+                "\n• 'יעד חשמול מסתמן' / 'יעד מסתמן' = תאריך חישמול / תאריך חשמול / מתי יחושמל"
+                "\n• 'יעד תכנית פיתוח' = תאריך תוכנית פיתוח / תאריך ת\"פ / יעד ת\"פ"
+                "\n• 'יעד מסתמן' (ללא 'חשמול') = תאריך יעד / תאריך סיום מסתמן / תאריך צפוי"
+                "\n• 'Update:' / 'פירוט שבועי' = עדכון שבועי / מה קורה / מצב עדכני / פעילות אחרונה"
+                "\n• 'Status:' = סטטוס / שלב / מצב הפרויקט"
+                "\n• 'Manager:' / 'מנה\"פ:' = מנהל / מנהל הפרויקט"
+                "\n• 'תו\"ב:' = תכנון ובנייה / רשות רישוי"
+                "\nחובה: לפני שאתה כותב 'הנתון לא נמצא', בדוק אם השדה מופיע בשם אחר לפי המדריך הזה."
                 "\n\nכללי חובה:"
                 "\n1. ענה ישירות על מה שנשאל — שם, תאריך, מספר, סטטוס — בשורה אחת או שתיים לכל היותר."
                 "\n2. אל תרחיב, אל תוסיף הקדמה, ואל תפרט פרויקטים אחרים שלא נשאלת עליהם."
                 "\n3. אם יש כמה ערכים רלוונטיים (למשל כמה תאריכים), ציין את כולם בצורה תמציתית."
-                "\n4. אם הנתון לא קיים בהקשר, כתוב 'הנתון לא נמצא במסד הידע'."
+                "\n4. אם הנתון לא קיים בהקשר גם לאחר בדיקת כל שמות השדות האפשריים, כתוב 'הנתון לא נמצא במסד הידע'."
                 '\n5. קיצורים: מנה"פ / פ"מ = מנהל פרויקט, תו"ב = תכנון ובנייה.'
-                f"{_TELEGRAM_FORMAT_RULES}"
+                f"{format_rules}"
+                f"{instructions_addon}"
                 "\n\nענה בעברית בלבד. תשובה קצרה וממוקדת בלבד."
             )
             max_tokens = 400
@@ -1309,6 +1422,12 @@ async def answer_question(question: str, context: str, full_list: bool = False, 
             system_prompt = (
                 "אתה מומחה לבקרת פרויקטים הנדסיים של רשות החשמל. "
                 "קיבלת קטעי נתונים ממסד הידע של הארגון — זוהי רשימת פרויקטים מאסטר. "
+                "\n\n## מדריך שמות שדות — מיפוי בין שמות טכניים בנתונים לשמות בשאלות:"
+                "\n• 'יעד חשמול מסתמן' / 'יעד מסתמן' = תאריך חישמול / תאריך חשמול"
+                "\n• 'יעד תכנית פיתוח' = תאריך תוכנית פיתוח / תאריך ת\"פ"
+                "\n• 'Update:' / 'פירוט שבועי' = עדכון שבועי / פעילות אחרונה"
+                "\n• 'Status:' = סטטוס / שלב / מצב"
+                "\n• 'Manager:' / 'מנה\"פ:' = מנהל / מנהל פרויקט"
                 "\n\nכללי חובה:"
                 "\n1. עבור על כל פרויקט המופיע בהקשר — ספור פנימית, אל תפסיד אף אחד."
                 "\n2. ערך חסר בנתונים = כתוב '—' — אל תשמיט פרויקטים."
@@ -1316,13 +1435,21 @@ async def answer_question(question: str, context: str, full_list: bool = False, 
                 "\n4. אם קטע מידע אינו רלוונטי לשאלה, התעלם ממנו בשקט."
                 "\n5. אימות סופי: לפני שאתה מסכם, סרוק שנית את כל בלוקי 🏗️ Project: בהקשר. "
                 "חפש גם התאמות חלקיות בשמות."
-                f"{_TELEGRAM_FORMAT_RULES}"
+                f"{format_rules}"
                 f"{auditor_addon}"
-                "\n\nענה בעברית בלבד."
+                + (
+                    "\n\n## שם פרויקט בלבד — הצג כרטיס מלא:"
+                    "\nהמשתמש כתב שם פרויקט בלבד. הצג את כל הנתונים הקיימים על הפרויקט: "
+                    "מנהל, סטטוס, עדכון, יעד תכנית פיתוח, יעד חשמול מסתמן, תו\"ב, וכל שאר השדות הזמינים."
+                    if bare_name else ""
+                )
+                + f"{instructions_addon}"
+                + "\n\nענה בעברית בלבד."
             )
-            max_tokens = 4000
+            max_tokens = 2000
 
-        return await groq_chat(
+        return await llm_chat(
+            "rag_answer",
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": f"{context}\n\nשאלה: {question}"},
@@ -1342,9 +1469,10 @@ async def _expand_query(question: str) -> str:
     This helps the embedding model find more relevant chunks.
     """
     try:
-        from app.services.groq_client import groq_chat
+        from app.services.llm_router import llm_chat
 
-        expansion = await groq_chat(
+        expansion = await llm_chat(
+            "query_expansion",
             messages=[
                 {
                     "role": "system",
@@ -1359,6 +1487,7 @@ async def _expand_query(question: str) -> str:
             ],
             max_tokens=100,
             temperature=0.3,
+            models=["llama-3.1-8b-instant"],  # fast model — frees primary quota for answer
         )
         return expansion.strip()
     except Exception as e:
@@ -1367,16 +1496,41 @@ async def _expand_query(question: str) -> str:
 
 
 async def _apply_learned_synonyms(question: str, session: AsyncSession) -> str:
-    """Append synonyms learned by the optimization engine to expand the query."""
+    """Append synonyms learned by the optimization engine to expand the query.
+    Uses normalized Hebrew word-set matching to handle nikud, final letters, and prefixes.
+    """
     try:
         from app.models import QuerySynonym
-        result = await session.execute(select(QuerySynonym))
+        # Only fetch TERMINOLOGY synonyms (not instructions)
+        result = await session.execute(
+            select(QuerySynonym).where(QuerySynonym.source != "instruction")
+        )
+        question_forms = _question_word_forms(question)
+        applied = []
         for row in result.scalars():
-            if row.original.lower() in question.lower():
+            original_forms = _question_word_forms(row.original)
+            # Check if any word form from the synonym's original matches any form in the question
+            if original_forms & question_forms:
                 question += " " + " ".join(row.synonyms)
+                applied.append(row.original)
+        if applied:
+            logger.info(f"Applied learned synonyms for: {applied}")
     except Exception as e:
         logger.warning(f"_apply_learned_synonyms failed: {e}")
     return question
+
+
+async def _get_learned_instructions(session: AsyncSession) -> list[str]:
+    """Load answer-improvement instructions from the consolidated __global_instructions__ row."""
+    try:
+        from app.models import QuerySynonym
+        row = await session.scalar(
+            select(QuerySynonym).where(QuerySynonym.original == "__global_instructions__")
+        )
+        return row.synonyms if row and row.synonyms else []
+    except Exception as e:
+        logger.warning(f"_get_learned_instructions failed: {e}")
+        return []
 
 
 _FULL_LIST_TRIGGERS = ['כמה', 'סה"כ', "סה''כ", 'רשימה', 'כל הפרויקטים', 'כל פרויקט',
@@ -1411,6 +1565,88 @@ def _is_specific_question(question: str) -> bool:
     return False
 
 
+_QUESTION_WORDS = frozenset({
+    'מה', 'מי', 'כמה', 'מתי', 'איזה', 'אילו', 'האם', 'כל', 'הכל',
+    'רשום', 'תרשום', 'הצג', 'תציג', 'ספר', 'תאר', 'דווח', 'סקור',
+    'כמות', 'רשימה', 'סה"כ', 'כמה', 'יש',
+})
+
+
+def _is_bare_name_query(question: str) -> bool:
+    """Return True when the user sent just a project name (1–4 words, no question/list words).
+
+    Examples: "חולה", "יאסיף", "בת ים", "בראון עמק הבכא"
+    These should return the full project card, same as asking 'כל הנתונים על X'.
+    """
+    words = question.strip().split()
+    if len(words) > 4:
+        return False
+    # If any word is a question/command word → not a bare name
+    return not any(w in _QUESTION_WORDS for w in words)
+
+
+def _extract_manager_name_from_question(question: str) -> str | None:
+    """Extract a manager name from a question like 'כמה פרויקטים מנהל משה ברקוביץ?'.
+
+    Returns the name as written by the user (first-name-first), or None if not found.
+    The caller is responsible for also trying the reversed (last, first) DB format.
+    """
+    # Match patterns like "מנהל [Name]" or "של [Name]" or "עבור [Name]"
+    patterns = [
+        r'(?:מנהל|מנהלת|של מנהל|של מנהלת|עבור)\s+([\u0590-\u05FF\s\-\'"״]+?)(?:\?|$)',
+        r'(?:פרויקטים\s+של|תחת\s+ניהול\s+של?)\s+([\u0590-\u05FF\s\-\'"״]+?)(?:\?|$)',
+    ]
+    for pat in patterns:
+        m = re.search(pat, question.strip())
+        if m:
+            name = m.group(1).strip().rstrip('?').strip()
+            # Must be at least 2 words and at least 4 chars total to avoid false positives
+            if len(name) >= 4 and ' ' in name:
+                return name
+    return None
+
+
+# All known project stages as they appear in the Status field of the master file.
+# Also includes common user aliases → canonical stage name.
+_STAGE_ALIASES: dict[str, str] = {
+    # canonical names (map to themselves)
+    "קבלת היתר": "קבלת היתר",
+    "תכנון": "תכנון",
+    "ביצוע": "ביצוע",
+    "בדיקות": "בדיקות",
+    "בחירת קבלן": "בחירת קבלן",
+    "הסתיים": "הסתיים",
+    "הקפאת תכולה": "הקפאת תכולה",
+    "הקפאת תצורה": "הקפאת תצורה",
+    "הרכבה חשמלית": "הרכבה חשמלית",
+    "הרכבה חשמלית ובדיקות": "הרכבה חשמלית ובדיקות",
+    "טופס 4": "טופס 4",
+    "לקראת ביצוע": "לקראת ביצוע",
+    "עבודה אזרחית": "עבודה אזרחית",
+    # user aliases
+    "היתר בניה": "קבלת היתר",
+    "שלב היתר": "קבלת היתר",
+    "היתר": "קבלת היתר",
+    "הסכם אגירת אנרגיה": "הסכם- אגירת אנרגיה",
+}
+
+
+def _extract_stage_filter_from_question(question: str) -> str | None:
+    """Return the canonical stage name if the question is asking about a specific project stage.
+
+    Matches patterns like 'בשלב קבלת היתר', 'שלב תכנון', 'פרויקטים בהרכבה חשמלית'.
+    Returns None if no stage is detected.
+    """
+    q = question.strip()
+    # Try longest alias first so "הרכבה חשמלית ובדיקות" matches before "הרכבה חשמלית"
+    for alias in sorted(_STAGE_ALIASES, key=len, reverse=True):
+        if alias in q:
+            canonical = _STAGE_ALIASES[alias]
+            logger.info(f"Stage filter detected: '{alias}' → canonical '{canonical}'")
+            return canonical
+    return None
+
+
 async def answer_with_full_context(question: str, session: AsyncSession, user_id: int) -> dict:
     """Search knowledge base + decisions, then answer with two-step retrieval.
 
@@ -1422,24 +1658,34 @@ async def answer_with_full_context(question: str, session: AsyncSession, user_id
     """
     from app.models import QueryLog
 
+    # Save the original question for database logging (no expansion, no synonyms)
+    original_question = question
+
     # Step 0: Abbreviation expansion + query-type detection on the RAW question
     # (must happen before learned-synonym expansion so noisy synonyms don't
     #  accidentally trigger full_list/specific flags)
     question = _expand_hebrew_abbrevs(question)
     full_list = _is_full_list_query(question)
     specific = _is_specific_question(question) and not full_list
+    # Bare project name (e.g. "חולה", "יאסיף") → treat as full-detail request.
+    # Keep specific=False so max_tokens=2000 allows the full project card.
+    bare_name = _is_bare_name_query(question) and not full_list
 
-    # Now append learned synonyms for search (does not affect type flags above)
-    question = await _apply_learned_synonyms(question, session)
+    # Expand question with learned synonyms for search, but keep this in a separate
+    # variable so the original (abbreviated but not expanded) is what gets stored
+    search_question = await _apply_learned_synonyms(question, session)
+
+    # Load learned answer-improvement instructions (injected into system prompt)
+    learned_instructions = await _get_learned_instructions(session)
 
     # Step 1: Expand the query for better search
     # Skip expansion for full-list queries — keywords suffice and we save a Groq call
     if full_list:
-        expanded_query = question
-        logger.info(f"Full-list query — skipping expansion, using original: {repr(question)}")
+        expanded_query = search_question
+        logger.info(f"Full-list query — skipping expansion, using search version: {repr(search_question)}")
     else:
-        expanded_query = await _expand_query(question)
-        logger.info(f"Original query: {repr(question)} → Expanded: {repr(expanded_query)}")
+        expanded_query = await _expand_query(search_question)
+        logger.info(f"Search question: {repr(search_question)} → Expanded: {repr(expanded_query)}")
     search_limit = 200 if full_list else 30
     logger.info(f"Full-list: {full_list} | Specific: {specific} → search_limit={search_limit}")
 
@@ -1449,19 +1695,58 @@ async def answer_with_full_context(question: str, session: AsyncSession, user_id
     if master_file_id is not None:
         # ── Step A: Master-file retrieval ─────────────────────────────────
         # For full-list / aggregation queries: pull master chunks with limits.
-        # Limit to 100 chunks to stay within Groq's 30K token limit.
-        # Each chunk is one project line, so 100 projects should be sufficient
-        # for most aggregations. If more needed, the compact format will group them.
+        # Limit to 500 chunks to stay within Groq's token limit (~30K).
+        # Each chunk is one project line, so 500 chunks handles all 233 projects.
+        # If more needed, the compact format will summarize efficiently.
         if full_list:
-            all_master_stmt = (
-                select(KnowledgeChunk)
-                .where(KnowledgeChunk.file_id == master_file_id)
-                .order_by(KnowledgeChunk.chunk_idx)
-                .limit(50)  # Cap at 50 projects to stay under Groq's free tier token limit
-            )
-            all_master_result = await session.execute(all_master_stmt)
-            anchor_chunks = list(all_master_result.scalars().all())
-            logger.info(f"Full-list mode: pulled {len(anchor_chunks)} master-file chunks (capped at 100)")
+            # Detect filters to reduce context to only relevant chunks.
+            # Both manager and stage filters can be combined.
+            manager_filter = _extract_manager_name_from_question(question)
+            stage_filter = _extract_stage_filter_from_question(question)
+
+            if manager_filter or stage_filter:
+                base_stmt = select(KnowledgeChunk).where(KnowledgeChunk.file_id == master_file_id)
+
+                if manager_filter:
+                    parts = manager_filter.split()
+                    reversed_name = f"{parts[-1]}, {' '.join(parts[:-1])}" if len(parts) >= 2 else manager_filter
+                    last_name = parts[-1]
+                    logger.info(f"Manager filter: '{manager_filter}' → DB form '{reversed_name}'")
+                    base_stmt = base_stmt.where(
+                        or_(
+                            KnowledgeChunk.content.ilike(f"%Manager: %{reversed_name}%"),
+                            KnowledgeChunk.content.ilike(f"%Manager: %{manager_filter}%"),
+                            KnowledgeChunk.content.ilike(f"%Manager: {last_name},%"),
+                            KnowledgeChunk.content.ilike(f"%Manager: {last_name} %"),
+                        )
+                    )
+
+                if stage_filter:
+                    logger.info(f"Stage filter: '{stage_filter}'")
+                    base_stmt = base_stmt.where(
+                        KnowledgeChunk.content.ilike(f"%| Status: {stage_filter} |%")
+                    )
+
+                filtered_result = await session.execute(base_stmt.order_by(KnowledgeChunk.chunk_idx))
+                anchor_chunks = list(filtered_result.scalars().all())
+                logger.info(f"Filtered chunks: {len(anchor_chunks)} "
+                            f"(manager={manager_filter or 'any'}, stage={stage_filter or 'any'})")
+
+                if not anchor_chunks:
+                    logger.warning("Filters returned 0 chunks — falling back to full master load")
+                    manager_filter = None
+                    stage_filter = None
+
+            if not manager_filter and not stage_filter:
+                all_master_stmt = (
+                    select(KnowledgeChunk)
+                    .where(KnowledgeChunk.file_id == master_file_id)
+                    .order_by(KnowledgeChunk.chunk_idx)
+                    .limit(500)
+                )
+                all_master_result = await session.execute(all_master_stmt)
+                anchor_chunks = list(all_master_result.scalars().all())
+                logger.info(f"Full-list mode: pulled {len(anchor_chunks)} master-file chunks (capped at 500)")
 
         else:
             # Specific / semantic query: vector search on master file (top-20)
@@ -1483,10 +1768,27 @@ async def answer_with_full_context(question: str, session: AsyncSession, user_id
             # translate or rewrite Hebrew proper nouns, losing exact strings like 'בת ים'.
             # Search for phrases directly in content (not label-restricted) so nothing is missed.
             phrases = _extract_query_phrases(question)
-            # Prefer multi-word phrases; fall back to single words >= 2 chars
-            multi = [p for p in phrases if ' ' in p]
-            singles = [p for p in phrases if ' ' not in p and len(p) >= 2]
-            sig_phrases = multi if multi else singles
+            # Hebrew stop words that appear in questions but not in project data
+            _STOP_WORDS = {'מה', 'כל', 'של', 'על', 'את', 'הנתונים', 'הפרויקט',
+                           'בפרויקט', 'לגבי', 'אנא', 'תוכל', 'ספר', 'לי',
+                           'כמה', 'מתי', 'איזה', 'אילו', 'יש', 'הם', 'הן',
+                           'תן', 'הצג', 'רשום', 'תרשום', 'תציג',
+                           # Generic project-domain words that appear in every chunk
+                           # — must NOT be in sig_phrases or they drown out specific names
+                           'פרויקט', 'תאריך', 'נתונים', 'מידע',
+                           # Question words (not proper nouns)
+                           'מי', 'איפה', 'למה', 'מדוע', 'כיצד', 'איך',
+                           # Domain verbs/nouns appearing in every Manager/Status field
+                           'מנהל', 'מנהלת', 'סטטוס', 'עדכון', 'שלב'}
+            # Multi-word phrases: filter out generic question phrases (stop-word combos)
+            multi = [p for p in phrases if ' ' in p
+                     and not all(w in _STOP_WORDS for w in p.split())]
+            # Single words: only include if long enough to be a proper noun (>=3 chars)
+            # and not a stop word — these are city/project names like "יזרעאל", "נתניה"
+            proper_nouns = [p for p in phrases if ' ' not in p and len(p) >= 3
+                            and p not in _STOP_WORDS]
+            # Always use proper nouns; add multi-word phrases only if they exist
+            sig_phrases = list(dict.fromkeys(proper_nouns + multi))  # deduplicated, order preserved
             if sig_phrases:
                 phrase_stmt = (
                     select(KnowledgeChunk)
@@ -1496,14 +1798,17 @@ async def answer_with_full_context(question: str, session: AsyncSession, user_id
                 )
                 phrase_result = await session.execute(phrase_stmt)
                 seen_anchor = {c.id for c in anchor_chunks}
-                phrase_hits = 0
+                phrase_hits_list = []
                 for c in phrase_result.scalars().all():
                     if c.id not in seen_anchor:
-                        anchor_chunks.append(c)
+                        phrase_hits_list.append(c)   # collect first, prepend below
                         seen_anchor.add(c.id)
-                        phrase_hits += 1
-                if phrase_hits:
-                    logger.info(f"Phrase label-search added {phrase_hits} chunks for phrases: {sig_phrases[:5]}")
+                if phrase_hits_list:
+                    # Prepend so phrase hits (exact project/keyword matches) appear
+                    # BEFORE semantic chunks — ensures they survive the 10,000-char
+                    # context truncation and the LLM always sees the target project.
+                    anchor_chunks = phrase_hits_list + anchor_chunks
+                    logger.info(f"Phrase label-search prepended {len(phrase_hits_list)} chunks for phrases: {sig_phrases[:5]}")
 
         logger.info(f"Anchor search: {len(anchor_chunks)} master-file chunks")
 
@@ -1601,7 +1906,10 @@ async def answer_with_full_context(question: str, session: AsyncSession, user_id
 
     if not parts:
         answer = "לא נמצא מידע רלוונטי. העלה קבצים או הגש החלטות תחילה."
-        log = QueryLog(question=question, ai_response=answer, sources_used=[], user_id=user_id)
+        from app.services.llm_router import get_last_llm_meta
+        _provider, _is_fb = get_last_llm_meta()
+        log = QueryLog(question=original_question, ai_response=answer, sources_used=[], user_id=user_id,
+                       llm_provider=_provider or None, is_fallback=_is_fb or None)
         session.add(log)
         await session.commit()
         await session.refresh(log)
@@ -1616,14 +1924,28 @@ async def answer_with_full_context(question: str, session: AsyncSession, user_id
 
     combined = "\n\n".join(parts)
 
-    # Log context size for debugging token limit issues
-    context_tokens_approx = len(combined.split()) * 1.3  # rough estimate: ~1.3 tokens per word
-    logger.info(f"Context for answer_question: {len(combined)} chars, ~{int(context_tokens_approx)} tokens, "
-                f"full_list={full_list}, specific={specific}")
-    if context_tokens_approx > 25000:
-        logger.warning(f"⚠️ Context approaching Groq token limit (25K): {int(context_tokens_approx)} tokens")
+    # Groq free tier: 12,000 tokens per request.
+    # Hebrew text ≈ 0.85 tokens/char (much denser than English).
+    # Budget: 12,000 - 2,000 (output) - 1,200 (system prompt) = 8,800 tokens → ~10,350 chars.
+    MAX_CONTEXT_CHARS = 10_000
+    if len(combined) > MAX_CONTEXT_CHARS:
+        combined = combined[:MAX_CONTEXT_CHARS] + "\n\n[...ההקשר קוצר בשל מגבלת טוקנים]"
+        logger.warning(f"⚠️ Context truncated to {MAX_CONTEXT_CHARS} chars to stay within Groq token limit")
 
-    answer = await answer_question(question, combined, full_list=full_list, specific=specific)
+    # Log context size for debugging
+    context_tokens_approx = int(len(combined) * 0.85)  # Hebrew ≈ 0.85 tokens/char
+    logger.info(f"Context for answer_question: {len(combined)} chars, ~{context_tokens_approx} tokens, "
+                f"full_list={full_list}, specific={specific}")
+    if context_tokens_approx > 8000:
+        logger.warning(f"⚠️ Context is large ({context_tokens_approx} tokens) — answers may be cut short")
+
+    answer = await answer_question(
+        question, combined,
+        full_list=full_list,
+        specific=specific,
+        learned_instructions=learned_instructions,
+        bare_name=bare_name,
+    )
 
     # Collect unique file names used
     file_names = []
@@ -1648,11 +1970,15 @@ async def answer_with_full_context(question: str, session: AsyncSession, user_id
     sources_payload = [{"file": name} for name in file_names]
     if decisions_ctx:
         sources_payload.append({"source": "decisions_db"})
+    from app.services.llm_router import get_last_llm_meta
+    _provider, _is_fb = get_last_llm_meta()
     log = QueryLog(
-        question=question,
+        question=original_question,
         ai_response=answer,
         sources_used=sources_payload,
         user_id=user_id,
+        llm_provider=_provider or None,
+        is_fallback=_is_fb or None,
     )
     session.add(log)
     await session.commit()

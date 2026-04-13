@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     # Telegram Bot
     TELEGRAM_BOT_TOKEN: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
     TELEGRAM_WEBHOOK_URL: str = os.getenv("TELEGRAM_WEBHOOK_URL", "")
+    WEBHOOK_SECRET_TOKEN: str = os.getenv("WEBHOOK_SECRET_TOKEN", "")
 
     # Claude API
     ANTHROPIC_API_KEY: str = os.getenv("ANTHROPIC_API_KEY", "")
@@ -22,6 +23,9 @@ class Settings(BaseSettings):
 
     # Groq API
     GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "")
+
+    # Google AI Studio (Gemma 4)
+    GOOGLE_AI_API_KEY: str = os.getenv("GOOGLE_AI_API_KEY", "")
 
     # Public base URL (for profile links etc.)
     BASE_URL: str = os.getenv("BASE_URL", "http://localhost:8000")

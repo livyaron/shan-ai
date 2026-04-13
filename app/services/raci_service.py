@@ -71,8 +71,9 @@ async def get_ai_raci_suggestions_from_text(problem_text: str) -> list[dict]:
 החזר JSON בלבד:
 {{"raci_distribution": [{{"user_id": מספר, "role": "R|A|C|I"}}]}}"""
 
-            from app.services.groq_client import groq_chat
-            raw = await groq_chat(
+            from app.services.llm_router import llm_chat
+            raw = await llm_chat(
+                "raci_suggestions",
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.1,
                 json_mode=True,
@@ -217,9 +218,10 @@ async def assign_raci_from_ai(decision_id: int) -> None:
   "responsibility_updates": [{{"user_id": מספר, "learned": "תחום חדש שנלמד"}}]
 }}"""
 
-            # 4. Call Groq
-            from app.services.groq_client import groq_chat
-            raw = await groq_chat(
+            # 4. Call LLM
+            from app.services.llm_router import llm_chat
+            raw = await llm_chat(
+                "raci_assignment",
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.1,
                 json_mode=True,

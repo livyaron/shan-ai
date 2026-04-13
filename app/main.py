@@ -20,15 +20,13 @@ from app.routers.dashboard import profile_router
 from app.routers import files as files_router
 from app.routers import ask as ask_router
 from app.routers import logs as logs_router
+from app.routers import projects as projects_router
+from app.routers import llm_config as llm_config_router
 from fastapi.templating import Jinja2Templates
 from app.services.telegram_polling import telegram_bot
 from app.services.feedback_service import run_feedback_scheduler
-import asyncio
 
 logger = logging.getLogger(__name__)
-
-# Global state to prevent multiple polling instances
-_polling_task = None
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
@@ -47,6 +45,8 @@ app.include_router(dashboard.router)
 app.include_router(files_router.router)
 app.include_router(ask_router.router)
 app.include_router(logs_router.router)
+app.include_router(projects_router.router)
+app.include_router(llm_config_router.router)
 app.include_router(profile_router)
 
 @app.on_event("startup")
@@ -110,6 +110,44 @@ async def startup():
                 await conn.execute(_text(
                     "ALTER TABLE knowledge_files ADD COLUMN IF NOT EXISTS is_master BOOLEAN NOT NULL DEFAULT FALSE;"
                 ))
+                await conn.execute(_text(
+                    "ALTER TABLE query_logs ADD COLUMN IF NOT EXISTS llm_provider VARCHAR(50);"
+                ))
+                await conn.execute(_text(
+                    "ALTER TABLE query_logs ADD COLUMN IF NOT EXISTS is_fallback BOOLEAN;"
+                ))
+
+                # LLM config table
+                await conn.execute(_text("""
+                    CREATE TABLE IF NOT EXISTS llm_config (
+                        usage_name  VARCHAR(64) PRIMARY KEY,
+                        provider    VARCHAR(16) NOT NULL DEFAULT 'groq',
+                        fallback    BOOLEAN NOT NULL DEFAULT TRUE,
+                        label_he    VARCHAR(128),
+                        updated_at  TIMESTAMP DEFAULT NOW(),
+                        updated_by  VARCHAR(255)
+                    )
+                """))
+
+            # Seed default LLM config rows (outside the conn block, use session)
+            from app.database import async_session_maker
+            from app.models import LLMConfig
+            from app.services.llm_router import USAGE_LABELS
+            from sqlalchemy import select as _select
+            async with async_session_maker() as _seed_session:
+                for usage_name, label_he in USAGE_LABELS.items():
+                    existing = await _seed_session.execute(
+                        _select(LLMConfig).where(LLMConfig.usage_name == usage_name)
+                    )
+                    if existing.scalar_one_or_none() is None:
+                        _seed_session.add(LLMConfig(
+                            usage_name=usage_name,
+                            provider="groq",
+                            fallback=True,
+                            label_he=label_he,
+                        ))
+                await _seed_session.commit()
+
             print("Database tables initialized.")
             break
         except Exception as e:
@@ -132,45 +170,27 @@ async def startup():
     except Exception as e:
         print(f"Warning: User password migration failed: {e}")
 
-    # Start Telegram bot polling in the background
+    # Start Telegram bot in webhook mode
     try:
         await telegram_bot.initialize()
-        print("Telegram bot initialized.")
-
-        # Start polling in background task
-        _polling_task = asyncio.create_task(telegram_bot.start_polling())
-        print("Telegram bot polling started in background.")
+        await telegram_bot.start()
+        await telegram_bot.set_webhook()
+        print("Telegram bot started and webhook registered.")
 
         # Start 48-hour feedback scheduler
         asyncio.create_task(run_feedback_scheduler(telegram_bot.application.bot))
         print("Feedback scheduler started.")
     except Exception as e:
-        print(f"Warning: Telegram bot polling failed to start: {e}")
+        print(f"Warning: Telegram bot failed to start: {e}")
         logger.error(f"Telegram bot startup error: {e}")
 
 @app.on_event("shutdown")
 async def shutdown():
-    """Gracefully stop the Telegram bot polling."""
-    global _polling_task
+    """Gracefully stop the Telegram bot and remove webhook."""
     try:
-        # Signal polling to stop
-        await telegram_bot.stop_polling()
-
-        # Wait for polling task to finish (with timeout)
-        if _polling_task and not _polling_task.done():
-            try:
-                await asyncio.wait_for(_polling_task, timeout=5)
-            except asyncio.TimeoutError:
-                print("Polling task did not stop in 5 seconds, cancelling...")
-                _polling_task.cancel()
-                try:
-                    await _polling_task
-                except asyncio.CancelledError:
-                    pass
-            except asyncio.CancelledError:
-                pass
-
-        print("Telegram bot stopped.")
+        await telegram_bot.delete_webhook()
+        await telegram_bot.stop()
+        print("Telegram bot stopped and webhook removed.")
     except Exception as e:
         print(f"Error stopping bot: {e}")
         logger.error(f"Telegram bot shutdown error: {e}")

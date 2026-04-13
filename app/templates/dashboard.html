@@ -3,223 +3,952 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Shan-AI — דשבורד ניהול החלטות</title>
+    <title>Shan-AI — מרכז בקרת החלטות</title>
+    <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <style>
-        body { background: #0f1117; color: #e0e0e0; font-family: 'Segoe UI', sans-serif; }
-        .navbar { background: #1a1d2e !important; border-bottom: 1px solid #2d3047; }
-        .card { background: #1a1d2e; border: 1px solid #2d3047; border-radius: 12px; }
-        .card-title { color: #8b9cf4; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 1px; }
-        .stat-value { font-size: 2.5rem; font-weight: 700; color: #fff; }
-        .stat-label { color: #d0d8f0; font-size: 0.9rem; }
-        .badge-info    { background: #17a2b8; }
-        .badge-normal  { background: #28a745; }
-        .badge-critical { background: #dc3545; }
-        .badge-uncertain { background: #ffc107; color: #000; }
-        .badge-pending  { background: #6c757d; }
-        .badge-approved { background: #28a745; }
-        .badge-rejected { background: #dc3545; }
-        .badge-executed { background: #17a2b8; }
-        .table { color: #e0e0e0; }
-        .table th { color: #8b9cf4; border-color: #2d3047; }
-        .table td { border-color: #2d3047; vertical-align: middle; }
-        .table tbody tr:hover { background: #22263a; }
-        .progress { background: #2d3047; height: 8px; border-radius: 4px; }
-        .section-title { color: #8b9cf4; font-size: 1.1rem; font-weight: 600; margin-bottom: 1rem; border-right: 3px solid #8b9cf4; padding-right: 10px; }
-        canvas { max-height: 260px; }
-        .modal-header {
-            flex-direction: row-reverse;
-            border-color: #2d3047 !important;
+        /* ── Design Tokens ─────────────────────────────────────────── */
+        :root {
+            --bg-deep:      #070b12;
+            --bg-surface:   #0c1220;
+            --bg-card:      #0f1826;
+            --border:       #1a2d47;
+            --border-hi:    #1e3a5f;
+            --cyan:         #00d4ff;
+            --cyan-dim:     rgba(0,212,255,0.09);
+            --cyan-glow:    0 0 18px rgba(0,212,255,0.18);
+            --purple:       #8b9cf4;
+            --green:        #10b981;
+            --amber:        #f59e0b;
+            --red:          #ef4444;
+            --red-dim:      rgba(239,68,68,0.1);
+            --text-1:       #e2e8f0;
+            --text-2:       #64748b;
+            --text-3:       #344156;
+            --ui:           'Heebo', sans-serif;
+            --mono:         'IBM Plex Mono', monospace;
+            --r-sm:         4px;
+            --r-md:         8px;
+            --r-lg:         12px;
         }
+
+        /* ── Base ───────────────────────────────────────────────────── */
+        *, *::before, *::after { box-sizing: border-box; }
+        html { scroll-behavior: smooth; }
+
+        body {
+            background: var(--bg-deep);
+            color: var(--text-1);
+            font-family: var(--ui);
+            font-size: 16px;
+            line-height: 1.5;
+            min-height: 100vh;
+            background-image:
+                radial-gradient(circle at 20% 20%, rgba(0,212,255,0.03) 0%, transparent 50%),
+                radial-gradient(circle at 80% 80%, rgba(139,156,244,0.03) 0%, transparent 50%),
+                radial-gradient(circle, #1a2d47 1px, transparent 1px);
+            background-size: 100% 100%, 100% 100%, 30px 30px;
+            background-attachment: fixed;
+        }
+
+        ::-webkit-scrollbar { width: 5px; height: 5px; }
+        ::-webkit-scrollbar-track { background: var(--bg-surface); }
+        ::-webkit-scrollbar-thumb { background: var(--border-hi); border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: var(--purple); }
+
+        /* ── Navbar ─────────────────────────────────────────────────── */
+        .navbar {
+            background: rgba(7,11,18,0.96) !important;
+            border-bottom: 1px solid var(--border);
+            backdrop-filter: blur(24px);
+            -webkit-backdrop-filter: blur(24px);
+            padding: 0 1.5rem;
+            height: 50px;
+            position: sticky;
+            top: 0;
+            z-index: 1000;
+            box-shadow: 0 4px 24px rgba(0,0,0,0.4);
+        }
+
+        .navbar::after {
+            content: '';
+            position: absolute;
+            bottom: 0; left: 0; right: 0;
+            height: 1px;
+            background: linear-gradient(90deg, transparent 0%, var(--cyan) 30%, var(--purple) 70%, transparent 100%);
+            opacity: 0.2;
+        }
+
+        .navbar-brand {
+            font-family: var(--mono);
+            font-size: 1rem;
+            font-weight: 600;
+            color: var(--cyan) !important;
+            letter-spacing: 0.08em;
+            display: flex;
+            align-items: center;
+            gap: 7px;
+            text-decoration: none;
+        }
+
+        .brand-pulse {
+            width: 5px; height: 5px;
+            background: var(--cyan);
+            border-radius: 50%;
+            box-shadow: 0 0 8px var(--cyan);
+            animation: blink 2.4s ease-in-out infinite;
+            flex-shrink: 0;
+        }
+
+        .nav-link {
+            font-size: 0.95rem;
+            font-weight: 500;
+            color: var(--text-2) !important;
+            padding: 0.28rem 0.75rem !important;
+            border-radius: var(--r-sm);
+            transition: all 0.14s;
+            letter-spacing: 0.02em;
+            white-space: nowrap;
+        }
+
+        .nav-link:hover { color: var(--text-1) !important; background: rgba(255,255,255,0.04); }
+        .nav-link.nav-active { color: var(--cyan) !important; background: var(--cyan-dim); }
+
+        .nav-pending-dot {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 18px; height: 18px;
+            background: var(--red);
+            color: #fff;
+            font-family: var(--mono);
+            font-size: 0.75rem;
+            border-radius: 50%;
+            margin-right: 4px;
+            box-shadow: 0 0 8px rgba(239,68,68,0.5);
+            animation: blink 1.5s ease-in-out infinite;
+        }
+
+        .user-chip {
+            display: flex; align-items: center; gap: 6px;
+            padding: 5px 12px;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            font-size: 0.9rem;
+            color: var(--text-2);
+        }
+
+        .user-online {
+            width: 5px; height: 5px;
+            background: var(--green);
+            border-radius: 50%;
+            box-shadow: 0 0 6px var(--green);
+        }
+
+        .logout-btn {
+            font-family: var(--mono);
+            font-size: 0.85rem;
+            color: var(--text-3) !important;
+            text-decoration: none;
+            padding: 4px 10px;
+            border-radius: var(--r-sm);
+            transition: all 0.14s;
+            letter-spacing: 0.04em;
+        }
+
+        .logout-btn:hover { color: var(--red) !important; background: var(--red-dim); }
+
+        /* ── Layout ─────────────────────────────────────────────────── */
+        .page-wrap { padding: 1.5rem 2rem; max-width: 1600px; margin: 0 auto; }
+
+        /* ── Section label ──────────────────────────────────────────── */
+        .slabel {
+            font-family: var(--mono);
+            font-size: 0.8rem;
+            font-weight: 500;
+            letter-spacing: 0.16em;
+            text-transform: uppercase;
+            color: var(--cyan);
+            opacity: 0.65;
+            margin-bottom: 0.75rem;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .slabel::before { content: ''; width: 14px; height: 1px; background: var(--cyan); opacity: 0.5; }
+        .slabel::after  { content: ''; flex: 1; height: 1px; background: linear-gradient(90deg, var(--border), transparent); }
+
+        /* Legacy */
+        .section-title {
+            font-family: var(--mono);
+            font-size: 0.8rem;
+            letter-spacing: 0.14em;
+            text-transform: uppercase;
+            color: var(--cyan);
+            opacity: 0.65;
+            margin-bottom: 1rem;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .section-title::before { content: ''; width: 10px; height: 1px; background: var(--cyan); }
+
+        /* ── Cards ──────────────────────────────────────────────────── */
+        .card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: var(--r-lg);
+            position: relative;
+            transition: border-color 0.2s, box-shadow 0.2s;
+        }
+
+        .card:hover { border-color: var(--border-hi); }
+
+        /* Corner bracket decoration */
+        .card::before, .card::after {
+            content: '';
+            position: absolute;
+            width: 10px; height: 10px;
+            border-color: var(--cyan);
+            border-style: solid;
+            opacity: 0.25;
+            transition: opacity 0.2s;
+            pointer-events: none;
+        }
+
+        .card::before { top: -1px; right: -1px; border-width: 1px 1px 0 0; border-radius: 0 var(--r-lg) 0 0; }
+        .card::after  { bottom: -1px; left: -1px; border-width: 0 0 1px 1px; border-radius: 0 0 0 var(--r-lg); }
+        .card:hover::before, .card:hover::after { opacity: 0.6; }
+
+        /* ── KPI cards ──────────────────────────────────────────────── */
+        .kpi-card {
+            padding: 1.25rem 1.4rem;
+            animation: fadein 0.4s ease-out both;
+        }
+
+        .kpi-card:nth-child(1) { animation-delay: 0.04s; }
+        .kpi-card:nth-child(2) { animation-delay: 0.08s; }
+        .kpi-card:nth-child(3) { animation-delay: 0.12s; }
+        .kpi-card:nth-child(4) { animation-delay: 0.18s; }
+
+        .kpi-label {
+            font-family: var(--mono);
+            font-size: 0.8rem;
+            font-weight: 500;
+            letter-spacing: 0.14em;
+            text-transform: uppercase;
+            color: var(--text-2);
+            margin-bottom: 0.5rem;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .kpi-live {
+            width: 6px; height: 6px;
+            background: var(--cyan);
+            border-radius: 50%;
+            box-shadow: 0 0 6px var(--cyan);
+            animation: blink 2.2s ease-in-out infinite;
+        }
+
+        .kpi-value {
+            font-family: var(--mono);
+            font-size: 3.2rem;
+            font-weight: 600;
+            line-height: 1;
+            color: #fff;
+            letter-spacing: -0.02em;
+        }
+
+        .kpi-sub {
+            font-size: 0.9rem;
+            color: var(--text-3);
+            margin-top: 0.35rem;
+            font-family: var(--mono);
+        }
+
+        .kpi-critical-card {
+            border-color: rgba(239,68,68,0.25) !important;
+        }
+
+        .kpi-critical-card .kpi-value {
+            color: var(--red);
+            text-shadow: 0 0 24px rgba(239,68,68,0.45);
+        }
+
+        .kpi-critical-card .kpi-live {
+            background: var(--red);
+            box-shadow: 0 0 8px var(--red);
+            border-color: var(--red);
+        }
+
+        .kpi-critical-card::before, .kpi-critical-card::after {
+            border-color: var(--red);
+            opacity: 0.4;
+        }
+
+        /* ── Pending alert ──────────────────────────────────────────── */
+        .pending-alert {
+            background: rgba(239,68,68,0.07);
+            border: 1px solid rgba(239,68,68,0.28);
+            border-radius: var(--r-md);
+            padding: 0.8rem 1.25rem;
+            color: #fca5a5;
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+            position: relative;
+            overflow: hidden;
+            animation: fadein 0.35s ease-out;
+        }
+
+        .pending-alert::before {
+            content: '';
+            position: absolute;
+            top: 0; right: 0; bottom: 0;
+            width: 3px;
+            background: var(--red);
+            animation: alphapulse 1.8s ease-in-out infinite;
+        }
+
+        .beacon {
+            position: relative;
+            width: 12px; height: 12px;
+            flex-shrink: 0;
+        }
+
+        .beacon::before {
+            content: '';
+            position: absolute;
+            inset: 2px;
+            background: var(--red);
+            border-radius: 50%;
+        }
+
+        .beacon::after {
+            content: '';
+            position: absolute;
+            inset: -2px;
+            border: 1.5px solid var(--red);
+            border-radius: 50%;
+            animation: beacon 1.6s ease-out infinite;
+        }
+
+        .pending-alert a { color: #f87171; font-weight: 600; text-decoration: none; }
+        .pending-alert a:hover { text-decoration: underline; }
+
+        /* ── Primary CTA ────────────────────────────────────────────── */
+        .btn-cmd {
+            background: transparent;
+            border: 1px solid var(--cyan);
+            color: var(--cyan) !important;
+            font-family: var(--mono);
+            font-size: 0.98rem;
+            font-weight: 500;
+            letter-spacing: 0.07em;
+            padding: 0.5rem 1.4rem;
+            border-radius: var(--r-sm);
+            cursor: pointer;
+            transition: all 0.14s;
+        }
+
+        .btn-cmd:hover {
+            background: var(--cyan-dim);
+            box-shadow: var(--cyan-glow);
+        }
+
+        /* ── Stats strip ────────────────────────────────────────────── */
+        .stats-strip {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: var(--r-lg);
+            overflow: hidden;
+            position: relative;
+        }
+
+        .stats-strip::before, .stats-strip::after {
+            content: '';
+            position: absolute;
+            width: 10px; height: 10px;
+            border-color: var(--cyan);
+            border-style: solid;
+            opacity: 0.25;
+            pointer-events: none;
+        }
+
+        .stats-strip::before { top: -1px; right: -1px; border-width: 1px 1px 0 0; border-radius: 0 var(--r-lg) 0 0; }
+        .stats-strip::after  { bottom: -1px; left: -1px; border-width: 0 0 1px 1px; border-radius: 0 0 0 var(--r-lg); }
+
+        .stat-cell {
+            padding: 1rem 1.25rem;
+            text-align: center;
+            border-left: 1px solid var(--border);
+            transition: background 0.15s;
+        }
+
+        .stat-cell:last-child { border-left: none; }
+        .stat-cell:hover { background: rgba(255,255,255,0.02); }
+
+        .stat-num {
+            font-family: var(--mono);
+            font-size: 1.7rem;
+            font-weight: 600;
+            line-height: 1;
+            display: block;
+        }
+
+        .stat-lbl {
+            font-size: 0.86rem;
+            color: var(--text-2);
+            margin-top: 0.3rem;
+            letter-spacing: 0.02em;
+        }
+
+        .c-r { color: var(--cyan); }
+        .c-a { color: var(--red); }
+        .c-c { color: var(--amber); }
+        .c-i { color: var(--green); }
+        .c-p { color: var(--purple); }
+
+        /* ── Charts ─────────────────────────────────────────────────── */
+        canvas { max-height: 210px; }
+
+        /* ── Progress ───────────────────────────────────────────────── */
+        .progress {
+            background: rgba(255,255,255,0.04);
+            border-radius: 2px;
+            height: 3px;
+        }
+
+        .progress-bar {
+            border-radius: 2px;
+            transition: width 0.7s cubic-bezier(.4,0,.2,1);
+        }
+
+        .role-row { margin-bottom: 1rem; }
+
+        .role-hd {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 0.35rem;
+        }
+
+        .role-name { font-size: 0.95rem; color: var(--text-2); }
+
+        .role-count {
+            font-family: var(--mono);
+            font-size: 0.94rem;
+            font-weight: 600;
+            color: var(--cyan);
+        }
+
+        /* ── Table Container (Glassmorphism) ────────────────────────── */
+        .table-container {
+            background: rgba(12,18,32,0.35);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(0,212,255,0.1);
+            border-radius: var(--r-lg);
+            overflow: hidden;
+            padding: 0;
+        }
+
+        /* ── Decisions table ────────────────────────────────────────── */
+        .dtable { color: var(--text-1); }
+
+        .dtable th {
+            font-family: var(--mono);
+            font-size: 0.98rem;
+            font-weight: 500;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+            color: var(--cyan);
+            border-bottom: 1px solid var(--border) !important;
+            border-top: none !important;
+            padding: 0.65rem 0.95rem;
+            background: rgba(12,18,32,0.6);
+            position: sticky;
+            top: 0;
+            z-index: 10;
+            text-align: right;
+        }
+
+        .dtable td {
+            font-size: 0.95rem;
+            border-bottom: 1px solid rgba(26,45,71,0.5) !important;
+            border-top: none !important;
+            padding: 0.65rem 0.95rem;
+            vertical-align: middle;
+            text-align: right;
+        }
+
+        .dtable tbody tr { transition: background 0.12s; }
+        .dtable tbody tr:hover td { background: rgba(0,212,255,0.04); }
+        .dtable .text-muted { color: var(--text-2) !important; font-family: var(--mono); font-size: 0.88rem; }
+
+        /* Type-accent border on rightmost visible td (in RTL = first child in DOM = right side) */
+        .drow-info     td:first-child { border-right: 2px solid #38bdf8 !important; }
+        .drow-normal   td:first-child { border-right: 2px solid var(--green) !important; }
+        .drow-critical td:first-child { border-right: 2px solid var(--red) !important; }
+        .drow-uncertain td:first-child { border-right: 2px solid var(--amber) !important; }
+
+        /* ── Badges & Status Badges ─────────────────────────────────── */
+        .badge {
+            font-family: var(--mono);
+            font-size: 0.85rem;
+            font-weight: 600;
+            letter-spacing: 0.08em;
+            padding: 6px 12px;
+            border-radius: 6px;
+            text-transform: uppercase;
+            display: inline-block;
+            backdrop-filter: blur(4px);
+        }
+
+        .status-badge {
+            font-family: var(--mono);
+            font-size: 0.85rem;
+            font-weight: 600;
+            letter-spacing: 0.08em;
+            padding: 8px 14px;
+            border-radius: 8px;
+            text-transform: uppercase;
+            display: inline-block;
+            backdrop-filter: blur(4px);
+            border: 1px solid;
+        }
+
+        .badge-info      { background: rgba(56,189,248,0.12); color: #38bdf8; border: 1px solid rgba(56,189,248,0.25); }
+        .badge-normal    { background: rgba(16,185,129,0.12); color: #10b981; border: 1px solid rgba(16,185,129,0.25); }
+        .badge-critical  { background: rgba(239,68,68,0.12);  color: #ef4444; border: 1px solid rgba(239,68,68,0.25); }
+        .badge-uncertain { background: rgba(245,158,11,0.12); color: #f59e0b; border: 1px solid rgba(245,158,11,0.25); }
+        .badge-pending   { background: rgba(100,116,139,0.12); color: #94a3b8; border: 1px solid rgba(100,116,139,0.25); }
+        .badge-approved  { background: rgba(16,185,129,0.12); color: #10b981; border: 1px solid rgba(16,185,129,0.25); }
+        .badge-rejected  { background: rgba(239,68,68,0.12);  color: #ef4444; border: 1px solid rgba(239,68,68,0.25); }
+        .badge-executed  { background: rgba(56,189,248,0.12); color: #38bdf8; border: 1px solid rgba(56,189,248,0.25); }
+
+        /* ── Buttons ─────────────────────────────────────────────────── */
+        .btn-primary {
+            background: transparent;
+            border: 1px solid var(--cyan);
+            color: var(--cyan) !important;
+            font-family: var(--mono);
+            font-size: 0.95rem;
+            font-weight: 500;
+            letter-spacing: 0.06em;
+            transition: all 0.14s;
+        }
+
+        .btn-primary:hover, .btn-primary:focus {
+            background: var(--cyan-dim);
+            border-color: var(--cyan);
+            box-shadow: var(--cyan-glow);
+            color: var(--cyan) !important;
+        }
+
+        .btn-primary:disabled { opacity: 0.35; cursor: not-allowed; }
+
+        .btn-secondary {
+            background: transparent;
+            border: 1px solid var(--border);
+            color: var(--text-2) !important;
+            font-family: var(--mono);
+            font-size: 0.95rem;
+            transition: all 0.14s;
+        }
+
+        .btn-secondary:hover {
+            background: rgba(255,255,255,0.04);
+            border-color: var(--border-hi);
+            color: var(--text-1) !important;
+        }
+
+        .btn-success {
+            background: rgba(16,185,129,0.12);
+            border: 1px solid rgba(16,185,129,0.35);
+            color: var(--green) !important;
+            font-family: var(--mono);
+            font-size: 0.95rem;
+            transition: all 0.14s;
+        }
+
+        .btn-success:hover { background: rgba(16,185,129,0.22); border-color: var(--green); }
+
+        .btn-outline-info {
+            background: transparent;
+            border: 1px solid rgba(56,189,248,0.25);
+            color: #38bdf8 !important;
+            font-size: 0.87rem;
+            padding: 2px 8px;
+            font-family: var(--mono);
+            transition: all 0.14s;
+        }
+
+        .btn-outline-info:hover {
+            background: rgba(56,189,248,0.08);
+            border-color: #38bdf8;
+        }
+
+        /* ── Modals ──────────────────────────────────────────────────── */
+        .modal-content {
+            background: var(--bg-card);
+            border: 1px solid var(--border-hi);
+            color: var(--text-1);
+            border-radius: var(--r-lg);
+            box-shadow: 0 24px 60px rgba(0,0,0,0.6);
+        }
+
+        .modal-header {
+            border-bottom: 1px solid var(--border) !important;
+            flex-direction: row-reverse;
+            padding: 1rem 1.25rem;
+        }
+
+        .modal-title {
+            font-family: var(--mono);
+            font-size: 1.02rem;
+            font-weight: 500;
+            letter-spacing: 0.07em;
+            color: var(--cyan) !important;
+        }
+
+        .modal-footer { border-top: 1px solid var(--border) !important; }
+
         .btn-close {
-            filter: none;
+            filter: none !important;
             background: none;
             border: none;
-            opacity: 1;
-            color: #8b9cf4;
-            font-size: 1.8rem;
+            opacity: 0.4;
+            color: var(--text-2);
+            font-size: 1.3rem;
             font-weight: 300;
             line-height: 1;
             cursor: pointer;
-            padding: 0.25rem 0;
-            width: auto;
-            height: auto;
+            transition: all 0.14s;
         }
-        .btn-close:hover, .btn-close:focus {
-            color: #5865f2;
-            opacity: 1;
-        }
-        .modal-content { background: #1a1d2e; border: 1px solid #2d3047; color: #e0e0e0; }
-        .modal-footer { border-color: #2d3047 !important; }
-        .text-muted { color: #d0d8f0 !important; }
-        .small.text-muted { color: #8b9cf4 !important; }
-        .small { color: #e0e0e0; }
+
+        .btn-close:hover { opacity: 0.9; color: var(--red); }
+
+        /* ── Forms ──────────────────────────────────────────────────── */
         .form-control, .form-select {
-            background: #0f1117; border: 1px solid #2d3047;
-            color: #ffffff; border-radius: 8px; font-weight: 500;
+            background: var(--bg-surface);
+            border: 1px solid var(--border);
+            color: var(--text-1);
+            border-radius: var(--r-md);
+            font-family: var(--ui);
+            font-size: 0.85rem;
+            transition: border-color 0.14s, box-shadow 0.14s;
         }
+
         .form-control:focus, .form-select:focus {
-            background: #0f1117; color: #ffffff;
-            border-color: #8b9cf4; box-shadow: 0 0 0 0.2rem rgba(139,156,244,0.25);
+            background: var(--bg-surface);
+            color: var(--text-1);
+            border-color: rgba(0,212,255,0.4);
+            box-shadow: 0 0 0 2px rgba(0,212,255,0.1);
+            outline: none;
         }
-        .form-control::placeholder {
-            color: #7a7a7a;
-            opacity: 1;
+
+        .form-control::placeholder { color: var(--text-3); }
+        .form-select option { background: var(--bg-card); }
+        .form-label { font-size: 0.98rem; color: var(--text-2); font-weight: 500; }
+        textarea.form-control { min-height: 90px; }
+
+        /* ── AI preview ──────────────────────────────────────────────── */
+        .ai-preview {
+            background: var(--bg-surface);
+            border: 1px solid rgba(0,212,255,0.15);
+            border-right: 2px solid var(--cyan);
+            border-radius: var(--r-md);
+            padding: 0.875rem 1rem;
+            margin-bottom: 1rem;
         }
-        .form-select option { background: #1a1d2e; color: #ffffff; }
-        .form-label { color: #d0d8f0; font-size: 0.9rem; }
-        textarea.form-control { min-height: 80px; }
+
+        .ai-preview-hd {
+            font-family: var(--mono);
+            font-size: 0.8rem;
+            letter-spacing: 0.12em;
+            color: var(--cyan);
+            opacity: 0.75;
+            margin-bottom: 0.6rem;
+            text-transform: uppercase;
+        }
+
+        .ai-preview-body { font-size: 1.02rem; color: var(--text-2); line-height: 1.6; }
+        .ai-preview-body strong { color: var(--text-1); }
+
+        /* ── RACI table ──────────────────────────────────────────────── */
+        .raci-wrap {
+            background: var(--bg-surface);
+            border: 1px solid var(--border);
+            border-radius: var(--r-md);
+            overflow: hidden;
+        }
+
+        .raci-hd {
+            font-family: var(--mono);
+            font-size: 0.82rem;
+            font-weight: 600;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+            padding: 0.5rem 0.75rem;
+            background: var(--bg-card);
+            border-bottom: 1px solid var(--border);
+            margin-bottom: 0;
+        }
+
+        .table.raci-table {
+            margin-bottom: 0;
+            color: var(--text-1);
+            background: rgba(12,18,32,0.35);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(0,212,255,0.1);
+        }
+
+        .table.raci-table th {
+            font-family: var(--mono);
+            font-size: 1.02rem;
+            font-weight: 600;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+            background: rgba(12,18,32,0.6);
+            border: none !important;
+            padding: 0.65rem 0.95rem;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+            text-align: right;
+        }
+
+        .table.raci-table td {
+            font-size: 1.02rem;
+            border-bottom: 1px solid rgba(26,45,71,0.4) !important;
+            border-top: none !important;
+            padding: 0.65rem 0.95rem;
+            vertical-align: middle;
+            text-align: right;
+        }
+
+        .table.raci-table th.rh { color: var(--cyan); }
+        .table.raci-table th.ah { color: var(--red); }
+        .table.raci-table th.ch { color: var(--amber); }
+        .table.raci-table th.ih { color: var(--green); }
+
+        /* ── AI result sections (modal) ─────────────────────────────── */
+        .ai-section {
+            border-radius: var(--r-md);
+            padding: 0.875rem 1rem;
+            margin-bottom: 0.75rem;
+        }
+
+        .ai-section-title {
+            font-family: var(--mono);
+            font-size: 0.88rem;
+            font-weight: 600;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+            margin-bottom: 0.5rem;
+        }
+
+        .ai-section-body {
+            font-size: 0.85rem;
+            line-height: 1.75;
+            white-space: pre-wrap;
+            color: var(--text-2);
+        }
+
+        /* ── Keyframes ──────────────────────────────────────────────── */
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50%       { opacity: 0.3; }
+        }
+
+        @keyframes beacon {
+            0%   { transform: scale(1); opacity: 0.8; }
+            100% { transform: scale(2.6); opacity: 0; }
+        }
+
+        @keyframes alphapulse {
+            0%, 100% { opacity: 1; }
+            50%       { opacity: 0.35; }
+        }
+
+        @keyframes fadein {
+            from { opacity: 0; transform: translateY(10px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
+
+        /* ── Misc ────────────────────────────────────────────────────── */
+        .mono { font-family: var(--mono); }
+        .text-muted { color: var(--text-2) !important; }
+
+        .divider {
+            height: 1px;
+            background: linear-gradient(90deg, transparent, var(--border), transparent);
+            margin: 1.25rem 0;
+            border: none;
+        }
+
+        .table-responsive {
+            border-radius: var(--r-lg);
+            overflow: hidden;
+            background: rgba(12,18,32,0.35);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(0,212,255,0.1);
+            box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+        }
     </style>
 </head>
 <body>
 
-<nav class="navbar navbar-dark px-4 py-3">
-    <span class="navbar-brand fw-bold fs-5">🧠 Shan-AI</span>
-    <div class="d-flex align-items-center gap-3">
-        <a href="/dashboard/" class="nav-link fw-bold" style="color:#8b9cf4 !important;">📊 דשבורד</a>
-        <a href="/dashboard/decisions" class="nav-link position-relative" style="color:#8b9cf4 !important;">📋 החלטות{% if pending_approvals %} <span class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger" style="font-size:0.65rem;">{{ pending_approvals }}</span>{% endif %}</a>
-        <a href="/dashboard/users" class="nav-link" style="color:#8b9cf4 !important;">👥 משתמשים</a>
-        <a href="/dashboard/files" class="nav-link" style="color:#8b9cf4 !important;">📁 קבצים</a>
-        <a href="/dashboard/ask" class="nav-link" style="color:#8b9cf4 !important;">💬 שאל</a>
-        <a href="/dashboard/learning" class="nav-link" style="color:#8b9cf4 !important;">🎓 למידה</a>
-        <a href="/dashboard/logs" class="nav-link" style="color:#8b9cf4 !important;">📊 לוגים</a>
-<div class="d-flex align-items-center gap-2 border-right ps-3" style="border-right: 1px solid #2d3047; padding-right: 15px;">
-            <span class="text-muted">👤 {{ current_user.username }}</span>
-            <a href="/logout" class="nav-link text-muted small" style="color:#dc3545 !important;">🚪 התנתקות</a>
+<!-- ── Navbar ───────────────────────────────────────────────────────────── -->
+<nav class="navbar navbar-dark d-flex align-items-center justify-content-between">
+    <a href="/dashboard/" class="navbar-brand text-decoration-none">
+        <div class="brand-pulse"></div>
+        SHAN-AI / DSS
+    </a>
+
+    <div class="d-flex align-items-center gap-1 flex-wrap">
+        <a href="/dashboard/" class="nav-link nav-active">📊 דשבורד</a>
+        <a href="/dashboard/decisions" class="nav-link position-relative">
+            {% if pending_approvals %}<span class="nav-pending-dot">{{ pending_approvals }}</span>{% endif %}📋 החלטות
+        </a>
+        <a href="/dashboard/users"    class="nav-link">👥 משתמשים</a>
+        <a href="/dashboard/files"    class="nav-link">📁 קבצים</a>
+        <a href="/dashboard/ask"      class="nav-link">💬 שאל</a>
+        <a href="/dashboard/learning" class="nav-link">🎓 למידה</a>
+        <a href="/dashboard/logs"     class="nav-link">📊 לוגים</a>
+        <a href="/dashboard/projects"   class="nav-link">📂 פרויקטים</a>
+        <a href="/dashboard/llm-config" class="nav-link">🤖 מודל AI</a>
+    </div>
+
+    <div class="d-flex align-items-center gap-2">
+        <div class="user-chip">
+            <div class="user-online"></div>
+            {{ current_user.username }}
         </div>
+        <a href="/logout" class="logout-btn">🚪 יציאה</a>
     </div>
 </nav>
 
-<div class="container-fluid py-4 px-4">
+<!-- ── Page content ─────────────────────────────────────────────────────── -->
+<div class="page-wrap">
 
+    <!-- Pending approvals alert -->
     {% if pending_approvals %}
-    <div class="alert d-flex align-items-center gap-3 mb-4" style="background:#2a1a1a; border:1px solid #dc3545; border-radius:10px; color:#ff9a9a;">
-        <span style="font-size:1.4rem;">🔔</span>
+    <div class="pending-alert">
+        <div class="beacon"></div>
         <div>
-            <strong>נדרשת פעולה שלך!</strong>
-            יש לך <strong>{{ pending_approvals }}</strong> החלטה{% if pending_approvals > 1 %}ות{% endif %} הממתינה{% if pending_approvals > 1 %}ות{% endif %} לאישורך.
-            <a href="/dashboard/decisions?filter_status=pending" style="color:#ff6b6b; margin-right:8px;">לחץ כאן לטיפול ←</a>
+            <strong>נדרשת פעולה!</strong> &nbsp;
+            יש לך <strong>{{ pending_approvals }}</strong>
+            החלטה{% if pending_approvals > 1 %}ות{% endif %} הממתינה{% if pending_approvals > 1 %}ות{% endif %} לאישורך.
+            <a href="/dashboard/decisions?filter_status=pending" class="me-2">← לחץ לטיפול</a>
         </div>
     </div>
     {% endif %}
 
-    <!-- New Decision Button -->
-    <div class="mb-4">
-        <button type="button" class="btn btn-primary btn-lg" style="background: #8b9cf4; border: none; color: #0f1117; font-weight: 700;"
+    <!-- CTA row -->
+    <div class="mb-4 d-flex align-items-center gap-3">
+        <button type="button" class="btn-cmd btn-lg"
                 data-bs-toggle="modal" data-bs-target="#newDecisionModal">
-            ➕ החלטה חדשה
+            + החלטה חדשה
+        </button>
+        <button class="btn-cmd" onclick="openDashboardAI()">
+            ◈ ניתוח AI
         </button>
     </div>
 
-    <!-- KPI Cards -->
+    <!-- ── KPIs ──────────────────────────────────────────────────────── -->
+    <div class="slabel mb-2">מדדים ראשיים</div>
     <div class="row g-3 mb-4">
         <div class="col-6 col-md-3">
-            <div class="card p-3 text-center">
-                <div class="card-title">סה"כ החלטות</div>
-                <div class="stat-value">{{ total_decisions }}</div>
+            <div class="card kpi-card">
+                <div class="kpi-label"><div class="kpi-live"></div>סה"כ החלטות</div>
+                <div class="kpi-value">{{ total_decisions }}</div>
+                <div class="kpi-sub">מצטבר במערכת</div>
             </div>
         </div>
         <div class="col-6 col-md-3">
-            <div class="card p-3 text-center">
-                <div class="card-title">משתמשים רשומים</div>
-                <div class="stat-value">{{ total_users }}</div>
+            <div class="card kpi-card">
+                <div class="kpi-label"><div class="kpi-live"></div>משתמשים רשומים</div>
+                <div class="kpi-value">{{ total_users }}</div>
+                <div class="kpi-sub">עם תפקיד פעיל</div>
             </div>
         </div>
         <div class="col-6 col-md-3">
-            <div class="card p-3 text-center">
-                <div class="card-title">ממוצע פידבק</div>
-                <div class="stat-value">{{ avg_feedback if avg_feedback else "—" }}{% if avg_feedback %}<span class="fs-4">/5</span>{% endif %}</div>
+            <div class="card kpi-card">
+                <div class="kpi-label"><div class="kpi-live"></div>ממוצע פידבק</div>
+                <div class="kpi-value">{{ avg_feedback if avg_feedback else "—" }}{% if avg_feedback %}<span style="font-size:1.2rem;opacity:.5">/5</span>{% endif %}</div>
+                <div class="kpi-sub">שביעות רצון</div>
             </div>
         </div>
         <div class="col-6 col-md-3">
-            <div class="card p-3 text-center">
-                <div class="card-title">קריטיות</div>
-                <div class="stat-value" style="color:#dc3545;">{{ type_counts.get('critical', 0) }}</div>
+            <div class="card kpi-card {% if type_counts.get('critical', 0) > 0 %}kpi-critical-card{% endif %}">
+                <div class="kpi-label"><div class="kpi-live"></div>החלטות קריטיות</div>
+                <div class="kpi-value">{{ type_counts.get('critical', 0) }}</div>
+                <div class="kpi-sub">דורשות תשומת לב</div>
             </div>
         </div>
     </div>
 
-    <!-- User Personal Stats -->
-    <div class="row g-3 mb-4">
-        <div class="col-12">
-            <div class="card p-3">
-                <div class="section-title">📊 הסטטיסטיקות שלך</div>
-                <div class="row g-3">
-                    <div class="col-6 col-md-2">
-                        <div class="text-center">
-                            <div class="stat-value" style="color:#8b9cf4; font-size:2rem;">{{ written_count }}</div>
-                            <div class="stat-label">החלטות שכתבת</div>
-                        </div>
-                    </div>
-                    <div class="col-6 col-md-2">
-                        <div class="text-center">
-                            <div class="stat-value" style="color:#17a2b8; font-size:2rem;">{{ raci_counts.get('R', 0) }}</div>
-                            <div class="stat-label">👤 Responsible (ביצוע)</div>
-                        </div>
-                    </div>
-                    <div class="col-6 col-md-2">
-                        <div class="text-center">
-                            <div class="stat-value" style="color:#dc3545; font-size:2rem;">{{ raci_counts.get('A', 0) }}</div>
-                            <div class="stat-label">🧠 Accountable (סמכות)</div>
-                        </div>
-                    </div>
-                    <div class="col-6 col-md-2">
-                        <div class="text-center">
-                            <div class="stat-value" style="color:#ffc107; font-size:2rem;">{{ raci_counts.get('C', 0) }}</div>
-                            <div class="stat-label">💬 Consulted (יועץ)</div>
-                        </div>
-                    </div>
-                    <div class="col-6 col-md-2">
-                        <div class="text-center">
-                            <div class="stat-value" style="color:#28a745; font-size:2rem;">{{ raci_counts.get('I', 0) }}</div>
-                            <div class="stat-label">📢 Informed (לידיעה)</div>
-                        </div>
-                    </div>
-                </div>
-            </div>
+    <!-- ── Personal stats strip ──────────────────────────────────────── -->
+    <div class="slabel mb-2">הסטטיסטיקות שלי</div>
+    <div class="stats-strip mb-4">
+        <div class="stat-cell">
+            <span class="stat-num c-p">{{ written_count }}</span>
+            <div class="stat-lbl">החלטות שכתבתי</div>
+        </div>
+        <div class="stat-cell">
+            <span class="stat-num c-r">{{ raci_counts.get('R', 0) }}</span>
+            <div class="stat-lbl">Responsible — ביצוע</div>
+        </div>
+        <div class="stat-cell">
+            <span class="stat-num c-a">{{ raci_counts.get('A', 0) }}</span>
+            <div class="stat-lbl">Accountable — סמכות</div>
+        </div>
+        <div class="stat-cell">
+            <span class="stat-num c-c">{{ raci_counts.get('C', 0) }}</span>
+            <div class="stat-lbl">Consulted — יועץ</div>
+        </div>
+        <div class="stat-cell">
+            <span class="stat-num c-i">{{ raci_counts.get('I', 0) }}</span>
+            <div class="stat-lbl">Informed — לידיעה</div>
         </div>
     </div>
 
-    <!-- AI Dashboard Analysis Button -->
-    <div class="mb-4 text-start">
-        <button class="btn btn-outline-info px-4" onclick="openDashboardAI()">
-            🤖 ניתוח AI של הדשבורד שלי
-        </button>
-    </div>
-
-    <!-- Charts Row -->
+    <!-- ── Charts row ────────────────────────────────────────────────── -->
+    <div class="slabel mb-2">ניתוח נתונים</div>
     <div class="row g-3 mb-4">
-
-        <!-- Decisions by type - Doughnut -->
         <div class="col-md-4">
             <div class="card p-3 h-100">
                 <div class="section-title">החלטות לפי סוג</div>
                 <canvas id="typeChart"></canvas>
             </div>
         </div>
-
-        <!-- Status breakdown - Doughnut -->
         <div class="col-md-4">
             <div class="card p-3 h-100">
                 <div class="section-title">התפלגות סטטוס</div>
                 <canvas id="statusChart"></canvas>
             </div>
         </div>
-
-        <!-- Daily trend - Line -->
         <div class="col-md-4">
             <div class="card p-3 h-100">
-                <div class="section-title">החלטות — 7 ימים אחרונים</div>
+                <div class="section-title">7 ימים אחרונים</div>
                 <canvas id="dailyChart"></canvas>
             </div>
         </div>
     </div>
 
-    <!-- Decisions per role -->
+    <!-- ── Decisions by role + Recent table ─────────────────────────── -->
     <div class="row g-3 mb-4">
-        <div class="col-md-6">
-            <div class="card p-3">
+        <div class="col-md-4">
+            <div class="card p-3 h-100">
                 <div class="section-title">החלטות לפי תפקיד</div>
                 {% set role_labels = {
                     'project_manager': 'מנהל פרויקט',
@@ -228,10 +957,10 @@
                     'division_manager': 'מנהל אגף'
                 } %}
                 {% for role, cnt in role_counts.items() %}
-                <div class="mb-2">
-                    <div class="d-flex justify-content-between mb-1">
-                        <span class="small">{{ role_labels.get(role, role) }}</span>
-                        <span class="small fw-bold">{{ cnt }}</span>
+                <div class="role-row">
+                    <div class="role-hd">
+                        <span class="role-name">{{ role_labels.get(role, role) }}</span>
+                        <span class="role-count">{{ cnt }}</span>
                     </div>
                     <div class="progress">
                         {% set max_cnt = role_counts.values() | max if role_counts else 1 %}
@@ -244,152 +973,261 @@
                 {% endif %}
             </div>
         </div>
-    </div>
 
-    <!-- Recent Decisions Table -->
-    <div class="card p-3">
-        <div class="section-title">החלטות אחרונות</div>
-        <div class="table-responsive">
-            <table class="table table-hover mb-0">
-                <thead>
-                    <tr>
-                        <th>#</th>
-                        <th>סוג</th>
-                        <th>סטטוס</th>
-                        <th>סיכום</th>
-                        <th>מגיש</th>
-                        <th>פידבק</th>
-                        <th>תאריך</th>
-                        <th></th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for d in recent_decisions %}
-                    <tr>
-                        <td class="text-muted">{{ d.id }}</td>
-                        <td><span class="badge badge-{{ d.type }}">{{ type_labels_he.get(d.type, d.type) }}</span></td>
-                        <td><span class="badge badge-{{ d.status }}">{{ status_labels_he.get(d.status, d.status) }}</span></td>
-                        <td style="max-width:300px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{{ d.summary or '—' }}</td>
-                        <td>{{ d.username }}</td>
-                        <td>{% if d.feedback_score %}⭐ {{ d.feedback_score }}/5{% else %}<span class="text-muted">—</span>{% endif %}</td>
-                        <td class="text-muted small">{{ d.created_at }}</td>
-                        <td><button class="btn btn-sm btn-outline-info" onclick="openDecisionAI({{ d.id }})">🤖</button></td>
-                    </tr>
-                    {% endfor %}
-                    {% if not recent_decisions %}
-                    <tr><td colspan="8" class="text-center text-muted py-4">אין החלטות עדיין</td></tr>
-                    {% endif %}
-                </tbody>
-            </table>
+        <div class="col-md-8">
+            <div class="card p-3">
+                <div class="section-title">החלטות אחרונות</div>
+                <div class="table-responsive">
+                    <table class="table dtable table-hover mb-0">
+                        <thead>
+                            <tr>
+                                <th>#</th>
+                                <th>סוג</th>
+                                <th>סטטוס</th>
+                                <th>סיכום</th>
+                                <th>מגיש</th>
+                                <th>פידבק</th>
+                                <th>תאריך</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for d in recent_decisions %}
+                            <tr class="drow-{{ d.type }}">
+                                <td class="text-muted">{{ d.id }}</td>
+                                <td><span class="badge badge-{{ d.type }}">{{ type_labels_he.get(d.type, d.type) }}</span></td>
+                                <td><span class="badge badge-{{ d.status }}">{{ status_labels_he.get(d.status, d.status) }}</span></td>
+                                <td style="max-width:240px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{{ d.summary or '—' }}</td>
+                                <td class="text-muted">{{ d.username }}</td>
+                                <td class="mono" style="font-size:0.72rem;">{% if d.feedback_score %}★ {{ d.feedback_score }}/5{% else %}<span class="text-muted">—</span>{% endif %}</td>
+                                <td class="text-muted">{{ d.created_at }}</td>
+                                <td><button class="btn btn-outline-info btn-sm" onclick="openDecisionAI({{ d.id }})">AI</button></td>
+                            </tr>
+                            {% endfor %}
+                            {% if not recent_decisions %}
+                            <tr><td colspan="8" class="text-center py-4 text-muted">אין החלטות עדיין</td></tr>
+                            {% endif %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
         </div>
     </div>
 
-</div>
+</div><!-- /page-wrap -->
 
-<!-- Dashboard AI Analysis Modal -->
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<!-- Dashboard AI Modal                                                        -->
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
 <div class="modal fade" id="aiDashboardModal" tabindex="-1">
     <div class="modal-dialog modal-lg">
-        <div class="modal-content" style="background:#1a1d2e; border:1px solid #2d3047; color:#e0e0e0;">
-            <div class="modal-header" style="border-color:#2d3047;">
-                <h5 class="modal-title" style="color:#8b9cf4;">🤖 ניתוח AI — הדשבורד שלי</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">◈ ניתוח AI — הדשבורד שלי</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal">✕</button>
             </div>
             <div class="modal-body" id="aiDashboardModalBody"></div>
-            <div class="modal-footer" style="border-color:#2d3047;">
+            <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">סגור</button>
             </div>
         </div>
     </div>
 </div>
 
-<!-- AI Analysis Modal -->
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<!-- Decision AI Modal                                                         -->
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
 <div class="modal fade" id="aiDecisionModal" tabindex="-1">
     <div class="modal-dialog modal-lg">
-        <div class="modal-content" style="background:#1a1d2e; border:1px solid #2d3047; color:#e0e0e0;">
-            <div class="modal-header" style="border-color:#2d3047;">
-                <h5 class="modal-title" style="color:#8b9cf4;">🤖 ניתוח AI — <span id="aiDecisionModalTitle"></span></h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">◈ ניתוח AI — <span id="aiDecisionModalTitle"></span></h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal">✕</button>
             </div>
             <div class="modal-body" id="aiDecisionModalBody"></div>
-            <div class="modal-footer" style="border-color:#2d3047;">
+            <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">סגור</button>
             </div>
         </div>
     </div>
 </div>
 
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<!-- New Decision Modal                                                        -->
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<div class="modal fade" id="newDecisionModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close">✕</button>
+                <h5 class="modal-title">+ החלטה חדשה</h5>
+            </div>
+            <div class="modal-body" style="max-height: 72vh; overflow-y: auto;">
+                <form id="newDecisionForm" method="POST" action="/decisions/confirm">
+
+                    <div class="mb-3">
+                        <label class="form-label">📝 תיאור הבעיה / ההחלטה *</label>
+                        <textarea id="decisionProblem" name="problem_description" class="form-control" rows="4"
+                                  placeholder="תאר את ההחלטה שלך בפירוט..." required></textarea>
+                    </div>
+
+                    <!-- Hidden analysis fields + results section -->
+                    <div id="analysisResults" style="display:none;">
+                        <input type="hidden" id="decisionType"       name="type"               value="">
+                        <input type="hidden" id="decisionSummary"    name="summary"             value="">
+                        <input type="hidden" id="decisionAction"     name="recommended_action"  value="">
+                        <input type="hidden" id="decisionApproval"   name="requires_approval"   value="">
+                        <input type="hidden" id="decisionMeasurable" name="measurability"       value="">
+                        <input type="hidden" id="decisionAssumptions" name="assumptions"        value="">
+                        <input type="hidden" id="decisionRisks"      name="risks"               value="">
+
+                        <!-- AI preview -->
+                        <div id="aiPreview" class="ai-preview" style="display:none;">
+                            <div class="ai-preview-hd">◈ תוצאות ניתוח AI</div>
+                            <div class="ai-preview-body">
+                                <div><strong>סוג:</strong> <span id="previewType">—</span></div>
+                                <div><strong>סיכום:</strong> <span id="previewSummary">—</span></div>
+                                <div><strong>פעולה:</strong> <span id="previewAction">—</span></div>
+                            </div>
+                        </div>
+
+                        <!-- RACI section -->
+                        <div class="raci-wrap mt-3">
+                            <div class="raci-hd" style="color:var(--cyan);">👥 הקצאת RACI</div>
+                            <div style="overflow-x:auto;">
+                                <table class="table raci-table table-sm">
+                                    <thead>
+                                        <tr>
+                                            <th style="text-align:right; color:var(--text-2);">משתמש</th>
+                                            <th class="rh text-center" style="min-width:56px;">R</th>
+                                            <th class="ah text-center" style="min-width:56px;">A</th>
+                                            <th class="ch text-center" style="min-width:56px;">C</th>
+                                            <th class="ih text-center" style="min-width:56px;">I</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="raciTableBody"></tbody>
+                                </table>
+                            </div>
+                            <div id="raciMessage" class="text-center py-2"
+                                 style="color:var(--red); font-size:0.78rem; font-family:var(--mono);">
+                                ⚠ חייב להיות בעל סמכות אחד (A)
+                            </div>
+                        </div>
+                    </div>
+
+                    <input type="hidden" id="raci_r" name="raci_r" value="">
+                    <input type="hidden" id="raci_a" name="raci_a" value="">
+                    <input type="hidden" id="raci_c" name="raci_c" value="">
+                    <input type="hidden" id="raci_i" name="raci_i" value="">
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">ביטול</button>
+                <button type="button" id="analyzeBtn" class="btn btn-primary" onclick="analyzeDecision()">
+                    ◎ נתח
+                </button>
+                <button type="button" id="submitBtn" class="btn btn-success" onclick="submitDecision()" style="display:none;">
+                    ✓ צור החלטה
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ── Scripts ───────────────────────────────────────────────────────────── -->
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 <script>
+/* ── AI section renderer ──────────────────────────────────────────────── */
 const COLOR_MAP = {
-    blue:   { bg: '#0d1b2a', border: '#17a2b8' },
-    green:  { bg: '#0d1f0d', border: '#28a745' },
-    yellow: { bg: '#1f1a0a', border: '#ffc107' },
-    purple: { bg: '#140d2a', border: '#8b9cf4' },
+    blue:   { bg: 'rgba(56,189,248,0.08)',  border: '#38bdf8', title: '#38bdf8' },
+    green:  { bg: 'rgba(16,185,129,0.08)',  border: '#10b981', title: '#10b981' },
+    yellow: { bg: 'rgba(245,158,11,0.08)',  border: '#f59e0b', title: '#f59e0b' },
+    purple: { bg: 'rgba(139,156,244,0.08)', border: '#8b9cf4', title: '#8b9cf4' },
 };
+
 function renderAISections(sections) {
     return (sections || []).map(s => {
         const c = COLOR_MAP[s.color] || COLOR_MAP.purple;
-        return `<div style="background:${c.bg}; border:1px solid ${c.border}; border-radius:10px; padding:16px 20px; margin-bottom:14px;">
-            <div style="color:${c.border}; font-weight:700; font-size:0.95rem; margin-bottom:8px;">${s.icon||''} ${s.title}</div>
-            <div style="color:#d0d8f0; font-size:0.92rem; line-height:1.7; white-space:pre-wrap;">${s.content}</div>
+        return `<div class="ai-section" style="background:${c.bg}; border:1px solid ${c.border}22; border-right:2px solid ${c.border};">
+            <div class="ai-section-title" style="color:${c.title};">${s.icon || ''} ${s.title}</div>
+            <div class="ai-section-body">${s.content}</div>
         </div>`;
     }).join('');
 }
+
 async function openDashboardAI() {
     document.getElementById('aiDashboardModalBody').innerHTML =
-        '<div class="text-center py-5" style="color:#8b9cf4;"><div style="font-size:2rem;">🤖</div><div class="mt-2">מנתח את הדשבורד שלך...</div></div>';
+        '<div class="text-center py-5" style="color:var(--cyan);"><div style="font-size:1.6rem;font-family:var(--mono);">◈</div><div class="mt-2" style="font-family:var(--mono);font-size:0.78rem;letter-spacing:.1em;">ANALYZING...</div></div>';
     new bootstrap.Modal(document.getElementById('aiDashboardModal')).show();
     try {
         const resp = await fetch('/dashboard/ai-analysis');
         const data = await resp.json();
         document.getElementById('aiDashboardModalBody').innerHTML =
             data.error ? `<div class="alert alert-danger">❌ ${data.error}</div>` : renderAISections(data.sections);
-    } catch(e) {
-        document.getElementById('aiDashboardModalBody').innerHTML = '<div class="alert alert-danger">❌ שגיאה בטעינת הניתוח</div>';
+    } catch (e) {
+        document.getElementById('aiDashboardModalBody').innerHTML = '<div class="text-center py-4" style="color:var(--red);font-family:var(--mono);font-size:.8rem;">שגיאה בטעינת הניתוח</div>';
     }
 }
 
 async function openDecisionAI(id) {
     document.getElementById('aiDecisionModalTitle').textContent = 'החלטה #' + id;
     document.getElementById('aiDecisionModalBody').innerHTML =
-        '<div class="text-center py-5" style="color:#8b9cf4;"><div style="font-size:2rem;">🤖</div><div class="mt-2">מנתח...</div></div>';
+        '<div class="text-center py-5" style="color:var(--cyan);"><div style="font-size:1.6rem;font-family:var(--mono);">◈</div><div class="mt-2" style="font-family:var(--mono);font-size:.78rem;letter-spacing:.1em;">ANALYZING...</div></div>';
     new bootstrap.Modal(document.getElementById('aiDecisionModal')).show();
     try {
         const resp = await fetch(`/dashboard/decisions/${id}/ai-analysis`);
         const data = await resp.json();
         document.getElementById('aiDecisionModalBody').innerHTML =
             data.error ? `<div class="alert alert-danger">❌ ${data.error}</div>` : renderAISections(data.sections);
-    } catch(e) {
-        document.getElementById('aiDecisionModalBody').innerHTML = '<div class="alert alert-danger">❌ שגיאה בטעינת הניתוח</div>';
+    } catch (e) {
+        document.getElementById('aiDecisionModalBody').innerHTML = '<div class="text-center py-4" style="color:var(--red);font-family:var(--mono);font-size:.8rem;">שגיאה בטעינת הניתוח</div>';
     }
 }
 
-const COLORS = { info:'#17a2b8', normal:'#28a745', critical:'#dc3545', uncertain:'#ffc107' };
-const STATUS_COLORS = { pending:'#6c757d', approved:'#28a745', rejected:'#dc3545', executed:'#17a2b8' };
+/* ── Charts ─────────────────────────────────────────────────────────────── */
+const CHART_DEFAULTS = {
+    plugins: { legend: { labels: { color: '#64748b', font: { family: 'IBM Plex Mono', size: 11 } } } },
+};
 
-// Type doughnut
+Chart.defaults.color = '#64748b';
+Chart.defaults.borderColor = '#1a2d47';
+
+const TYPE_COLORS   = { info: '#38bdf8', normal: '#10b981', critical: '#ef4444', uncertain: '#f59e0b' };
+const STATUS_COLORS = { pending: '#475569', approved: '#10b981', rejected: '#ef4444', executed: '#38bdf8' };
+
 const typeData = {{ type_counts | tojson }};
 new Chart(document.getElementById('typeChart'), {
     type: 'doughnut',
     data: {
         labels: Object.keys(typeData).map(k => ({ info:'מידע', normal:'רגיל', critical:'קריטי', uncertain:'לא ודאי' })[k] || k),
-        datasets: [{ data: Object.values(typeData), backgroundColor: Object.keys(typeData).map(k => COLORS[k] || '#888'), borderWidth: 0 }]
+        datasets: [{
+            data: Object.values(typeData),
+            backgroundColor: Object.keys(typeData).map(k => TYPE_COLORS[k] + '99' || '#888'),
+            borderColor:     Object.keys(typeData).map(k => TYPE_COLORS[k] || '#888'),
+            borderWidth: 1,
+            hoverBorderWidth: 2,
+        }]
     },
-    options: { plugins: { legend: { labels: { color: '#e0e0e0' } } }, cutout: '65%' }
+    options: { ...CHART_DEFAULTS, cutout: '68%' }
 });
 
-// Status doughnut
 const statusData = {{ status_counts | tojson }};
 new Chart(document.getElementById('statusChart'), {
     type: 'doughnut',
     data: {
         labels: Object.keys(statusData).map(k => ({ pending:'ממתין', approved:'מאושר', rejected:'נדחה', executed:'בוצע' })[k] || k),
-        datasets: [{ data: Object.values(statusData), backgroundColor: Object.keys(statusData).map(k => STATUS_COLORS[k] || '#888'), borderWidth: 0 }]
+        datasets: [{
+            data: Object.values(statusData),
+            backgroundColor: Object.keys(statusData).map(k => STATUS_COLORS[k] + '99' || '#888'),
+            borderColor:     Object.keys(statusData).map(k => STATUS_COLORS[k] || '#888'),
+            borderWidth: 1,
+            hoverBorderWidth: 2,
+        }]
     },
-    options: { plugins: { legend: { labels: { color: '#e0e0e0' } } }, cutout: '65%' }
+    options: { ...CHART_DEFAULTS, cutout: '68%' }
 });
 
-// Daily trend line
 new Chart(document.getElementById('dailyChart'), {
     type: 'line',
     data: {
@@ -397,121 +1235,38 @@ new Chart(document.getElementById('dailyChart'), {
         datasets: [{
             label: 'החלטות',
             data: {{ daily_data | safe }},
-            borderColor: '#8b9cf4',
-            backgroundColor: 'rgba(139,156,244,0.15)',
+            borderColor: '#00d4ff',
+            backgroundColor: 'rgba(0,212,255,0.07)',
             tension: 0.4,
             fill: true,
-            pointBackgroundColor: '#8b9cf4'
+            pointBackgroundColor: '#00d4ff',
+            pointRadius: 3,
+            pointHoverRadius: 5,
+            borderWidth: 1.5,
         }]
     },
     options: {
-        plugins: { legend: { labels: { color: '#e0e0e0' } } },
+        ...CHART_DEFAULTS,
         scales: {
-            x: { ticks: { color: '#a0a8c0' }, grid: { color: '#2d3047' } },
-            y: { ticks: { color: '#a0a8c0', stepSize: 1 }, grid: { color: '#2d3047' }, beginAtZero: true }
+            x: { ticks: { color: '#3d5270', font: { family: 'IBM Plex Mono', size: 10 } }, grid: { color: '#1a2d47' } },
+            y: { ticks: { color: '#3d5270', stepSize: 1, font: { family: 'IBM Plex Mono', size: 10 } }, grid: { color: '#1a2d47' }, beginAtZero: true }
         }
     }
 });
-</script>
 
-<!-- ========== NEW DECISION MODAL ========== -->
-<div class="modal fade" id="newDecisionModal" tabindex="-1" aria-hidden="true">
-    <div class="modal-dialog modal-lg">
-        <div class="modal-content">
-            <div class="modal-header" style="flex-direction: row-reverse; border-color: #2d3047;">
-                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                <h5 class="modal-title" style="color: #8b9cf4; font-weight: 700;">➕ החלטה חדשה</h5>
-            </div>
-            <div class="modal-body" style="max-height: 70vh; overflow-y: auto;">
-                <form id="newDecisionForm" method="POST" action="/decisions/confirm">
-                    <!-- Problem Description -->
-                    <div class="mb-3">
-                        <label class="form-label" style="color: #d0d8f0;">📝 תיאור הבעיה / ההחלטה *</label>
-                        <textarea id="decisionProblem" name="problem_description" class="form-control" rows="4"
-                                  style="background: #0f1117; border: 1px solid #2d3047; color: #e0e0e0;"
-                                  placeholder="תאר את ההחלטה שלך בפירוט..."required></textarea>
-                    </div>
-
-                    <!-- Hidden: Analysis Results (populated by Analyze) -->
-                    <div id="analysisResults" style="display: none;">
-                        <input type="hidden" id="decisionType" name="type" value="">
-                        <input type="hidden" id="decisionSummary" name="summary" value="">
-                        <input type="hidden" id="decisionAction" name="recommended_action" value="">
-                        <input type="hidden" id="decisionApproval" name="requires_approval" value="">
-                        <input type="hidden" id="decisionMeasurable" name="measurability" value="">
-                        <input type="hidden" id="decisionAssumptions" name="assumptions" value="">
-                        <input type="hidden" id="decisionRisks" name="risks" value="">
-
-                        <!-- Analysis Preview -->
-                        <div id="aiPreview" style="display: none; background: #0f1117; border: 1px solid #8b9cf4; border-radius: 8px; padding: 12px; margin-bottom: 16px;">
-                            <div style="color: #8b9cf4; font-weight: 600; margin-bottom: 8px;">🤖 תוצאות AI:</div>
-                            <div style="color: #d0d8f0; font-size: 0.9rem; line-height: 1.5;">
-                                <div><strong>סוג:</strong> <span id="previewType">—</span></div>
-                                <div><strong>סיכום:</strong> <span id="previewSummary">—</span></div>
-                                <div><strong>פעולה:</strong> <span id="previewAction">—</span></div>
-                            </div>
-                        </div>
-
-                        <!-- RACI Assignment Section -->
-                        <div style="background: #0f1117; border: 1px solid #2d3047; border-radius: 8px; padding: 12px;">
-                            <div style="color: #8b9cf4; font-weight: 600; margin-bottom: 12px;">👥 הקצאת RACI</div>
-                            <div style="overflow-x: auto;">
-                                <table class="table table-sm" style="color: #e0e0e0; margin-bottom: 0;">
-                                    <thead style="background: #1a1d2e; border-bottom: 1px solid #2d3047;">
-                                        <tr>
-                                            <th style="color: #8b9cf4; text-align: right;">משתמש</th>
-                                            <th style="color: #8b9cf4; text-align: center; min-width: 60px;">R</th>
-                                            <th style="color: #dc3545; text-align: center; min-width: 60px;">A</th>
-                                            <th style="color: #ffc107; text-align: center; min-width: 60px;">C</th>
-                                            <th style="color: #17a2b8; text-align: center; min-width: 60px;">I</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody id="raciTableBody" style="border-color: #2d3047;">
-                                        <!-- Populated by JavaScript -->
-                                    </tbody>
-                                </table>
-                            </div>
-                            <div id="raciMessage" style="color: #dc3545; font-size: 0.85rem; margin-top: 8px; text-align: center;">
-                                ⚠️ חייב להיות בעל סמכות אחד (A)
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- RACI Hidden Inputs -->
-                    <input type="hidden" id="raci_r" name="raci_r" value="">
-                    <input type="hidden" id="raci_a" name="raci_a" value="">
-                    <input type="hidden" id="raci_c" name="raci_c" value="">
-                    <input type="hidden" id="raci_i" name="raci_i" value="">
-                </form>
-            </div>
-            <div class="modal-footer" style="border-color: #2d3047;">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">ביטול</button>
-                <button type="button" id="analyzeBtn" class="btn btn-primary" onclick="analyzeDecision()">
-                    🔍 נתח
-                </button>
-                <button type="button" id="submitBtn" class="btn btn-success" onclick="submitDecision()" style="display: none;">
-                    ✅ צור החלטה
-                </button>
-            </div>
-        </div>
-    </div>
-</div>
-
-<script>
-// Global state for decision modal
+/* ── New Decision flow ──────────────────────────────────────────────────── */
 let allUsers = [];
 let currentAnalysis = null;
 
 async function analyzeDecision() {
     const problem = document.getElementById('decisionProblem').value.trim();
-    if (!problem) {
-        alert('אנא הכנס תיאור בעיה');
-        return;
-    }
+    if (!problem) { alert('אנא הכנס תיאור בעיה'); return; }
 
-    document.getElementById('analyzeBtn').disabled = true;
+    const btn = document.getElementById('analyzeBtn');
+    btn.disabled = true;
+    btn.textContent = '...מנתח';
+
     try {
-        // Call the combined analyze/preview endpoint
         const response = await fetch('/dashboard/decisions/analyze/preview', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -521,61 +1276,48 @@ async function analyzeDecision() {
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data = await response.json();
 
-        if (data.error) {
-            alert('❌ ' + data.error);
-            return;
-        }
+        if (data.error) { alert('❌ ' + data.error); return; }
+        if (data.verdict !== 'DECISION') { alert('⚠️ ' + (data.message || 'לא זוהתה החלטה')); return; }
 
-        if (data.verdict !== 'DECISION') {
-            alert('⚠️ ' + (data.message || 'לא זוהתה החלטה'));
-            return;
-        }
-
-        // Store analysis and users
         currentAnalysis = data.analysis;
         allUsers = data.users || [];
 
-        // Populate hidden fields
-        document.getElementById('decisionType').value = currentAnalysis.type || '';
-        document.getElementById('decisionSummary').value = currentAnalysis.summary || '';
-        document.getElementById('decisionAction').value = currentAnalysis.recommended_action || '';
-        document.getElementById('decisionApproval').value = currentAnalysis.requires_approval ? 'true' : 'false';
+        document.getElementById('decisionType').value       = currentAnalysis.type || '';
+        document.getElementById('decisionSummary').value    = currentAnalysis.summary || '';
+        document.getElementById('decisionAction').value     = currentAnalysis.recommended_action || '';
+        document.getElementById('decisionApproval').value   = currentAnalysis.requires_approval ? 'true' : 'false';
         document.getElementById('decisionMeasurable').value = currentAnalysis.measurability || '';
         document.getElementById('decisionAssumptions').value = JSON.stringify(currentAnalysis.self_critique?.assumptions || []);
-        document.getElementById('decisionRisks').value = JSON.stringify(currentAnalysis.self_critique?.risks || []);
+        document.getElementById('decisionRisks').value      = JSON.stringify(currentAnalysis.self_critique?.risks || []);
 
-        // Show analysis preview
         document.getElementById('aiPreview').style.display = 'block';
-        document.getElementById('previewType').textContent = currentAnalysis.type || '—';
-        document.getElementById('previewSummary').textContent = (currentAnalysis.summary || '—').substring(0, 80) + '...';
-        document.getElementById('previewAction').textContent = (currentAnalysis.recommended_action || '—').substring(0, 80) + '...';
+        document.getElementById('previewType').textContent    = currentAnalysis.type || '—';
+        document.getElementById('previewSummary').textContent = (currentAnalysis.summary || '—').substring(0, 80) + '…';
+        document.getElementById('previewAction').textContent  = (currentAnalysis.recommended_action || '—').substring(0, 80) + '…';
 
-        // Populate RACI table
         populateRaciTable(allUsers, data.raci_suggestions || {});
 
-        // Show analysis results and submit button
         document.getElementById('analysisResults').style.display = 'block';
         document.getElementById('submitBtn').style.display = 'inline-block';
-        document.getElementById('analyzeBtn').textContent = '🔄 נתח מחדש';
+        btn.textContent = '◎ נתח מחדש';
     } catch (e) {
         alert('❌ שגיאה בניתוח: ' + e.message);
+        btn.textContent = '◎ נתח';
     } finally {
-        document.getElementById('analyzeBtn').disabled = false;
+        btn.disabled = false;
     }
 }
 
 function populateRaciTable(users, suggestions) {
     const tbody = document.getElementById('raciTableBody');
     tbody.innerHTML = '';
-
     for (const user of users) {
         const tr = document.createElement('tr');
-        tr.style.borderBottom = '1px solid #2d3047';
-
-        let html = '<td style="text-align: right;">' + user.username + '</td>';
+        tr.style.borderBottom = '1px solid #1a2d47';
+        let html = `<td style="text-align:right;">${user.username}</td>`;
         for (const role of ['R', 'A', 'C', 'I']) {
             const checked = suggestions[user.id] === role ? 'checked' : '';
-            html += `<td style="text-align: center;">
+            html += `<td style="text-align:center;">
                 <input type="radio" name="raci_${user.id}" value="${role}" class="raci-radio"
                        data-user="${user.id}" data-role="${role}" ${checked}>
             </td>`;
@@ -583,12 +1325,7 @@ function populateRaciTable(users, suggestions) {
         tr.innerHTML = html;
         tbody.appendChild(tr);
     }
-
-    // Add change listeners
-    document.querySelectorAll('.raci-radio').forEach(el => {
-        el.addEventListener('change', validateRaci);
-    });
-
+    document.querySelectorAll('.raci-radio').forEach(el => el.addEventListener('change', validateRaci));
     validateRaci();
 }
 
@@ -596,39 +1333,31 @@ function validateRaci() {
     const checked = Array.from(document.querySelectorAll('.raci-radio:checked'));
     const aCount = checked.filter(el => el.value === 'A').length;
     const msg = document.getElementById('raciMessage');
-
+    const submitBtn = document.getElementById('submitBtn');
     if (aCount === 0) {
-        msg.textContent = '⚠️ חייב להיות בעל סמכות אחד (A)';
-        msg.style.color = '#dc3545';
-        document.getElementById('submitBtn').disabled = true;
+        msg.textContent = '⚠ חייב להיות בעל סמכות אחד (A)';
+        msg.style.color = 'var(--red)';
+        submitBtn.disabled = true;
     } else if (aCount === 1) {
-        msg.textContent = '✅ הקצאת RACI תקינה';
-        msg.style.color = '#28a745';
-        document.getElementById('submitBtn').disabled = false;
+        msg.textContent = '✓ הקצאת RACI תקינה';
+        msg.style.color = 'var(--green)';
+        submitBtn.disabled = false;
     } else {
-        msg.textContent = '❌ רק בעל סמכות אחד (A)';
-        msg.style.color = '#dc3545';
-        document.getElementById('submitBtn').disabled = true;
+        msg.textContent = '✕ רק בעל סמכות אחד (A)';
+        msg.style.color = 'var(--red)';
+        submitBtn.disabled = true;
     }
 }
 
 function submitDecision() {
-    // Collect RACI assignments
     const raci = { R: [], A: [], C: [], I: [] };
-    document.querySelectorAll('.raci-radio:checked').forEach(el => {
-        raci[el.value].push(el.dataset.user);
-    });
-
-    // Populate hidden fields
+    document.querySelectorAll('.raci-radio:checked').forEach(el => raci[el.value].push(el.dataset.user));
     document.getElementById('raci_r').value = raci.R.join(',');
     document.getElementById('raci_a').value = raci.A.join(',');
     document.getElementById('raci_c').value = raci.C.join(',');
     document.getElementById('raci_i').value = raci.I.join(',');
-
-    // Submit form
     document.getElementById('newDecisionForm').submit();
 }
 </script>
-
 </body>
 </html>

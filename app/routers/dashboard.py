@@ -542,8 +542,9 @@ async def dashboard_ai_analysis(
 כל content חייב להיות ספציפי לנתונים — עם מספרים, דפוסים ותובנות אמיתיות. אל תהיה גנרי."""
 
     try:
-        from app.services.groq_client import groq_chat
-        raw = await groq_chat(
+        from app.services.llm_router import llm_chat
+        raw = await llm_chat(
+            "dashboard_analysis",
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": data_block},
@@ -647,8 +648,9 @@ async def user_ai_analysis(
 כל section.content צריך להיות פסקה מלאה בעברית, עם תובנות ספציפיות לנתונים — לא גנריות. אם אין מספיק נתונים, ציין זאת בכנות."""
 
     try:
-        from app.services.groq_client import groq_chat
-        raw = await groq_chat(
+        from app.services.llm_router import llm_chat
+        raw = await llm_chat(
+            "dashboard_analysis",
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": data_block},
@@ -757,8 +759,9 @@ async def decision_ai_analysis(
 כל section.content צריך להיות ניתוח ספציפי לנתונים — לא גנרי. התחשב במשובים שניתנו מהמשתמשים בניתוחך. היה כן גם אם הניתוח שלילי."""
 
     try:
-        from app.services.groq_client import groq_chat
-        raw = await groq_chat(
+        from app.services.llm_router import llm_chat
+        raw = await llm_chat(
+            "dashboard_analysis",
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": data_block},

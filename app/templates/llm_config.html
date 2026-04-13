@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Shan-AI — הגדרות מודל AI</title>
+    <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        :root {
+            --bg-deep:   #070b12;
+            --bg-card:   #0f1826;
+            --border:    #1a2d47;
+            --border-hi: #1e3a5f;
+            --cyan:      #00d4ff;
+            --cyan-dim:  rgba(0,212,255,0.09);
+            --purple:    #8b9cf4;
+            --green:     #10b981;
+            --orange:    #f59e0b;
+            --red:       #ef4444;
+            --text-1:    #e2e8f0;
+            --text-2:    #64748b;
+            --text-3:    #344156;
+            --mono:      'IBM Plex Mono', monospace;
+            --ui:        'Heebo', sans-serif;
+        }
+        @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+        body { background: var(--bg-deep); color: var(--text-1); font-family: var(--ui); min-height: 100vh; }
+
+        /* ── Navbar ── */
+        .navbar {
+            background: rgba(7,11,18,0.96) !important;
+            border-bottom: 1px solid var(--border);
+            backdrop-filter: blur(24px);
+            padding: 0 1.5rem; height: 50px;
+            position: sticky; top: 0; z-index: 1000;
+            box-shadow: 0 4px 24px rgba(0,0,0,0.4);
+        }
+        .navbar::after {
+            content: ''; position: absolute; bottom: 0; left: 0; right: 0; height: 1px;
+            background: linear-gradient(90deg, transparent 0%, var(--cyan) 30%, var(--purple) 70%, transparent 100%);
+            opacity: 0.2;
+        }
+        .navbar-brand {
+            font-family: var(--mono); font-size: 1.02rem; font-weight: 600;
+            color: var(--cyan) !important; letter-spacing: 0.08em;
+            display: flex; align-items: center; gap: 7px; text-decoration: none;
+        }
+        .brand-pulse {
+            width: 5px; height: 5px; background: var(--cyan); border-radius: 50%;
+            box-shadow: 0 0 8px var(--cyan); animation: blink 2.4s ease-in-out infinite;
+        }
+        .nav-link {
+            font-size: 0.95rem; font-weight: 500; color: var(--text-2) !important;
+            padding: 0.22rem 0.6rem !important; border-radius: 4px;
+            transition: all 0.14s; white-space: nowrap;
+        }
+        .nav-link:hover { color: var(--text-1) !important; background: rgba(255,255,255,0.04); }
+        .nav-link.nav-active { color: var(--cyan) !important; background: var(--cyan-dim); }
+        .user-chip {
+            display: flex; align-items: center; gap: 6px;
+            padding: 3px 10px; background: var(--bg-card); border: 1px solid var(--border);
+            border-radius: 20px; font-size: 0.92rem; color: var(--text-2);
+        }
+        .user-online { width: 5px; height: 5px; background: var(--green); border-radius: 50%; box-shadow: 0 0 6px var(--green); }
+        .logout-btn {
+            font-family: var(--mono); font-size: 0.88rem; color: var(--text-3) !important;
+            text-decoration: none; padding: 3px 8px; border-radius: 4px; transition: all 0.14s;
+        }
+        .logout-btn:hover { color: var(--red) !important; background: rgba(239,68,68,0.1); }
+
+        /* ── Page ── */
+        .page-header {
+            padding: 2rem 0 1.2rem;
+            border-bottom: 1px solid var(--border);
+            margin-bottom: 2rem;
+        }
+        .page-title {
+            font-family: var(--mono); font-size: 1.4rem; font-weight: 600;
+            color: var(--cyan); letter-spacing: 0.06em;
+        }
+        .page-subtitle { color: var(--text-2); font-size: 0.95rem; margin-top: 4px; }
+
+        /* ── Quick-select buttons ── */
+        .quick-bar {
+            display: flex; gap: 8px; flex-wrap: wrap; align-items: center;
+            background: rgba(15,24,38,0.8); border: 1px solid var(--border);
+            border-radius: 10px; padding: 12px 16px; margin-bottom: 1.5rem;
+        }
+        .quick-bar .label { color: var(--text-2); font-size: 0.9rem; margin-left: 6px; }
+        .btn-quick {
+            font-size: 0.85rem; font-weight: 600; padding: 5px 14px; border-radius: 6px;
+            border: none; cursor: pointer; transition: all 0.15s;
+        }
+        .btn-groq  { background: rgba(139,156,244,0.15); color: var(--purple); border: 1px solid rgba(139,156,244,0.3); }
+        .btn-groq:hover  { background: rgba(139,156,244,0.28); }
+        .btn-gemma { background: rgba(16,185,129,0.15);  color: var(--green);  border: 1px solid rgba(16,185,129,0.3); }
+        .btn-gemma:hover { background: rgba(16,185,129,0.28); }
+        .btn-auto  { background: rgba(245,158,11,0.15);  color: var(--orange); border: 1px solid rgba(245,158,11,0.3); }
+        .btn-auto:hover  { background: rgba(245,158,11,0.28); }
+
+        /* ── Table ── */
+        .table-container {
+            background: rgba(12,18,32,0.5); backdrop-filter: blur(10px);
+            border: 1px solid rgba(0,212,255,0.12); border-radius: 12px; overflow: hidden;
+        }
+        .table { color: var(--text-1); margin-bottom: 0; }
+        .table thead th {
+            background: rgba(12,18,32,0.8); border-bottom: 1px solid rgba(0,212,255,0.2);
+            color: var(--cyan); font-size: 0.9rem; font-weight: 600;
+            padding: 0.75rem 1rem; white-space: nowrap; text-align: right;
+        }
+        .table tbody td { border-color: rgba(255,255,255,0.05); padding: 0.7rem 1rem; vertical-align: middle; }
+        .table tbody tr:hover { background: rgba(0,212,255,0.03); }
+
+        /* ── Provider select ── */
+        .prov-select {
+            background: #0d1523; border: 1px solid var(--border); color: var(--text-1);
+            border-radius: 7px; font-size: 0.88rem; padding: 4px 8px;
+            min-width: 140px; cursor: pointer;
+        }
+        .prov-select:focus { border-color: var(--cyan); box-shadow: 0 0 0 2px rgba(0,212,255,0.15); outline: none; }
+        .prov-select option { background: #0d1523; }
+
+        /* ── Provider badges ── */
+        .badge-groq  { background: rgba(139,156,244,0.18); color: var(--purple); border: 1px solid rgba(139,156,244,0.4); }
+        .badge-gemma { background: rgba(16,185,129,0.18);  color: var(--green);  border: 1px solid rgba(16,185,129,0.4); }
+        .badge-auto  { background: rgba(245,158,11,0.18);  color: var(--orange); border: 1px solid rgba(245,158,11,0.4); }
+
+        /* ── Fallback toggle ── */
+        .form-check-input:checked { background-color: var(--cyan); border-color: var(--cyan); }
+        .form-check-input { background-color: var(--bg-card); border-color: var(--border); cursor: pointer; }
+
+        /* ── Meta text ── */
+        .meta-text { font-size: 0.78rem; color: var(--text-2); font-family: var(--mono); }
+
+        /* ── Save button ── */
+        .btn-save {
+            background: linear-gradient(135deg, rgba(0,212,255,0.2), rgba(139,156,244,0.2));
+            border: 1px solid rgba(0,212,255,0.4); color: var(--cyan);
+            font-weight: 700; font-size: 0.95rem; padding: 8px 28px; border-radius: 8px;
+            transition: all 0.16s; cursor: pointer;
+        }
+        .btn-save:hover { background: rgba(0,212,255,0.28); border-color: var(--cyan); color: #fff; }
+
+        /* ── Alert ── */
+        .alert-saved {
+            background: rgba(16,185,129,0.12); border: 1px solid rgba(16,185,129,0.35);
+            color: var(--green); border-radius: 8px; padding: 10px 16px;
+            font-size: 0.92rem; margin-bottom: 1rem;
+        }
+
+        /* ── Legend ── */
+        .legend-row { display: flex; gap: 14px; flex-wrap: wrap; font-size: 0.82rem; color: var(--text-2); align-items: center; }
+        .legend-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-left: 4px; }
+    </style>
+</head>
+<body>
+
+<!-- ═══════════════════════ NAVBAR ═══════════════════════ -->
+<nav class="navbar navbar-dark d-flex align-items-center justify-content-between">
+    <a href="/dashboard/" class="navbar-brand text-decoration-none">
+        <span class="brand-pulse"></span>SHAN-AI
+    </a>
+    <div class="d-flex align-items-center gap-2 flex-wrap">
+        <a href="/dashboard/"          class="nav-link">📊 דשבורד</a>
+        <a href="/dashboard/decisions" class="nav-link">📋 החלטות</a>
+        <a href="/dashboard/users"     class="nav-link">👥 משתמשים</a>
+        <a href="/dashboard/files"     class="nav-link">📁 קבצים</a>
+        <a href="/dashboard/ask"       class="nav-link">💬 שאל</a>
+        <a href="/dashboard/learning"  class="nav-link">🎓 למידה</a>
+        <a href="/dashboard/logs"      class="nav-link">📊 לוגים</a>
+        <a href="/dashboard/projects"  class="nav-link">📂 פרויקטים</a>
+        <a href="/dashboard/llm-config" class="nav-link nav-active">🤖 מודל AI</a>
+    </div>
+    <div class="d-flex align-items-center gap-2">
+        <div class="user-chip">
+            <span class="user-online"></span>
+            {{ current_user.username }}
+        </div>
+        <a href="/logout" class="logout-btn">🚪 יציאה</a>
+    </div>
+</nav>
+
+<!-- ═══════════════════════ CONTENT ═══════════════════════ -->
+<div class="container-fluid px-4">
+
+    <div class="page-header">
+        <div class="page-title">🤖 הגדרות מודל AI</div>
+        <div class="page-subtitle">בחר איזה ספק LLM ישמש לכל שימוש במערכת. שינויים נכנסים לתוקף תוך 30 שניות.</div>
+    </div>
+
+    {% if request.query_params.get('saved') %}
+    <div class="alert-saved">✅ ההגדרות נשמרו בהצלחה</div>
+    {% endif %}
+
+    <form method="post" action="/dashboard/llm-config">
+
+        <!-- ── Quick-select bar ── -->
+        <div class="quick-bar">
+            <span class="label">בחר הכל:</span>
+            <button type="button" class="btn-quick btn-groq"  onclick="selectAll('groq')">⚡ Groq — הכל</button>
+            <button type="button" class="btn-quick btn-gemma" onclick="selectAll('gemma')">🌿 Gemma 4 — הכל</button>
+            <button type="button" class="btn-quick btn-auto"  onclick="selectAll('auto')">🔀 Auto — הכל</button>
+            <span class="me-auto"></span>
+            <div class="legend-row">
+                <span><span class="legend-dot" style="background:var(--purple)"></span> Groq llama-3.3-70b</span>
+                <span><span class="legend-dot" style="background:var(--green)"></span>  Gemma 4-31b (Google AI)</span>
+                <span><span class="legend-dot" style="background:var(--orange)"></span> Auto (50/50 random)</span>
+            </div>
+        </div>
+
+        <!-- ── Config table ── -->
+        <div class="table-container mb-4">
+            <table class="table table-borderless">
+                <thead>
+                    <tr>
+                        <th>שימוש</th>
+                        <th>ספק ראשי</th>
+                        <th style="text-align:center">Fallback אוטומטי</th>
+                        <th>עודכן ע"י</th>
+                        <th>תאריך עדכון</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for item in items %}
+                <tr>
+                    <!-- Usage label -->
+                    <td>
+                        <div style="font-weight:600; color:var(--text-1)">{{ item.label_he }}</div>
+                        <div class="meta-text" style="margin-top:2px">{{ item.usage_name }}</div>
+                    </td>
+
+                    <!-- Provider dropdown -->
+                    <td>
+                        <select name="provider_{{ item.usage_name }}"
+                                class="prov-select provider-select"
+                                data-usage="{{ item.usage_name }}"
+                                onchange="updateBadge(this)">
+                            <option value="groq"  {% if item.provider == 'groq'  %}selected{% endif %}>⚡ Groq</option>
+                            <option value="gemma" {% if item.provider == 'gemma' %}selected{% endif %}>🌿 Gemma 4</option>
+                            <option value="auto"  {% if item.provider == 'auto'  %}selected{% endif %}>🔀 Auto</option>
+                        </select>
+                    </td>
+
+                    <!-- Fallback toggle -->
+                    <td style="text-align:center">
+                        <div class="form-check form-switch d-inline-flex justify-content-center" style="padding:0">
+                            <input class="form-check-input"
+                                   type="checkbox"
+                                   name="fallback_{{ item.usage_name }}"
+                                   id="fb_{{ item.usage_name }}"
+                                   {% if item.fallback %}checked{% endif %}
+                                   style="width:2.4em;height:1.3em;margin:0">
+                        </div>
+                    </td>
+
+                    <!-- Updated by -->
+                    <td class="meta-text">{{ item.updated_by or '—' }}</td>
+
+                    <!-- Updated at -->
+                    <td class="meta-text">
+                        {% if item.updated_at %}
+                            {{ item.updated_at.strftime('%d/%m/%Y %H:%M') }}
+                        {% else %}
+                            —
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <!-- ── Fallback explanation ── -->
+        <div class="mb-3" style="color:var(--text-2); font-size:0.85rem; padding: 0 4px">
+            🔄 <strong style="color:var(--text-1)">Fallback אוטומטי:</strong>
+            כאשר מופעל — אם הספק הראשי נכשל (rate limit / שגיאה), המערכת עוברת אוטומטית לספק השני ומתעדת זאת בלוג.
+        </div>
+
+        <!-- ── Save ── -->
+        <div class="d-flex justify-content-end pb-4">
+            <button type="submit" class="btn-save">💾 שמור הגדרות</button>
+        </div>
+    </form>
+</div>
+
+<script>
+function selectAll(provider) {
+    document.querySelectorAll('.provider-select').forEach(sel => {
+        sel.value = provider;
+    });
+}
+</script>
+
+</body>
+</html>

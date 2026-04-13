@@ -92,14 +92,14 @@
         .table td { border-color: #2d3047; vertical-align: top; font-size: 0.88rem; }
         .table tbody tr:hover { background: #22263a; }
 
-        .feedback-up   { color: #28a745; font-size: 1.3rem; font-weight: bold; display: inline-block; min-width: 20px; }
-        .feedback-down { color: #dc3545; font-size: 1.3rem; font-weight: bold; display: inline-block; min-width: 20px; }
-        .feedback-none { color: #6c757d; font-size: 1.2rem; display: inline-block; min-width: 20px; }
+        .feedback-up   { color: #28a745; font-size: 1.1rem; }
+        .feedback-down { color: #dc3545; font-size: 1.1rem; }
+        .feedback-none { color: #6c757d; font-size: 1.1rem; }
 
-        .q-cell { max-width: 320px; }
+        .q-cell { max-width: 260px; }
         .q-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-                  max-width: 310px; cursor: pointer; color: #a8b8d8; font-size: 1.15rem; font-weight: 600; }
-        .q-text:hover { color: #00d4ff; text-decoration: underline; }
+                  max-width: 250px; cursor: pointer; color: #c8d0f0; }
+        .q-text:hover { color: #8b9cf4; text-decoration: underline; }
 
         .ans-cell { max-width: 280px; }
         .ans-text { max-height: 60px; overflow: hidden; font-size: 1.02rem;
@@ -160,45 +160,6 @@
                          font-size: 0.75rem; padding: 3px 10px; border-radius: 6px; cursor: pointer; }
         .btn-reprocess:hover { background: #fd7e14; color: #0f1117; }
         .btn-reprocess:disabled { opacity: 0.5; cursor: not-allowed; }
-        /* ── Table Container (Glassmorphism) ────────────────────────── */
-        .table-container {
-            background: rgba(12,18,32,0.35);
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(0,212,255,0.1);
-            border-radius: 12px;
-            overflow: hidden;
-            padding: 0;
-        }
-
-        .table { background: rgba(12,18,32,0.35) !important; backdrop-filter: blur(10px) !important; }
-        .table thead th {
-            background: rgba(12,18,32,0.6) !important;
-            border-bottom: 1px solid rgba(0,212,255,0.2) !important;
-            position: sticky;
-            top: 0;
-            z-index: 10;
-            text-align: right !important;
-            padding: 0.65rem 0.95rem !important;
-            color: #00d4ff !important;
-            font-size: 0.98rem !important;
-        }
-        .table tbody td {
-            text-align: right !important;
-            padding: 0.65rem 0.95rem !important;
-            border-bottom: 1px solid rgba(26,45,71,0.5) !important;
-        }
-        .table tbody tr:hover td { background: rgba(0,212,255,0.04) !important; }
-        .status-badge {
-            display: inline-block;
-            padding: 8px 14px;
-            border-radius: 8px;
-            font-size: 0.85rem;
-            font-weight: 600;
-            letter-spacing: 0.08em;
-            text-transform: uppercase;
-            backdrop-filter: blur(4px);
-            border: 1px solid;
-        }
     </style>
 </head>
 <body>
@@ -238,9 +199,6 @@
             <button class="btn-optimize" id="optimizeBtn" onclick="runOptimize()">
                 ⚡ הפעל אופטימיזציה עצמית
             </button>
-            <button class="btn-optimize" onclick="openInspector()">
-                📚 מה ה-AI למד?
-            </button>
             <button class="btn-clear" onclick="confirmClear()">🗑️ נקה הכל</button>
         </div>
         {% endif %}
@@ -271,7 +229,6 @@
                         <th style="width:110px; text-align:center;">סוג כשל</th>
                         <th>הערת מנהל</th>
                         <th style="width:80px; text-align:center;">מדויק?</th>
-                        <th style="width:100px; text-align:center;">מודל AI</th>
                         <th style="width:110px;">תאריך</th>
                     </tr>
                 </thead>
@@ -315,6 +272,12 @@
                             <span class="save-ok" id="ok-{{ log.id }}">✓ נשמר</span>
                             {% if log.analyzed %}<span class="badge-analyzed" id="analyzed-{{ log.id }}">נותח ✓</span>{% else %}<span class="badge-analyzed" id="analyzed-{{ log.id }}" style="display:none;">נותח ✓</span>{% endif %}
                         </div>
+                        {% if log.failure_type == 'STRUCTURE' %}
+                        <div class="mt-1">
+                            <button class="btn-reprocess" id="rp-{{ log.id }}" onclick="reprocessFile({{ log.id }})">🔄 עבד מחדש</button>
+                            <span id="rp-ok-{{ log.id }}" style="display:none; color:#28a745; font-size:0.75rem;">✓ עובד מחדש</span>
+                        </div>
+                        {% endif %}
                         {% else %}
                             <span class="text-muted small">{{ log.admin_note or '—' }}</span>
                             {% if log.analyzed %}<br><span class="badge-analyzed">נותח ✓</span>{% endif %}
@@ -332,21 +295,6 @@
                             {% if log.is_accurate == true %}<span class="badge-accurate">✓ כן</span>
                             {% elif log.is_accurate == false %}<span class="badge-inaccurate">✗ לא</span>
                             {% else %}<span class="text-muted">—</span>{% endif %}
-                        {% endif %}
-                    </td>
-                    <td style="text-align:center;">
-                        {% if log.llm_provider %}
-                            <span style="font-family:var(--mono);font-size:0.78rem;
-                                color:{% if log.is_fallback %}#f59e0b{% else %}#10b981{% endif %};">
-                                {{ log.llm_provider }}
-                            </span>
-                            {% if log.is_fallback %}
-                                <br><span style="font-size:0.7rem;color:#f59e0b;opacity:0.8;">גיבוי</span>
-                            {% else %}
-                                <br><span style="font-size:0.7rem;color:#10b981;opacity:0.7;">ראשי</span>
-                            {% endif %}
-                        {% else %}
-                            <span class="text-muted">—</span>
                         {% endif %}
                     </td>
                     <td class="text-muted small">
@@ -392,47 +340,13 @@
 <div class="modal fade" id="optimizeModal" tabindex="-1">
     <div class="modal-dialog">
         <div class="modal-content">
-            <div class="modal-header" style="border-bottom: 2px solid #28a745;">
-                <h5 class="modal-title" style="color:#28a745; font-weight:bold; font-size:1.15rem;">⚡ תוצאות אופטימיזציה עצמית</h5>
+            <div class="modal-header">
+                <h5 class="modal-title" style="color:#28a745;">⚡ תוצאות אופטימיזציה</h5>
                 <button class="btn-close-custom" onclick="bootstrap.Modal.getInstance(document.getElementById('optimizeModal')).hide()">✕</button>
             </div>
-            <div class="modal-body" id="optimizeResult" style="font-size:0.96rem; line-height:1.8; padding:1.5rem;"></div>
+            <div class="modal-body" id="optimizeResult" style="font-size:0.95rem; line-height:1.8;"></div>
             <div class="modal-footer">
                 <button class="btn btn-secondary btn-sm" onclick="bootstrap.Modal.getInstance(document.getElementById('optimizeModal')).hide()">סגור</button>
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- Knowledge Inspector modal -->
-<div class="modal fade" id="inspectorModal" tabindex="-1">
-    <div class="modal-dialog modal-lg">
-        <div class="modal-content">
-            <div class="modal-header" style="border-bottom: 2px solid #00d4ff;">
-                <h5 class="modal-title" style="color:#00d4ff; font-weight:bold;">📚 ממאגר ידע — ניהול אופטימיזציות</h5>
-                <button class="btn-close-custom" onclick="bootstrap.Modal.getInstance(document.getElementById('inspectorModal')).hide()">✕</button>
-            </div>
-            <div class="modal-body" style="padding:1.5rem; font-size:0.9rem;">
-                <!-- Synonyms section -->
-                <div style="margin-bottom:2rem;">
-                    <h6 style="color:#8b9cf4; margin-bottom:1rem; font-weight:bold;">🔤 מילים נרדפות פעילות</h6>
-                    <div id="synonymsContainer" style="max-height:250px; overflow-y:auto; border:1px solid rgba(139,156,244,0.2); border-radius:4px; padding:1rem; background:rgba(139,156,244,0.05);">
-                        <div style="text-align:center; color:#a8b8d8;">⏳ טוען...</div>
-                    </div>
-                </div>
-
-                <!-- Instructions section -->
-                <div>
-                    <h6 style="color:#28a745; margin-bottom:1rem; font-weight:bold;">💡 הוראות שנלמדו</h6>
-                    <div id="instructionsContainer" style="max-height:250px; overflow-y:auto; border:1px solid rgba(40,167,69,0.2); border-radius:4px; padding:1rem; background:rgba(40,167,69,0.05);">
-                        <div style="text-align:center; color:#a8b8d8;">⏳ טוען...</div>
-                    </div>
-                </div>
-            </div>
-            <div class="modal-footer" style="gap:0.5rem;">
-                <button id="reorgBtn" class="btn btn-sm" style="background:#00d4ff22; color:#00d4ff; border:1px solid #00d4ff; font-weight:600;"
-                        onclick="reorganizeKnowledge()">🔄 ארגן מחדש עם AI</button>
-                <button class="btn btn-secondary btn-sm" onclick="bootstrap.Modal.getInstance(document.getElementById('inspectorModal')).hide()">סגור</button>
             </div>
         </div>
     </div>
@@ -489,69 +403,17 @@ async function runOptimize() {
         const data = await resp.json();
         let html = '';
         if (data.status === 'ok') {
-            const new_instructions = data.new_instructions || [];
-            const new_instructions_html = new_instructions.length > 0
-                ? new_instructions.map((inst, idx) => `
-                    <div style="margin-bottom:0.7rem; padding:0.8rem; background:rgba(16,185,129,0.12); border-left:3px solid #10b981; border-radius:3px;">
-                        <div style="color:#10b981; font-weight:bold; font-size:0.9rem; margin-bottom:0.3rem;">🆕 הוראה ${idx + 1}</div>
-                        <div style="color:#a8b8d8; line-height:1.6;">${escapeHtml(inst)}</div>
-                    </div>
-                `).join('')
-                : '<div style="color:#666; font-style:italic;">אין הוראות חדשות בהריצה זו</div>';
-
-            const synonyms_text = data.synonyms_added > 0 || data.synonyms_updated > 0
-                ? `${data.synonyms_added} מילים נרדפות חדשות + ${data.synonyms_updated} עודכנו`
-                : 'אין מילים נרדפות חדשות';
-
-            html = `
-                <div style="color:#28a745; font-size:1.2rem; font-weight:bold; margin-bottom:1.5rem;">
-                    ✅ האופטימיזציה הושלמה בהצלחה!
-                </div>
-
-                <!-- Statistics Box -->
-                <div style="background:rgba(139,156,244,0.1); border-left:3px solid #8b9cf4; padding:1rem; border-radius:4px; margin-bottom:1.5rem;">
-                    <div style="margin-bottom:0.8rem;">
-                        <strong style="color:#8b9cf4;">📊 סטטיסטיקות הריצה הזאת:</strong>
-                    </div>
-                    <div style="margin-left:1rem; line-height:2; font-size:0.95rem;">
-                        <div>📋 <strong>לוגים שנותחו:</strong> ${data.logs_processed}</div>
-                        <div style="color:#28a745;">➕ <strong>מילים נרדפות חדשות:</strong> ${data.synonyms_added}</div>
-                        <div style="color:#00d4ff;">🔄 <strong>מילים נרדפות עודכנו:</strong> ${data.synonyms_updated}</div>
-                        <div style="color:#f59e0b;">🔧 <strong>בעיות מבניות:</strong> ${data.structural_issues || 0}</div>
-                        <div style="color:#ec4899;">💬 <strong>הוראות חדשות שנאספו:</strong> ${data.instructions_collected || 0}</div>
-                    </div>
-                </div>
-
-                <!-- New Instructions Box -->
-                ${new_instructions.length > 0 ? `
-                <div style="background:rgba(16,185,129,0.1); border-left:3px solid #10b981; padding:1.2rem; border-radius:4px; margin-bottom:1.5rem;">
-                    <div style="margin-bottom:1rem;">
-                        <strong style="color:#10b981; font-size:1.05rem;">🆕 הוראות חדשות שנגילו בהריצה זו (${new_instructions.length}):</strong>
-                        <div style="font-size:0.85rem; color:#888; margin-top:0.3rem;">אלו הן ההוראות שהמערכת תשתמש בהן בשאלות עתידיות</div>
-                    </div>
-                    <div style="max-height:350px; overflow-y:auto;">
-                        ${new_instructions_html}
-                    </div>
-                </div>
-                ` : `
-                <div style="background:rgba(107,114,128,0.1); border-left:3px solid #888; padding:1rem; border-radius:4px; margin-bottom:1.5rem;">
-                    <div style="color:#a8b8d8; font-size:0.95rem;">
-                        <strong>ℹ️ לא היו הוראות חדשות</strong><br>
-                        <div style="font-size:0.9rem; margin-top:0.5rem;">המערכת תעדכן את המילים הנרדפות, אך לא אתרה הוראות חדשות שיש לשמור.</div>
-                    </div>
-                </div>
-                `}
-
-                <!-- Summary Box -->
-                <div style="background:rgba(0,212,255,0.05); padding:1rem; border-radius:4px; border:1px solid rgba(0,212,255,0.2);">
-                    <div style="font-size:0.9rem; line-height:1.8; color:#a8b8d8;">
-                        <strong style="color:#00d4ff;">✨ שינויים בהריצה זו:</strong><br>
-                        • ${synonyms_text}<br>
-                        • ${data.instructions_collected || 0} הוראות חדשות אתרו<br>
-                        ${data.structural_issues > 0 ? `• ${data.structural_issues} בעיות מבניות זוהו לתיקון` : '• לא זוהו בעיות מבניות'}
-                    </div>
-                </div>
-            `;
+            const structureNote = data.structural_issues > 0
+                ? `<br>⚠️ בעיות מבנה שזוהו: <strong style="color:#fd7e14;">${data.structural_issues}</strong> — שורות מסומנות בכתום לעיבוד מחדש`
+                : '';
+            html = `✅ האופטימיזציה הושלמה!<br><br>
+                    📋 לוגים שנותחו: <strong>${data.logs_processed}</strong><br>
+                    ➕ מילים נרדפות חדשות: <strong>${data.synonyms_added}</strong><br>
+                    🔄 מילים נרדפות עודכנו: <strong>${data.synonyms_updated}</strong>
+                    ${structureNote}<br><br>
+                    <span style="color:#8b9cf4; font-size:0.85rem;">
+                        המונחים החדשים יחולו אוטומטית על שאלות עתידיות.
+                    </span>`;
         } else if (data.status === 'no_data') {
             html = '📭 אין לוגים עם פידבק שלילי או הערות מנהל לניתוח.';
         } else {
@@ -559,7 +421,8 @@ async function runOptimize() {
         }
         document.getElementById('optimizeResult').innerHTML = html;
         new bootstrap.Modal(document.getElementById('optimizeModal')).show();
-        // Do NOT auto-close — let user read and close manually
+        // Refresh page so analyzed badges appear on processed rows
+        if (data.status === 'ok') setTimeout(() => window.location.reload(), 3000);
     } catch (e) {
         alert('שגיאה בהפעלת האופטימיזציה');
     } finally {
@@ -588,133 +451,6 @@ async function reprocessFile(logId) {
         btn.textContent = '🔄 עבד מחדש';
         alert('שגיאה בעיבוד מחדש');
     }
-}
-
-async function openInspector(skipShow = false) {
-    try {
-        const resp = await fetch('/api/knowledge/inspector');
-        const data = await resp.json();
-
-        // Render synonyms
-        const synHtml = data.synonyms.length > 0
-            ? data.synonyms.map(syn => `
-                <div style="margin-bottom:1rem; padding:0.8rem; background:rgba(139,156,244,0.1); border-radius:4px; border-left:3px solid #8b9cf4;">
-                    <div style="display:flex; justify-content:space-between; align-items:start;">
-                        <div>
-                            <strong style="color:#8b9cf4;">${escapeHtml(syn.original)}</strong>
-                            <div style="color:#a8b8d8; font-size:0.85rem; margin-top:0.3rem;">
-                                ${syn.synonyms.join(', ')}
-                            </div>
-                        </div>
-                        <button class="btn btn-sm btn-outline-danger" onclick="deleteEntry(${syn.id}, 'synonym')">🗑️</button>
-                    </div>
-                </div>
-            `).join('')
-            : '<div style="color:#a8b8d8; text-align:center;">אין מילים נרדפות שנלמדו עדיין</div>';
-        document.getElementById('synonymsContainer').innerHTML = synHtml;
-
-        // Render instructions
-        const instHtml = data.instructions.length > 0
-            ? data.instructions.map(inst => `
-                <div style="margin-bottom:1rem; padding:0.8rem; background:rgba(40,167,69,0.1); border-radius:4px; border-left:3px solid #28a745;">
-                    <div style="display:flex; justify-content:space-between; align-items:start;">
-                        <div style="flex:1; color:#a8b8d8; line-height:1.5;">
-                            ${inst.index + 1}. ${escapeHtml(inst.text)}
-                        </div>
-                        <button class="btn btn-sm btn-outline-danger" onclick="deleteInstruction(${inst.index})" style="margin-right:0.5rem;">🗑️</button>
-                    </div>
-                </div>
-            `).join('')
-            : '<div style="color:#a8b8d8; text-align:center;">אין הוראות שנלמדו עדיין</div>';
-        document.getElementById('instructionsContainer').innerHTML = instHtml;
-
-        if (!skipShow) {
-            new bootstrap.Modal(document.getElementById('inspectorModal')).show();
-        }
-    } catch (e) {
-        alert('שגיאה בטעינת הממאגר');
-        console.error(e);
-    }
-}
-
-async function deleteEntry(entryId, type) {
-    if (!confirm(`למחוק את ${type === 'synonym' ? 'המילה הנרדפת' : 'ההוראה'} זו?`)) return;
-
-    try {
-        const resp = await fetch(`/api/knowledge/entry/${entryId}`, { method: 'DELETE' });
-        if (resp.ok) {
-            await openInspector();  // Refresh modal
-        } else {
-            alert('שגיאה בהשמטה');
-        }
-    } catch (e) {
-        alert('שגיאה בהשמטה');
-        console.error(e);
-    }
-}
-
-async function deleteInstruction(index) {
-    if (!confirm('למחוק הוראה זו?')) return;
-    try {
-        const resp = await fetch(`/api/knowledge/instruction/${index}`, { method: 'DELETE' });
-        if (resp.ok) {
-            await openInspector();  // Refresh modal
-        } else {
-            alert('שגיאה בהשמטה');
-        }
-    } catch (e) {
-        alert('שגיאה בהשמטה');
-        console.error(e);
-    }
-}
-
-async function reorganizeKnowledge() {
-    const btn = document.getElementById('reorgBtn');
-    const origText = btn.textContent;
-    btn.disabled = true;
-    btn.textContent = '⏳ מארגן עם AI...';
-
-    // Show loading state inside both containers while waiting
-    document.getElementById('synonymsContainer').innerHTML = '<div style="text-align:center; color:#a8b8d8;">⏳ AI מנתח ומארגן מחדש...</div>';
-    document.getElementById('instructionsContainer').innerHTML = '<div style="text-align:center; color:#a8b8d8;">⏳ AI מנתח ומארגן מחדש...</div>';
-
-    try {
-        const resp = await fetch('/api/knowledge/reorganize', { method: 'POST' });
-        const data = await resp.json();
-
-        if (!resp.ok) {
-            alert('שגיאה בארגון: ' + (data.detail || resp.statusText));
-            btn.disabled = false;
-            btn.textContent = origText;
-            return;
-        }
-
-        // Show summary before refreshing
-        const synDelta = data.synonyms_after - data.synonyms_before;
-        const instDelta = data.instructions_after - data.instructions_before;
-        const synMsg = `מילים נרדפות: ${data.synonyms_before} → ${data.synonyms_after}` + (synDelta !== 0 ? ` (${synDelta > 0 ? '+' : ''}${synDelta})` : ' (ללא שינוי)');
-        const instMsg = `הוראות: ${data.instructions_before} → ${data.instructions_after}` + (instDelta !== 0 ? ` (${instDelta > 0 ? '+' : ''}${instDelta})` : ' (ללא שינוי)');
-
-        document.getElementById('synonymsContainer').innerHTML = `<div style="color:#00d4ff; text-align:center; padding:0.5rem;">✅ ${synMsg}</div>`;
-        document.getElementById('instructionsContainer').innerHTML = `<div style="color:#00d4ff; text-align:center; padding:0.5rem;">✅ ${instMsg}</div>`;
-
-        // Reload content in-place (modal is already open — don't call .show() again)
-        setTimeout(async () => {
-            await openInspector(true);
-            btn.disabled = false;
-            btn.textContent = origText;
-        }, 1500);
-    } catch (e) {
-        alert('שגיאה בארגון מחדש');
-        console.error(e);
-        btn.disabled = false;
-        btn.textContent = origText;
-    }
-}
-
-function escapeHtml(text) {
-    const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' };
-    return text.replace(/[&<>"']/g, m => map[m]);
 }
 </script>
 </body>

@@ -100,45 +100,6 @@
             border-right: 3px solid #8b9cf4; padding-right: 10px; }
         .info-badge { background: #2d3047; border-radius: 8px; padding: 6px 14px;
             color: #8b9cf4; font-weight: 600; display: inline-block; }
-        /* ── Table Container (Glassmorphism) ────────────────────────── */
-        .table-container {
-            background: rgba(12,18,32,0.35);
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(0,212,255,0.1);
-            border-radius: 12px;
-            overflow: hidden;
-            padding: 0;
-        }
-
-        .table { background: rgba(12,18,32,0.35) !important; backdrop-filter: blur(10px) !important; }
-        .table thead th {
-            background: rgba(12,18,32,0.6) !important;
-            border-bottom: 1px solid rgba(0,212,255,0.2) !important;
-            position: sticky;
-            top: 0;
-            z-index: 10;
-            text-align: right !important;
-            padding: 0.65rem 0.95rem !important;
-            color: #00d4ff !important;
-            font-size: 0.98rem !important;
-        }
-        .table tbody td {
-            text-align: right !important;
-            padding: 0.65rem 0.95rem !important;
-            border-bottom: 1px solid rgba(26,45,71,0.5) !important;
-        }
-        .table tbody tr:hover td { background: rgba(0,212,255,0.04) !important; }
-        .status-badge {
-            display: inline-block;
-            padding: 8px 14px;
-            border-radius: 8px;
-            font-size: 0.85rem;
-            font-weight: 600;
-            letter-spacing: 0.08em;
-            text-transform: uppercase;
-            backdrop-filter: blur(4px);
-            border: 1px solid;
-        }
     </style>
 </head>
 <body>

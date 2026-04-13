@@ -3,176 +3,490 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>כניסה - Shan-Ai</title>
+    <title>Shan-AI — כניסה למערכת</title>
+    <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
     <style>
-        /* General Page Background */
+        :root {
+            --bg:    #070b12;
+            --card:  #0f1826;
+            --brd:   #1a2d47;
+            --brd-hi:#1e3a5f;
+            --cyan:  #00d4ff;
+            --purple:#8b9cf4;
+            --red:   #ef4444;
+            --green: #10b981;
+            --t1:    #e2e8f0;
+            --t2:    #64748b;
+            --t3:    #344156;
+            --mono:  'IBM Plex Mono', monospace;
+            --ui:    'Heebo', sans-serif;
+        }
+
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
         body {
-            background-color: #0d1117;
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: var(--bg);
+            font-family: var(--ui);
+            min-height: 100vh;
             display: flex;
-            justify-content: center;
             align-items: center;
-            height: 100vh;
-            margin: 0;
-            color: white;
+            justify-content: center;
+            color: var(--t1);
+            background-image:
+                radial-gradient(circle at 20% 30%, rgba(0,212,255,0.04) 0%, transparent 50%),
+                radial-gradient(circle at 80% 70%, rgba(139,156,244,0.04) 0%, transparent 50%),
+                radial-gradient(circle, #1a2d47 1px, transparent 1px);
+            background-size: 100% 100%, 100% 100%, 28px 28px;
+            background-attachment: fixed;
+            overflow-x: hidden;
         }
 
-        /* The Dark Card (Container) */
         .login-container {
-            background-color: #00020a;
-            padding: 40px;
-            border-radius: 24px;
             width: 100%;
-            max-width: 400px;
-            text-align: center;
-            box-shadow: 0 0 40px rgba(88, 101, 242, 0.3);
-            border: 1px solid rgba(88, 101, 242, 0.2);
+            max-width: 600px;
+            display: flex;
+            flex-direction: column;
+            gap: 2rem;
+            padding: 2rem;
+            align-items: center;
+            justify-items: center;
         }
 
-        /* Elegant Breathing + Glow Animation */
-        @keyframes elegantBreath {
-            0%, 100% {
-                transform: scale(1);
-                opacity: 0.85;
-                filter: drop-shadow(0 0 20px rgba(88, 101, 242, 0.2));
-            }
-            50% {
-                transform: scale(1.03);
-                opacity: 1;
-                filter: drop-shadow(0 0 30px rgba(88, 101, 242, 0.4));
-            }
+        /* LOGO SECTION - TOP */
+        .logo-section {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+            width: 100%;
+        }
+
+        .logo-stage {
+            position: relative;
+            width: 380px;
+            height: 380px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        /* Multi-layer glow system */
+        .glow-layer-1 {
+            position: absolute;
+            inset: -40px;
+            background: radial-gradient(circle, rgba(0,212,255,0.12) 0%, transparent 65%);
+            border-radius: 50%;
+            filter: blur(16px);
+            animation: glowPulse1 4s ease-in-out infinite;
+        }
+
+        .glow-layer-2 {
+            position: absolute;
+            inset: -60px;
+            background: radial-gradient(circle, rgba(139,156,244,0.08) 0%, transparent 60%);
+            border-radius: 50%;
+            filter: blur(24px);
+            animation: glowPulse2 5s ease-in-out infinite;
+        }
+
+        .glow-ring {
+            position: absolute;
+            inset: -50px;
+            border: 1.5px solid rgba(0,212,255,0.15);
+            border-radius: 50%;
+            animation: ringSpin 12s linear infinite;
+        }
+
+        .glow-ring::after {
+            content: '';
+            position: absolute;
+            inset: -30px;
+            border: 1px solid rgba(139,156,244,0.12);
+            border-radius: 50%;
+            animation: ringSpinReverse 16s linear infinite;
+        }
+
+        .logo-wrapper {
+            position: relative;
+            width: 320px;
+            height: 320px;
+            background: rgba(12,18,32,0.35);
+            backdrop-filter: blur(16px);
+            border: 1.5px solid rgba(0,212,255,0.3);
+            border-radius: 24px;
+            padding: 16px;
+            box-shadow:
+                inset 0 2px 4px rgba(255,255,255,0.08),
+                0 0 40px rgba(0,212,255,0.12),
+                0 0 80px rgba(139,156,244,0.08),
+                0 20px 60px rgba(0,0,0,0.4);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            transition: all 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+        }
+
+        .logo-wrapper::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(135deg, rgba(0,212,255,0.08), rgba(139,156,244,0.08));
+            border-radius: 24px;
+            pointer-events: none;
         }
 
         .logo-img {
-            width: 405px;
-            height: auto;
-            border-radius: 0;
-            box-shadow: none;
-            filter: drop-shadow(0 0 20px rgba(88, 101, 242, 0.2));
-            margin-bottom: 20px;
-            animation: elegantBreath 4s ease-in-out infinite;
-            cursor: default;
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            object-position: center;
+            filter: drop-shadow(0 0 16px rgba(0,212,255,0.4)) drop-shadow(0 0 32px rgba(139,156,244,0.2));
+            position: relative;
+            z-index: 2;
+            animation: logoFloat 3.5s ease-in-out infinite;
         }
 
-        h2 {
-            color: #8b9cf4;
-            font-size: 1.2rem;
-            margin-bottom: 30px;
+        /* Hover effect on logo */
+        .logo-stage:hover .logo-wrapper {
+            border-color: rgba(0,212,255,0.5);
+            box-shadow:
+                inset 0 2px 4px rgba(255,255,255,0.12),
+                0 0 60px rgba(0,212,255,0.2),
+                0 0 120px rgba(139,156,244,0.15),
+                0 30px 80px rgba(0,0,0,0.5);
+            transform: scale(1.08);
+        }
+
+        /* LOGIN CARD - RIGHT SIDE */
+        .login-box {
+            width: 100%;
+            max-width: 420px;
+            animation: cardSlideIn 0.8s cubic-bezier(0.34, 1.56, 0.64, 1) 0.2s both;
+        }
+
+        .login-card {
+            background: var(--card);
+            border: 1px solid var(--brd);
+            border-radius: 12px;
+            padding: 2rem;
+            position: relative;
+        }
+
+        .login-card::before, .login-card::after {
+            content: '';
+            position: absolute;
+            width: 14px; height: 14px;
+            border-color: var(--cyan);
+            border-style: solid;
+            opacity: 0.35;
+        }
+
+        .login-card::before { top: -1px; right: -1px; border-width: 1px 1px 0 0; border-radius: 0 12px 0 0; }
+        .login-card::after  { bottom: -1px; left: -1px; border-width: 0 0 1px 1px; border-radius: 0 0 0 12px; }
+
+        .card-header-label {
+            font-family: var(--mono);
+            font-size: 0.8rem;
+            letter-spacing: 0.16em;
+            text-transform: uppercase;
+            color: var(--cyan);
+            opacity: 0.6;
+            margin-bottom: 1.5rem;
+            display: flex; align-items: center; gap: 8px;
+            animation: fadeInDown 0.7s ease-out 0.4s both;
+        }
+
+        .card-header-label::before { content: ''; width: 12px; height: 1px; background: var(--cyan); opacity: 0.6; }
+
+        .alert-err {
+            background: rgba(239,68,68,0.1);
+            border: 1px solid rgba(239,68,68,0.3);
+            border-radius: 6px;
+            padding: 8px 12px;
+            font-size: 0.82rem;
+            color: #fca5a5;
+            margin-bottom: 1.25rem;
+            display: flex; align-items: center; gap: 8px;
         }
 
         .form-group {
-            text-align: right;
-            margin-bottom: 20px;
+            margin-bottom: 1.1rem;
+            animation: fadeInDown 0.7s ease-out both;
         }
+
+        .form-group:nth-of-type(1) { animation-delay: 0.5s; }
+        .form-group:nth-of-type(2) { animation-delay: 0.6s; }
 
         label {
             display: block;
-            margin-bottom: 8px;
-            font-size: 0.9rem;
-            color: #d0d8f0;
-        }
-
-        /* Input Styling */
-        select, input {
-            width: 100%;
-            padding: 12px;
-            background-color: #0d1117;
-            border: 1px solid #30363d;
-            border-radius: 12px;
-            color: white;
-            font-size: 1rem;
-            box-sizing: border-box;
+            font-size: 0.95rem;
             font-weight: 500;
+            color: var(--t2);
+            margin-bottom: 0.4rem;
+            letter-spacing: 0.02em;
         }
 
-        input::placeholder {
-            color: #7a7a7a;
-            opacity: 1;
+        select, input[type="password"] {
+            width: 100%;
+            padding: 12px 14px;
+            background: rgba(12,18,32,0.8);
+            border: 1px solid var(--brd);
+            border-radius: 6px;
+            color: var(--t1);
+            font-family: var(--ui);
+            font-size: 1.05rem;
+            transition: border-color 0.14s, box-shadow 0.14s;
+            -webkit-appearance: none;
         }
 
-        select option {
-            background-color: #1a222d;
-            color: white;
+        select:focus, input[type="password"]:focus {
+            outline: none;
+            border-color: rgba(0,212,255,0.4);
+            box-shadow: 0 0 0 2px rgba(0,212,255,0.1);
         }
 
-        /* The Submit Button */
-        .login-btn {
+        select option { background: var(--card); color: var(--t1); }
+        input::placeholder { color: var(--t3); }
+
+        .btn-login {
             width: 100%;
             padding: 14px;
-            background-color: #5865f2;
-            border: none;
-            border-radius: 12px;
-            color: white;
-            font-weight: bold;
-            font-size: 1.1rem;
+            margin-top: 0.5rem;
+            background: transparent;
+            border: 1px solid var(--cyan);
+            border-radius: 6px;
+            color: var(--cyan);
+            font-family: var(--mono);
+            font-size: 1rem;
+            font-weight: 500;
+            letter-spacing: 0.1em;
             cursor: pointer;
-            margin-top: 10px;
-            box-shadow: 0 4px 15px rgba(88, 101, 242, 0.4);
-            transition: background-color 0.3s;
+            transition: all 0.14s;
+            animation: fadeInDown 0.7s ease-out 0.7s both;
         }
 
-        .login-btn:hover {
-            background-color: #4751d6;
+        .btn-login:hover {
+            background: rgba(0,212,255,0.09);
+            box-shadow: 0 0 18px rgba(0,212,255,0.18);
         }
 
-        .login-btn:disabled {
-            background-color: #6c757d;
-            cursor: not-allowed;
+        .btn-login:disabled { opacity: 0.35; cursor: not-allowed; }
+
+        .login-footer {
+            text-align: center;
+            margin-top: 1.25rem;
+            font-family: var(--mono);
+            font-size: 0.85rem;
+            letter-spacing: 0.1em;
+            color: var(--t3);
+            animation: fadeInDown 0.7s ease-out 0.8s both;
         }
 
-        .footer-text {
-            margin-top: 25px;
+        .status-bar {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            font-family: var(--mono);
             font-size: 0.8rem;
-            color: #5865f2;
+            letter-spacing: 0.1em;
+            color: var(--t3);
+            animation: fadeInUp 0.7s ease-out 1s both;
         }
 
-        .alert {
-            padding: 10px;
-            margin-bottom: 20px;
-            border-radius: 8px;
-            font-size: 0.9rem;
+        .status-dot {
+            width: 5px; height: 5px;
+            background: var(--green);
+            border-radius: 50%;
+            box-shadow: 0 0 6px var(--green);
+            animation: blink 2.2s ease-in-out infinite;
         }
 
-        .alert-danger {
-            background-color: #dc3545;
-            color: white;
+        /* ANIMATIONS */
+        @keyframes logoFloat {
+            0%, 100% { transform: translateY(0px); }
+            50% { transform: translateY(-12px); }
+        }
+
+        @keyframes glowPulse1 {
+            0%, 100% { opacity: 0.6; }
+            50% { opacity: 1; }
+        }
+
+        @keyframes glowPulse2 {
+            0%, 100% { opacity: 0.3; }
+            50% { opacity: 0.7; }
+        }
+
+        @keyframes ringSpin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+
+        @keyframes ringSpinReverse {
+            from { transform: rotate(360deg); }
+            to { transform: rotate(0deg); }
+        }
+
+        @keyframes cardSlideIn {
+            from {
+                opacity: 0;
+                transform: translateX(40px);
+            }
+            to {
+                opacity: 1;
+                transform: translateX(0);
+            }
+        }
+
+        @keyframes fadeInDown {
+            from {
+                opacity: 0;
+                transform: translateY(-12px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        @keyframes fadeInUp {
+            from {
+                opacity: 0;
+                transform: translateY(12px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+        /* RESPONSIVE */
+        @media (max-width: 768px) {
+            .logo-stage {
+                width: 280px;
+                height: 280px;
+            }
+
+            .logo-wrapper {
+                width: 240px;
+                height: 240px;
+                padding: 12px;
+            }
+
+            .glow-ring {
+                inset: -35px;
+            }
+
+            .glow-ring::after {
+                inset: -25px;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .login-container {
+                gap: 1.5rem;
+                padding: 1rem;
+            }
+
+            .logo-stage {
+                width: 240px;
+                height: 240px;
+            }
+
+            .logo-wrapper {
+                width: 210px;
+                height: 210px;
+                padding: 10px;
+            }
+
+            .login-box {
+                width: 100%;
+            }
+
+            .glow-layer-1 {
+                inset: -30px;
+                filter: blur(12px);
+            }
+
+            .glow-layer-2 {
+                inset: -45px;
+                filter: blur(18px);
+            }
+
+            .glow-ring {
+                inset: -25px;
+            }
+
+            .glow-ring::after {
+                inset: -18px;
+            }
+
+            .status-bar {
+                bottom: 12px;
+                right: 12px;
+            }
         }
     </style>
 </head>
 <body>
 
-    <div class="login-container">
-        <img src="/static/logo.png" alt="Shan-Ai Logo" class="logo-img">
-
-        <h2>פלטפורמת קבלת החלטות חכמה</h2>
-
-        {% if error %}
-        <div class="alert alert-danger">❌ {{ error }}</div>
-        {% endif %}
-
-        <form method="POST" action="/login">
-            <div class="form-group">
-                <label>בחר משתמש</label>
-                <select name="user_id" required>
-                    <option value="">-- בחר משתמש --</option>
-                    {% for u in users %}
-                    <option value="{{ u.id }}">{{ u.username }}{% if u.job_title %} — {{ u.job_title }}{% endif %}</option>
-                    {% endfor %}
-                </select>
+<div class="login-container">
+    <!-- LOGO SECTION -->
+    <div class="logo-section">
+        <div class="logo-stage">
+            <div class="glow-layer-1"></div>
+            <div class="glow-layer-2"></div>
+            <div class="glow-ring"></div>
+            <div class="logo-wrapper">
+                <img src="/static/logo.png" alt="Shan-AI Logo" class="logo-img">
             </div>
-
-            <div class="form-group">
-                <label>סיסמה</label>
-                <input type="password" name="password" placeholder="הזן סיסמה" required>
-            </div>
-
-            <button type="submit" class="login-btn">כניסה למערכת</button>
-        </form>
-
-        <div class="footer-text">
-            סיסמה ברירת מחדל: 1234
         </div>
     </div>
+
+    <!-- LOGIN CARD SECTION -->
+    <div class="login-box">
+        <div class="login-card">
+            <div class="card-header-label">כניסה למערכת</div>
+
+            {% if error %}
+            <div class="alert-err">❌ {{ error }}</div>
+            {% endif %}
+
+            <form method="POST" action="/login">
+                <div class="form-group">
+                    <label>בחר משתמש</label>
+                    <select name="user_id" required>
+                        <option value="">-- בחר משתמש --</option>
+                        {% for u in users %}
+                        <option value="{{ u.id }}">{{ u.username }}{% if u.job_title %} — {{ u.job_title }}{% endif %}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label>סיסמה</label>
+                    <input type="password" name="password" placeholder="הזן סיסמה" required>
+                </div>
+
+                <button type="submit" class="btn-login">כניסה ←</button>
+            </form>
+
+            <div class="login-footer">סיסמה ברירת מחדל: 1234</div>
+        </div>
+    </div>
+</div>
+
+<div class="status-bar">
+    <div class="status-dot"></div>
+    SYSTEM ONLINE
+</div>
 
 </body>
 </html>

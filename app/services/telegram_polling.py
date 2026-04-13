@@ -1,6 +1,5 @@
 """Telegram bot polling handler - runs as background task."""
 
-import asyncio
 import html as _html
 import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -15,10 +14,6 @@ from app.models import User, RoleEnum
 from sqlalchemy import select
 
 logger = logging.getLogger(__name__)
-
-# Global polling control
-_polling_should_run = False
-_polling_event = asyncio.Event()  # Signals when polling can proceed
 
 # In-memory state: tracks superiors waiting to provide rejection notes
 # { telegram_id (int): decision_id (int) }
@@ -51,6 +46,52 @@ def _is_data_question(text: str) -> bool:
     )
 
 
+_PROJECT_QUERY_KEYWORDS = (
+    "פרויקט", "פרוייקט", "project", "עדכון שבועי", "מנהל פרויקט",
+    'מנה"פ', "שלב", "סיכון", "חסם", "לטיפול",
+)
+
+# Count-style questions about projects that must go to project_tools, not knowledge_service
+_PROJECT_COUNT_TRIGGERS = (
+    "כמה פרויקט", "כמה פרוייקט", "how many project",
+    "מנהל", "מנהלת", "מנהלים", 'מנה"פ', "מי מנהל", "מי אחראי",
+)
+
+
+_DECISION_VERBS = (
+    "לאשר", "לבצע", "להחליף", "לשנות", "להוסיף", "להסיר", "לבטל",
+    "לעדכן", "לדחות", "לקדם", "להפעיל", "לסגור", "להשהות",
+    "approve", "execute", "cancel", "update", "replace",
+)
+_BARE_NAME_SKIP = frozenset({
+    "כן", "לא", "אישור", "ביטול", "תודה", "טוב", "בסדר", "ok", "yes", "no",
+    "שלום", "היי", "הי",
+})
+
+
+def _is_project_query(text: str) -> bool:
+    """Return True if this looks like a project-related query."""
+    t = text.lower().strip()
+    if any(kw.lower() in t for kw in _PROJECT_QUERY_KEYWORDS):
+        return True
+    # Count + manager questions: "כמה פרויקטים מנהלת רחלי?"
+    if any(kw in t for kw in _PROJECT_COUNT_TRIGGERS):
+        return True
+    # Bare project name: short (1-5 words), no question/decision markers, mostly Hebrew
+    words = t.split()
+    if 1 <= len(words) <= 5:
+        if t in _BARE_NAME_SKIP:
+            return False
+        if t.endswith("?"):
+            return False  # questions are handled by _is_data_question
+        if any(verb in t for verb in _DECISION_VERBS):
+            return False
+        hebrew_chars = sum(1 for c in t if "\u05d0" <= c <= "\u05ea")
+        if hebrew_chars >= 2:  # at least 2 Hebrew characters → treat as potential name
+            return True
+    return False
+
+
 def _feedback_keyboard(log_id: int) -> InlineKeyboardMarkup:
     """Inline keyboard with 👍/👎 buttons tied to a query log entry."""
     return InlineKeyboardMarkup([[
@@ -67,27 +108,33 @@ async def _maybe_summarize(reply: str) -> str:
     if len(reply) <= _TG_MAX:
         return reply
     logger.warning(f"Reply too long ({len(reply)} chars), summarizing...")
-    from app.services.groq_client import groq_chat
+    import re as _re
+    from app.services.llm_router import llm_chat
+    # Strip HTML tags before sending to LLM — prevents model from echoing markup
+    plain = _re.sub(r"<[^>]+>", "", reply).strip()
+    # Limit input to avoid 413 token errors (Hebrew ≈ 0.85 tok/char → 8000 chars ≈ 9400 tok)
+    plain = plain[:8000]
     try:
-        summary = await groq_chat(
+        summary = await llm_chat(
+            "message_summary",
             messages=[
                 {
                     "role": "system",
                     "content": (
-                        "אתה עוזר שמסכם תשובות ארוכות לגרסה קצרה וממוקדת בעברית. "
-                        "שמור על כל הנקודות החשובות. השתמש בכל היותר ב-3000 תווים."
+                        "אתה עוזר שמסכם תשובות ארוכות לגרסה קצרה וממוקדת. "
+                        "ענה בעברית בלבד. אל תציין את תפקידך או ההוראות. "
+                        "שמור על כל הנקודות החשובות. עד 3000 תווים."
                     ),
                 },
                 {
                     "role": "user",
-                    "content": f"סכם את התשובה הבאה בצורה קצרה וברורה:\n\n{reply}",
+                    "content": f"סכם את התשובה הבאה בעברית בצורה קצרה וברורה:\n\n{plain}",
                 },
             ],
             max_tokens=800,
             temperature=0.2,
         )
         summarized = f"\u200F🤖 <b>תשובה (מסוכמת):</b>\n\n{_html.escape(summary)}"
-        # Fallback: hard-truncate if even the summary is somehow too long
         if len(summarized) > _TG_MAX:
             summarized = summarized[: _TG_MAX - 20] + "\n…(קוצר)"
         return summarized
@@ -97,11 +144,10 @@ async def _maybe_summarize(reply: str) -> str:
 
 
 class TelegramPollingBot:
-    """Telegram bot that polls for updates."""
+    """Telegram bot that processes updates via webhook."""
 
     def __init__(self):
         self.application = None
-        self._polling_task = None
 
     async def error_handler(self, update: object, context: ContextTypes.DEFAULT_TYPE):
         """Log all handler errors to stdout."""
@@ -460,6 +506,19 @@ class TelegramPollingBot:
                 chat_id=update.effective_chat.id, action="typing"
             )
 
+            # --- Project-aware query: check before generic data question handler ---
+            if _is_project_query(text):
+                try:
+                    from app.services.project_tools import answer_project_query
+                    reply_text = await answer_project_query(text, session, context.user_data, user_id=user.id)
+                    reply = f"\u200F📂 <b>נתוני פרויקט:</b>\n\n{_html.escape(reply_text)}"
+                except Exception as e:
+                    logger.warning(f"project_tools failed: {e}")
+                    reply = "\u200Fלא הצלחתי למצוא נתוני פרויקט. ודא שהקובץ הראשי הועלה."
+                reply = await _maybe_summarize(reply)
+                await update.message.reply_text(reply, parse_mode="HTML")
+                return
+
             # --- Keyword pre-filter: data questions bypass LLM classification ---
             if _is_data_question(text):
                 from app.services.knowledge_service import answer_with_full_context
@@ -673,77 +732,52 @@ class TelegramPollingBot:
                 )
 
     # ------------------------------------------------------------------
-    # Polling lifecycle
+    # Webhook lifecycle
     # ------------------------------------------------------------------
 
-    async def start_polling(self):
-        """Start polling for updates with auto-retry on transient errors."""
-        global _polling_should_run, _polling_event
+    async def start(self):
+        """Initialize and start the bot application for webhook mode."""
+        try:
+            await self.application.initialize()
+            await self.application.start()
+            logger.info("Telegram bot application started (webhook mode)")
+        except Exception as e:
+            logger.error(f"Failed to start bot application: {e}")
+            raise
 
-        logger.info("Starting Telegram bot polling...")
-        _polling_should_run = True
-        _polling_event.clear()
+    async def stop(self):
+        """Stop the bot application gracefully."""
+        try:
+            await self.application.stop()
+            await self.application.shutdown()
+            logger.info("Telegram bot application stopped")
+        except Exception as e:
+            logger.error(f"Error stopping bot application: {e}")
 
-        retry_delay = 5  # seconds between retries
-        max_retries = 12  # up to ~1 minute of retrying
+    async def set_webhook(self):
+        """Register the webhook URL with Telegram."""
+        webhook_url = (
+            settings.TELEGRAM_WEBHOOK_URL
+            or f"{settings.BASE_URL}/telegram/webhook"
+        )
+        try:
+            await self.application.bot.set_webhook(
+                url=webhook_url,
+                secret_token=settings.WEBHOOK_SECRET_TOKEN or None,
+                allowed_updates=["message", "callback_query", "edited_message"],
+            )
+            logger.info(f"Telegram webhook set to: {webhook_url}")
+        except Exception as e:
+            logger.error(f"Failed to set webhook: {e}")
+            raise
 
-        for attempt in range(max_retries):
-            if not _polling_should_run:
-                break
-
-            # Close any old app context
-            if self.application:
-                try:
-                    await self.application.stop()
-                    await asyncio.sleep(0.5)
-                except Exception as e:
-                    logger.warning(f"Error stopping old application: {e}")
-                self.application = None
-
-            # Reinitialize fresh
-            await self.initialize()
-
-            try:
-                async with self.application:
-                    await self.application.start()
-
-                    await self.application.updater.start_polling(allowed_updates=Update.ALL_TYPES)
-                    logger.info("Bot polling started successfully")
-                    _polling_event.set()
-
-                    # Wait until we're told to stop
-                    while _polling_should_run:
-                        try:
-                            await asyncio.sleep(1)
-                        except asyncio.CancelledError:
-                            logger.info("Polling cancelled")
-                            _polling_should_run = False
-                            raise
-
-                    logger.info("Stopping polling...")
-                    await self.application.updater.stop()
-                    await self.application.stop()
-                    return  # Clean shutdown
-
-            except asyncio.CancelledError:
-                logger.info("Polling task cancelled")
-                _polling_should_run = False
-                raise
-            except Exception as e:
-                logger.error(f"Polling error (attempt {attempt + 1}/{max_retries}): {e}")
-                if attempt < max_retries - 1 and _polling_should_run:
-                    logger.info(f"Retrying in {retry_delay}s...")
-                    await asyncio.sleep(retry_delay)
-                else:
-                    logger.error("Max retries reached — bot polling stopped.")
-                    _polling_should_run = False
-                    raise
-
-    async def stop_polling(self):
-        """Stop polling gracefully."""
-        global _polling_should_run
-        _polling_should_run = False
-        logger.info("Signalled polling to stop")
+    async def delete_webhook(self):
+        """Remove the webhook registration from Telegram."""
+        try:
+            await self.application.bot.delete_webhook()
+            logger.info("Telegram webhook deleted")
+        except Exception as e:
+            logger.error(f"Failed to delete webhook: {e}")
 
 
 async def _process_master_and_notify(file_id: int, telegram_id: int, filename: str, bot) -> None:

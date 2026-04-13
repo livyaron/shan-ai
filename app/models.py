@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, BigInteger, String, Text, DateTime, Float, Boolean, ForeignKey, Enum, JSON
+from sqlalchemy import Column, Integer, BigInteger, String, Text, DateTime, Date, Float, Boolean, ForeignKey, Enum, JSON
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 from pgvector.sqlalchemy import Vector
@@ -226,6 +226,8 @@ class QueryLog(Base):
     fix_suggestion = Column(Text, nullable=True)
     user_id       = Column(Integer, ForeignKey("users.id"), nullable=True)
     timestamp     = Column(DateTime, default=datetime.utcnow, index=True)
+    llm_provider  = Column(String(50), nullable=True)   # "Groq" | "Gemma"
+    is_fallback   = Column(Boolean, nullable=True)      # True if backup provider was used
 
     user = relationship("User")
 
@@ -239,3 +241,35 @@ class QuerySynonym(Base):
     synonyms   = Column(JSON, nullable=False)   # list of strings
     source     = Column(String(20), default="ai")  # "ai" or "admin"
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class LLMConfig(Base):
+    """Per-usage LLM provider configuration, managed from the admin dashboard."""
+    __tablename__ = "llm_config"
+
+    usage_name  = Column(String(64), primary_key=True)   # e.g. "decision_analysis"
+    provider    = Column(String(16), nullable=False, default="groq")  # groq | gemma | auto
+    fallback    = Column(Boolean, nullable=False, default=True)
+    label_he    = Column(String(128), nullable=True)      # Hebrew display label
+    updated_at  = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_by  = Column(String(255), nullable=True)
+
+
+class Project(Base):
+    """Project management — synced from master file, updated via project_sync service."""
+    __tablename__ = "projects"
+
+    id                    = Column(Integer, primary_key=True, index=True)
+    project_identifier    = Column(String(100), unique=True, index=True, nullable=False)
+    name                  = Column(String(500), nullable=True)
+    project_type          = Column(String(100), nullable=True)
+    stage                 = Column(String(100), nullable=True)
+    manager               = Column(String(255), nullable=True)
+    weekly_report         = Column(Text, nullable=True)
+    weekly_report_brief   = Column(String(500), nullable=True)
+    risks                 = Column(Text, nullable=True)
+    to_handle             = Column(Text, nullable=True)
+    dev_plan_date         = Column(Date, nullable=True)
+    estimated_finish_date = Column(Date, nullable=True)
+    last_updated          = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    is_active             = Column(Boolean, default=True, nullable=False)

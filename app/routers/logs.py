@@ -178,3 +178,123 @@ async def run_optimization(
     except Exception as e:
         logger.error(f"Optimization failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---------------------------------------------------------------------------
+# Knowledge Inspector — GET + DELETE endpoints
+# ---------------------------------------------------------------------------
+
+@router.get("/api/knowledge/inspector")
+async def get_knowledge_entries(
+    session: AsyncSession = Depends(get_db_session),
+    current_user: User = Depends(get_current_user),
+):
+    """Fetch synonyms and individual instructions from __global_instructions__ for the inspector UI."""
+    if not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="Admin only")
+
+    from app.models import QuerySynonym
+
+    result = await session.execute(select(QuerySynonym))
+    rows = result.scalars().all()
+
+    # Fetch only synonym rows (source != 'instruction')
+    synonyms_data = [
+        {
+            "id": row.id,
+            "original": row.original,
+            "synonyms": row.synonyms,
+        }
+        for row in rows
+        if row.source != "instruction"
+    ]
+
+    # Fetch __global_instructions__ and flatten it into individual items
+    instructions_data = []
+    global_instr = await session.scalar(
+        select(QuerySynonym).where(QuerySynonym.original == "__global_instructions__")
+    )
+    if global_instr and global_instr.synonyms:
+        instructions_data = [
+            {
+                "id": global_instr.id,
+                "index": idx,
+                "text": text,
+            }
+            for idx, text in enumerate(global_instr.synonyms)
+        ]
+
+    return JSONResponse({
+        "synonyms": synonyms_data,
+        "instructions": instructions_data,
+    })
+
+
+@router.post("/api/knowledge/reorganize")
+async def reorganize_knowledge(
+    session: AsyncSession = Depends(get_db_session),
+    current_user: User = Depends(get_current_user),
+):
+    """LLM-powered full reorganization of synonyms + instructions."""
+    if not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="Admin only")
+
+    from app.services.optimization_service import reorganize_knowledge as _reorg
+    try:
+        result = await _reorg(session)
+        return JSONResponse(result)
+    except Exception as e:
+        logger.error(f"Reorganize failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/api/knowledge/entry/{entry_id}")
+async def delete_knowledge_entry(
+    entry_id: int,
+    session: AsyncSession = Depends(get_db_session),
+    current_user: User = Depends(get_current_user),
+):
+    """Delete a synonym or instruction by ID."""
+    if not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="Admin only")
+
+    from app.models import QuerySynonym
+    from sqlalchemy import delete
+
+    row = await session.get(QuerySynonym, entry_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Entry not found")
+
+    await session.execute(delete(QuerySynonym).where(QuerySynonym.id == entry_id))
+    await session.commit()
+
+    return JSONResponse({"ok": True, "deleted_id": entry_id})
+
+
+@router.delete("/api/knowledge/instruction/{index}")
+async def delete_instruction_by_index(
+    index: int,
+    session: AsyncSession = Depends(get_db_session),
+    current_user: User = Depends(get_current_user),
+):
+    """Delete a specific instruction by index from __global_instructions__."""
+    if not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="Admin only")
+
+    from app.models import QuerySynonym
+
+    row = await session.scalar(
+        select(QuerySynonym).where(QuerySynonym.original == "__global_instructions__")
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Global instructions not found")
+
+    if index < 0 or index >= len(row.synonyms):
+        raise HTTPException(status_code=400, detail="Index out of range")
+
+    # Remove instruction at this index
+    row.synonyms = [text for idx, text in enumerate(row.synonyms) if idx != index]
+    await session.commit()
+    logger.info(f"Deleted instruction at index {index}")
+
+    return JSONResponse({"ok": True, "deleted_index": index})
