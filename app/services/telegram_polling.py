@@ -49,6 +49,7 @@ def _is_data_question(text: str) -> bool:
 _PROJECT_QUERY_KEYWORDS = (
     "פרויקט", "פרוייקט", "project", "עדכון שבועי", "מנהל פרויקט",
     'מנה"פ', "שלב", "סיכון", "חסם", "לטיפול",
+    "סטטוס", "status", "עדכון",  # Status/update queries like "מה סטטוס X?"
 )
 
 # Count-style questions about projects that must go to project_tools, not knowledge_service
