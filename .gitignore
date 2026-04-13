@@ -53,3 +53,4 @@ logs/
 htmlcov/
 .coverage
 .aider*
+.env.staging
