@@ -70,6 +70,75 @@ _BARE_NAME_SKIP = frozenset({
 })
 
 
+_ROUTING_PROMPT = """\
+אתה מנתב הודעות במערכת ניהול פרויקטים תשתיות חשמל.
+קבל הודעת משתמש בעברית והחזר JSON בלבד — ללא markdown, ללא הסברים.
+
+פורמט מחייב:
+{"route": "...", "intent": "...", "param": ...}
+
+route:
+- "project"   — שאלה על פרויקט/ים: סטטוס, תאריכים, מנהל, סיכונים, ספירה, עדכון שבועי
+- "knowledge" — שאלה על נהלים, מסמכים, מידע כללי (לא פרויקט ספציפי)
+- "decision"  — תיאור בעיה הדורשת ניתוח או פעולה
+
+intent (רק כש-route="project", אחרת "general"):
+- "by_identifier" — שאלה על פרויקט אחד לפי שם/מזהה (param = שם/מזהה)
+- "by_manager"    — פרויקטים של מנהל מסוים (param = "שם משפחה, שם פרטי")
+- "count_by_type" — ספירה לפי סוג (param = סוג, או null לכולם)
+- "list_risks"    — פרויקטים עם סיכונים (param = null)
+- "by_year"       — פרויקטים לפי שנת סיום (param = "2026")
+- "general"       — שאלת פרויקט כללית (param = null)
+
+שמות מנהלים — תמיד בפורמט "שם משפחה, שם פרטי":
+"ענת אוברקוביץ" → "אוברקוביץ, ענת" | "רחל כהן" → "כהן, רחל"
+
+דוגמאות:
+"מה סטטוס רעות?"                        → {"route":"project","intent":"by_identifier","param":"רעות"}
+"מה תאריך תכנית הפיתוח של רעות?"        → {"route":"project","intent":"by_identifier","param":"רעות"}
+"כמה פרויקטים מנהלת ענת אוברקוביץ?"     → {"route":"project","intent":"by_manager","param":"אוברקוביץ, ענת"}
+"אילו פרויקטים מסתיימים ב-2026?"        → {"route":"project","intent":"by_year","param":"2026"}
+"מה הסיכונים בפרויקטים?"                → {"route":"project","intent":"list_risks","param":null}
+"כמה פרויקטי הקמה יש?"                  → {"route":"project","intent":"count_by_type","param":"הקמה"}
+"כמה פרויקטים יש בסך הכל?"              → {"route":"project","intent":"count_by_type","param":null}
+"מה הנוהל להחלפת טרנספורמטור?"          → {"route":"knowledge","intent":"general","param":null}
+"צריך להחליף שנאי ישן בתחנה 5"          → {"route":"decision","intent":"general","param":null}
+
+הודעה: {text}
+
+JSON:"""
+
+
+async def _ai_route_message(text: str) -> dict:
+    """One LLM call: classify route (project/knowledge/decision) + extract intent+param."""
+    import json as _json
+    import re as _re
+    from app.services.llm_router import llm_chat
+    prompt = _ROUTING_PROMPT.replace("{text}", text)
+    try:
+        response = await llm_chat(
+            "message_routing",
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=100,
+            temperature=0.0,
+        )
+        match = _re.search(r'\{[^}]+\}', response)
+        if match:
+            data = _json.loads(match.group())
+            route = data.get("route")
+            intent = data.get("intent") or "general"
+            param = data.get("param")
+            if param in (None, "null", "", "None"):
+                param = None
+            if route in {"project", "knowledge", "decision"}:
+                logger.info(f"_ai_route_message: route={route!r} intent={intent!r} param={param!r}")
+                return {"route": route, "intent": intent, "param": param}
+        logger.warning(f"_ai_route_message: could not parse response: {response!r}")
+    except Exception as e:
+        logger.warning(f"_ai_route_message failed: {e}")
+    return {"route": None, "intent": None, "param": None}
+
+
 def _is_project_query(text: str) -> bool:
     """Return True if this looks like a project-related query."""
     t = text.lower().strip()
@@ -507,11 +576,19 @@ class TelegramPollingBot:
                 chat_id=update.effective_chat.id, action="typing"
             )
 
-            # --- Project-aware query: check before generic data question handler ---
-            if _is_project_query(text):
+            # --- AI-first routing: one LLM call decides route + intent + param ---
+            routing = await _ai_route_message(text)
+            ai_route = routing["route"]
+            ai_intent = routing["intent"]
+            ai_param = routing["param"]
+
+            if ai_route == "project":
                 try:
                     from app.services.project_tools import answer_project_query
-                    reply_text = await answer_project_query(text, session, context.user_data, user_id=user.id)
+                    reply_text = await answer_project_query(
+                        text, session, context.user_data, user_id=user.id,
+                        precomputed_intent=ai_intent, precomputed_param=ai_param,
+                    )
                     reply = f"\u200F📂 <b>נתוני פרויקט:</b>\n\n{_html.escape(reply_text)}"
                 except Exception as e:
                     logger.warning(f"project_tools failed: {e}")
@@ -520,11 +597,10 @@ class TelegramPollingBot:
                 await update.message.reply_text(reply, parse_mode="HTML")
                 return
 
-            # --- Keyword pre-filter: data questions bypass LLM classification ---
-            if _is_data_question(text):
-                from app.services.knowledge_service import answer_with_full_context
+            if ai_route == "knowledge":
                 kb = None
                 try:
+                    from app.services.knowledge_service import answer_with_full_context
                     qa_result = await answer_with_full_context(text, session, user.id)
                     reply = f"\u200F🤖 <b>תשובה:</b>\n\n{_html.escape(qa_result['answer'])}"
                     if qa_result.get("sources_text"):
@@ -537,6 +613,39 @@ class TelegramPollingBot:
                 reply = await _maybe_summarize(reply)
                 await update.message.reply_text(reply, parse_mode="HTML", reply_markup=kb)
                 return
+
+            if ai_route == "decision":
+                pass  # falls through to ClaudeService().classify() below
+
+            # AI routing failed — keyword fallback
+            if ai_route is None:
+                if _is_project_query(text):
+                    try:
+                        from app.services.project_tools import answer_project_query
+                        reply_text = await answer_project_query(text, session, context.user_data, user_id=user.id)
+                        reply = f"\u200F📂 <b>נתוני פרויקט:</b>\n\n{_html.escape(reply_text)}"
+                    except Exception as e:
+                        logger.warning(f"project_tools failed (keyword fallback): {e}")
+                        reply = "\u200Fלא הצלחתי למצוא נתוני פרויקט. ודא שהקובץ הראשי הועלה."
+                    reply = await _maybe_summarize(reply)
+                    await update.message.reply_text(reply, parse_mode="HTML")
+                    return
+                if _is_data_question(text):
+                    kb = None
+                    try:
+                        from app.services.knowledge_service import answer_with_full_context
+                        qa_result = await answer_with_full_context(text, session, user.id)
+                        reply = f"\u200F🤖 <b>תשובה:</b>\n\n{_html.escape(qa_result['answer'])}"
+                        if qa_result.get("sources_text"):
+                            reply += f"\n\n<i>{_html.escape(qa_result['sources_text'])}</i>"
+                        if qa_result.get("log_id"):
+                            kb = _feedback_keyboard(qa_result["log_id"])
+                    except Exception as e:
+                        logger.warning(f"answer_with_full_context failed (keyword fallback): {e}")
+                        reply = "\u200Fלא הצלחתי למצוא תשובה. נסה לנסח אחרת."
+                    reply = await _maybe_summarize(reply)
+                    await update.message.reply_text(reply, parse_mode="HTML", reply_markup=kb)
+                    return
 
             # --- Check if this is a clarification response ---
             if telegram_id in _awaiting_clarification:

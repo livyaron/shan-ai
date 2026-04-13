@@ -397,19 +397,28 @@ async def answer_project_query(
     session: AsyncSession,
     user_data: dict,
     user_id: Optional[int] = None,
+    precomputed_intent: Optional[str] = None,
+    precomputed_param: Optional[str] = None,
 ) -> str:
     """
     Main function: detect intent, fetch data, and generate Hebrew summary via AI.
     Updates user_data["last_project"] for conversation context.
     Writes a QueryLog entry so the question appears in the dashboard logs tab.
+
+    If precomputed_intent is provided (from the top-level router), use it directly
+    and skip the second LLM call. Falls back to _ai_detect_intent → _detect_intent.
     """
-    # Primary: ask the LLM to understand the question
-    intent, param = await _ai_detect_intent(text)
-    # Fallback: keyword-based detection if AI failed or returned nothing useful
-    if not intent or intent == "general":
-        kw_intent, kw_param = _detect_intent(text, user_data)
-        if kw_intent != "general" or not intent:
-            intent, param = kw_intent, kw_param
+    if precomputed_intent and precomputed_intent != "general":
+        intent, param = precomputed_intent, precomputed_param
+        logger.info(f"answer_project_query: using precomputed intent={intent!r}, param={param!r}")
+    else:
+        # Primary: ask the LLM to understand the question
+        intent, param = await _ai_detect_intent(text)
+        # Fallback: keyword-based detection if AI failed or returned nothing useful
+        if not intent or intent == "general":
+            kw_intent, kw_param = _detect_intent(text, user_data)
+            if kw_intent != "general" or not intent:
+                intent, param = kw_intent, kw_param
 
     # Detect if this is a bare name lookup (no question words, just a name)
     _q = text.strip().rstrip("?").strip()

@@ -40,6 +40,7 @@ USAGE_LABELS: dict[str, str] = {
     "project_query":           "שאלה על פרויקטים",
     "message_summary":         "סיכום תשובת בוט ארוכה",
     "dashboard_analysis":      "ניתוח AI בדשבורד",
+    "message_routing":         "ניתוב הודעה + זיהוי כוונה",
 }
 
 
