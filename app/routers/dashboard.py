@@ -397,7 +397,6 @@ async def regen_code(
 async def edit_user(
     user_id: int,
     username: str = Form(...),
-    telegram_id: str = Form(""),
     role: str = Form(""),
     job_title: str = Form(""),
     responsibilities: str = Form(""),
@@ -416,7 +415,6 @@ async def edit_user(
         return RedirectResponse("/dashboard/users?error=משתמש+לא+נמצא", status_code=303)
 
     user.username = username
-    user.telegram_id = int(telegram_id) if telegram_id.strip() else None
     if role:
         user.role = RoleEnum(role)
         user.hierarchy_level = _ROLE_HIERARCHY.get(role)
@@ -544,8 +542,9 @@ async def dashboard_ai_analysis(
 כל content חייב להיות ספציפי לנתונים — עם מספרים, דפוסים ותובנות אמיתיות. אל תהיה גנרי."""
 
     try:
-        from app.services.groq_client import groq_chat
-        raw = await groq_chat(
+        from app.services.llm_router import llm_chat
+        raw = await llm_chat(
+            "dashboard_analysis",
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": data_block},
@@ -649,8 +648,9 @@ async def user_ai_analysis(
 כל section.content צריך להיות פסקה מלאה בעברית, עם תובנות ספציפיות לנתונים — לא גנריות. אם אין מספיק נתונים, ציין זאת בכנות."""
 
     try:
-        from app.services.groq_client import groq_chat
-        raw = await groq_chat(
+        from app.services.llm_router import llm_chat
+        raw = await llm_chat(
+            "dashboard_analysis",
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": data_block},
@@ -759,8 +759,9 @@ async def decision_ai_analysis(
 כל section.content צריך להיות ניתוח ספציפי לנתונים — לא גנרי. התחשב במשובים שניתנו מהמשתמשים בניתוחך. היה כן גם אם הניתוח שלילי."""
 
     try:
-        from app.services.groq_client import groq_chat
-        raw = await groq_chat(
+        from app.services.llm_router import llm_chat
+        raw = await llm_chat(
+            "dashboard_analysis",
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": data_block},

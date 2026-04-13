@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, BigInteger, String, Text, DateTime, Float, Boolean, ForeignKey, Enum
+from sqlalchemy import Column, Integer, BigInteger, String, Text, DateTime, Date, Float, Boolean, ForeignKey, Enum, JSON
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 from pgvector.sqlalchemy import Vector
@@ -152,6 +152,7 @@ class KnowledgeFile(Base):
     summary       = Column(Text, nullable=True)
     chunk_count   = Column(Integer, default=0)
     status        = Column(String(20), default="processing")  # processing | ready | error
+    is_master     = Column(Boolean, default=False, nullable=False, server_default="false")
     created_at    = Column(DateTime, default=datetime.utcnow)
 
     uploader = relationship("User")
@@ -207,3 +208,68 @@ class DecisionRaciRole(Base):
 
     decision = relationship("Decision", back_populates="raci_roles")
     user     = relationship("User")
+
+
+class QueryLog(Base):
+    """Logs every RAG query with AI response and user feedback."""
+    __tablename__ = "query_logs"
+
+    id            = Column(Integer, primary_key=True, index=True)
+    question      = Column(Text, nullable=False)
+    ai_response   = Column(Text, nullable=False)
+    sources_used  = Column(JSON, nullable=True)       # [{"file": "name.xlsx"}, ...]
+    user_feedback = Column(Integer, default=0)         # 1=up, -1=down, 0=none
+    admin_note    = Column(Text, nullable=True)
+    is_accurate   = Column(Boolean, nullable=True)
+    analyzed      = Column(Boolean, default=False)     # True after optimization run consumed this log
+    failure_type  = Column(String(20), nullable=True)  # "TERMINOLOGY" | "STRUCTURE" | None
+    fix_suggestion = Column(Text, nullable=True)
+    user_id       = Column(Integer, ForeignKey("users.id"), nullable=True)
+    timestamp     = Column(DateTime, default=datetime.utcnow, index=True)
+    llm_provider  = Column(String(50), nullable=True)   # "Groq" | "Gemma"
+    is_fallback   = Column(Boolean, nullable=True)      # True if backup provider was used
+
+    user = relationship("User")
+
+
+class QuerySynonym(Base):
+    """Learned synonyms from optimization runs, used to expand future queries."""
+    __tablename__ = "query_synonyms"
+
+    id         = Column(Integer, primary_key=True)
+    original   = Column(String(255), unique=True, nullable=False, index=True)
+    synonyms   = Column(JSON, nullable=False)   # list of strings
+    source     = Column(String(20), default="ai")  # "ai" or "admin"
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class LLMConfig(Base):
+    """Per-usage LLM provider configuration, managed from the admin dashboard."""
+    __tablename__ = "llm_config"
+
+    usage_name  = Column(String(64), primary_key=True)   # e.g. "decision_analysis"
+    provider    = Column(String(16), nullable=False, default="groq")  # groq | gemma | auto
+    fallback    = Column(Boolean, nullable=False, default=True)
+    label_he    = Column(String(128), nullable=True)      # Hebrew display label
+    updated_at  = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_by  = Column(String(255), nullable=True)
+
+
+class Project(Base):
+    """Project management — synced from master file, updated via project_sync service."""
+    __tablename__ = "projects"
+
+    id                    = Column(Integer, primary_key=True, index=True)
+    project_identifier    = Column(String(100), unique=True, index=True, nullable=False)
+    name                  = Column(String(500), nullable=True)
+    project_type          = Column(String(100), nullable=True)
+    stage                 = Column(String(100), nullable=True)
+    manager               = Column(String(255), nullable=True)
+    weekly_report         = Column(Text, nullable=True)
+    weekly_report_brief   = Column(String(500), nullable=True)
+    risks                 = Column(Text, nullable=True)
+    to_handle             = Column(Text, nullable=True)
+    dev_plan_date         = Column(Date, nullable=True)
+    estimated_finish_date = Column(Date, nullable=True)
+    last_updated          = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    is_active             = Column(Boolean, default=True, nullable=False)

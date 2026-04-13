@@ -35,6 +35,24 @@ async def ask_query(
     session: AsyncSession = Depends(get_db_session),
     current_user: User = Depends(get_current_user),
 ):
+    from app.services.telegram_polling import _is_project_query
     from app.services.knowledge_service import answer_with_full_context
+
+    # Route project-related questions to project_tools, same as the Telegram bot does
+    if _is_project_query(body.question):
+        try:
+            from app.services.project_tools import answer_project_query
+            answer = await answer_project_query(body.question, session, {}, user_id=current_user.id)
+            return JSONResponse({
+                "answer": answer,
+                "sources_text": "📂 מסד הפרויקטים",
+                "has_files": True,
+                "has_decisions": False,
+                "file_names": [],
+                "log_id": None,
+            })
+        except Exception:
+            pass  # fall through to knowledge_service on error
+
     result = await answer_with_full_context(body.question, session, current_user.id)
     return JSONResponse(result)

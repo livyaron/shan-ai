@@ -145,8 +145,9 @@ async def suggest_distribution(decision: Decision, submitter: User, session: Asy
 כלול רק משתמשים רלוונטיים. אל תוסיף טקסט מחוץ ל-JSON."""
 
     try:
-        from app.services.groq_client import groq_chat
-        raw = await groq_chat(
+        from app.services.llm_router import llm_chat
+        raw = await llm_chat(
+            "distribution_suggestion",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.1,
         )

@@ -1,10 +1,8 @@
-"""AI decision analysis service - uses Groq (Llama 3.3 70B, fallback to 8B on rate limit)."""
+"""AI decision analysis service — routes to configured LLM (Groq or Gemma) via llm_router."""
 
 import json
 import logging
-from groq import AsyncGroq
-from app.config import settings
-from app.services.groq_client import groq_chat
+from app.services.llm_router import llm_chat
 
 logger = logging.getLogger(__name__)
 
@@ -81,13 +79,14 @@ CLASSIFY_PROMPT = """אתה שומר סף למערכת ניהול החלטות �
 
 class ClaudeService:
     def __init__(self):
-        self.client = AsyncGroq(api_key=settings.GROQ_API_KEY)
+        pass
 
     async def classify(self, text: str) -> dict:
         """Pre-classify text: DECISION | NOT_DECISION | UNCLEAR.
         Returns dict with keys: verdict, reply (opt), clarifying_question (opt).
         """
-        raw = await groq_chat(
+        raw = await llm_chat(
+            "decision_analysis",
             messages=[
                 {"role": "system", "content": CLASSIFY_PROMPT},
                 {"role": "user", "content": text},
@@ -95,12 +94,11 @@ class ClaudeService:
             max_tokens=200,
             temperature=0.1,
             json_mode=True,
-            client=self.client,
         )
         return json.loads(raw)
 
     async def analyze(self, problem: str, user_role: str, past_context: str = "") -> dict:
-        """Send problem to Groq and return parsed decision JSON."""
+        """Send problem to configured LLM and return parsed decision JSON."""
         # Replace straight quotes with Hebrew geresh to avoid breaking JSON
         clean_problem = problem.replace('"', '״').replace("'", "׳")
         user_message = f"תפקיד המגיש: {user_role}\n\n"
@@ -108,15 +106,15 @@ class ClaudeService:
             user_message += f"החלטות עבר רלוונטיות:\n{past_context}\n\n"
         user_message += f"בעיה/החלטה:\n{clean_problem}"
 
-        logger.info(f"שולח ל-Groq: {problem[:80]}...")
+        logger.info(f"שולח ל-LLM: {problem[:80]}...")
 
-        raw = await groq_chat(
+        raw = await llm_chat(
+            "decision_analysis",
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": user_message},
             ],
             temperature=0.2,
-            client=self.client,
         )
         logger.info(f"תגובת Groq: {raw[:200]}")
 

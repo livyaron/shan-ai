@@ -69,8 +69,9 @@ RACI: {raci_str}
 החזר JSON בלבד:
 {{"lesson": "הלקח כאן...", "tags": ["תגית1", "תגית2"], "decision_type": "{decision.type.value}"}}"""
 
-            from app.services.groq_client import groq_chat
-            raw = await groq_chat(
+            from app.services.llm_router import llm_chat
+            raw = await llm_chat(
+                "lesson_extraction",
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.2,
                 json_mode=True,
@@ -363,8 +364,9 @@ async def generate_knowledge_summary(decision_type: str) -> None:
 החזר JSON בלבד:
 {{"principles": ["עיקרון 1", "עיקרון 2", ...], "risks": ["סיכון 1", ...], "success_factors": ["גורם 1", ...], "ai_guidance": "הנחיה לשיפור ה-AI"}}"""
 
-            from app.services.groq_client import groq_chat
-            raw = await groq_chat(
+            from app.services.llm_router import llm_chat
+            raw = await llm_chat(
+                "knowledge_summary",
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.2,
                 json_mode=True,

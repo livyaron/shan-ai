@@ -1,0 +1,984 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Shan-AI — ניהול פרויקטים</title>
+
+    <!-- Bootstrap 5 -->
+    <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- DataTables + Bootstrap 5 integration -->
+    <link href="https://cdn.datatables.net/1.13.8/css/dataTables.bootstrap5.min.css" rel="stylesheet">
+
+    <style>
+        /* ── Shared DSS design tokens ── */
+        :root {
+            --bg-deep:   #070b12;
+            --bg-card:   #0f1826;
+            --border:    #1a2d47;
+            --border-hi: #1e3a5f;
+            --cyan:      #00d4ff;
+            --cyan-dim:  rgba(0,212,255,0.09);
+            --purple:    #8b9cf4;
+            --green:     #10b981;
+            --red:       #ef4444;
+            --text-1:    #e2e8f0;
+            --text-2:    #64748b;
+            --text-3:    #344156;
+            --mono:      'IBM Plex Mono', monospace;
+            --ui:        'Heebo', sans-serif;
+        }
+
+        @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
+        @keyframes slideInDown { from { opacity: 0; transform: translateY(-20px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+        /* ── Navbar ── */
+        .navbar {
+            background: rgba(7,11,18,0.96) !important;
+            border-bottom: 1px solid var(--border);
+            backdrop-filter: blur(24px);
+            -webkit-backdrop-filter: blur(24px);
+            padding: 0 1.5rem;
+            height: 50px;
+            position: sticky; top: 0; z-index: 1000;
+            box-shadow: 0 4px 24px rgba(0,0,0,0.4);
+        }
+        .navbar::after {
+            content: '';
+            position: absolute; bottom: 0; left: 0; right: 0; height: 1px;
+            background: linear-gradient(90deg, transparent 0%, var(--cyan) 30%, var(--purple) 70%, transparent 100%);
+            opacity: 0.2;
+        }
+        .navbar-brand {
+            font-family: var(--mono); font-size: 1.02rem; font-weight: 600;
+            color: var(--cyan) !important; letter-spacing: 0.08em;
+            display: flex; align-items: center; gap: 7px; text-decoration: none;
+        }
+        .brand-pulse {
+            width: 5px; height: 5px; background: var(--cyan); border-radius: 50%;
+            box-shadow: 0 0 8px var(--cyan); animation: blink 2.4s ease-in-out infinite;
+        }
+        .nav-link {
+            font-size: 0.95rem; font-weight: 500; color: var(--text-2) !important;
+            padding: 0.22rem 0.6rem !important; border-radius: 4px;
+            transition: all 0.14s; white-space: nowrap;
+        }
+        .nav-link:hover { color: var(--text-1) !important; background: rgba(255,255,255,0.04); }
+        .nav-link.nav-active { color: var(--cyan) !important; background: var(--cyan-dim); }
+        .nav-pending-dot {
+            display: inline-flex; align-items: center; justify-content: center;
+            width: 16px; height: 16px; background: var(--red); color: #fff;
+            font-family: var(--mono); font-size: 0.55rem; border-radius: 50%;
+            margin-right: 3px; box-shadow: 0 0 8px rgba(239,68,68,0.5);
+            animation: blink 1.5s ease-in-out infinite;
+        }
+        .user-chip {
+            display: flex; align-items: center; gap: 6px;
+            padding: 3px 10px; background: var(--bg-card); border: 1px solid var(--border);
+            border-radius: 20px; font-size: 0.92rem; color: var(--text-2);
+        }
+        .user-online { width: 5px; height: 5px; background: var(--green); border-radius: 50%; box-shadow: 0 0 6px var(--green); }
+        .logout-btn {
+            font-family: var(--mono); font-size: 0.88rem; color: var(--text-3) !important;
+            text-decoration: none; padding: 3px 8px; border-radius: 4px; transition: all 0.14s; letter-spacing: 0.04em;
+        }
+        .logout-btn:hover { color: var(--red) !important; background: rgba(239,68,68,0.1); }
+
+        body {
+            background: #0f1117;
+            color: #e0e0e0;
+            font-family: system-ui, -apple-system, 'Segoe UI', 'Heebo', sans-serif;
+        }
+
+        .navbar {
+            background: #1a1d2e !important;
+            border-bottom: 1px solid #2d3047;
+        }
+
+        .nav-link {
+            color: #8b9cf4 !important;
+        }
+
+        .nav-link:hover {
+            color: #fff !important;
+        }
+
+        .nav-link.fw-bold {
+            color: #fff !important;
+        }
+
+        .card {
+            background: #1a1d2e;
+            border: 1px solid #2d3047;
+            border-radius: 12px;
+        }
+
+        .section-title {
+            color: #8b9cf4;
+            font-size: 1.1rem;
+            font-weight: 600;
+            border-right: 3px solid #8b9cf4;
+            padding-right: 10px;
+        }
+
+        /* ── DataTables dark overrides ── */
+        .dataTables_wrapper {
+            color: #e0e0e0;
+        }
+
+        .dataTables_filter input,
+        .dataTables_length select {
+            background: #0f1117;
+            border: 1px solid #2d3047;
+            color: #e0e0e0;
+            border-radius: 6px;
+            padding: 4px 8px;
+        }
+
+        .dataTables_filter input:focus,
+        .dataTables_length select:focus {
+            border-color: #8b9cf4;
+            outline: none;
+            box-shadow: 0 0 0 0.2rem rgba(139, 156, 244, 0.25);
+        }
+
+        .dataTables_info,
+        .dataTables_paginate {
+            color: #d0d8f0;
+        }
+
+        .paginate_button {
+            color: #8b9cf4 !important;
+            background: none !important;
+        }
+
+        .paginate_button:hover {
+            background: #22263a !important;
+            border-color: #2d3047 !important;
+        }
+
+        .paginate_button.current,
+        .paginate_button.current:hover {
+            background: #8b9cf4 !important;
+            color: #0f1117 !important;
+            border-color: #8b9cf4 !important;
+        }
+
+        .paginate_button.disabled {
+            color: #555 !important;
+        }
+
+        /* ── Main table ── */
+        table.dataTable {
+            color: #e0e0e0;
+            border-collapse: collapse !important;
+        }
+
+        table.dataTable thead th {
+            color: #8b9cf4;
+            border-bottom: 2px solid #2d3047 !important;
+            background: #1a1d2e;
+            font-weight: 600;
+        }
+
+        table.dataTable tbody td {
+            border-color: #2d3047;
+            vertical-align: middle;
+        }
+
+        /* ── CLICKABLE ROW STYLE ── */
+        .clickable-row {
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .clickable-row:hover {
+            background: rgba(0,212,255,0.15) !important;
+        }
+
+        .clickable-row:hover td {
+            color: #ffffff !important;
+            font-weight: 500;
+            text-shadow: 0 0 8px rgba(0,212,255,0.3);
+        }
+
+        .clickable-row:hover .badge {
+            transform: scale(1.08);
+        }
+
+        table.dataTable tbody tr.odd {
+            background: #181b28;
+        }
+
+        table.dataTable tbody tr.even {
+            background: #1a1d2e;
+        }
+
+        /* ── Column filter dropdowns ── */
+        .col-filter {
+            background: #0f1117;
+            border: 2px solid #2d3047;
+            color: #e0e0e0;
+            border-radius: 8px;
+            font-size: 0.9rem;
+            padding: 10px 12px;
+            width: 100%;
+            font-weight: 500;
+            transition: all 0.2s ease;
+        }
+
+        .col-filter:hover {
+            border-color: #8b9cf4;
+            box-shadow: 0 0 12px rgba(139,156,244,0.1);
+        }
+
+        .col-filter:focus {
+            border-color: #8b9cf4;
+            outline: none;
+            box-shadow: 0 0 0 3px rgba(139, 156, 244, 0.2);
+            background: #0a0d16;
+        }
+
+        .col-filter option {
+            background: #1a1d2e;
+            color: #e0e0e0;
+        }
+
+        .filter-label {
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: #00d4ff;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            margin-bottom: 8px;
+            display: block;
+        }
+
+        /* ── Forms / Modals ── */
+        .form-control,
+        .form-select {
+            background: #0f1117;
+            border: 1px solid #2d3047;
+            color: #ffffff;
+            border-radius: 8px;
+            font-weight: 500;
+        }
+
+        .form-control:focus,
+        .form-select:focus {
+            background: #0f1117;
+            color: #ffffff;
+            border-color: #8b9cf4;
+            box-shadow: 0 0 0 0.2rem rgba(139, 156, 244, 0.25);
+        }
+
+        /* ── ENHANCED MODAL STYLING ── */
+        .modal-content {
+            background: linear-gradient(135deg, #1a1d2e 0%, #161a28 100%);
+            border: 1px solid rgba(139,156,244,0.3);
+            border-radius: 12px;
+            color: #e0e0e0;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+            backdrop-filter: blur(10px);
+        }
+
+        .modal-header {
+            border-bottom: 1px solid rgba(139,156,244,0.2);
+            background: rgba(12,18,32,0.5);
+            flex-direction: row-reverse;
+            padding: 1.5rem;
+        }
+
+        .modal-title {
+            font-size: 1.3rem;
+            font-weight: 700;
+            color: #00d4ff;
+            letter-spacing: 0.05em;
+        }
+
+        .modal-footer {
+            border-top: 1px solid rgba(139,156,244,0.2);
+            background: rgba(12,18,32,0.3);
+            flex-direction: row-reverse;
+        }
+
+        .modal-body {
+            padding: 2rem;
+            max-height: 80vh;
+            overflow-y: auto;
+            direction: rtl;
+            text-align: right;
+        }
+
+        .btn-close {
+            filter: none;
+            background: none;
+            border: none;
+            opacity: 0.7;
+            color: #8b9cf4;
+            font-size: 1.8rem;
+            font-weight: 300;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .btn-close:hover {
+            opacity: 1;
+            color: #00d4ff;
+            transform: rotate(90deg);
+        }
+
+        .form-label {
+            color: #d0d8f0;
+            font-size: 0.9rem;
+        }
+
+        /* ── PROJECT DETAILS MODAL ── */
+        .project-detail-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1.5rem;
+            margin-bottom: 1.5rem;
+            padding-bottom: 1.5rem;
+            border-bottom: 1px solid rgba(139,156,244,0.15);
+            animation: slideInDown 0.4s ease-out;
+        }
+
+        .project-detail-row:last-child {
+            border-bottom: none;
+            margin-bottom: 0;
+            padding-bottom: 0;
+        }
+
+        .project-detail-field {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .project-detail-label {
+            font-size: 0.75rem;
+            font-weight: 700;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+            color: #00d4ff;
+            margin-bottom: 0.5rem;
+        }
+
+        .project-detail-value {
+            font-size: 0.95rem;
+            color: #e2e8f0;
+            word-break: break-word;
+            line-height: 1.6;
+            background: rgba(139,156,244,0.05);
+            padding: 0.75rem;
+            border-right: 3px solid #8b9cf4;
+            border-radius: 4px;
+            min-height: 50px;
+            direction: rtl;
+            text-align: right;
+            unicode-bidi: plaintext;
+            white-space: pre-wrap;
+            overflow-wrap: break-word;
+        }
+
+        .project-detail-row > .project-detail-field:nth-child(1):nth-last-child(1) {
+            grid-column: 1 / -1;
+        }
+
+        /* ── Buttons ── */
+        .btn-primary {
+            background: #8b9cf4;
+            border: none;
+            color: #0f1117;
+            font-weight: 700;
+            transition: all 0.2s;
+        }
+
+        .btn-primary:hover {
+            background: #6b7ce6;
+            color: #0f1117;
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(139,156,244,0.3);
+        }
+
+        .btn-secondary {
+            background: #2d3047;
+            border: 1px solid #3d4057;
+            color: #e0e0e0;
+            transition: all 0.2s;
+        }
+
+        .btn-secondary:hover {
+            background: #3d4057;
+            border-color: #4d5067;
+        }
+
+        /* ── Risk badge ── */
+        .badge {
+            font-weight: 600;
+            padding: 0.35em 0.65em;
+            transition: all 0.2s;
+        }
+
+        /* ── Toasts ── */
+        .toast-container {
+            position: fixed;
+            top: 1rem;
+            left: 1rem;
+            z-index: 9999;
+        }
+
+        .toast {
+            background: #1a1d2e;
+            border: 1px solid #2d3047;
+            color: #e0e0e0;
+        }
+
+        .toast.bg-success {
+            background: #1a5a3a !important;
+            border-color: #28a745 !important;
+        }
+
+        .toast.bg-danger {
+            background: #5a1a1a !important;
+            border-color: #dc3545 !important;
+        }
+
+        /* ── Table Container (Glassmorphism) ────────────────────────── */
+        .table-container {
+            background: rgba(12,18,32,0.35);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(0,212,255,0.1);
+            border-radius: 12px;
+            overflow: hidden;
+            padding: 0;
+        }
+
+        .table {
+            background: rgba(12,18,32,0.35) !important;
+            backdrop-filter: blur(10px) !important;
+        }
+
+        .table thead th {
+            background: rgba(12,18,32,0.6) !important;
+            border-bottom: 1px solid rgba(0,212,255,0.2) !important;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+            text-align: right !important;
+            padding: 0.65rem 0.95rem !important;
+            color: #00d4ff !important;
+            font-size: 0.98rem !important;
+        }
+
+        .table tbody td {
+            text-align: right !important;
+            padding: 0.65rem 0.95rem !important;
+            border-bottom: 1px solid rgba(26,45,71,0.5) !important;
+            max-height: 54px;
+            overflow: hidden;
+            white-space: normal;
+            word-break: break-word;
+        }
+
+        .table tbody tr:hover td {
+            background: rgba(0,212,255,0.04) !important;
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 8px 14px;
+            border-radius: 8px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            backdrop-filter: blur(4px);
+            border: 1px solid;
+        }
+
+        /* ── WEEKLY UPDATE COLUMN & HI-TECH BORDERS ── */
+        .weekly-update-cell {
+            max-width: 420px;
+            white-space: normal;
+            word-break: break-word;
+            max-height: 54px;
+            overflow: hidden;
+            line-height: 1.5;
+            position: relative;
+            padding: 0.75rem !important;
+        }
+
+        .weekly-update-cell::after {
+            content: '...';
+            position: absolute;
+            bottom: 0;
+            right: 0;
+            background: linear-gradient(90deg, transparent 0%, #0f1117 60%);
+            padding-left: 20px;
+        }
+
+        /* ── Project ID column narrower ── */
+        .table tbody td:nth-child(1),
+        .table thead th:nth-child(1) {
+            max-width: 80px;
+            width: 80px;
+        }
+
+        /* ── Project Type column wider ── */
+        .table tbody td:nth-child(3),
+        .table thead th:nth-child(3) {
+            min-width: 140px;
+        }
+
+        /* ── Last updated column with special border ── */
+        .table tbody td:nth-child(11),
+        .table thead th:nth-child(11) {
+            border-left: 2px solid rgba(0,212,255,0.4) !important;
+        }
+
+        .table tbody tr:hover td:nth-child(11) {
+            border-left-color: rgba(0,212,255,0.7) !important;
+        }
+
+        /* ── HI-TECH CELL BORDERS ── */
+        .table tbody td,
+        .table thead th {
+            border-right: 1px solid rgba(0,212,255,0.2) !important;
+            border-bottom: 1px solid rgba(0,212,255,0.15) !important;
+            position: relative;
+        }
+
+        .table thead th {
+            border-right-color: rgba(139,156,244,0.3) !important;
+            border-bottom-color: rgba(139,156,244,0.3) !important;
+        }
+
+        .table tbody td:last-child,
+        .table thead th:last-child {
+            border-right: none !important;
+        }
+
+        .table tbody tr:last-child td {
+            border-bottom: none !important;
+        }
+
+        /* Glow effect on hover */
+        .table tbody tr.clickable-row:hover td {
+            border-right-color: rgba(0,212,255,0.5) !important;
+            border-bottom-color: rgba(0,212,255,0.3) !important;
+        }
+
+        @media (max-width: 768px) {
+            .project-detail-row {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+
+<!-- ── Navbar ── -->
+<nav class="navbar navbar-dark d-flex align-items-center justify-content-between position-relative">
+    <a href="/dashboard/" class="navbar-brand text-decoration-none"><div class="brand-pulse"></div>SHAN-AI / DSS</a>
+    <div class="d-flex align-items-center gap-1 flex-wrap">
+        <a href="/dashboard/" class="nav-link">📊 דשבורד</a>
+        <a href="/dashboard/decisions" class="nav-link">📋 החלטות</a>
+        <a href="/dashboard/users"    class="nav-link">👥 משתמשים</a>
+        <a href="/dashboard/files"    class="nav-link">📁 קבצים</a>
+        <a href="/dashboard/ask"      class="nav-link">💬 שאל</a>
+        <a href="/dashboard/learning" class="nav-link">🎓 למידה</a>
+        <a href="/dashboard/logs"     class="nav-link">📊 לוגים</a>
+        <a href="/dashboard/projects" class="nav-link nav-active">📂 פרויקטים</a>
+    </div>
+    <div class="d-flex align-items-center gap-2">
+        <div class="user-chip"><div class="user-online"></div>{{ current_user.username }}</div>
+        <a href="/logout" class="logout-btn">🚪 יציאה</a>
+    </div>
+</nav>
+
+<!-- ── Toast container ── -->
+<div class="toast-container">
+    <div id="syncToast" class="toast align-items-center text-white border-0" role="alert" aria-live="assertive" aria-atomic="true" style="display:none;">
+        <div class="d-flex">
+            <div class="toast-body" id="syncToastBody">הקובץ מעובד...</div>
+            <button type="button" class="btn-close me-2 m-auto" data-bs-dismiss="toast"></button>
+        </div>
+    </div>
+</div>
+
+<!-- ── Upload Modal ── -->
+<div class="modal fade" id="uploadModal" tabindex="-1" aria-labelledby="uploadModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="uploadModalLabel">📂 סנכרון קובץ מאסטר פרויקטים</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close">×</button>
+            </div>
+            <div class="modal-body">
+                <p class="text-muted small">העלה קובץ XLSX או CSV עם נתוני הפרויקטים. המערכת תסנכרן אוטומטית.</p>
+                <label class="form-label" for="projectFile">בחר קובץ</label>
+                <input class="form-control" type="file" id="projectFile" accept=".xlsx,.csv">
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">ביטול</button>
+                <button type="button" class="btn btn-primary" id="uploadBtn">
+                    העלה וסנכרן
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ── PROJECT DETAILS MODAL ── -->
+<div class="modal fade" id="projectModal" tabindex="-1" aria-labelledby="projectModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="projectModalLabel">📂 פרטי פרויקט</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close">×</button>
+            </div>
+            <div class="modal-body" id="projectModalBody">
+                <!-- Details will be inserted here -->
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">סגור</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ── Page body ── -->
+<div class="container-fluid py-4 px-4">
+
+    <div class="d-flex justify-content-between align-items-center mb-4" style="flex-wrap: wrap; gap: 1rem;">
+        <h4 class="section-title mb-0">📂 ניהול פרויקטים</h4>
+        <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#uploadModal">
+            ⬆ סנכרן קובץ ראשי
+        </button>
+    </div>
+
+    <!-- ── ENHANCED FILTER ROW ── -->
+    <div class="card p-4 mb-4" style="background: rgba(12,18,32,0.5); border: 1px solid rgba(139,156,244,0.2);">
+        <div class="row g-3">
+            <div class="col-md-6 col-lg-3">
+                <label class="filter-label">לטיפול</label>
+                <select id="filterStatus" class="col-filter">
+                    <option value="">הכל</option>
+                </select>
+            </div>
+            <div class="col-md-6 col-lg-3">
+                <label class="filter-label">סוג פרויקט</label>
+                <select id="filterType" class="col-filter">
+                    <option value="">הכל</option>
+                </select>
+            </div>
+            <div class="col-md-6 col-lg-3">
+                <label class="filter-label">שלב</label>
+                <select id="filterStage" class="col-filter">
+                    <option value="">הכל</option>
+                </select>
+            </div>
+            <div class="col-md-6 col-lg-3">
+                <label class="filter-label">מנהל פרויקט</label>
+                <select id="filterManager" class="col-filter">
+                    <option value="">הכל</option>
+                </select>
+            </div>
+        </div>
+    </div>
+
+    <!-- ── Projects table ── -->
+    <div class="card p-3">
+        <div class="table-responsive">
+            <table id="projectsTable" class="table table-hover w-100">
+                <thead>
+                    <tr>
+                        <th>זיהוי</th>
+                        <th>שם פרויקט</th>
+                        <th>סוג</th>
+                        <th>שלב</th>
+                        <th>מנהל</th>
+                        <th>עדכון שבועי</th>
+                        <th>סיכונים</th>
+                        <th>לטיפול</th>
+                        <th>תאריך תכנית</th>
+                        <th>תאריך סיום</th>
+                        <th>עודכן</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for p in projects %}
+                    <tr class="clickable-row" data-project='{{ p | tojson }}'>
+                        <td><strong>{{ p.project_identifier }}</strong></td>
+                        <td>{{ p.name }}</td>
+                        <td>{{ p.project_type }}</td>
+                        <td>{{ p.stage }}</td>
+                        <td>{{ p.manager }}</td>
+                        <td class="weekly-update-cell" title="{{ p.weekly_report }}">
+                            {% if p.weekly_report_brief %}
+                                {{ p.weekly_report_brief }}{% if p.weekly_report_brief|length > 90 %}...{% endif %}
+                            {% elif p.weekly_report %}
+                                {{ p.weekly_report[:50] }}...
+                            {% else %}
+                                —
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if p.risks %}
+                                <span class="badge bg-danger">⚠</span>
+                                <span class="small ms-1 text-danger">{{ p.risks[:60] }}{% if p.risks|length > 60 %}...{% endif %}</span>
+                            {% endif %}
+                        </td>
+                        <td>{{ p.to_handle }}</td>
+                        <td>{{ p.dev_plan_date }}</td>
+                        <td>{{ p.estimated_finish_date }}</td>
+                        <td><span class="small text-muted">{{ p.last_updated }}</span></td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% if not projects %}
+            <div class="text-center text-muted py-4">
+                <p>אין פרויקטים להצגה. העלה קובץ מאסטר כדי להתחיל.</p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<!-- ── JS: jQuery → DataTables → Bootstrap 5 ── -->
+<!-- Load order matters: jQuery first, then DataTables, then Bootstrap -->
+<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+<script src="https://cdn.datatables.net/1.13.8/js/jquery.dataTables.min.js"></script>
+<script src="https://cdn.datatables.net/1.13.8/js/dataTables.bootstrap5.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+
+<script>
+$(document).ready(function () {
+
+    // ── 1. Initialize DataTable ──────────────────────────────────────────
+    const table = $('#projectsTable').DataTable({
+        pageLength: 25,
+        language: {
+            search:         "חיפוש:",
+            lengthMenu:     "הצג _MENU_ שורות",
+            info:           "מציג _START_ עד _END_ מתוך _TOTAL_ פרויקטים",
+            infoEmpty:      "אין נתונים להצגה",
+            infoFiltered:   "(מסונן מתוך _MAX_ סה״כ)",
+            paginate: {
+                first:    "ראשון",
+                last:     "אחרון",
+                next:     "הבא ›",
+                previous: "‹ הקודם",
+            },
+            zeroRecords:    "לא נמצאו פרויקטים התואמים את החיפוש",
+        },
+        order: [[1, 'asc']],
+        columnDefs: [
+            { targets: 5, orderable: false },  // weekly_report
+            { targets: 6, orderable: false },  // risks
+        ],
+    });
+
+    // ── 2. Populate filter dropdowns from actual data ──────────────────
+    function populateDropdown(selectId, colIdx) {
+        const seen = new Set();
+        table.column(colIdx).data().each(function (val) {
+            const v = (val || '').trim();
+            if (v && !seen.has(v)) {
+                seen.add(v);
+                $('#' + selectId).append(
+                    $('<option>').val(v).text(v)
+                );
+            }
+        });
+        const opts = $('#' + selectId + ' option:not(:first)').sort(function (a, b) {
+            return $(a).text().localeCompare($(b).text(), 'he');
+        });
+        $('#' + selectId).append(opts);
+    }
+
+    // Use new filter IDs matching the reordered layout
+    populateDropdown('filterStatus',  7);   // to_handle column
+    populateDropdown('filterType',    2);   // project_type column
+    populateDropdown('filterStage',   3);   // stage column
+    populateDropdown('filterManager', 4);   // manager column
+
+    // ── 3. Wire filter dropdowns to DataTables column search ─────────
+    $('#filterStatus').on('change', function () {
+        const val = $.fn.dataTable.util.escapeRegex($(this).val());
+        table.column(7).search(val ? '^' + val + '$' : '', true, false).draw();
+    });
+    $('#filterType').on('change', function () {
+        const val = $.fn.dataTable.util.escapeRegex($(this).val());
+        table.column(2).search(val ? '^' + val + '$' : '', true, false).draw();
+    });
+    $('#filterStage').on('change', function () {
+        const val = $.fn.dataTable.util.escapeRegex($(this).val());
+        table.column(3).search(val ? '^' + val + '$' : '', true, false).draw();
+    });
+    $('#filterManager').on('change', function () {
+        const val = $.fn.dataTable.util.escapeRegex($(this).val());
+        table.column(4).search(val ? '^' + val + '$' : '', true, false).draw();
+    });
+
+    // ── 4. CLICKABLE ROW — OPEN MODAL WITH PROJECT DETAILS ─────────────
+    $('#projectsTable tbody').on('click', 'tr.clickable-row', function () {
+        try {
+            const projectJson = $(this).attr('data-project');
+            const project = JSON.parse(projectJson);
+
+            // Build HTML for modal body with all fields
+            const modalBody = `
+                <div class="project-detail-row">
+                    <div class="project-detail-field">
+                        <span class="project-detail-label">זיהוי פרויקט</span>
+                        <span class="project-detail-value">${escapeHtml(project.project_identifier || '—')}</span>
+                    </div>
+                    <div class="project-detail-field">
+                        <span class="project-detail-label">שם פרויקט</span>
+                        <span class="project-detail-value">${escapeHtml(project.name || '—')}</span>
+                    </div>
+                </div>
+
+                <div class="project-detail-row">
+                    <div class="project-detail-field">
+                        <span class="project-detail-label">מנהל פרויקט</span>
+                        <span class="project-detail-value">${escapeHtml(project.manager || '—')}</span>
+                    </div>
+                    <div class="project-detail-field">
+                        <span class="project-detail-label">סוג פרויקט</span>
+                        <span class="project-detail-value">${escapeHtml(project.project_type || '—')}</span>
+                    </div>
+                </div>
+
+                <div class="project-detail-row">
+                    <div class="project-detail-field">
+                        <span class="project-detail-label">שלב</span>
+                        <span class="project-detail-value">${escapeHtml(project.stage || '—')}</span>
+                    </div>
+                    <div class="project-detail-field">
+                        <span class="project-detail-label">לטיפול</span>
+                        <span class="project-detail-value">${escapeHtml(project.to_handle || '—')}</span>
+                    </div>
+                </div>
+
+                <div class="project-detail-row">
+                    <div class="project-detail-field">
+                        <span class="project-detail-label">תאריך תכנית</span>
+                        <span class="project-detail-value">${escapeHtml(project.dev_plan_date || '—')}</span>
+                    </div>
+                    <div class="project-detail-field">
+                        <span class="project-detail-label">תאריך סיום משוער</span>
+                        <span class="project-detail-value">${escapeHtml(project.estimated_finish_date || '—')}</span>
+                    </div>
+                </div>
+
+                <div class="project-detail-row">
+                    <div class="project-detail-field full-width">
+                        <span class="project-detail-label">עדכון שבועי מלא</span>
+                        <span class="project-detail-value" style="max-height: none; white-space: pre-wrap; min-height: 120px;">
+                            ${escapeHtml(project.weekly_report || '—')}
+                        </span>
+                    </div>
+                </div>
+
+                <div class="project-detail-row">
+                    <div class="project-detail-field full-width">
+                        <span class="project-detail-label">סיכונים</span>
+                        <span class="project-detail-value">${project.risks ? `<span class="badge bg-danger mb-2">⚠ סיכון</span><div>${escapeHtml(project.risks)}</div>` : '—'}</span>
+                    </div>
+                </div>
+
+                <div class="project-detail-row">
+                    <div class="project-detail-field full-width">
+                        <span class="project-detail-label">עודכן</span>
+                        <span class="project-detail-value">${escapeHtml(project.last_updated || '—')}</span>
+                    </div>
+                </div>
+            `;
+
+            // Update modal header with project name
+            $('#projectModalLabel').html(`📂 פרויקט: <strong>${escapeHtml(project.name)}</strong>`);
+
+            // Insert body content
+            $('#projectModalBody').html(modalBody);
+
+            // Show modal
+            new bootstrap.Modal(document.getElementById('projectModal')).show();
+        } catch (err) {
+            console.error('Error parsing project data:', err);
+            alert('שגיאה בטעינת פרטי הפרויקט');
+        }
+    });
+
+    // ── HELPER: Escape HTML to prevent XSS ─────────────────────────────
+    function escapeHtml(text) {
+        const map = {
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#039;'
+        };
+        return (text || '').replace(/[&<>"']/g, m => map[m]);
+    }
+
+    // ── 5. Upload modal: fetch POST ────────────────────────────────────
+    $('#uploadBtn').on('click', async function () {
+        const fileInput = document.getElementById('projectFile');
+        if (!fileInput.files.length) {
+            alert('יש לבחור קובץ');
+            return;
+        }
+
+        const btn = $(this);
+        const originalText = btn.text();
+        btn.prop('disabled', true).text('מעלה...');
+
+        const formData = new FormData();
+        formData.append('file', fileInput.files[0]);
+
+        try {
+            const resp = await fetch('/dashboard/projects/upload', {
+                method: 'POST',
+                body: formData,
+            });
+            const data = await resp.json();
+
+            const toastEl = document.getElementById('syncToast');
+            const toastBody = document.getElementById('syncToastBody');
+
+            // Close modal
+            const modal = bootstrap.Modal.getInstance(document.getElementById('uploadModal'));
+            if (modal) modal.hide();
+
+            if (resp.ok) {
+                toastEl.classList.remove('bg-danger');
+                toastEl.classList.add('bg-success');
+                toastBody.textContent = data.message || 'הקובץ הועלה בהצלחה. מרענן...';
+                toastEl.style.display = 'flex';
+                new bootstrap.Toast(toastEl, { delay: 4000 }).show();
+                setTimeout(() => location.reload(), 3000);
+            } else {
+                toastEl.classList.remove('bg-success');
+                toastEl.classList.add('bg-danger');
+                toastBody.textContent = data.detail || 'שגיאה בהעלאת הקובץ';
+                toastEl.style.display = 'flex';
+                new bootstrap.Toast(toastEl, { delay: 5000 }).show();
+            }
+        } catch (err) {
+            console.error(err);
+            alert('שגיאת רשת — נסה שוב');
+        } finally {
+            btn.prop('disabled', false).text(originalText);
+            fileInput.value = '';
+        }
+    });
+});
+</script>
+</body>
+</html>

@@ -1,9 +1,8 @@
 """Telegram bot polling handler - runs as background task."""
 
-import asyncio
 import html as _html
 import logging
-from telegram import Update
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 
 from app.config import settings
@@ -16,10 +15,6 @@ from sqlalchemy import select
 
 logger = logging.getLogger(__name__)
 
-# Global polling control
-_polling_should_run = False
-_polling_event = asyncio.Event()  # Signals when polling can proceed
-
 # In-memory state: tracks superiors waiting to provide rejection notes
 # { telegram_id (int): decision_id (int) }
 _awaiting_rejection_note: dict[int, int] = {}
@@ -29,6 +24,9 @@ _awaiting_dist_rejection: dict[int, int] = {}
 
 # { telegram_id (int): original_text (str) }  — waiting for clarification on an UNCLEAR message
 _awaiting_clarification: dict[int, str] = {}
+
+# { telegram_id (int): file_id (int) }  — waiting for master-file confirmation after upload
+_awaiting_master_confirm: dict[int, int] = {}
 
 # Hebrew question prefixes — messages starting with these are treated as data queries, never decisions
 _QUESTION_PREFIXES = (
@@ -48,12 +46,108 @@ def _is_data_question(text: str) -> bool:
     )
 
 
+_PROJECT_QUERY_KEYWORDS = (
+    "פרויקט", "פרוייקט", "project", "עדכון שבועי", "מנהל פרויקט",
+    'מנה"פ', "שלב", "סיכון", "חסם", "לטיפול",
+)
+
+# Count-style questions about projects that must go to project_tools, not knowledge_service
+_PROJECT_COUNT_TRIGGERS = (
+    "כמה פרויקט", "כמה פרוייקט", "how many project",
+    "מנהל", "מנהלת", "מנהלים", 'מנה"פ', "מי מנהל", "מי אחראי",
+)
+
+
+_DECISION_VERBS = (
+    "לאשר", "לבצע", "להחליף", "לשנות", "להוסיף", "להסיר", "לבטל",
+    "לעדכן", "לדחות", "לקדם", "להפעיל", "לסגור", "להשהות",
+    "approve", "execute", "cancel", "update", "replace",
+)
+_BARE_NAME_SKIP = frozenset({
+    "כן", "לא", "אישור", "ביטול", "תודה", "טוב", "בסדר", "ok", "yes", "no",
+    "שלום", "היי", "הי",
+})
+
+
+def _is_project_query(text: str) -> bool:
+    """Return True if this looks like a project-related query."""
+    t = text.lower().strip()
+    if any(kw.lower() in t for kw in _PROJECT_QUERY_KEYWORDS):
+        return True
+    # Count + manager questions: "כמה פרויקטים מנהלת רחלי?"
+    if any(kw in t for kw in _PROJECT_COUNT_TRIGGERS):
+        return True
+    # Bare project name: short (1-5 words), no question/decision markers, mostly Hebrew
+    words = t.split()
+    if 1 <= len(words) <= 5:
+        if t in _BARE_NAME_SKIP:
+            return False
+        if t.endswith("?"):
+            return False  # questions are handled by _is_data_question
+        if any(verb in t for verb in _DECISION_VERBS):
+            return False
+        hebrew_chars = sum(1 for c in t if "\u05d0" <= c <= "\u05ea")
+        if hebrew_chars >= 2:  # at least 2 Hebrew characters → treat as potential name
+            return True
+    return False
+
+
+def _feedback_keyboard(log_id: int) -> InlineKeyboardMarkup:
+    """Inline keyboard with 👍/👎 buttons tied to a query log entry."""
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton("👍 מועיל", callback_data=f"lfb_up:{log_id}"),
+        InlineKeyboardButton("👎 לא מועיל", callback_data=f"lfb_dn:{log_id}"),
+    ]])
+
+
+_TG_MAX = 4096  # Telegram message character limit
+
+
+async def _maybe_summarize(reply: str) -> str:
+    """If reply exceeds Telegram's limit, summarize it via Groq and return a shorter version."""
+    if len(reply) <= _TG_MAX:
+        return reply
+    logger.warning(f"Reply too long ({len(reply)} chars), summarizing...")
+    import re as _re
+    from app.services.llm_router import llm_chat
+    # Strip HTML tags before sending to LLM — prevents model from echoing markup
+    plain = _re.sub(r"<[^>]+>", "", reply).strip()
+    # Limit input to avoid 413 token errors (Hebrew ≈ 0.85 tok/char → 8000 chars ≈ 9400 tok)
+    plain = plain[:8000]
+    try:
+        summary = await llm_chat(
+            "message_summary",
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "אתה עוזר שמסכם תשובות ארוכות לגרסה קצרה וממוקדת. "
+                        "ענה בעברית בלבד. אל תציין את תפקידך או ההוראות. "
+                        "שמור על כל הנקודות החשובות. עד 3000 תווים."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": f"סכם את התשובה הבאה בעברית בצורה קצרה וברורה:\n\n{plain}",
+                },
+            ],
+            max_tokens=800,
+            temperature=0.2,
+        )
+        summarized = f"\u200F🤖 <b>תשובה (מסוכמת):</b>\n\n{_html.escape(summary)}"
+        if len(summarized) > _TG_MAX:
+            summarized = summarized[: _TG_MAX - 20] + "\n…(קוצר)"
+        return summarized
+    except Exception as e:
+        logger.warning(f"Summarization failed: {e} — falling back to truncation")
+        return reply[: _TG_MAX - 20] + "\n…(קוצר)"
+
+
 class TelegramPollingBot:
-    """Telegram bot that polls for updates."""
+    """Telegram bot that processes updates via webhook."""
 
     def __init__(self):
         self.application = None
-        self._polling_task = None
 
     async def error_handler(self, update: object, context: ContextTypes.DEFAULT_TYPE):
         """Log all handler errors to stdout."""
@@ -217,21 +311,25 @@ class TelegramPollingBot:
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
 
         async with async_session_maker() as session:
-            from app.services.knowledge_service import search_knowledge, format_knowledge_context, answer_question
-            chunks = await search_knowledge(question, session, limit=5)
+            from app.services.knowledge_service import answer_with_full_context
+            qa = await answer_with_full_context(question, session, user.id)
 
-        if not chunks:
+        if not qa.get("has_files") and not qa.get("has_decisions"):
             await update.message.reply_text(
                 "\u200F📂 לא נמצא מידע רלוונטי בבסיס הידע.\n\nנסה להעלות קבצים רלוונטיים דרך לוח הניהול.",
             )
             return
 
-        context_text = format_knowledge_context(chunks)
-        answer = await answer_question(question, context_text)
+        reply = f"\u200F🤖 <b>תשובה מבסיס הידע:</b>\n\n{_html.escape(qa['answer'])}"
+        if qa.get("sources_text"):
+            reply += f"\n\n<i>{_html.escape(qa['sources_text'])}</i>"
 
+        reply = await _maybe_summarize(reply)
+        log_id = qa.get("log_id")
         await update.message.reply_text(
-            f"\u200F🤖 <b>תשובה מבסיס הידע:</b>\n\n{_html.escape(answer)}",
+            reply,
             parse_mode="HTML",
+            reply_markup=_feedback_keyboard(log_id) if log_id else None,
         )
 
     # ------------------------------------------------------------------
@@ -260,11 +358,6 @@ class TelegramPollingBot:
             )
             return
 
-        await update.message.reply_text(
-            f"\u200F📁 הקובץ <b>{_html.escape(filename)}</b> התקבל ומעובד...\nתקבל אישור בסיום.",
-            parse_mode="HTML",
-        )
-
         try:
             from pathlib import Path
             import uuid as _uuid
@@ -292,9 +385,29 @@ class TelegramPollingBot:
                 await session.refresh(kf)
                 file_id = kf.id
 
-            context.application.create_task(_process_and_notify(
-                file_id, telegram_id, filename, context.bot
-            ))
+            # For XLSX files — ask if this is the master project file before processing
+            if ext == "xlsx":
+                _awaiting_master_confirm[telegram_id] = file_id
+                keyboard = InlineKeyboardMarkup([[
+                    InlineKeyboardButton("⭐ כן, קובץ מאסטר", callback_data=f"master_yes:{file_id}"),
+                    InlineKeyboardButton("📄 לא, קובץ רגיל", callback_data=f"master_no:{file_id}"),
+                ]])
+                await update.message.reply_text(
+                    f"\u200F📁 הקובץ <b>{_html.escape(filename)}</b> התקבל.\n\n"
+                    f"⭐ <b>האם זהו קובץ המאסטר של הפרויקטים?</b>\n"
+                    f"<i>(קובץ מאסטר עובר עיבוד מיוחד לחילוץ נתוני פרויקטים)</i>",
+                    parse_mode="HTML",
+                    reply_markup=keyboard,
+                )
+            else:
+                # PDF / DOCX — process immediately without asking
+                await update.message.reply_text(
+                    f"\u200F📁 הקובץ <b>{_html.escape(filename)}</b> התקבל ומעובד...\nתקבל אישור בסיום.",
+                    parse_mode="HTML",
+                )
+                context.application.create_task(_process_and_notify(
+                    file_id, telegram_id, filename, context.bot
+                ))
 
         except Exception as e:
             logger.error(f"Document upload error: {e}", exc_info=True)
@@ -393,18 +506,35 @@ class TelegramPollingBot:
                 chat_id=update.effective_chat.id, action="typing"
             )
 
+            # --- Project-aware query: check before generic data question handler ---
+            if _is_project_query(text):
+                try:
+                    from app.services.project_tools import answer_project_query
+                    reply_text = await answer_project_query(text, session, context.user_data, user_id=user.id)
+                    reply = f"\u200F📂 <b>נתוני פרויקט:</b>\n\n{_html.escape(reply_text)}"
+                except Exception as e:
+                    logger.warning(f"project_tools failed: {e}")
+                    reply = "\u200Fלא הצלחתי למצוא נתוני פרויקט. ודא שהקובץ הראשי הועלה."
+                reply = await _maybe_summarize(reply)
+                await update.message.reply_text(reply, parse_mode="HTML")
+                return
+
             # --- Keyword pre-filter: data questions bypass LLM classification ---
             if _is_data_question(text):
                 from app.services.knowledge_service import answer_with_full_context
+                kb = None
                 try:
                     qa_result = await answer_with_full_context(text, session, user.id)
                     reply = f"\u200F🤖 <b>תשובה:</b>\n\n{_html.escape(qa_result['answer'])}"
                     if qa_result.get("sources_text"):
                         reply += f"\n\n<i>{_html.escape(qa_result['sources_text'])}</i>"
+                    if qa_result.get("log_id"):
+                        kb = _feedback_keyboard(qa_result["log_id"])
                 except Exception as e:
                     logger.warning(f"answer_with_full_context failed: {e}")
                     reply = "\u200Fלא הצלחתי למצוא תשובה. נסה לנסח אחרת."
-                await update.message.reply_text(reply, parse_mode="HTML")
+                reply = await _maybe_summarize(reply)
+                await update.message.reply_text(reply, parse_mode="HTML", reply_markup=kb)
                 return
 
             # --- Check if this is a clarification response ---
@@ -414,14 +544,18 @@ class TelegramPollingBot:
                 # If original was a question, answer it; otherwise process as decision
                 if _is_data_question(original_text):
                     from app.services.knowledge_service import answer_with_full_context
+                    kb = None
                     try:
                         qa = await answer_with_full_context(combined_text, session, user.id)
                         reply = f"\u200F🤖 <b>תשובה:</b>\n\n{_html.escape(qa['answer'])}"
                         if qa.get("sources_text"):
                             reply += f"\n\n<i>{_html.escape(qa['sources_text'])}</i>"
+                        if qa.get("log_id"):
+                            kb = _feedback_keyboard(qa["log_id"])
                     except Exception:
                         reply = "\u200Fלא הצלחתי למצוא תשובה. נסה לנסח אחרת."
-                    await update.message.reply_text(reply, parse_mode="HTML")
+                    reply = await _maybe_summarize(reply)
+                    await update.message.reply_text(reply, parse_mode="HTML", reply_markup=kb)
                 else:
                     decision_svc = DecisionService(session, self.application)
                     reply = await decision_svc.process(user, combined_text)
@@ -444,17 +578,21 @@ class TelegramPollingBot:
 
             if verdict == "NOT_DECISION":
                 # Answer from knowledge base + decisions data
+                kb = None
                 try:
                     from app.services.knowledge_service import answer_with_full_context
                     qa_result = await answer_with_full_context(text, session, user.id)
                     reply = f"\u200F🤖 <b>תשובה:</b>\n\n{_html.escape(qa_result['answer'])}"
                     if qa_result.get("sources_text"):
                         reply += f"\n\n<i>{_html.escape(qa_result['sources_text'])}</i>"
+                    if qa_result.get("log_id"):
+                        kb = _feedback_keyboard(qa_result["log_id"])
                 except Exception as e:
                     logger.warning(f"answer_with_full_context failed: {e}")
                     ai_reply = classify_result.get("reply", "")
                     reply = f"\u200F{_html.escape(ai_reply)}" if ai_reply else "\u200Fשאל שאלות עבודה או שלח החלטה לניתוח."
-                await update.message.reply_text(reply, parse_mode="HTML")
+                reply = await _maybe_summarize(reply)
+                await update.message.reply_text(reply, parse_mode="HTML", reply_markup=kb)
                 return
 
             if verdict == "UNCLEAR":
@@ -499,6 +637,64 @@ class TelegramPollingBot:
                 await query.edit_message_text("❌ You are not registered in the system.")
                 return
 
+            # --- Master file confirmation ---
+            if action in ("master_yes", "master_no"):
+                file_id = decision_id  # reusing variable — it's the knowledge file id
+                _awaiting_master_confirm.pop(telegram_id, None)
+                from app.models import KnowledgeFile as _KF
+                from sqlalchemy import update as _sa_update
+
+                if action == "master_yes":
+                    async with async_session_maker() as db:
+                        # Unset any existing master
+                        await db.execute(_sa_update(_KF).values(is_master=False))
+                        kf = await db.get(_KF, file_id)
+                        if kf:
+                            kf.is_master = True
+                            await db.commit()
+                            filename = kf.original_name
+                        else:
+                            filename = "קובץ"
+                    await query.edit_message_text(
+                        f"\u200F⭐ <b>קובץ מאסטר!</b>\n"
+                        f"מעבד את <b>{_html.escape(filename)}</b> בעיבוד מיוחד...\n"
+                        f"תקבל אישור בסיום.",
+                        parse_mode="HTML",
+                    )
+                    context.application.create_task(
+                        _process_master_and_notify(file_id, telegram_id, filename, context.bot)
+                    )
+                else:  # master_no
+                    async with async_session_maker() as db:
+                        kf = await db.get(_KF, file_id)
+                        filename = kf.original_name if kf else "קובץ"
+                    await query.edit_message_text(
+                        f"\u200F📄 מעבד את <b>{_html.escape(filename)}</b>...\nתקבל אישור בסיום.",
+                        parse_mode="HTML",
+                    )
+                    context.application.create_task(
+                        _process_and_notify(file_id, telegram_id, filename, context.bot)
+                    )
+                return
+
+            # --- Query log feedback (👍/👎 on RAG answers) ---
+            if action in ("lfb_up", "lfb_dn"):
+                from app.models import QueryLog as _QL
+                log = await session.get(_QL, decision_id)
+                if log:
+                    log.user_feedback = 1 if action == "lfb_up" else -1
+                    await session.commit()
+                emoji = "👍" if action == "lfb_up" else "👎"
+                try:
+                    await query.edit_message_reply_markup(reply_markup=None)
+                except Exception:
+                    pass
+                await context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text=f"\u200F{emoji} תודה! הפידבק נשמר.",
+                )
+                return
+
             # --- Distribution responses ---
             if action in ("dist_ack", "dist_done", "dist_approve", "dist_reject"):
                 from app.services.distribution_service import handle_dist_response
@@ -536,64 +732,76 @@ class TelegramPollingBot:
                 )
 
     # ------------------------------------------------------------------
-    # Polling lifecycle
+    # Webhook lifecycle
     # ------------------------------------------------------------------
 
-    async def start_polling(self):
-        """Start polling for updates (ensures only one instance)."""
-        global _polling_should_run, _polling_event
-
-        logger.info("Starting Telegram bot polling...")
-        _polling_should_run = True
-        _polling_event.clear()
-
-        # Close any old app context
-        if self.application:
-            try:
-                await self.application.stop()
-                await asyncio.sleep(0.5)  # Brief delay to release Telegram connection
-            except Exception as e:
-                logger.warning(f"Error stopping old application: {e}")
-            self.application = None
-
-        # Reinitialize fresh
-        await self.initialize()
-
+    async def start(self):
+        """Initialize and start the bot application for webhook mode."""
         try:
-            async with self.application:
-                await self.application.start()
-
-                await self.application.updater.start_polling(allowed_updates=Update.ALL_TYPES)
-                logger.info("Bot polling started successfully")
-                _polling_event.set()
-
-                # Wait until we're told to stop
-                while _polling_should_run:
-                    try:
-                        await asyncio.sleep(1)
-                    except asyncio.CancelledError:
-                        logger.info("Polling cancelled")
-                        _polling_should_run = False
-                        raise
-
-                logger.info("Stopping polling...")
-                await self.application.updater.stop()
-                await self.application.stop()
-
-        except asyncio.CancelledError:
-            logger.info("Polling task cancelled")
-            _polling_should_run = False
-            raise
+            await self.application.initialize()
+            await self.application.start()
+            logger.info("Telegram bot application started (webhook mode)")
         except Exception as e:
-            logger.error(f"Polling error: {e}", exc_info=True)
-            _polling_should_run = False
+            logger.error(f"Failed to start bot application: {e}")
             raise
 
-    async def stop_polling(self):
-        """Stop polling gracefully."""
-        global _polling_should_run
-        _polling_should_run = False
-        logger.info("Signalled polling to stop")
+    async def stop(self):
+        """Stop the bot application gracefully."""
+        try:
+            await self.application.stop()
+            await self.application.shutdown()
+            logger.info("Telegram bot application stopped")
+        except Exception as e:
+            logger.error(f"Error stopping bot application: {e}")
+
+    async def set_webhook(self):
+        """Register the webhook URL with Telegram."""
+        webhook_url = (
+            settings.TELEGRAM_WEBHOOK_URL
+            or f"{settings.BASE_URL}/telegram/webhook"
+        )
+        try:
+            await self.application.bot.set_webhook(
+                url=webhook_url,
+                secret_token=settings.WEBHOOK_SECRET_TOKEN or None,
+                allowed_updates=["message", "callback_query", "edited_message"],
+            )
+            logger.info(f"Telegram webhook set to: {webhook_url}")
+        except Exception as e:
+            logger.error(f"Failed to set webhook: {e}")
+            raise
+
+    async def delete_webhook(self):
+        """Remove the webhook registration from Telegram."""
+        try:
+            await self.application.bot.delete_webhook()
+            logger.info("Telegram webhook deleted")
+        except Exception as e:
+            logger.error(f"Failed to delete webhook: {e}")
+
+
+async def _process_master_and_notify(file_id: int, telegram_id: int, filename: str, bot) -> None:
+    """Process a master XLSX file with specialized ETL and notify when done."""
+    from app.services.knowledge_service import process_master_file
+    await process_master_file(file_id)
+    from app.database import async_session_maker as _sm
+    from app.models import KnowledgeFile as _KF
+    async with _sm() as session:
+        kf = await session.get(_KF, file_id)
+        if kf and kf.status == "ready":
+            msg = (
+                f"\u200F⭐ <b>קובץ המאסטר עובד בהצלחה!</b>\n"
+                f"📄 {_html.escape(filename)}\n"
+                f"🔢 {kf.chunk_count} בלוקי פרויקט נוצרו\n\n"
+                f"כעת תוכל לשאול: /ask שאלה"
+            )
+        else:
+            summary = kf.summary if kf else ""
+            msg = f"\u200F❌ שגיאה בעיבוד קובץ המאסטר <b>{_html.escape(filename)}</b>.\n{_html.escape(summary or '')}"
+    try:
+        await bot.send_message(chat_id=telegram_id, text=msg, parse_mode="HTML")
+    except Exception as e:
+        logger.warning(f"Failed to notify user {telegram_id}: {e}")
 
 
 async def _process_and_notify(file_id: int, telegram_id: int, filename: str, bot) -> None:

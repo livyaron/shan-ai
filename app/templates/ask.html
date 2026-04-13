@@ -4,155 +4,420 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Shan-AI — שאל את ה-AI</title>
+    <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
-        body { background: #0f1117; color: #e0e0e0; font-family: 'Segoe UI', sans-serif; }
-        .navbar { background: #1a1d2e !important; border-bottom: 1px solid #2d3047; }
-        .nav-link { color: #8b9cf4 !important; }
-        .nav-link.active { color: #fff !important; font-weight: 600; }
+        :root {
+            --bg-deep:    #070b12;
+            --bg-surface: #0c1220;
+            --bg-card:    #0f1826;
+            --border:     #1a2d47;
+            --border-hi:  #1e3a5f;
+            --cyan:       #00d4ff;
+            --cyan-dim:   rgba(0,212,255,0.09);
+            --cyan-glow:  0 0 18px rgba(0,212,255,0.18);
+            --purple:     #8b9cf4;
+            --green:      #10b981;
+            --red:        #ef4444;
+            --text-1:     #e2e8f0;
+            --text-2:     #64748b;
+            --text-3:     #344156;
+            --ui:         'Heebo', sans-serif;
+            --mono:       'IBM Plex Mono', monospace;
+            --r-sm:       4px;
+            --r-md:       8px;
+            --r-lg:       12px;
+        }
 
-        .chat-container {
-            max-width: 780px;
-            margin: 0 auto;
+        *, *::before, *::after { box-sizing: border-box; }
+
+        body {
+            background: var(--bg-deep);
+            color: var(--text-1);
+            font-family: var(--ui);
+            font-size: 16px;
+            line-height: 1.5;
+            height: 100vh;
             display: flex;
             flex-direction: column;
-            height: calc(100vh - 130px);
+            overflow: hidden;
+            background-image:
+                radial-gradient(circle at 15% 85%, rgba(0,212,255,0.03) 0%, transparent 40%),
+                radial-gradient(circle, #1a2d47 1px, transparent 1px);
+            background-size: 100% 100%, 30px 30px;
+            background-attachment: fixed;
         }
+
+        ::-webkit-scrollbar { width: 4px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: var(--border-hi); border-radius: 2px; }
+
+        /* ── Navbar ── */
+        .navbar {
+            background: rgba(7,11,18,0.96) !important;
+            border-bottom: 1px solid var(--border);
+            backdrop-filter: blur(24px);
+            padding: 0 1.5rem;
+            height: 50px;
+            flex-shrink: 0;
+            z-index: 100;
+            box-shadow: 0 4px 24px rgba(0,0,0,0.4);
+        }
+
+        .navbar::after {
+            content: '';
+            position: absolute;
+            bottom: 0; left: 0; right: 0;
+            height: 1px;
+            background: linear-gradient(90deg, transparent 0%, var(--cyan) 30%, var(--purple) 70%, transparent 100%);
+            opacity: 0.2;
+        }
+
+        .navbar-brand {
+            font-family: var(--mono);
+            font-size: 1.02rem;
+            font-weight: 600;
+            color: var(--cyan) !important;
+            letter-spacing: 0.08em;
+            display: flex; align-items: center; gap: 7px;
+            text-decoration: none;
+        }
+
+        .brand-pulse {
+            width: 5px; height: 5px;
+            background: var(--cyan);
+            border-radius: 50%;
+            box-shadow: 0 0 8px var(--cyan);
+            animation: blink 2.4s ease-in-out infinite;
+        }
+
+        .nav-link {
+            font-size: 0.95rem; font-weight: 500;
+            color: var(--text-2) !important;
+            padding: 0.22rem 0.6rem !important;
+            border-radius: var(--r-sm);
+            transition: all 0.14s;
+            white-space: nowrap;
+        }
+
+        .nav-link:hover { color: var(--text-1) !important; background: rgba(255,255,255,0.04); }
+        .nav-link.nav-active { color: var(--cyan) !important; background: var(--cyan-dim); }
+
+        .user-chip {
+            display: flex; align-items: center; gap: 6px;
+            padding: 3px 10px;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            font-size: 0.92rem; color: var(--text-2);
+        }
+
+        .user-online { width: 5px; height: 5px; background: var(--green); border-radius: 50%; box-shadow: 0 0 6px var(--green); }
+
+        .logout-btn {
+            font-family: var(--mono); font-size: 0.88rem;
+            color: var(--text-3) !important; text-decoration: none;
+            padding: 3px 8px; border-radius: var(--r-sm); transition: all 0.14s; letter-spacing: 0.04em;
+        }
+        .logout-btn:hover { color: var(--red) !important; background: rgba(239,68,68,0.1); }
+
+        /* ── Chat layout ── */
+        .chat-wrap {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            max-width: 820px;
+            width: 100%;
+            margin: 0 auto;
+            padding: 0 1.25rem;
+            overflow: hidden;
+        }
+
         .chat-history {
             flex: 1;
             overflow-y: auto;
-            padding: 20px 0;
+            padding: 1.5rem 0 1rem;
             display: flex;
             flex-direction: column;
-            gap: 16px;
+            gap: 14px;
         }
-        .chat-history::-webkit-scrollbar { width: 5px; }
-        .chat-history::-webkit-scrollbar-track { background: #0f1117; }
-        .chat-history::-webkit-scrollbar-thumb { background: #2d3047; border-radius: 3px; }
 
+        /* ── Messages ── */
         .msg-user {
             align-self: flex-start;
-            background: #1e2240;
-            border: 1px solid #2d3047;
-            border-radius: 12px 12px 12px 2px;
-            padding: 12px 16px;
-            max-width: 85%;
-            color: #c8d0f0;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: var(--r-lg) var(--r-lg) var(--r-lg) var(--r-sm);
+            padding: 10px 14px;
+            max-width: 82%;
+            color: var(--text-1);
+            font-size: 0.88rem;
+            line-height: 1.6;
         }
+
         .msg-ai {
             align-self: flex-end;
-            background: linear-gradient(135deg, #12192e, #1a1d2e);
-            border: 1px solid #8b9cf4;
-            border-radius: 12px 12px 2px 12px;
-            padding: 14px 18px;
-            max-width: 85%;
-            line-height: 1.7;
+            background: rgba(0,212,255,0.04);
+            border: 1px solid rgba(0,212,255,0.15);
+            border-left: 2px solid var(--cyan);
+            border-radius: var(--r-lg) var(--r-lg) var(--r-sm) var(--r-lg);
+            padding: 12px 16px;
+            max-width: 88%;
+            line-height: 1.75;
+            font-size: 0.88rem;
+            animation: msgin 0.25s ease-out;
         }
-        .msg-ai .ai-label {
-            color: #8b9cf4;
-            font-size: 0.72rem;
-            font-weight: 600;
-            letter-spacing: .5px;
-            margin-bottom: 8px;
-            display: flex;
-            align-items: center;
-            gap: 6px;
+
+        .ai-label {
+            font-family: var(--mono);
+            font-size: 0.82rem;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+            color: var(--cyan);
+            opacity: 0.7;
+            margin-bottom: 6px;
+            display: flex; align-items: center; gap: 6px;
         }
+
+        .ai-label::before {
+            content: '';
+            width: 4px; height: 4px;
+            background: var(--cyan);
+            border-radius: 50%;
+            box-shadow: 0 0 6px var(--cyan);
+            animation: blink 2s ease-in-out infinite;
+        }
+
         .source-badge {
             display: inline-block;
-            font-size: 0.68rem;
+            font-family: var(--mono);
+            font-size: 0.8rem;
+            letter-spacing: 0.08em;
             padding: 2px 8px;
-            border-radius: 10px;
-            margin-top: 10px;
+            border-radius: 3px;
+            margin-top: 8px;
             margin-left: 4px;
         }
-        .source-files { background: #0d3040; color: #17a2b8; border: 1px solid #17a2b8; }
-        .source-decisions { background: #0d2a0d; color: #28a745; border: 1px solid #28a745; }
+
+        .source-files     { background: rgba(56,189,248,0.1); color: #38bdf8; border: 1px solid rgba(56,189,248,0.25); }
+        .source-decisions { background: rgba(16,185,129,0.1); color: #10b981; border: 1px solid rgba(16,185,129,0.25); }
 
         .msg-loading {
             align-self: flex-end;
-            background: #1a1d2e;
-            border: 1px solid #2d3047;
-            border-radius: 12px;
-            padding: 14px 20px;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: var(--r-lg);
+            padding: 12px 18px;
         }
-        .dot-flashing {
-            display: inline-flex; gap: 5px; align-items: center;
-        }
+
+        .dot-flashing { display: inline-flex; gap: 5px; align-items: center; }
         .dot-flashing span {
-            width: 7px; height: 7px; border-radius: 50%;
-            background: #8b9cf4; animation: blink 1.2s infinite;
+            width: 6px; height: 6px;
+            border-radius: 50%;
+            background: var(--cyan);
+            animation: dotblink 1.2s infinite;
+            opacity: 0.3;
         }
         .dot-flashing span:nth-child(2) { animation-delay: 0.2s; }
         .dot-flashing span:nth-child(3) { animation-delay: 0.4s; }
-        @keyframes blink { 0%,80%,100% { opacity: 0.2; } 40% { opacity: 1; } }
 
-        .input-area {
-            padding: 14px 0 4px;
-            border-top: 1px solid #2d3047;
-        }
-        .question-input {
-            background: #1a1d2e;
-            border: 1px solid #2d3047;
-            color: #e0e0e0;
-            border-radius: 10px;
-            padding: 12px 16px;
-            resize: none;
-            width: 100%;
-            font-size: 0.97rem;
-            line-height: 1.5;
-        }
-        .question-input:focus { outline: none; border-color: #8b9cf4; }
-        .question-input::placeholder { color: #888; }
-        .btn-send {
-            background: #8b9cf4; border: none; color: #0f1117;
-            font-weight: 700; padding: 10px 28px;
-            border-radius: 10px; white-space: nowrap;
-        }
-        .btn-send:hover { background: #7a8de3; color: #0f1117; }
-        .btn-send:disabled { background: #2d3047; color: #555; cursor: not-allowed; }
-
+        /* ── Empty state ── */
         .empty-state {
             flex: 1; display: flex; flex-direction: column;
             align-items: center; justify-content: center;
-            color: #7080a0; text-align: center; gap: 10px;
+            text-align: center; gap: 8px; color: var(--text-2);
         }
-        .empty-state .icon { font-size: 3rem; }
-        .empty-state .hint { font-size: 0.85rem; color: #8b9aaa; margin-top: 6px; }
-        .suggestions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 16px; }
+
+        .empty-icon {
+            width: 48px; height: 48px;
+            border: 1px solid var(--border);
+            border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 1.4rem;
+            margin-bottom: 8px;
+            position: relative;
+        }
+
+        .empty-icon::before {
+            content: '';
+            position: absolute; inset: -6px;
+            border: 1px solid var(--border);
+            border-radius: 50%;
+            opacity: 0.4;
+        }
+
+        .empty-title { font-weight: 600; color: var(--text-2); font-size: 0.9rem; }
+        .empty-hint  { font-size: 0.78rem; color: var(--text-3); }
+
+        .suggestions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 14px; }
+
         .suggestion-chip {
-            background: #1a1d2e; border: 1px solid #2d3047;
-            border-radius: 20px; padding: 6px 14px;
-            font-size: 0.82rem; color: #8b9cf4; cursor: pointer;
-            transition: border-color .2s;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            padding: 5px 14px;
+            font-size: 0.78rem;
+            color: var(--text-2);
+            cursor: pointer;
+            transition: all 0.14s;
         }
-        .suggestion-chip:hover { border-color: #8b9cf4; }
+
+        .suggestion-chip:hover {
+            border-color: var(--cyan);
+            color: var(--cyan);
+            background: var(--cyan-dim);
+        }
+
+        /* ── Feedback ── */
+        .feedback-row { display: flex; gap: 6px; align-items: center; margin-top: 8px; }
+
+        .feedback-btn {
+            background: var(--bg-surface);
+            border: 1px solid var(--border);
+            color: var(--text-2);
+            border-radius: var(--r-sm);
+            padding: 6px 14px;
+            font-size: 1.5rem;
+            cursor: pointer;
+            transition: all 0.14s;
+            font-family: var(--mono);
+            line-height: 1;
+        }
+
+        .feedback-btn:hover { border-color: var(--border-hi); color: var(--text-1); }
+        .feedback-btn.selected-up   { background: rgba(16,185,129,0.1); border-color: #10b981; color: #10b981; }
+        .feedback-btn.selected-down { background: rgba(239,68,68,0.1);  border-color: #ef4444; color: #ef4444; }
+        .feedback-btn:disabled { cursor: default; opacity: 0.6; }
+        .feedback-done { color: var(--green); font-size: 0.7rem; font-family: var(--mono); display: none; }
+
+        /* ── Input area ── */
+        .input-area {
+            padding: 0.875rem 0 0.75rem;
+            border-top: 1px solid var(--border);
+            flex-shrink: 0;
+        }
+
+        .question-input {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            color: var(--text-1);
+            border-radius: var(--r-md);
+            padding: 10px 14px;
+            resize: none;
+            width: 100%;
+            font-size: 0.9rem;
+            line-height: 1.5;
+            font-family: var(--ui);
+            transition: border-color 0.14s, box-shadow 0.14s;
+        }
+
+        .question-input:focus {
+            outline: none;
+            border-color: rgba(0,212,255,0.35);
+            box-shadow: 0 0 0 2px rgba(0,212,255,0.08);
+        }
+
+        .question-input::placeholder { color: var(--text-3); }
+
+        .btn-send {
+            background: transparent;
+            border: 1px solid var(--cyan);
+            color: var(--cyan);
+            font-family: var(--mono);
+            font-size: 0.95rem;
+            font-weight: 500;
+            letter-spacing: 0.06em;
+            padding: 8px 20px;
+            border-radius: var(--r-sm);
+            white-space: nowrap;
+            cursor: pointer;
+            transition: all 0.14s;
+        }
+
+        .btn-send:hover { background: var(--cyan-dim); box-shadow: var(--cyan-glow); }
+        .btn-send:disabled { opacity: 0.35; cursor: not-allowed; }
+
+        .input-hint {
+            font-family: var(--mono);
+            font-size: 0.8rem;
+            letter-spacing: 0.08em;
+            color: var(--text-3);
+            margin-top: 0.4rem;
+        }
+
+        /* ── Keyframes ── */
+        @keyframes blink    { 0%,100%{opacity:1} 50%{opacity:0.3} }
+        @keyframes dotblink { 0%,80%,100%{opacity:0.2} 40%{opacity:1} }
+        @keyframes msgin    { from{opacity:0;transform:translateY(6px)} to{opacity:1;transform:translateY(0)} }
+        /* ── Table Container (Glassmorphism) ────────────────────────── */
+        .table-container {
+            background: rgba(12,18,32,0.35);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(0,212,255,0.1);
+            border-radius: 12px;
+            overflow: hidden;
+            padding: 0;
+        }
+        .table { background: rgba(12,18,32,0.35) !important; backdrop-filter: blur(10px) !important; }
+        .table thead th {
+            background: rgba(12,18,32,0.6) !important;
+            border-bottom: 1px solid rgba(0,212,255,0.2) !important;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+            text-align: right !important;
+            padding: 0.65rem 0.95rem !important;
+            color: #00d4ff !important;
+            font-size: 0.98rem !important;
+        }
+        .table tbody td {
+            text-align: right !important;
+            padding: 0.65rem 0.95rem !important;
+            border-bottom: 1px solid rgba(26,45,71,0.5) !important;
+        }
+        .table tbody tr:hover td { background: rgba(0,212,255,0.04) !important; }
+        .status-badge {
+            display: inline-block;
+            padding: 8px 14px;
+            border-radius: 8px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            backdrop-filter: blur(4px);
+            border: 1px solid;
+        }
     </style>
 </head>
 <body>
 
-<nav class="navbar navbar-dark px-4 py-3">
-    <span class="navbar-brand fw-bold fs-5">🧠 Shan-AI</span>
-    <div>
-        <a href="/dashboard/" class="nav-link d-inline ms-3">📊 דשבורד</a>
-        <a href="/dashboard/decisions" class="nav-link d-inline ms-3">📋 החלטות</a>
-        <a href="/dashboard/users" class="nav-link d-inline ms-3">👥 משתמשים</a>
-        <a href="/dashboard/files" class="nav-link d-inline ms-3">📁 קבצים</a>
-        <a href="/dashboard/ask" class="nav-link active d-inline ms-3">💬 שאל</a>
-        <a href="/dashboard/learning" class="nav-link d-inline ms-3">🎓 למידה</a>
-        <span class="text-muted small ms-3">👤 {{ current_user.username }}</span>
-        <a href="/logout" class="nav-link d-inline ms-3" style="color:#dc3545 !important;">🚪 התנתקות</a>
+<nav class="navbar navbar-dark d-flex align-items-center justify-content-between position-relative">
+    <a href="/dashboard/" class="navbar-brand text-decoration-none">
+        <div class="brand-pulse"></div>
+        SHAN-AI / DSS
+    </a>
+    <div class="d-flex align-items-center gap-1">
+        <a href="/dashboard/"         class="nav-link">📊 דשבורד</a>
+        <a href="/dashboard/decisions" class="nav-link">📋 החלטות</a>
+        <a href="/dashboard/users"    class="nav-link">👥 משתמשים</a>
+        <a href="/dashboard/files"    class="nav-link">📁 קבצים</a>
+        <a href="/dashboard/ask"      class="nav-link nav-active">💬 שאל</a>
+        <a href="/dashboard/learning" class="nav-link">🎓 למידה</a>
+        <a href="/dashboard/logs"     class="nav-link">📊 לוגים</a>
+        <a href="/dashboard/projects" class="nav-link">📂 פרויקטים</a>
+    </div>
+    <div class="d-flex align-items-center gap-2">
+        <div class="user-chip"><div class="user-online"></div>{{ current_user.username }}</div>
+        <a href="/logout" class="logout-btn">🚪 יציאה</a>
     </div>
 </nav>
 
-<div class="container py-3 chat-container">
-
-    <!-- Chat history -->
+<div class="chat-wrap">
     <div class="chat-history" id="chatHistory">
         <div class="empty-state" id="emptyState">
-            <div class="icon">💬</div>
-            <div class="fw-semibold" style="color:#8b9aaa;">שאל שאלה על ההחלטות או הקבצים שלך</div>
-            <div class="hint">ה-AI יחפש בהחלטות שלך ובמסמכים שהועלו</div>
+            <div class="empty-icon">💬</div>
+            <div class="empty-title">שאל שאלה על ההחלטות או הקבצים שלך</div>
+            <div class="empty-hint">ה-AI יחפש בהחלטות שלך ובמסמכים שהועלו</div>
             <div class="suggestions">
                 <div class="suggestion-chip" onclick="fillQuestion('כמה החלטות קריטיות יש לי?')">כמה החלטות קריטיות יש לי?</div>
                 <div class="suggestion-chip" onclick="fillQuestion('מה ההחלטות הממתינות לאישור?')">מה ההחלטות הממתינות לאישור?</div>
@@ -162,17 +427,14 @@
         </div>
     </div>
 
-    <!-- Input area -->
     <div class="input-area">
         <div class="d-flex gap-2 align-items-end">
             <textarea class="question-input" id="questionInput" rows="2"
                 placeholder="שאל שאלה על ההחלטות שלך, הקבצים, הנהלים..."
                 onkeydown="handleKey(event)"></textarea>
-            <button class="btn btn-send" id="sendBtn" onclick="sendQuestion()">שלח ↵</button>
+            <button class="btn-send" id="sendBtn" onclick="sendQuestion()">שלח ↵</button>
         </div>
-        <div class="text-muted small mt-1" style="font-size:0.72rem;">
-            Enter לשליחה · Shift+Enter לשורה חדשה
-        </div>
+        <div class="input-hint">ENTER לשליחה · SHIFT+ENTER לשורה חדשה</div>
     </div>
 </div>
 
@@ -183,10 +445,7 @@ function fillQuestion(text) {
 }
 
 function handleKey(e) {
-    if (e.key === 'Enter' && !e.shiftKey) {
-        e.preventDefault();
-        sendQuestion();
-    }
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendQuestion(); }
 }
 
 function appendUserMsg(text) {
@@ -207,7 +466,7 @@ function appendLoading() {
     return div;
 }
 
-function appendAIMsg(answer, hasFiles, hasDecisions, fileNames, sourcesText) {
+function appendAIMsg(answer, hasFiles, hasDecisions, fileNames, sourcesText, logId) {
     document.getElementById('loadingMsg')?.remove();
     const div = document.createElement('div');
     div.className = 'msg-ai';
@@ -215,20 +474,45 @@ function appendAIMsg(answer, hasFiles, hasDecisions, fileNames, sourcesText) {
     let sources = '';
     if (hasDecisions) sources += '<span class="source-badge source-decisions">📋 מסד ההחלטות</span>';
     if (fileNames && fileNames.length) {
-        fileNames.forEach(f => {
-            sources += `<span class="source-badge source-files">📁 ${escapeHtml(f)}</span>`;
-        });
+        fileNames.forEach(f => { sources += `<span class="source-badge source-files">📁 ${escapeHtml(f)}</span>`; });
     } else if (hasFiles) {
         sources += '<span class="source-badge source-files">📁 מסמכים</span>';
     }
 
+    const feedbackHtml = logId ? `
+        <div class="feedback-row">
+            <button class="feedback-btn" id="up-${logId}" onclick="sendFeedback(${logId}, 1)">👍</button>
+            <button class="feedback-btn" id="dn-${logId}" onclick="sendFeedback(${logId}, -1)">👎</button>
+            <span class="feedback-done" id="fd-${logId}">✓ נשמר</span>
+        </div>` : '';
+
     div.innerHTML = `
-        <div class="ai-label">🤖 Shan-AI</div>
+        <div class="ai-label">SHAN-AI</div>
         <div>${escapeHtml(answer).replace(/\n/g, '<br>')}</div>
         ${sources ? '<div class="mt-2">' + sources + '</div>' : ''}
+        ${feedbackHtml}
     `;
     document.getElementById('chatHistory').appendChild(div);
     scrollDown();
+}
+
+async function sendFeedback(logId, value) {
+    const upBtn = document.getElementById(`up-${logId}`);
+    const dnBtn = document.getElementById(`dn-${logId}`);
+    const doneSpan = document.getElementById(`fd-${logId}`);
+    upBtn.disabled = true; dnBtn.disabled = true;
+    upBtn.classList.remove('selected-up', 'selected-down');
+    dnBtn.classList.remove('selected-up', 'selected-down');
+    if (value === 1) upBtn.classList.add('selected-up');
+    else dnBtn.classList.add('selected-down');
+    try {
+        await fetch('/api/logs/feedback', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ log_id: logId, feedback: value }),
+        });
+        doneSpan.style.display = 'inline';
+    } catch (e) { upBtn.disabled = false; dnBtn.disabled = false; }
 }
 
 function escapeHtml(text) {
@@ -244,15 +528,11 @@ async function sendQuestion() {
     const input = document.getElementById('questionInput');
     const question = input.value.trim();
     if (!question) return;
-
     const btn = document.getElementById('sendBtn');
     btn.disabled = true;
     input.value = '';
-    input.rows = 2;
-
     appendUserMsg(question);
     appendLoading();
-
     try {
         const resp = await fetch('/dashboard/ask/query', {
             method: 'POST',
@@ -260,16 +540,15 @@ async function sendQuestion() {
             body: JSON.stringify({ question }),
         });
         const data = await resp.json();
-        appendAIMsg(data.answer, data.has_files, data.has_decisions);
+        appendAIMsg(data.answer, data.has_files, data.has_decisions, data.file_names, data.sources_text, data.log_id);
     } catch (err) {
         document.getElementById('loadingMsg')?.remove();
-        appendAIMsg('שגיאה בתקשורת עם השרת. נסה שוב.', false, false);
+        appendAIMsg('שגיאה בתקשורת עם השרת. נסה שוב.', false, false, [], '', null);
     } finally {
         btn.disabled = false;
         input.focus();
     }
 }
 </script>
-
 </body>
 </html>
