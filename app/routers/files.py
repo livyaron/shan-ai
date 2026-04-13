@@ -18,6 +18,30 @@ UPLOAD_DIR = Path("uploads")
 ALLOWED_EXTENSIONS = {"pdf", "docx", "xlsx"}
 
 router = APIRouter(prefix="/dashboard/files", tags=["files"])
+
+# ---------------------------------------------------------------------------
+# Temporary restore endpoint — copies raw files to uploads/ with exact names
+# Remove after initial Railway volume population
+# ---------------------------------------------------------------------------
+from fastapi import Header
+import os as _os
+
+_RESTORE_SECRET = _os.getenv("RESTORE_SECRET", "")
+
+@router.post("/restore-raw")
+async def restore_raw_file(
+    file: UploadFile = File(...),
+    filename: str = Form(...),
+    x_restore_secret: str = Header(default=""),
+):
+    """Accept a raw file and save it to uploads/ with the exact given filename."""
+    if not _RESTORE_SECRET or x_restore_secret != _RESTORE_SECRET:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    dest = UPLOAD_DIR / filename
+    content = await file.read()
+    dest.write_bytes(content)
+    return {"saved": str(dest), "size": len(content)}
 templates = Jinja2Templates(directory="app/templates")
 
 
