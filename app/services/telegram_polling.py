@@ -358,6 +358,17 @@ class TelegramPollingBot:
                 )
                 return
 
+            # Remove any roleless placeholder that was auto-created for this telegram_id
+            # (happens when user sent /start or a message before registering)
+            from sqlalchemy import delete as _sa_delete
+            await session.execute(
+                _sa_delete(User).where(
+                    User.telegram_id == telegram_id,
+                    User.role.is_(None),
+                    User.id != user.id,
+                )
+            )
+
             # Link telegram account and clear the registration code
             user.telegram_id = telegram_id
             user.registration_code = None
