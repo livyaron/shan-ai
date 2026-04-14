@@ -94,6 +94,8 @@ intent (רק כש-route="project", אחרת "general"):
 "ענת אוברקוביץ" → "אוברקוביץ, ענת" | "רחל כהן" → "כהן, רחל"
 
 דוגמאות:
+"רעות"                                   → {"route":"project","intent":"by_identifier","param":"רעות"}
+"טרומן"                                  → {"route":"project","intent":"by_identifier","param":"טרומן"}
 "מה סטטוס רעות?"                        → {"route":"project","intent":"by_identifier","param":"רעות"}
 "מה תאריך תכנית הפיתוח של רעות?"        → {"route":"project","intent":"by_identifier","param":"רעות"}
 "מי מנהל את פרויקט רמת חובב?"           → {"route":"project","intent":"by_identifier","param":"רמת חובב"}

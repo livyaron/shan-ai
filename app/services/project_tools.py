@@ -615,8 +615,9 @@ def _strip_thinking(text: str) -> str:
     # 1. Strip explicit <think>...</think> blocks (DeepSeek / some Gemma models)
     text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
 
-    # 2. Strip any %%%...%%% delimiter artifacts (legacy or corrupted markers from any model)
-    text = re.sub(r"%%%[^%]*%%%", "", text).strip()
+    # 2. Strip all %%% delimiter artifacts — remove every %%%WORD%%% block and any leftover %%%
+    text = re.sub(r"%%%[^%\n]*%%%", "", text)  # remove %%%CONTENT%%% pairs
+    text = text.replace("%%%", "").strip()      # remove any remaining %%% fragments
 
     # 3. Discard leading reasoning blocks.
     #    Strategy: find the LAST contiguous block of Hebrew-dominant lines.
