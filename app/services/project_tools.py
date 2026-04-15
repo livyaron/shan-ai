@@ -420,13 +420,8 @@ async def answer_project_query(
             if kw_intent != "general" or not intent:
                 intent, param = kw_intent, kw_param
 
-    # Detect if this is a bare name lookup (no question words, just a name)
-    _q = text.strip().rstrip("?").strip()
-    _bare_name = (
-        intent == "by_identifier"
-        and not any(kw in text.lower() for kw in (*_PROJECT_KEYWORDS, *_RISK_KEYWORDS, "מה", "סטטוס", "שלב"))
-        and len(_q.split()) <= 5
-    )
+    # For single-project lookups, always show the full structured card
+    _bare_name = (intent == "by_identifier")
 
     context_str = ""
     current_project_id = None
@@ -526,16 +521,16 @@ async def answer_project_query(
         if _bare_name:
             system_content = (
                 "אתה עוזר מומחה בניהול פרויקטים תשתיות חשמל. "
-                "ענה בעברית בלבד, ישירות וקצר. אל תוסיף הקדמות, סיכומים, או סימנים מיוחדים. "
-                "הצג את כל השדות הקיימים:\n"
-                "• שם הפרויקט ומזהה\n"
-                "• שלב / סטטוס\n"
-                "• מנהל פרויקט\n"
-                "• תאריך יעד חשמול\n"
-                "• תאריך תכנית פיתוח\n"
-                "• עדכון שבועי (שורה אחת)\n"
-                "• סיכונים וחסמים (אם קיימים — הדגש)\n"
-                "• לטיפול (אם קיים)\n"
+                "ענה בעברית בלבד, ישירות. אל תוסיף הקדמות, סיכומים, או סימנים מיוחדים. "
+                "הצג את כל השדות הקיימים, כל שדה בשורה נפרדת, בפורמט הבא (כולל תגיות HTML לעיצוב):\n"
+                "<b>שם הפרויקט ומזהה:</b> [ערך]\n"
+                "<b>שלב / סטטוס:</b> [ערך]\n"
+                "<b>מנהל פרויקט:</b> [ערך]\n"
+                "<b>תאריך יעד חשמול:</b> [ערך]\n"
+                "<b>תאריך תכנית פיתוח:</b> [ערך]\n"
+                "<b>עדכון שבועי:</b> [ערך]\n"
+                "<b>סיכונים וחסמים:</b> [ערך]\n"
+                "<b>לטיפול:</b> [ערך]\n"
                 "שדה ריק — כתוב '—'. אל תמציא מידע."
                 + instructions_addon
             )

@@ -644,7 +644,7 @@ class TelegramPollingBot:
                         text, session, context.user_data, user_id=user.id,
                         precomputed_intent=ai_intent, precomputed_param=ai_param,
                     )
-                    reply = f"\u200F📂 <b>נתוני פרויקט:</b>\n\n{_html.escape(reply_text)}"
+                    reply = f"\u200F📂 <b>נתוני פרויקט:</b>\n\n{reply_text}"
                 except Exception as e:
                     logger.warning(f"project_tools failed: {e}")
                     reply = "\u200Fלא הצלחתי למצוא נתוני פרויקט. ודא שהקובץ הראשי הועלה."
@@ -678,7 +678,7 @@ class TelegramPollingBot:
                     try:
                         from app.services.project_tools import answer_project_query
                         reply_text = await answer_project_query(text, session, context.user_data, user_id=user.id)
-                        reply = f"\u200F📂 <b>נתוני פרויקט:</b>\n\n{_html.escape(reply_text)}"
+                        reply = f"\u200F📂 <b>נתוני פרויקט:</b>\n\n{reply_text}"
                     except Exception as e:
                         logger.warning(f"project_tools failed (keyword fallback): {e}")
                         reply = "\u200Fלא הצלחתי למצוא נתוני פרויקט. ודא שהקובץ הראשי הועלה."
