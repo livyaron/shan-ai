@@ -360,14 +360,30 @@ class TelegramPollingBot:
 
             # Remove any roleless placeholder that was auto-created for this telegram_id
             # (happens when user sent /start or a message before registering)
-            from sqlalchemy import delete as _sa_delete
-            await session.execute(
-                _sa_delete(User).where(
+            # Must reassign FK references first — deleting a placeholder that has messages
+            # stored under it would violate the messages.user_id FK constraint.
+            from sqlalchemy import update as _sa_update
+            from app.models import Message as _Message
+
+            ph_result = await session.execute(
+                select(User).where(
                     User.telegram_id == telegram_id,
                     User.role.is_(None),
                     User.id != user.id,
                 )
             )
+            placeholder = ph_result.scalar_one_or_none()
+
+            if placeholder:
+                # Reassign messages from placeholder to the admin-created user
+                await session.execute(
+                    _sa_update(_Message)
+                    .where(_Message.user_id == placeholder.id)
+                    .values(user_id=user.id)
+                )
+                await session.flush()        # apply UPDATE before DELETE
+                await session.delete(placeholder)
+                await session.flush()        # apply DELETE before telegram_id UPDATE
 
             # Link telegram account and clear the registration code
             user.telegram_id = telegram_id
