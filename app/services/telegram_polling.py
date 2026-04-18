@@ -653,8 +653,12 @@ class TelegramPollingBot:
                 chat_id=update.effective_chat.id, action="typing"
             )
 
-            # --- AI-first routing: one LLM call decides route + intent + param ---
-            routing = await _ai_route_message(text)
+            # Hard bypass: single-word or clearly non-work messages skip LLM routing entirely
+            _NON_WORK_WORDS = {"בדיחה", "בדיחות", "שלום", "היי", "הי", "תודה", "להתראות", "ביי", "בוקר טוב", "ערב טוב", "לילה טוב"}
+            if text.strip() in _NON_WORK_WORDS:
+                routing = {"route": None, "intent": None, "param": None}
+            else:
+                routing = await _ai_route_message(text)
             ai_route = routing["route"]
             ai_intent = routing["intent"]
             ai_param = routing["param"]
