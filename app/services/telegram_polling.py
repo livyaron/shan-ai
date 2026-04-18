@@ -85,6 +85,7 @@ route:
 - "project"   — שאלה על פרויקט/ים: סטטוס, תאריכים, מנהל, סיכונים, ספירה, עדכון שבועי
 - "knowledge" — שאלה על נהלים, מסמכים, מידע כללי (לא פרויקט ספציפי)
 - "decision"  — תיאור בעיה הדורשת ניתוח או פעולה
+- null        — כל השאר: ברכה, בדיחה, שיחה כללית, מילה בודדת שאינה שם פרויקט
 
 intent (רק כש-route="project", אחרת "general"):
 - "by_identifier" — שאלה על פרויקט אחד לפי שם/מזהה (param = שם/מזהה)
@@ -109,6 +110,9 @@ intent (רק כש-route="project", אחרת "general"):
 "כמה פרויקטים יש בסך הכל?"              → {"route":"project","intent":"count_by_type","param":null}
 "מה הנוהל להחלפת טרנספורמטור?"          → {"route":"knowledge","intent":"general","param":null}
 "צריך להחליף שנאי ישן בתחנה 5"          → {"route":"decision","intent":"general","param":null}
+"בדיחה"                                  → {"route":null,"intent":null,"param":null}
+"שלום"                                   → {"route":null,"intent":null,"param":null}
+"תודה"                                   → {"route":null,"intent":null,"param":null}
 
 הודעה: {text}
 
