@@ -720,7 +720,8 @@ class TelegramPollingBot:
 
             # AI routing failed — keyword fallback
             if ai_route is None:
-                if _is_project_query(text):
+                _NON_WORK = {"בדיחה", "בדיחות", "שלום", "היי", "הי", "תודה", "להתראות", "ביי", "בוקר טוב", "ערב טוב", "לילה טוב"}
+                if text.strip() not in _NON_WORK and _is_project_query(text):
                     kb = None
                     try:
                         from app.services.project_tools import answer_project_query
