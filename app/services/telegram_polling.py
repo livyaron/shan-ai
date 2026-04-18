@@ -28,6 +28,13 @@ _awaiting_clarification: dict[int, str] = {}
 # { telegram_id (int): file_id (int) }  — waiting for master-file confirmation after upload
 _awaiting_master_confirm: dict[int, int] = {}
 
+# { telegram_id (int): original_text (str) }  — bot wasn't sure; waiting for user to confirm if it's a decision
+_awaiting_decision_confirm: dict[int, str] = {}
+
+# { telegram_id (int): edit state dict }  — in-progress RACI inline edit session
+# value: { decision_id, items: [{user_id, role, name}], all_users: [{id, name}], is_critical, parsed }
+_raci_edit_state: dict[int, dict] = {}
+
 # Hebrew question prefixes — messages starting with these are treated as data queries, never decisions
 _QUESTION_PREFIXES = (
     "כמה", "מה ", "מי ", "מתי", "איך ", "האם ", "האם?",
@@ -791,6 +798,11 @@ class TelegramPollingBot:
                 )
                 return
 
+            _dec_confirm_kb = InlineKeyboardMarkup([[
+                InlineKeyboardButton("✅ כן, זו החלטה", callback_data="dec_conf_y:0"),
+                InlineKeyboardButton("❌ לא", callback_data="dec_conf_n:0"),
+            ]])
+
             if verdict == "NOT_DECISION":
                 # If LLM gave a direct reply (e.g. joke, greeting), use it — skip knowledge base
                 ai_reply = classify_result.get("reply", "")
@@ -812,15 +824,22 @@ class TelegramPollingBot:
                     reply = "\u200Fשאל שאלות עבודה או שלח החלטה לניתוח."
                 reply = await _maybe_summarize(reply)
                 await update.message.reply_text(reply, parse_mode="HTML", reply_markup=kb)
+                # Ask if it was actually a decision
+                _awaiting_decision_confirm[telegram_id] = text
+                await update.message.reply_text(
+                    "\u200F❓ <b>האם זוהי החלטה חדשה?</b>",
+                    parse_mode="HTML",
+                    reply_markup=_dec_confirm_kb,
+                )
                 return
 
             if verdict == "UNCLEAR":
-                _awaiting_clarification[telegram_id] = text
-                question = classify_result.get("clarifying_question", "אנא פרט את ההחלטה.")
-                await update.message.reply_text(
-                    f"\u200F🔍 <b>נדרש פרט נוסף:</b>\n\n{_html.escape(question)}",
-                    parse_mode="HTML",
-                )
+                _awaiting_decision_confirm[telegram_id] = text
+                question = classify_result.get("clarifying_question", "")
+                msg = "\u200F❓ <b>לא הצלחתי לסווג את ההודעה. האם זוהי החלטה חדשה?</b>"
+                if question:
+                    msg += f"\n\n<i>{_html.escape(question)}</i>"
+                await update.message.reply_text(msg, parse_mode="HTML", reply_markup=_dec_confirm_kb)
                 return
 
             # DECISION — process through decision engine
@@ -842,8 +861,9 @@ class TelegramPollingBot:
         telegram_id = update.effective_user.id
 
         try:
-            action, decision_id_str = data.split(":")
-            decision_id = int(decision_id_str)
+            parts = data.split(":")
+            action = parts[0]
+            decision_id = int(parts[1]) if len(parts) > 1 else 0
         except (ValueError, AttributeError):
             await query.edit_message_text("❌ Invalid action.")
             return
@@ -937,12 +957,33 @@ class TelegramPollingBot:
                 from app.services.raci_service import _pending_raci_suggestions, save_pregenerated_raci
 
                 if action == "raci_edit":
-                    from app.config import settings as _cfg
-                    url = f"{_cfg.BASE_URL}/dashboard/decisions/{decision_id}"
-                    await query.edit_message_text(
-                        f"\u200F✏️ <b>ערוך RACI בלוח הניהול:</b>\n{url}",
-                        parse_mode="HTML",
-                    )
+                    pending = _pending_raci_suggestions.get(decision_id)
+                    if not pending:
+                        await query.edit_message_text("\u200F⚠️ פג תוקף ההצעה. שלח את ההחלטה מחדש.")
+                        return
+                    from app.models import User as _User
+                    async with async_session_maker() as _sess:
+                        _all = (await _sess.scalars(
+                            select(_User).where(_User.role.isnot(None))
+                        )).all()
+                        all_users = [{"id": u.id, "name": u.username or str(u.telegram_id)} for u in _all]
+                    _raci_edit_state[telegram_id] = {
+                        "decision_id": decision_id,
+                        "items": [
+                            {
+                                "user_id": i["user_id"],
+                                "role": i["role"],
+                                "name": pending["user_names"].get(i["user_id"], str(i["user_id"])),
+                            }
+                            for i in pending["valid_items"]
+                        ],
+                        "all_users": all_users,
+                        "is_critical": pending.get("is_critical", False),
+                        "parsed": pending.get("parsed", {}),
+                    }
+                    from app.services.raci_service import build_raci_list_message as _blm
+                    text, kbd = _blm(decision_id, _raci_edit_state[telegram_id]["items"])
+                    await query.edit_message_text(text, parse_mode="HTML", reply_markup=kbd)
                     return
 
                 # raci_approve
@@ -986,6 +1027,186 @@ class TelegramPollingBot:
 
                 await query.edit_message_text(
                     "\u200F✅ <b>RACI אושר ונשמר.</b>\nהצוות יקבל הודעות בהתאם לתפקידיהם.",
+                    parse_mode="HTML",
+                )
+                return
+
+            # --- Decision classification confirmation (yes/no buttons) ---
+            if action in ("dec_conf_y", "dec_conf_n"):
+                original_text = _awaiting_decision_confirm.pop(telegram_id, None)
+                if action == "dec_conf_n" or not original_text:
+                    await query.edit_message_text("\u200Fבסדר, ממשיכים.")
+                    return
+                # User confirmed it IS a decision — process through engine
+                await query.edit_message_text(
+                    "\u200F⏳ <b>מעבד את ההחלטה...</b>",
+                    parse_mode="HTML",
+                )
+                decision_svc = DecisionService(session, self.application)
+                reply = await decision_svc.process(approver, original_text)
+                await context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text=reply,
+                    parse_mode="HTML",
+                )
+                return
+
+            # --- Inline RACI editor callbacks ---
+            if action == "raci_ev":
+                state = _raci_edit_state.get(telegram_id)
+                if not state or state["decision_id"] != decision_id:
+                    await query.edit_message_text("\u200F⚠️ סשן עריכה לא פעיל. לחץ ✏️ ערוך שוב.")
+                    return
+                from app.services.raci_service import build_raci_list_message as _blm
+                text, kbd = _blm(decision_id, state["items"])
+                await query.edit_message_text(text, parse_mode="HTML", reply_markup=kbd)
+                return
+
+            if action == "raci_eu":
+                # data = "raci_eu:{did}:{uid}"
+                uid = int(data.split(":")[2])
+                state = _raci_edit_state.get(telegram_id)
+                if not state:
+                    await query.answer("סשן עריכה לא פעיל.", show_alert=True)
+                    return
+                item = next((i for i in state["items"] if i["user_id"] == uid), None)
+                uname = item["name"] if item else str(uid)
+                from app.services.raci_service import build_role_picker as _brp
+                text, kbd = _brp(decision_id, uid, uname)
+                await query.edit_message_text(text, parse_mode="HTML", reply_markup=kbd)
+                return
+
+            if action == "raci_sr":
+                # data = "raci_sr:{did}:{uid}:{role}"
+                _dp = data.split(":")
+                uid, role = int(_dp[2]), _dp[3]
+                state = _raci_edit_state.get(telegram_id)
+                if not state:
+                    await query.answer("סשן עריכה לא פעיל.", show_alert=True)
+                    return
+                for item in state["items"]:
+                    if item["user_id"] == uid:
+                        item["role"] = role
+                        break
+                from app.services.raci_service import build_raci_list_message as _blm
+                text, kbd = _blm(decision_id, state["items"])
+                await query.edit_message_text(text, parse_mode="HTML", reply_markup=kbd)
+                return
+
+            if action == "raci_rm":
+                # data = "raci_rm:{did}:{uid}"
+                uid = int(data.split(":")[2])
+                state = _raci_edit_state.get(telegram_id)
+                if not state:
+                    await query.answer("סשן עריכה לא פעיל.", show_alert=True)
+                    return
+                state["items"] = [i for i in state["items"] if i["user_id"] != uid]
+                from app.services.raci_service import build_raci_list_message as _blm
+                text, kbd = _blm(decision_id, state["items"])
+                await query.edit_message_text(text, parse_mode="HTML", reply_markup=kbd)
+                return
+
+            if action == "raci_au":
+                # data = "raci_au:{did}:{page}"
+                _dp = data.split(":")
+                page = int(_dp[2]) if len(_dp) > 2 else 0
+                state = _raci_edit_state.get(telegram_id)
+                if not state:
+                    await query.answer("סשן עריכה לא פעיל.", show_alert=True)
+                    return
+                existing_ids = {i["user_id"] for i in state["items"]}
+                from app.services.raci_service import build_user_picker as _bup
+                text, kbd = _bup(decision_id, state["all_users"], existing_ids, page)
+                await query.edit_message_text(text, parse_mode="HTML", reply_markup=kbd)
+                return
+
+            if action == "raci_ap":
+                # data = "raci_ap:{did}:{uid}"
+                uid = int(data.split(":")[2])
+                state = _raci_edit_state.get(telegram_id)
+                if not state:
+                    await query.answer("סשן עריכה לא פעיל.", show_alert=True)
+                    return
+                uname = next((u["name"] for u in state["all_users"] if u["id"] == uid), str(uid))
+                from app.services.raci_service import build_new_user_role_picker as _bnrp
+                text, kbd = _bnrp(decision_id, uid, uname)
+                await query.edit_message_text(text, parse_mode="HTML", reply_markup=kbd)
+                return
+
+            if action == "raci_ar":
+                # data = "raci_ar:{did}:{uid}:{role}"
+                _dp = data.split(":")
+                uid, role = int(_dp[2]), _dp[3]
+                state = _raci_edit_state.get(telegram_id)
+                if not state:
+                    await query.answer("סשן עריכה לא פעיל.", show_alert=True)
+                    return
+                uname = next((u["name"] for u in state["all_users"] if u["id"] == uid), str(uid))
+                state["items"].append({"user_id": uid, "role": role, "name": uname})
+                from app.services.raci_service import build_raci_list_message as _blm
+                text, kbd = _blm(decision_id, state["items"])
+                await query.edit_message_text(text, parse_mode="HTML", reply_markup=kbd)
+                return
+
+            if action == "raci_confirm":
+                state = _raci_edit_state.get(telegram_id)
+                if not state or state["decision_id"] != decision_id:
+                    await query.edit_message_text("\u200F⚠️ סשן עריכה לא פעיל.")
+                    return
+                if not state["items"]:
+                    await query.answer("לא ניתן לשמור RACI ריק.", show_alert=True)
+                    return
+                accountables = [i for i in state["items"] if i["role"] == "A"]
+                if len(accountables) != 1:
+                    from app.services.raci_service import build_raci_list_message as _blm
+                    text, kbd = _blm(decision_id, state["items"])
+                    err = f"\u200F⚠️ חייב להיות בדיוק מוסמך אחד (A). כרגע: {len(accountables)}.\n\n" + text
+                    await query.edit_message_text(err, parse_mode="HTML", reply_markup=kbd)
+                    return
+
+                from app.services.raci_service import (
+                    save_pregenerated_raci as _spr,
+                    _pending_raci_suggestions as _prs,
+                )
+                pending = _prs.pop(decision_id, None)
+                parsed = state.get("parsed") or (pending.get("parsed") if pending else {})
+                valid_items = [{"user_id": i["user_id"], "role": i["role"]} for i in state["items"]]
+                _raci_edit_state.pop(telegram_id, None)
+
+                await _spr(decision_id, valid_items, parsed)
+
+                if state.get("is_critical"):
+                    from app.services.raci_service import get_accountable_user_id as _get_acc
+                    from app.models import Decision as _Dec
+                    import html as _html2
+                    async with async_session_maker() as _sess:
+                        accountable_id = await _get_acc(decision_id, _sess)
+                        if accountable_id:
+                            acc_user = await _sess.get(User, accountable_id)
+                            dec = await _sess.get(_Dec, decision_id)
+                            if acc_user and acc_user.telegram_id and dec:
+                                crit_keyboard = InlineKeyboardMarkup([[
+                                    InlineKeyboardButton("✅ אישור", callback_data=f"approve:{decision_id}"),
+                                    InlineKeyboardButton("❌ דחייה", callback_data=f"reject:{decision_id}"),
+                                ]])
+                                try:
+                                    await context.bot.send_message(
+                                        chat_id=acc_user.telegram_id,
+                                        text=(
+                                            f"\u200F🚨 <b>החלטה קריטית — נדרש אישור</b>\n\n"
+                                            f"<b>החלטה #{decision_id}</b>\n\n"
+                                            f"📋 <b>סיכום:</b> {_html2.escape(dec.summary or '')}\n"
+                                            f"🎯 <b>פעולה מומלצת:</b> {_html2.escape(dec.recommended_action or '')}\n\n"
+                                            f"<b>אנא אשר או דחה החלטה זו:</b>"
+                                        ),
+                                        parse_mode="HTML",
+                                        reply_markup=crit_keyboard,
+                                    )
+                                except Exception as _e:
+                                    logger.warning(f"RACI confirm: failed to notify accountable: {_e}")
+
+                await query.edit_message_text(
+                    "\u200F✅ <b>RACI עודכן ונשמר.</b>\nהצוות יקבל הודעות בהתאם לתפקידיהם.",
                     parse_mode="HTML",
                 )
                 return

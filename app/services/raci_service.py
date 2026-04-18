@@ -800,6 +800,119 @@ async def propose_raci_to_submitter(
         await assign_raci_from_ai(decision_id)
 
 
+# ---------------------------------------------------------------------------
+# Telegram inline RACI editor — keyboard builders
+# ---------------------------------------------------------------------------
+
+_ROLE_LABEL = {"R": "👤 R", "A": "🧠 A", "C": "💬 C", "I": "📢 I"}
+_ROLE_FULL = {"R": "מבצע (R)", "A": "מוסמך (A)", "C": "יועץ (C)", "I": "מעודכן (I)"}
+_PAGE_SIZE = 8
+
+
+def build_raci_list_message(decision_id: int, items: list[dict]):
+    """Return (text, InlineKeyboardMarkup) for the RACI list edit view."""
+    import html as _h
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+
+    lines = []
+    buttons = []
+    for item in items:
+        role_lbl = _ROLE_LABEL.get(item["role"], item["role"])
+        name = _h.escape(item.get("name", str(item["user_id"])))
+        lines.append(f"{role_lbl}: <b>{name}</b>")
+        buttons.append([InlineKeyboardButton(
+            f"{role_lbl} {name}",
+            callback_data=f"raci_eu:{decision_id}:{item['user_id']}"
+        )])
+
+    buttons.append([
+        InlineKeyboardButton("➕ הוסף", callback_data=f"raci_au:{decision_id}:0"),
+        InlineKeyboardButton("✅ אשר", callback_data=f"raci_confirm:{decision_id}"),
+    ])
+
+    text = (
+        f"\u200F✏️ <b>עריכת RACI — החלטה #{decision_id}</b>\n\n"
+        + "\n".join(lines)
+        + "\n\n<i>לחץ על שם לשינוי תפקיד / הסרה.</i>"
+    )
+    return text, InlineKeyboardMarkup(buttons)
+
+
+def build_role_picker(decision_id: int, user_id: int, user_name: str):
+    """Return (text, InlineKeyboardMarkup) for the role picker of a specific user."""
+    import html as _h
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+
+    name = _h.escape(user_name)
+    role_buttons = [
+        InlineKeyboardButton(lbl, callback_data=f"raci_sr:{decision_id}:{user_id}:{role}")
+        for role, lbl in _ROLE_LABEL.items()
+    ]
+    keyboard = [
+        role_buttons[:2],
+        role_buttons[2:],
+        [
+            InlineKeyboardButton("🗑️ הסר", callback_data=f"raci_rm:{decision_id}:{user_id}"),
+            InlineKeyboardButton("🔙 חזור", callback_data=f"raci_ev:{decision_id}"),
+        ],
+    ]
+    text = f"\u200F<b>בחר תפקיד עבור {name}:</b>"
+    return text, InlineKeyboardMarkup(keyboard)
+
+
+def build_user_picker(decision_id: int, all_users: list[dict], existing_user_ids: set, page: int = 0):
+    """Return (text, InlineKeyboardMarkup) for the user picker (add flow)."""
+    import html as _h
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+
+    available = [u for u in all_users if u["id"] not in existing_user_ids]
+    total_pages = max(1, (len(available) + _PAGE_SIZE - 1) // _PAGE_SIZE)
+    page = max(0, min(page, total_pages - 1))
+    chunk = available[page * _PAGE_SIZE: (page + 1) * _PAGE_SIZE]
+
+    buttons = [
+        [InlineKeyboardButton(
+            _h.escape(u["name"]),
+            callback_data=f"raci_ap:{decision_id}:{u['id']}"
+        )]
+        for u in chunk
+    ]
+
+    nav = []
+    if page > 0:
+        nav.append(InlineKeyboardButton("◀️", callback_data=f"raci_au:{decision_id}:{page - 1}"))
+    if page < total_pages - 1:
+        nav.append(InlineKeyboardButton("▶️", callback_data=f"raci_au:{decision_id}:{page + 1}"))
+    if nav:
+        buttons.append(nav)
+
+    buttons.append([InlineKeyboardButton("🔙 חזור", callback_data=f"raci_ev:{decision_id}")])
+
+    text = f"\u200F<b>בחר משתמש להוספה ל-RACI:</b>"
+    if not available:
+        text += "\n\n<i>כל המשתמשים כבר מופיעים ב-RACI.</i>"
+    return text, InlineKeyboardMarkup(buttons)
+
+
+def build_new_user_role_picker(decision_id: int, user_id: int, user_name: str):
+    """Role picker for a newly-added user (no remove option, has back-to-list)."""
+    import html as _h
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+
+    name = _h.escape(user_name)
+    role_buttons = [
+        InlineKeyboardButton(lbl, callback_data=f"raci_ar:{decision_id}:{user_id}:{role}")
+        for role, lbl in _ROLE_LABEL.items()
+    ]
+    keyboard = [
+        role_buttons[:2],
+        role_buttons[2:],
+        [InlineKeyboardButton("🔙 חזור", callback_data=f"raci_au:{decision_id}:0")],
+    ]
+    text = f"\u200F<b>בחר תפקיד עבור {name}:</b>"
+    return text, InlineKeyboardMarkup(keyboard)
+
+
 async def get_accountable_user_id(decision_id: int, session: AsyncSession) -> int | None:
     """Return the user_id of the Accountable (A) for a decision, or None if not assigned."""
     return await session.scalar(
