@@ -5,18 +5,18 @@ import random
 import string
 import secrets
 import logging
+import os
+import uuid
 from datetime import datetime, timedelta
-from fastapi import APIRouter, Depends, Request, Form, HTTPException, status
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi import APIRouter, Depends, Request, Form, UploadFile, File
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, case, or_, exists
-from typing import Optional
+from sqlalchemy import select, func, or_, exists, update, delete
 
 from app.database import get_db_session
-from app.models import Decision, User, DecisionTypeEnum, DecisionStatusEnum, RoleEnum, DecisionDistribution, DistributionTypeEnum, DistributionStatusEnum, DecisionFeedback, DecisionRaciRole, RaciRoleEnum, LessonLearned
+from app.models import Decision, User, DecisionTypeEnum, DecisionStatusEnum, RoleEnum, DecisionDistribution, DistributionTypeEnum, DistributionStatusEnum, DecisionFeedback, DecisionRaciRole, RaciRoleEnum, LessonLearned, Message, KnowledgeFile, QueryLog
 from app.routers.login import get_current_user
-from app.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -263,6 +263,8 @@ async def users_page(
             "job_title": u.job_title or "",
             "manager_id": u.manager_id or "",
             "responsibilities": u.responsibilities or "",
+            "photo_path": u.photo_path or "",
+            "avatar_path": u.avatar_path or "",
         }
         for u in users
     ], ensure_ascii=False)
@@ -295,7 +297,7 @@ async def create_user(
     # Check duplicate username
     existing = await session.scalar(select(User).where(User.username == username))
     if existing:
-        return RedirectResponse(f"/dashboard/users?error=שם+משתמש+כבר+קיים", status_code=303)
+        return RedirectResponse("/dashboard/users?error=שם+משתמש+כבר+קיים", status_code=303)
 
     # Generate unique registration code
     for _ in range(10):
@@ -332,7 +334,7 @@ async def toggle_admin(
     # If removing admin, ensure at least one other admin remains
     if user.is_admin:
         admin_count_q = await session.execute(
-            select(func.count()).select_from(User).where(User.is_admin == True)
+            select(func.count()).select_from(User).where(User.is_admin)
         )
         admin_count = admin_count_q.scalar() or 0
         if admin_count <= 1:
@@ -369,6 +371,27 @@ async def delete_user(
 ):
     user = await session.get(User, user_id)
     if user:
+        # Nullify nullable FKs pointing to this user
+        await session.execute(update(User).where(User.manager_id == user_id).values(manager_id=None))
+        await session.execute(update(KnowledgeFile).where(KnowledgeFile.uploader_id == user_id).values(uploader_id=None))
+        await session.execute(update(QueryLog).where(QueryLog.user_id == user_id).values(user_id=None))
+
+        # Delete non-nullable FK records referencing this user
+        await session.execute(delete(DecisionFeedback).where(DecisionFeedback.user_id == user_id))
+        await session.execute(delete(DecisionDistribution).where(DecisionDistribution.user_id == user_id))
+        await session.execute(delete(DecisionRaciRole).where(DecisionRaciRole.user_id == user_id))
+        await session.execute(delete(Message).where(Message.user_id == user_id))
+
+        # Delete decisions submitted by this user (cascades distributions/raci_roles on those decisions)
+        decision_ids_result = await session.execute(select(Decision.id).where(Decision.submitter_id == user_id))
+        decision_ids = [row[0] for row in decision_ids_result.fetchall()]
+        if decision_ids:
+            await session.execute(delete(LessonLearned).where(LessonLearned.decision_id.in_(decision_ids)))
+            await session.execute(delete(DecisionFeedback).where(DecisionFeedback.decision_id.in_(decision_ids)))
+            await session.execute(delete(DecisionDistribution).where(DecisionDistribution.decision_id.in_(decision_ids)))
+            await session.execute(delete(DecisionRaciRole).where(DecisionRaciRole.decision_id.in_(decision_ids)))
+            await session.execute(delete(Decision).where(Decision.submitter_id == user_id))
+
         await session.delete(user)
         await session.commit()
     return RedirectResponse("/dashboard/users?msg=משתמש+נמחק", status_code=303)
@@ -425,6 +448,222 @@ async def edit_user(
         user.password_hash = hash_password(password)
     await session.commit()
     return RedirectResponse("/dashboard/users?msg=פרטי+משתמש+עודכנו", status_code=303)
+
+
+# -----------------------------------------------------------------------
+# Photo / Avatar endpoints
+# -----------------------------------------------------------------------
+
+PHOTOS_DIR = "static/photos"
+
+@router.post("/users/{user_id}/upload-photo")
+async def upload_photo(
+    user_id: int,
+    file: UploadFile = File(...),
+    session: AsyncSession = Depends(get_db_session),
+    current_user: User = Depends(get_current_user),
+):
+    if not current_user.is_admin and current_user.id != user_id:
+        return JSONResponse({"error": "אין הרשאה"}, status_code=403)
+
+    user = await session.get(User, user_id)
+    if not user:
+        return JSONResponse({"error": "משתמש לא נמצא"}, status_code=404)
+
+    os.makedirs(PHOTOS_DIR, exist_ok=True)
+
+    ext = os.path.splitext(file.filename or "photo.jpg")[1].lower() or ".jpg"
+    filename = f"user_{user_id}_{uuid.uuid4().hex[:8]}{ext}"
+    filepath = os.path.join(PHOTOS_DIR, filename)
+
+    content = await file.read()
+    with open(filepath, "wb") as f:
+        f.write(content)
+
+    # Remove old photo file if exists
+    if user.photo_path:
+        old = user.photo_path.lstrip("/")
+        if os.path.exists(old):
+            os.remove(old)
+
+    user.photo_path = f"/static/photos/{filename}"
+    user.avatar_path = None  # reset avatar when photo changes
+    await session.commit()
+    return JSONResponse({"ok": True, "photo_url": user.photo_path})
+
+
+@router.get("/users/{user_id}/avatar-prompt")
+async def get_avatar_prompt(
+    user_id: int,
+    session: AsyncSession = Depends(get_db_session),
+    current_user: User = Depends(get_current_user),
+):
+    """Generate a personalized caricature style prompt for the user via Groq."""
+    user = await session.get(User, user_id)
+    if not user:
+        return JSONResponse({"error": "משתמש לא נמצא"}, status_code=404)
+
+    role_labels = {
+        "project_manager": "מנהל פרויקט",
+        "department_manager": "מנהל מחלקה",
+        "deputy_division_manager": "סגן מנהל אגף",
+        "division_manager": "מנהל אגף",
+    }
+    role_he = role_labels.get(user.role.value, user.role.value) if user.role else "לא מוגדר"
+
+    user_block = f"""שם: {user.username}
+תפקיד: {role_he}
+תואר: {user.job_title or '—'}
+תחומי אחריות: {user.responsibilities or '—'}"""
+
+    system = """אתה יוצר קריקטורות ואווטארים מצחיקים לאנשי ארגון.
+כתוב פרומפט קצר ומצחיק באנגלית (3-5 משפטים) לאווטאר קריקטורי של האדם,
+בהתאם לתפקידו ואחריותיו. כלול: סגנון ויזואלי (cartoon/manga/comic),
+תכונות מוגזמות שמתאימות לתפקיד, ואקססוריז מצחיקים שמייצגים את תחומי העבודה.
+השב רק בפרומפט עצמו, ללא הסברים."""
+
+    try:
+        from app.services.llm_router import llm_chat
+        prompt = await llm_chat(
+            "dashboard_analysis",
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user_block},
+            ],
+            max_tokens=200,
+            temperature=0.8,
+        )
+        return JSONResponse({"prompt": prompt.strip()})
+    except Exception as e:
+        fallback = f"Cartoon caricature of {user.username}, a {user.job_title or role_he}, exaggerated friendly features, comic book style, colorful, fun and professional"
+        return JSONResponse({"prompt": fallback})
+
+
+def _apply_avatar_style(img, style: str):
+    """Apply OpenCV visual style. style: cartoon|sketch|manga|watercolor|neon|vintage"""
+    import cv2
+    import numpy as np
+
+    if style == "sketch":
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        inv = 255 - gray
+        blur = cv2.GaussianBlur(inv, (21, 21), 0)
+        sketch = cv2.divide(gray, 255 - blur, scale=256.0)
+        return cv2.cvtColor(sketch, cv2.COLOR_GRAY2BGR)
+
+    if style == "manga":
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        gray = cv2.equalizeHist(gray)
+        edges = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY, 7, 2)
+        bilateral = cv2.bilateralFilter(img, 9, 150, 150)
+        return cv2.bitwise_and(bilateral, cv2.cvtColor(edges, cv2.COLOR_GRAY2BGR))
+
+    if style == "watercolor":
+        color = img.copy()
+        for _ in range(3):
+            color = cv2.bilateralFilter(color, d=15, sigmaColor=80, sigmaSpace=80)
+        hsv = cv2.cvtColor(color, cv2.COLOR_BGR2HSV).astype(np.float32)
+        hsv[:, :, 1] = np.clip(hsv[:, :, 1] * 1.4, 0, 255)
+        return cv2.cvtColor(hsv.astype(np.uint8), cv2.COLOR_HSV2BGR)
+
+    if style == "neon":
+        color = cv2.bilateralFilter(img, 9, 200, 200)
+        hsv = cv2.cvtColor(color, cv2.COLOR_BGR2HSV).astype(np.float32)
+        hsv[:, :, 1] = np.clip(hsv[:, :, 1] * 2.0, 0, 255)
+        hsv[:, :, 2] = np.clip(hsv[:, :, 2] * 1.2, 0, 255)
+        return cv2.cvtColor(hsv.astype(np.uint8), cv2.COLOR_HSV2BGR)
+
+    if style == "vintage":
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        sepia = np.zeros_like(img)
+        sepia[:, :, 0] = np.clip(gray * 0.74, 0, 255)
+        sepia[:, :, 1] = np.clip(gray * 0.93, 0, 255)
+        sepia[:, :, 2] = np.clip(gray * 1.01, 0, 255)
+        return sepia.astype(np.uint8)
+
+    # Default: cartoon
+    color = img.copy()
+    for _ in range(4):
+        color = cv2.bilateralFilter(color, d=9, sigmaColor=250, sigmaSpace=250)
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    gray = cv2.medianBlur(gray, 7)
+    edges = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY, 9, 2)
+    return cv2.bitwise_and(color, cv2.cvtColor(edges, cv2.COLOR_GRAY2BGR))
+
+
+@router.post("/users/{user_id}/generate-avatar")
+async def generate_avatar(
+    user_id: int,
+    prompt: str = Form(""),
+    session: AsyncSession = Depends(get_db_session),
+    current_user: User = Depends(get_current_user),
+):
+    if not current_user.is_admin and current_user.id != user_id:
+        return JSONResponse({"error": "אין הרשאה"}, status_code=403)
+
+    user = await session.get(User, user_id)
+    if not user or not user.photo_path:
+        return JSONResponse({"error": "יש להעלות תמונה תחילה"}, status_code=400)
+
+    try:
+        import cv2
+
+        photo_path = user.photo_path.lstrip("/")
+        img = cv2.imread(photo_path)
+        if img is None:
+            return JSONResponse({"error": "לא ניתן לקרוא את התמונה"}, status_code=400)
+
+        cartoon = _apply_avatar_style(img, prompt.lower())
+
+        os.makedirs(PHOTOS_DIR, exist_ok=True)
+        avatar_filename = f"avatar_{user_id}_{uuid.uuid4().hex[:8]}.jpg"
+        avatar_path_full = os.path.join(PHOTOS_DIR, avatar_filename)
+        cv2.imwrite(avatar_path_full, cartoon, [cv2.IMWRITE_JPEG_QUALITY, 90])
+
+        # Don't save to DB yet — return preview URL, frontend will call save-avatar
+        return JSONResponse({"ok": True, "avatar_url": f"/static/photos/{avatar_filename}", "filename": avatar_filename})
+
+    except ImportError:
+        return JSONResponse({"error": "opencv לא מותקן — הפעל מחדש את הקונטיינר"}, status_code=500)
+    except Exception as e:
+        logger.exception("generate_avatar failed")
+        return JSONResponse({"error": f"שגיאה: {str(e)[:80]}"}, status_code=500)
+
+
+@router.post("/users/{user_id}/save-avatar")
+async def save_avatar(
+    user_id: int,
+    filename: str = Form(...),
+    session: AsyncSession = Depends(get_db_session),
+    current_user: User = Depends(get_current_user),
+):
+    """Commit a generated avatar (by filename) as the user's saved avatar."""
+    if not current_user.is_admin and current_user.id != user_id:
+        return JSONResponse({"error": "אין הרשאה"}, status_code=403)
+
+    # Security: only allow filenames in photos dir, no path traversal
+    if "/" in filename or "\\" in filename or ".." in filename:
+        return JSONResponse({"error": "שם קובץ לא חוקי"}, status_code=400)
+    if not filename.startswith(f"avatar_{user_id}_"):
+        return JSONResponse({"error": "קובץ לא שייך למשתמש זה"}, status_code=403)
+
+    user = await session.get(User, user_id)
+    if not user:
+        return JSONResponse({"error": "משתמש לא נמצא"}, status_code=404)
+
+    # Remove old avatar file
+    if user.avatar_path:
+        old = user.avatar_path.lstrip("/")
+        new_path = f"static/photos/{filename}"
+        if os.path.exists(old) and old != new_path:
+            try:
+                os.remove(old)
+            except OSError:
+                pass
+
+    user.avatar_path = f"/static/photos/{filename}"
+    await session.commit()
+    return JSONResponse({"ok": True})
 
 
 # -----------------------------------------------------------------------
@@ -1042,7 +1281,6 @@ async def confirm_decision(
     current_user: User = Depends(get_current_user),
 ):
     """Save a pre-analyzed decision after the user reviews and confirms it, including RACI assignments."""
-    import json as _json
     from app.models import DecisionRaciRole, RaciRoleEnum
 
     decision = Decision(
@@ -1606,7 +1844,7 @@ async def distribute_decision(
                 pass
 
     if not recipients:
-        return RedirectResponse(f"/dashboard/decisions?error=לא+נבחרו+נמענים", status_code=303)
+        return RedirectResponse("/dashboard/decisions?error=לא+נבחרו+נמענים", status_code=303)
 
     submitter = await session.get(User, d.submitter_id)
     bot = telegram_bot.application.bot if telegram_bot.application else None
@@ -1747,7 +1985,6 @@ async def learning_page(
 
     # 8. Phase 4 — pending extraction count + knowledge summaries
     from app.services.lessons_service import get_pending_extraction_count, get_knowledge_summaries
-    from app.models import KnowledgeSummary
     pending_extraction = await get_pending_extraction_count(session)
     raw_summaries = await get_knowledge_summaries(session)
     TYPE_LABELS_FULL = {"info": "מידע", "normal": "רגיל", "critical": "קריטי", "uncertain": "לא ודאי"}

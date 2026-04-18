@@ -1,7 +1,7 @@
 import asyncio
-from sqlalchemy import select, func
+from sqlalchemy import select
 from app.database import async_session_maker
-from app.models import KnowledgeFile, Decision  # ודא שהשמות תואמים ל-models.py שלך
+from app.models import KnowledgeFile  # ודא שהשמות תואמים ל-models.py שלך
 
 async def diagnose_rag():
     print("--- Shan-AI RAG Diagnosis Start ---")

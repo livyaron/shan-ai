@@ -40,7 +40,7 @@ async def reprocess_latest():
     # Check results
     async with async_session_maker() as session:
         kf = await session.get(KnowledgeFile, kf.id)
-        print(f"✅ Re-processing complete!")
+        print("✅ Re-processing complete!")
         print(f"   Status: {kf.status}")
         print(f"   Chunks: {kf.chunk_count}")
         print(f"   Summary: {kf.summary}")

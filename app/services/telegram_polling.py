@@ -10,7 +10,7 @@ from app.database import async_session_maker
 from app.services.telegram_service import TelegramService
 from app.services.decision_service import DecisionService
 from app.services import feedback_service
-from app.models import User, RoleEnum
+from app.models import User
 from sqlalchemy import select
 
 logger = logging.getLogger(__name__)
@@ -49,7 +49,8 @@ def _is_data_question(text: str) -> bool:
 _PROJECT_QUERY_KEYWORDS = (
     "פרויקט", "פרוייקט", "project", "עדכון שבועי", "מנהל פרויקט",
     'מנה"פ', "שלב", "סיכון", "חסם", "לטיפול",
-    "סטטוס", "status", "עדכון",  # Status/update queries like "מה סטטוס X?"
+    "סטטוס", "status", "עדכון",
+    "חשמול", "חישמול", "תאריך יעד", 'תאריך ת"פ', "תכנית פיתוח", "מזהה",
 )
 
 # Count-style questions about projects that must go to project_tools, not knowledge_service
@@ -57,6 +58,9 @@ _PROJECT_COUNT_TRIGGERS = (
     "כמה פרויקט", "כמה פרוייקט", "how many project",
     "מנהל", "מנהלת", "מנהלים", 'מנה"פ', "מי מנהל", "מי אחראי",
 )
+
+
+_DECISION_HISTORY_KEYWORDS = ("החלטה", "החלטות", "ההחלטה", "ההחלטות")
 
 
 _DECISION_VERBS = (
@@ -84,14 +88,11 @@ route:
 
 intent (רק כש-route="project", אחרת "general"):
 - "by_identifier" — שאלה על פרויקט אחד לפי שם/מזהה (param = שם/מזהה)
-- "by_manager"    — פרויקטים של מנהל מסוים (param = "שם משפחה, שם פרטי")
+- "by_manager"    — פרויקטים של מנהל מסוים (param = שם המנהל/ת כפי שנאמר)
 - "count_by_type" — ספירה לפי סוג (param = סוג, או null לכולם)
 - "list_risks"    — פרויקטים עם סיכונים (param = null)
 - "by_year"       — פרויקטים לפי שנת סיום (param = "2026")
 - "general"       — שאלת פרויקט כללית (param = null)
-
-שמות מנהלים — תמיד בפורמט "שם משפחה, שם פרטי":
-"ענת אוברקוביץ" → "אוברקוביץ, ענת" | "רחל כהן" → "כהן, רחל"
 
 דוגמאות:
 "רעות"                                   → {"route":"project","intent":"by_identifier","param":"רעות"}
@@ -100,7 +101,8 @@ intent (רק כש-route="project", אחרת "general"):
 "מה תאריך תכנית הפיתוח של רעות?"        → {"route":"project","intent":"by_identifier","param":"רעות"}
 "מי מנהל את פרויקט רמת חובב?"           → {"route":"project","intent":"by_identifier","param":"רמת חובב"}
 "מה העדכון השבועי של פרויקט X?"         → {"route":"project","intent":"by_identifier","param":"X"}
-"כמה פרויקטים מנהלת ענת אוברקוביץ?"     → {"route":"project","intent":"by_manager","param":"אוברקוביץ, ענת"}
+"כמה פרויקטים מנהלת ענת אוברקוביץ?"     → {"route":"project","intent":"by_manager","param":"ענת אוברקוביץ"}
+"אלו פרויקטים מנהלת רחלי?"               → {"route":"project","intent":"by_manager","param":"רחלי"}
 "אילו פרויקטים מסתיימים ב-2026?"        → {"route":"project","intent":"by_year","param":"2026"}
 "מה הסיכונים בפרויקטים?"                → {"route":"project","intent":"list_risks","param":null}
 "כמה פרויקטי הקמה יש?"                  → {"route":"project","intent":"count_by_type","param":"הקמה"}
@@ -579,7 +581,7 @@ class TelegramPollingBot:
                 async with async_session_maker() as fb_session:
                     await feedback_service.save_feedback_text(fb_session, decision_id, text)
                 await update.message.reply_text(
-                    f"\u200F✅ תודה! הפידבק נשמר ויסייע לשיפור ההחלטות הבאות.",
+                    "\u200F✅ תודה! הפידבק נשמר ויסייע לשיפור ההחלטות הבאות.",
                     parse_mode="HTML",
                 )
                 return
@@ -591,7 +593,7 @@ class TelegramPollingBot:
                     fb_user = await fb_session.scalar(stmt)
                     if fb_user:
                         from sqlalchemy import select as sa_select
-                        from app.models import Decision, DecisionStatusEnum
+                        from app.models import Decision
                         pending_stmt = (
                             sa_select(Decision)
                             .where(Decision.submitter_id == fb_user.id)
@@ -653,19 +655,39 @@ class TelegramPollingBot:
             ai_intent = routing["intent"]
             ai_param = routing["param"]
 
+            # Decision history query — answer from decisions DB
+            if any(kw in text for kw in _DECISION_HISTORY_KEYWORDS):
+                kb = None
+                try:
+                    from app.services.knowledge_service import get_decisions_context, answer_decisions_question
+                    decisions_ctx = await get_decisions_context(session, user.id)
+                    if decisions_ctx:
+                        dec_answer = await answer_decisions_question(text, decisions_ctx)
+                    else:
+                        dec_answer = "לא נמצאו החלטות עבורך במסד הנתונים."
+                    reply = f"\u200F{dec_answer}"
+                except Exception as e:
+                    logger.warning(f"decisions query failed: {e}")
+                    reply = "\u200Fלא הצלחתי לשלוף את ההחלטות."
+                await update.message.reply_text(reply, parse_mode="HTML", reply_markup=kb)
+                return
+
             if ai_route == "project":
+                kb = None
                 try:
                     from app.services.project_tools import answer_project_query
-                    reply_text = await answer_project_query(
+                    reply_text, proj_log_id = await answer_project_query(
                         text, session, context.user_data, user_id=user.id,
                         precomputed_intent=ai_intent, precomputed_param=ai_param,
                     )
-                    reply = f"\u200F📂 <b>נתוני פרויקט:</b>\n\n{reply_text}"
+                    reply = f"\u200F{reply_text}"
+                    if proj_log_id:
+                        kb = _feedback_keyboard(proj_log_id)
                 except Exception as e:
                     logger.warning(f"project_tools failed: {e}")
                     reply = "\u200Fלא הצלחתי למצוא נתוני פרויקט. ודא שהקובץ הראשי הועלה."
                 reply = await _maybe_summarize(reply)
-                await update.message.reply_text(reply, parse_mode="HTML")
+                await update.message.reply_text(reply, parse_mode="HTML", reply_markup=kb)
                 return
 
             if ai_route == "knowledge":
@@ -691,15 +713,18 @@ class TelegramPollingBot:
             # AI routing failed — keyword fallback
             if ai_route is None:
                 if _is_project_query(text):
+                    kb = None
                     try:
                         from app.services.project_tools import answer_project_query
-                        reply_text = await answer_project_query(text, session, context.user_data, user_id=user.id)
-                        reply = f"\u200F📂 <b>נתוני פרויקט:</b>\n\n{reply_text}"
+                        reply_text, proj_log_id = await answer_project_query(text, session, context.user_data, user_id=user.id)
+                        reply = f"\u200F{reply_text}"
+                        if proj_log_id:
+                            kb = _feedback_keyboard(proj_log_id)
                     except Exception as e:
                         logger.warning(f"project_tools failed (keyword fallback): {e}")
                         reply = "\u200Fלא הצלחתי למצוא נתוני פרויקט. ודא שהקובץ הראשי הועלה."
                     reply = await _maybe_summarize(reply)
-                    await update.message.reply_text(reply, parse_mode="HTML")
+                    await update.message.reply_text(reply, parse_mode="HTML", reply_markup=kb)
                     return
                 if _is_data_question(text):
                     kb = None
@@ -884,7 +909,7 @@ class TelegramPollingBot:
                 if action == "dist_reject":
                     _awaiting_dist_rejection[telegram_id] = dist_id
                     await query.edit_message_text(
-                        f"\u200F❌ *דחייה — החלטה*\n\nאנא שלח את סיבת הדחייה בהודעה הבאה.",
+                        "\u200F❌ *דחייה — החלטה*\n\nאנא שלח את סיבת הדחייה בהודעה הבאה.",
                         parse_mode="HTML",
                     )
                     return
@@ -892,6 +917,64 @@ class TelegramPollingBot:
                 dist_action = action.replace("dist_", "")
                 reply = await handle_dist_response(dist_id, dist_action, approver, None, session, self.application.bot)
                 await query.edit_message_text(f"\u200F{reply}", parse_mode="HTML")
+                return
+
+            # --- RACI proposal: approve / edit ---
+            if action in ("raci_approve", "raci_edit"):
+                from app.services.raci_service import _pending_raci_suggestions, save_pregenerated_raci
+
+                if action == "raci_edit":
+                    from app.config import settings as _cfg
+                    url = f"{_cfg.BASE_URL}/dashboard/decisions/{decision_id}"
+                    await query.edit_message_text(
+                        f"\u200F✏️ <b>ערוך RACI בלוח הניהול:</b>\n{url}",
+                        parse_mode="HTML",
+                    )
+                    return
+
+                # raci_approve
+                pending = _pending_raci_suggestions.pop(decision_id, None)
+                if not pending:
+                    await query.edit_message_text("\u200F⚠️ לא נמצאה הצעת RACI פעילה לאישור.")
+                    return
+
+                await save_pregenerated_raci(decision_id, pending["valid_items"], pending["parsed"])
+
+                # For CRITICAL decisions: after RACI is saved, send approval request to accountable
+                if pending.get("is_critical"):
+                    from app.services.raci_service import get_accountable_user_id as _get_acc
+                    from app.database import async_session_maker as _sm
+                    import html as _html2
+                    async with _sm() as _sess:
+                        accountable_id = await _get_acc(decision_id, _sess)
+                        if accountable_id:
+                            acc_user = await _sess.get(User, accountable_id)
+                            dec = await _sess.get(Decision, decision_id)
+                            if acc_user and acc_user.telegram_id and dec:
+                                crit_keyboard = InlineKeyboardMarkup([[
+                                    InlineKeyboardButton("✅ אישור", callback_data=f"approve:{decision_id}"),
+                                    InlineKeyboardButton("❌ דחייה", callback_data=f"reject:{decision_id}"),
+                                ]])
+                                try:
+                                    await context.bot.send_message(
+                                        chat_id=acc_user.telegram_id,
+                                        text=(
+                                            f"\u200F🚨 <b>החלטה קריטית — נדרש אישור</b>\n\n"
+                                            f"<b>החלטה #{decision_id}</b>\n\n"
+                                            f"📋 <b>סיכום:</b> {_html2.escape(dec.summary or '')}\n"
+                                            f"🎯 <b>פעולה מומלצת:</b> {_html2.escape(dec.recommended_action or '')}\n\n"
+                                            f"<b>אנא אשר או דחה החלטה זו:</b>"
+                                        ),
+                                        parse_mode="HTML",
+                                        reply_markup=crit_keyboard,
+                                    )
+                                except Exception as _e:
+                                    logger.warning(f"RACI approve: failed to notify accountable {acc_user.username}: {_e}")
+
+                await query.edit_message_text(
+                    "\u200F✅ <b>RACI אושר ונשמר.</b>\nהצוות יקבל הודעות בהתאם לתפקידיהם.",
+                    parse_mode="HTML",
+                )
                 return
 
             # --- Legacy approve/reject (CRITICAL decision flow) ---

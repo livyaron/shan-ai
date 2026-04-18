@@ -2,8 +2,8 @@
 
 import asyncio
 import logging
-import os
 import re
+import unicodedata
 from pathlib import Path
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, or_
@@ -17,8 +17,6 @@ logger = logging.getLogger(__name__)
 UPLOAD_DIR = Path("uploads")
 
 # ─── Hebrew Normalization ───────────────────────────────────────────────────
-
-import unicodedata
 
 _FINAL_LETTERS = {"ך": "כ", "ם": "מ", "ן": "נ", "ף": "פ", "ץ": "צ"}
 _HEBREW_PREFIXES = frozenset("והבכלמש")
@@ -91,7 +89,6 @@ def _find_context_columns(df) -> tuple[int, int]:
     """Find PROJECT and WBS column indices by keyword matching.
     Returns (project_col_idx, wbs_col_idx) or (None, None) if not found.
     """
-    import pandas as pd
 
     project_col_idx = None
     wbs_col_idx = None
@@ -187,7 +184,7 @@ def extract_text(file_path: str, file_type: str) -> str:
                         df = pd.read_excel(path, sheet_name=sheet_name, engine='openpyxl', header=1)
                     else:
                         df = pd.read_excel(path, sheet_name=sheet_name, engine='openpyxl')
-                except:
+                except Exception:
                     df = pd.read_excel(path, sheet_name=sheet_name, engine='openpyxl')
 
                 # ─── GREEDY ROW PARSER (v2) ───
@@ -651,6 +648,20 @@ async def process_master_file(file_id: int) -> None:
             kf.status = "ready"
             await session.commit()
             logger.info(f"process_master_file {file_id}: {len(all_chunks)} project-block chunks stored")
+
+            # Sync to Projects table so the Projects tab reflects the master file
+            try:
+                from app.services.project_sync import sync_projects_file
+                sync_result = await sync_projects_file(str(path), sheet_name=primary_sheet_name)
+                logger.info(
+                    f"process_master_file {file_id}: project sync complete — "
+                    f"{sync_result['processed']} rows, "
+                    f"{sync_result['created']} created, "
+                    f"{sync_result['updated']} updated, "
+                    f"{len(sync_result['errors'])} errors"
+                )
+            except Exception as sync_err:
+                logger.warning(f"process_master_file {file_id}: project sync failed (non-fatal): {sync_err}")
 
         except Exception as e:
             logger.error(f"process_master_file error file {file_id}: {e}", exc_info=True)
@@ -1266,6 +1277,27 @@ def _format_compact_index(
 # Decisions context for Q&A
 # ---------------------------------------------------------------------------
 
+async def answer_decisions_question(question: str, decisions_ctx: str) -> str:
+    """Answer a question about the user's decisions in plain conversational Hebrew."""
+    from app.services.llm_router import llm_chat
+    system = (
+        "אתה עוזר שעונה על שאלות לגבי החלטות של עובד. "
+        "ענה בעברית בלבד, בשפה טבעית וקולחת — כמו אדם שעונה לעמית. "
+        "אל תוסיף הקדמות, הסברים על המתודולוגיה, כוכביות, או כללים. "
+        "אפשר להשתמש באימוג׳י. "
+        "תשובה קצרה וממוקדת — רק מה שנשאל."
+    )
+    return await llm_chat(
+        "decisions_answer",
+        messages=[
+            {"role": "system", "content": system},
+            {"role": "user", "content": f"נתונים:\n{decisions_ctx}\n\nשאלה: {question}"},
+        ],
+        max_tokens=600,
+        temperature=0.2,
+    )
+
+
 async def get_decisions_context(session: AsyncSession, user_id: int) -> str:
     """Fetch recent decisions submitted by this user and format as Q&A context."""
     from app.models import Decision
@@ -1296,7 +1328,7 @@ async def get_decisions_context(session: AsyncSession, user_id: int) -> str:
 async def _get_master_file_id(session: AsyncSession):
     """Return the id of the current master KnowledgeFile, or None."""
     result = await session.execute(
-        select(KnowledgeFile.id).where(KnowledgeFile.is_master == True).limit(1)
+        select(KnowledgeFile.id).where(KnowledgeFile.is_master).limit(1)
     )
     return result.scalar_one_or_none()
 
@@ -1367,13 +1399,14 @@ async def answer_question(
     try:
         from app.services.llm_router import llm_chat
 
-        # Build the learned-instructions addon (injected at end of system prompt)
+        # Build the learned-instructions addon (appended at END of system prompt with override framing)
         instructions_addon = ""
         if learned_instructions:
             instructions_text = "\n".join(f"- {inst}" for inst in learned_instructions)
             instructions_addon = (
-                "\n\n## הוראות שנלמדו מפידבק קודם (חובה לקיים):\n"
+                "\n\n## ⚠️ הוראות מחייבות (עדיפות עליונה — דורסות את כל הכללים למעלה):\n"
                 + instructions_text
+                + "\nבמקרה של סתירה בין הוראה כאן לכלל פורמט למעלה — ההוראה כאן גוברת.\n"
             )
             logger.info(f"Injecting {len(learned_instructions)} learned instructions into system prompt:")
             for i, inst in enumerate(learned_instructions):
@@ -1405,8 +1438,8 @@ async def answer_question(
                 "\n4. אם הנתון לא קיים בהקשר גם לאחר בדיקת כל שמות השדות האפשריים, כתוב 'הנתון לא נמצא במסד הידע'."
                 '\n5. קיצורים: מנה"פ / פ"מ = מנהל פרויקט, תו"ב = תכנון ובנייה.'
                 f"{format_rules}"
-                f"{instructions_addon}"
                 "\n\nענה בעברית בלבד. תשובה קצרה וממוקדת בלבד."
+                f"{instructions_addon}"
             )
             max_tokens = 400
         else:
@@ -1420,7 +1453,7 @@ async def answer_question(
             ) if full_list else ""
 
             system_prompt = (
-                "אתה מומחה לבקרת פרויקטים הנדסיים של רשות החשמל. "
+                "אתה מומחה לבקרת פרויקטים הנדסיים של חברת החשמל."
                 "קיבלת קטעי נתונים ממסד הידע של הארגון — זוהי רשימת פרויקטים מאסטר. "
                 "\n\n## מדריך שמות שדות — מיפוי בין שמות טכניים בנתונים לשמות בשאלות:"
                 "\n• 'יעד חשמול מסתמן' / 'יעד מסתמן' = תאריך חישמול / תאריך חשמול"
@@ -1443,8 +1476,8 @@ async def answer_question(
                     "מנהל, סטטוס, עדכון, יעד תכנית פיתוח, יעד חשמול מסתמן, תו\"ב, וכל שאר השדות הזמינים."
                     if bare_name else ""
                 )
-                + f"{instructions_addon}"
                 + "\n\nענה בעברית בלבד."
+                + instructions_addon
             )
             max_tokens = 2000
 

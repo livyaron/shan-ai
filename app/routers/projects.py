@@ -11,8 +11,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.database import get_db_session
-from app.models import Project, User
+from app.models import Project, User, KnowledgeFile
 from app.routers.login import get_current_user
+from app.services.project_tools import _compute_delay
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +38,7 @@ async def projects_page(
     """Render projects dashboard page with all active projects."""
     result = await session.execute(
         select(Project)
-        .where(Project.is_active == True)
+        .where(Project.is_active)
         .order_by(Project.name)
     )
     projects_orm = result.scalars().all()
@@ -57,14 +58,31 @@ async def projects_page(
             "dev_plan_date":         p.dev_plan_date.strftime("%d/%m/%Y") if p.dev_plan_date else "",
             "estimated_finish_date": p.estimated_finish_date.strftime("%d/%m/%Y") if p.estimated_finish_date else "",
             "last_updated":          p.last_updated.strftime("%d/%m/%Y %H:%M") if p.last_updated else "",
+            "delay_months":          _compute_delay(p.dev_plan_date, p.estimated_finish_date),
         }
         for p in projects_orm
     ]
+
+    # Fetch the last master file upload time
+    master_result = await session.execute(
+        select(KnowledgeFile)
+        .where(KnowledgeFile.is_master)
+        .order_by(KnowledgeFile.created_at.desc())
+        .limit(1)
+    )
+    master_file = master_result.scalars().first()
+    master_synced_at = (
+        master_file.created_at.strftime("%d/%m/%Y %H:%M")
+        if master_file and master_file.created_at else None
+    )
+    master_file_name = master_file.original_name if master_file else None
 
     return templates.TemplateResponse("projects.html", {
         "request": request,
         "current_user": current_user,
         "projects": projects,
+        "master_synced_at": master_synced_at,
+        "master_file_name": master_file_name,
     })
 
 
@@ -75,7 +93,7 @@ async def projects_data(
 ):
     """JSON endpoint for fetching projects (for future AJAX use)."""
     result = await session.execute(
-        select(Project).where(Project.is_active == True).order_by(Project.name)
+        select(Project).where(Project.is_active).order_by(Project.name)
     )
     projects_orm = result.scalars().all()
 

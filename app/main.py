@@ -1,7 +1,6 @@
 from fastapi import FastAPI
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import RedirectResponse
 from fastapi.requests import Request
-from sqlalchemy.ext.asyncio import AsyncSession
 import logging
 import asyncio
 from app.config import settings
@@ -13,18 +12,17 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
-from app.database import engine, get_db_session
-from app.models import Base
-from app.routers import auth, telegram, dashboard, login
-from app.routers.dashboard import profile_router
-from app.routers import files as files_router
-from app.routers import ask as ask_router
-from app.routers import logs as logs_router
-from app.routers import projects as projects_router
-from app.routers import llm_config as llm_config_router
-from fastapi.templating import Jinja2Templates
-from app.services.telegram_polling import telegram_bot
-from app.services.feedback_service import run_feedback_scheduler
+from app.database import engine  # noqa: E402
+from app.models import Base  # noqa: E402
+from app.routers import auth, telegram, dashboard, login  # noqa: E402
+from app.routers.dashboard import profile_router  # noqa: E402
+from app.routers import files as files_router  # noqa: E402
+from app.routers import ask as ask_router  # noqa: E402
+from app.routers import logs as logs_router  # noqa: E402
+from app.routers import projects as projects_router  # noqa: E402
+from app.routers import llm_config as llm_config_router  # noqa: E402
+from app.services.telegram_polling import telegram_bot  # noqa: E402
+from app.services.feedback_service import run_feedback_scheduler  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -115,6 +113,12 @@ async def startup():
                 ))
                 await conn.execute(_text(
                     "ALTER TABLE query_logs ADD COLUMN IF NOT EXISTS is_fallback BOOLEAN;"
+                ))
+                await conn.execute(_text(
+                    "ALTER TABLE users ADD COLUMN IF NOT EXISTS photo_path VARCHAR(512);"
+                ))
+                await conn.execute(_text(
+                    "ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_path VARCHAR(512);"
                 ))
 
                 # LLM config table

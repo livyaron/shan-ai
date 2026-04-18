@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 """Start the Shan-AI FastAPI server with Telegram bot polling."""
 
-import asyncio
 import sys
 import logging
 

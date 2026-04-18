@@ -18,9 +18,11 @@ _model = None
 def _get_model():
     global _model
     if _model is None:
+        import os
         from fastembed import TextEmbedding
         logger.info(f"טוען מודל embeddings: {MODEL_NAME}")
-        _model = TextEmbedding(MODEL_NAME)
+        cache_dir = os.environ.get("FASTEMBED_CACHE_PATH")
+        _model = TextEmbedding(MODEL_NAME, cache_dir=cache_dir) if cache_dir else TextEmbedding(MODEL_NAME)
         logger.info("מודל embeddings נטען בהצלחה")
     return _model
 

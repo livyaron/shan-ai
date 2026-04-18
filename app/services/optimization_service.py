@@ -413,6 +413,7 @@ async def reorganize_knowledge(session: AsyncSession) -> dict:
     Called automatically after each optimization run that produced changes,
     and exposed manually via POST /api/knowledge/reorganize.
     """
+    import asyncio
     from app.models import QuerySynonym
     from app.services.llm_router import llm_chat
 
@@ -426,27 +427,59 @@ async def reorganize_knowledge(session: AsyncSession) -> dict:
     after_synonyms = before_synonyms
     after_instructions = before_instructions
 
-    # ── Reorganize synonyms ──────────────────────────────────────────────────
-    if synonym_rows:
+    # ── Run both LLM calls in parallel with a hard timeout ───────────────────
+    _TIMEOUT = 45  # seconds per call
+
+    async def _call_synonyms():
+        if not synonym_rows:
+            return None
         synonym_input = [
             {"id": r.id, "original": r.original, "synonyms": r.synonyms}
             for r in synonym_rows
         ]
-        try:
-            raw = await llm_chat(
+        return await asyncio.wait_for(
+            llm_chat(
                 "optimization",
                 messages=[
                     {"role": "system", "content": REORGANIZE_SYNONYMS_PROMPT},
                     {"role": "user", "content": json.dumps(synonym_input, ensure_ascii=False)},
                 ],
                 json_mode=True,
-                max_tokens=3000,
+                max_tokens=2000,
                 temperature=0.1,
-            )
-            data = json.loads(raw) if isinstance(raw, str) else raw
+            ),
+            timeout=_TIMEOUT,
+        )
+
+    async def _call_instructions():
+        if not instructions:
+            return None
+        return await asyncio.wait_for(
+            llm_chat(
+                "optimization",
+                messages=[
+                    {"role": "system", "content": REORGANIZE_INSTRUCTIONS_PROMPT},
+                    {"role": "user", "content": json.dumps(instructions, ensure_ascii=False)},
+                ],
+                json_mode=True,
+                max_tokens=1500,
+                temperature=0.1,
+            ),
+            timeout=_TIMEOUT,
+        )
+
+    syn_raw, inst_raw = await asyncio.gather(
+        _call_synonyms(),
+        _call_instructions(),
+        return_exceptions=True,
+    )
+
+    # ── Apply synonym results ────────────────────────────────────────────────
+    if synonym_rows and not isinstance(syn_raw, BaseException) and syn_raw is not None:
+        try:
+            data = json.loads(syn_raw) if isinstance(syn_raw, str) else syn_raw
             new_synonyms = data.get("synonyms", [])
 
-            # Replace all synonym rows with the reorganized set
             for row in synonym_rows:
                 await session.delete(row)
             await session.flush()
@@ -461,22 +494,14 @@ async def reorganize_knowledge(session: AsyncSession) -> dict:
             logger.info(f"Reorganize synonyms: {before_synonyms} → {after_synonyms} entries")
         except Exception as e:
             logger.error(f"Synonym reorganization failed: {e}", exc_info=True)
+    elif isinstance(syn_raw, BaseException):
+        logger.error(f"Synonym LLM call failed/timed out: {syn_raw}")
 
-    # ── Reorganize instructions ──────────────────────────────────────────────
-    if instructions:
+    # ── Apply instructions results ────────────────────────────────────────────
+    if instructions and not isinstance(inst_raw, BaseException) and inst_raw is not None:
         try:
-            raw = await llm_chat(
-                "optimization",
-                messages=[
-                    {"role": "system", "content": REORGANIZE_INSTRUCTIONS_PROMPT},
-                    {"role": "user", "content": json.dumps(instructions, ensure_ascii=False)},
-                ],
-                json_mode=True,
-                max_tokens=2000,
-                temperature=0.1,
-            )
-            data = json.loads(raw) if isinstance(raw, str) else raw
-            new_instructions = data.get("instructions", instructions)  # fallback: keep original
+            data = json.loads(inst_raw) if isinstance(inst_raw, str) else inst_raw
+            new_instructions = data.get("instructions", instructions)
 
             if global_instr_row:
                 global_instr_row.synonyms = new_instructions
@@ -484,6 +509,8 @@ async def reorganize_knowledge(session: AsyncSession) -> dict:
             logger.info(f"Reorganize instructions: {before_instructions} → {after_instructions} entries")
         except Exception as e:
             logger.error(f"Instructions reorganization failed: {e}", exc_info=True)
+    elif isinstance(inst_raw, BaseException):
+        logger.error(f"Instructions LLM call failed/timed out: {inst_raw}")
 
     await session.commit()
 

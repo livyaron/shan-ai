@@ -1,7 +1,6 @@
 """Google AI Studio (Gemma 4) client — mirrors groq_chat signature."""
 
 import asyncio
-import json
 import logging
 import re
 
@@ -46,6 +45,30 @@ def _strip_json_fences(text: str) -> str:
     return text.strip()
 
 
+def _strip_thinking(text: str) -> str:
+    """Strip Gemma chain-of-thought preamble from non-JSON responses.
+
+    Gemma sometimes emits internal reasoning lines (English meta-commentary,
+    lines starting with '* ', 'Keep it', 'Since these', etc.) before the
+    actual Hebrew answer.  We detect a Hebrew answer block and return only that.
+    """
+    # If the text is mostly Hebrew (>30% Hebrew chars) from the start — no stripping needed
+    hebrew_chars = sum(1 for c in text[:200] if "\u05d0" <= c <= "\u05ea")
+    if hebrew_chars / max(len(text[:200]), 1) > 0.3:
+        return text
+
+    # Find first line that starts with a Hebrew character or Hebrew bullet (•/-)
+    lines = text.splitlines()
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped and ("\u05d0" <= stripped[0] <= "\u05ea" or
+                         (len(stripped) > 1 and stripped[0] in ("•", "-", "*") and
+                          "\u05d0" <= stripped[1:].lstrip()[0:1].ljust(1)[0] <= "\u05ea")):
+            return "\n".join(lines[i:]).strip()
+
+    return text  # nothing to strip — return as-is
+
+
 async def gemma_chat(
     messages: list,
     max_tokens: int = 1024,
@@ -85,9 +108,13 @@ async def gemma_chat(
                 resp = await client.post(url, json=payload)
                 resp.raise_for_status()
                 data = resp.json()
-                text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
+                parts = data["candidates"][0]["content"]["parts"]
+                text_parts = [p["text"] for p in parts if not p.get("thought") and "text" in p]
+                text = " ".join(text_parts).strip()
                 if json_mode:
                     text = _strip_json_fences(text)
+                else:
+                    text = _strip_thinking(text)
                 if not text:
                     raise ValueError(f"gemma_chat: empty response from {model} (json_mode={json_mode})")
                 if i > 0:

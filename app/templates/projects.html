@@ -653,12 +653,23 @@
 <!-- ── Page body ── -->
 <div class="container-fluid py-4 px-4">
 
-    <div class="d-flex justify-content-between align-items-center mb-4" style="flex-wrap: wrap; gap: 1rem;">
+    <div class="d-flex justify-content-between align-items-center mb-3" style="flex-wrap: wrap; gap: 1rem;">
         <h4 class="section-title mb-0">📂 ניהול פרויקטים</h4>
         <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#uploadModal">
             ⬆ סנכרן קובץ ראשי
         </button>
     </div>
+
+    {% if master_synced_at %}
+    <div class="mb-4 px-1" style="font-size:0.87rem; color:#64748b; display:flex; align-items:center; gap:0.5rem;">
+        <span style="color:#00d4ff; font-size:0.8rem;">●</span>
+        סנכרון אחרון:
+        <strong style="color:#8b9cf4;">{{ master_synced_at }}</strong>
+        {% if master_file_name %}
+        <span style="color:#475569;">— {{ master_file_name }}</span>
+        {% endif %}
+    </div>
+    {% endif %}
 
     <!-- ── ENHANCED FILTER ROW ── -->
     <div class="card p-4 mb-4" style="background: rgba(12,18,32,0.5); border: 1px solid rgba(139,156,244,0.2);">
@@ -706,6 +717,7 @@
                         <th>לטיפול</th>
                         <th>תאריך תכנית</th>
                         <th>תאריך סיום</th>
+                        <th>עיכוב / מרווח</th>
                         <th>עודכן</th>
                     </tr>
                 </thead>
@@ -735,6 +747,15 @@
                         <td>{{ p.to_handle }}</td>
                         <td>{{ p.dev_plan_date }}</td>
                         <td>{{ p.estimated_finish_date }}</td>
+                        <td>
+                            {% if p.delay_months is not none %}
+                                {% if p.delay_months < 0 %}
+                                    <span class="badge bg-danger">⚠️ מאחר {{ p.delay_months | abs }} ח'</span>
+                                {% else %}
+                                    <span class="badge bg-success">✅ מרווח {{ p.delay_months }} ח'</span>
+                                {% endif %}
+                            {% else %}—{% endif %}
+                        </td>
                         <td><span class="small text-muted">{{ p.last_updated }}</span></td>
                     </tr>
                     {% endfor %}
@@ -832,7 +853,12 @@ $(document).ready(function () {
             const project = JSON.parse(projectJson);
 
             // Build HTML for modal body with all fields
-            const modalBody = `
+            const delayBadge = project.delay_months != null
+                ? (project.delay_months < 0
+                    ? `<div class="mb-3"><span class="badge bg-danger fs-6">⚠️ הפרויקט מאחר ב-${Math.abs(project.delay_months)} חודשים</span></div>`
+                    : `<div class="mb-3"><span class="badge bg-success fs-6">✅ יש ${project.delay_months} חודשי מרווח</span></div>`)
+                : '';
+            const modalBody = `${delayBadge}
                 <div class="project-detail-row">
                     <div class="project-detail-field">
                         <span class="project-detail-label">זיהוי פרויקט</span>

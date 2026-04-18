@@ -488,7 +488,7 @@ function appendAIMsg(answer, hasFiles, hasDecisions, fileNames, sourcesText, log
 
     div.innerHTML = `
         <div class="ai-label">SHAN-AI</div>
-        <div>${escapeHtml(answer).replace(/\n/g, '<br>')}</div>
+        <div>${answer.replace(/\n{2,}/g, '<br>').replace(/\n/g, '<br>')}</div>
         ${sources ? '<div class="mt-2">' + sources + '</div>' : ''}
         ${feedbackHtml}
     `;

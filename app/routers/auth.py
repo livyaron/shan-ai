@@ -11,7 +11,6 @@ from app.schemas import (
     UserResponse,
     RoleAssignmentRequest,
     RoleAssignmentResponse,
-    RoleEnum,
 )
 
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])

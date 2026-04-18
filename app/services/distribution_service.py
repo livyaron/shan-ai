@@ -7,10 +7,7 @@ from datetime import datetime
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application
-from groq import AsyncGroq
 
-from app.config import settings
 from app.models import (
     User, Decision, DecisionDistribution,
     DecisionTypeEnum, DistributionTypeEnum, DistributionStatusEnum, DecisionStatusEnum
@@ -216,19 +213,29 @@ def _rule_based_suggestion(decision: Decision, submitter: User, all_users: dict)
 
     dtype = decision.type
     if dtype == DecisionTypeEnum.INFO:
-        if manager_id: add(manager_id, "info")
-        for p in peers: add(p, "info")
+        if manager_id:
+            add(manager_id, "info")
+        for p in peers:
+            add(p, "info")
     elif dtype == DecisionTypeEnum.NORMAL:
-        if manager_id: add(manager_id, "info")
-        for r in reports: add(r, "execution")
-        for p in peers: add(p, "info")
+        if manager_id:
+            add(manager_id, "info")
+        for r in reports:
+            add(r, "execution")
+        for p in peers:
+            add(p, "info")
     elif dtype == DecisionTypeEnum.CRITICAL:
-        if manager_id: add(manager_id, "approval")
-        if manager_manager_id: add(manager_manager_id, "info")
-        for p in peers: add(p, "info")
+        if manager_id:
+            add(manager_id, "approval")
+        if manager_manager_id:
+            add(manager_manager_id, "info")
+        for p in peers:
+            add(p, "info")
     elif dtype == DecisionTypeEnum.UNCERTAIN:
-        if manager_id: add(manager_id, "approval")
-        if manager_manager_id: add(manager_manager_id, "info")
+        if manager_id:
+            add(manager_id, "approval")
+        if manager_manager_id:
+            add(manager_manager_id, "info")
 
     return [
         {"user_id": uid, "username": all_users[uid].username,

@@ -1,7 +1,7 @@
  # Shan-AI Root Controller
 
 ## 1. Project Identity & Context
-- **Project:** Shan-AI (ï¿½ï¿½"ï¿½ - ï¿½ï¿½ï¿½ï¿½ï¿½, ï¿½ï¿½ï¿½ï¿½ï¿½, ï¿½ï¿½ï¿½ï¿½ï¿½).
+- **Project:** Shan-AI (ùð"ì - ùéúåó, ðñéåï, ìîéãä).
 - **Domain:** Decision intelligence for electrical substation infrastructure.
 - **Tech Stack:** FastAPI, Telegram (Polling), Groq (Llama-3.3-70b), PostgreSQL + pgvector.
 - **Reference:** For detailed service maps and schemas, see `@docs/architecture.md`.
@@ -30,7 +30,7 @@
 
 ## 5. Development Standards (Hebrew & Logic)
 - **Hebrew RTL:** Prefix ALL bot messages with `\u200F` (RTL Mark).
-- **JSON Safety:** Replace straight quotes `"` with Hebrew gershayim `ï¿½` in user inputs before Groq processing.
+- **JSON Safety:** Replace straight quotes `"` with Hebrew gershayim `Ø` in user inputs before Groq processing.
 - **Type Safety:** Strict Pydantic v2 schemas and mandatory Python Type Hinting.
 - **Vector Specs:** pgvector size is 384 (FastEmbed default).
 

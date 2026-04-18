@@ -1,5 +1,6 @@
 """Telegram webhook endpoint."""
 
+import asyncio
 import logging
 from fastapi import APIRouter, Request, Response, HTTPException
 
@@ -31,9 +32,13 @@ async def telegram_webhook(request: Request):
     try:
         data = await request.json()
         update = Update.de_json(data, telegram_bot.application.bot)
-        await telegram_bot.application.process_update(update)
-        return Response(status_code=200)
+        # Process in background so Telegram gets 200 immediately.
+        # Awaiting process_update delays the response; if LLM calls exceed
+        # Telegram's ~30s timeout, Telegram retries the same update — causing
+        # the bot to reply multiple times for a single message.
+        asyncio.create_task(telegram_bot.application.process_update(update))
     except Exception as e:
         logger.error(f"Webhook processing error: {e}", exc_info=True)
-        # Return 200 anyway so Telegram does not retry the failed update
-        return Response(status_code=200)
+
+    # Always return 200 immediately so Telegram never retries this update.
+    return Response(status_code=200)

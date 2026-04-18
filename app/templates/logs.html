@@ -415,7 +415,10 @@
             <div class="modal-body" style="padding:1.5rem; font-size:0.9rem;">
                 <!-- Synonyms section -->
                 <div style="margin-bottom:2rem;">
-                    <h6 style="color:#8b9cf4; margin-bottom:1rem; font-weight:bold;">🔤 מילים נרדפות פעילות</h6>
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem;">
+                        <h6 style="color:#8b9cf4; font-weight:bold; margin:0;">🔤 מילים נרדפות פעילות</h6>
+                        <button class="btn btn-sm" style="background:#8b9cf422; color:#8b9cf4; border:1px solid #8b9cf4; font-size:0.85rem;" onclick="showAddSynonym()">+ הוסף</button>
+                    </div>
                     <div id="synonymsContainer" style="max-height:250px; overflow-y:auto; border:1px solid rgba(139,156,244,0.2); border-radius:4px; padding:1rem; background:rgba(139,156,244,0.05);">
                         <div style="text-align:center; color:#a8b8d8;">⏳ טוען...</div>
                     </div>
@@ -423,7 +426,10 @@
 
                 <!-- Instructions section -->
                 <div>
-                    <h6 style="color:#28a745; margin-bottom:1rem; font-weight:bold;">💡 הוראות שנלמדו</h6>
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem;">
+                        <h6 style="color:#28a745; font-weight:bold; margin:0;">💡 הוראות שנלמדו</h6>
+                        <button class="btn btn-sm" style="background:#28a74522; color:#28a745; border:1px solid #28a745; font-size:0.85rem;" onclick="showAddInstruction()">+ הוסף</button>
+                    </div>
                     <div id="instructionsContainer" style="max-height:250px; overflow-y:auto; border:1px solid rgba(40,167,69,0.2); border-radius:4px; padding:1rem; background:rgba(40,167,69,0.05);">
                         <div style="text-align:center; color:#a8b8d8;">⏳ טוען...</div>
                     </div>
@@ -598,15 +604,18 @@ async function openInspector(skipShow = false) {
         // Render synonyms
         const synHtml = data.synonyms.length > 0
             ? data.synonyms.map(syn => `
-                <div style="margin-bottom:1rem; padding:0.8rem; background:rgba(139,156,244,0.1); border-radius:4px; border-left:3px solid #8b9cf4;">
+                <div id="syn-row-${syn.id}" style="margin-bottom:1rem; padding:0.8rem; background:rgba(139,156,244,0.1); border-radius:4px; border-left:3px solid #8b9cf4;">
                     <div style="display:flex; justify-content:space-between; align-items:start;">
-                        <div>
+                        <div style="flex:1;">
                             <strong style="color:#8b9cf4;">${escapeHtml(syn.original)}</strong>
                             <div style="color:#a8b8d8; font-size:0.85rem; margin-top:0.3rem;">
-                                ${syn.synonyms.join(', ')}
+                                ${syn.synonyms.map(s => escapeHtml(s)).join(', ')}
                             </div>
                         </div>
-                        <button class="btn btn-sm btn-outline-danger" onclick="deleteEntry(${syn.id}, 'synonym')">🗑️</button>
+                        <div style="display:flex; gap:4px; flex-shrink:0;">
+                            <button class="btn btn-sm btn-outline-info" style="font-size:0.75rem;" onclick="editSynonym(${syn.id}, '${escapeHtml(syn.original).replace(/'/g,"\\'")}', ${JSON.stringify(syn.synonyms)})">✏️</button>
+                            <button class="btn btn-sm btn-outline-danger" style="font-size:0.75rem;" onclick="deleteEntry(${syn.id}, 'synonym')">🗑️</button>
+                        </div>
                     </div>
                 </div>
             `).join('')
@@ -616,12 +625,15 @@ async function openInspector(skipShow = false) {
         // Render instructions
         const instHtml = data.instructions.length > 0
             ? data.instructions.map(inst => `
-                <div style="margin-bottom:1rem; padding:0.8rem; background:rgba(40,167,69,0.1); border-radius:4px; border-left:3px solid #28a745;">
+                <div id="inst-row-${inst.index}" style="margin-bottom:1rem; padding:0.8rem; background:rgba(40,167,69,0.1); border-radius:4px; border-left:3px solid #28a745;">
                     <div style="display:flex; justify-content:space-between; align-items:start;">
                         <div style="flex:1; color:#a8b8d8; line-height:1.5;">
                             ${inst.index + 1}. ${escapeHtml(inst.text)}
                         </div>
-                        <button class="btn btn-sm btn-outline-danger" onclick="deleteInstruction(${inst.index})" style="margin-right:0.5rem;">🗑️</button>
+                        <div style="display:flex; gap:4px; flex-shrink:0;">
+                            <button class="btn btn-sm btn-outline-info" style="font-size:0.75rem;" onclick="editInstruction(${inst.index}, '${escapeHtml(inst.text).replace(/'/g,"\\'")}')">✏️</button>
+                            <button class="btn btn-sm btn-outline-danger" style="font-size:0.75rem;" onclick="deleteInstruction(${inst.index})">🗑️</button>
+                        </div>
                     </div>
                 </div>
             `).join('')
@@ -668,6 +680,134 @@ async function deleteInstruction(index) {
     }
 }
 
+// ── Synonym edit / add ──────────────────────────────────────────────────────
+
+function editSynonym(id, original, synonymsArr) {
+    const row = document.getElementById(`syn-row-${id}`);
+    row.innerHTML = `
+        <div style="display:flex; flex-direction:column; gap:6px;">
+            <input id="edit-syn-orig-${id}" class="form-control form-control-sm"
+                   style="background:#1a1d2e; color:#e0e4ff; border-color:#8b9cf4;"
+                   placeholder="מילה ראשית" value="${escapeHtml(original)}">
+            <input id="edit-syn-list-${id}" class="form-control form-control-sm"
+                   style="background:#1a1d2e; color:#e0e4ff; border-color:#8b9cf4;"
+                   placeholder="מילים נרדפות (מופרדות בפסיק)" value="${synonymsArr.map(s=>escapeHtml(s)).join(', ')}">
+            <div style="display:flex; gap:6px; justify-content:flex-end;">
+                <button class="btn btn-sm btn-success" onclick="saveSynonym(${id})">💾 שמור</button>
+                <button class="btn btn-sm btn-secondary" onclick="openInspector(true)">ביטול</button>
+            </div>
+        </div>`;
+}
+
+async function saveSynonym(id) {
+    const original = document.getElementById(`edit-syn-orig-${id}`).value.trim();
+    const synonymsRaw = document.getElementById(`edit-syn-list-${id}`).value;
+    const synonyms = synonymsRaw.split(',').map(s => s.trim()).filter(Boolean);
+    if (!original) { alert('חסרה מילה ראשית'); return; }
+    const resp = await fetch(`/api/knowledge/entry/${id}`, {
+        method: 'PUT',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({original, synonyms}),
+    });
+    if (resp.ok) { await openInspector(true); } else { alert('שגיאה בשמירה'); }
+}
+
+function showAddSynonym() {
+    const container = document.getElementById('synonymsContainer');
+    const formId = 'add-syn-form';
+    if (document.getElementById(formId)) return;
+    const div = document.createElement('div');
+    div.id = formId;
+    div.style.cssText = 'margin-bottom:1rem; padding:0.8rem; background:rgba(139,156,244,0.15); border-radius:4px; border:1px dashed #8b9cf4;';
+    div.innerHTML = `
+        <div style="display:flex; flex-direction:column; gap:6px;">
+            <input id="new-syn-orig" class="form-control form-control-sm"
+                   style="background:#1a1d2e; color:#e0e4ff; border-color:#8b9cf4;"
+                   placeholder="מילה ראשית (למשל: ממ&quot;ג)">
+            <input id="new-syn-list" class="form-control form-control-sm"
+                   style="background:#1a1d2e; color:#e0e4ff; border-color:#8b9cf4;"
+                   placeholder="מילים נרדפות מופרדות בפסיק (למשל: מרכז מיחשוב, מחשוב)">
+            <div style="display:flex; gap:6px; justify-content:flex-end;">
+                <button class="btn btn-sm btn-success" onclick="submitAddSynonym()">💾 הוסף</button>
+                <button class="btn btn-sm btn-secondary" onclick="document.getElementById('add-syn-form').remove()">ביטול</button>
+            </div>
+        </div>`;
+    container.prepend(div);
+    document.getElementById('new-syn-orig').focus();
+}
+
+async function submitAddSynonym() {
+    const original = document.getElementById('new-syn-orig').value.trim();
+    const synonymsRaw = document.getElementById('new-syn-list').value;
+    const synonyms = synonymsRaw.split(',').map(s => s.trim()).filter(Boolean);
+    if (!original) { alert('חסרה מילה ראשית'); return; }
+    const resp = await fetch('/api/knowledge/entry', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({original, synonyms}),
+    });
+    if (resp.ok) { await openInspector(true); } else { alert('שגיאה בהוספה'); }
+}
+
+// ── Instruction edit / add ───────────────────────────────────────────────────
+
+function editInstruction(index, text) {
+    const row = document.getElementById(`inst-row-${index}`);
+    row.innerHTML = `
+        <div style="display:flex; flex-direction:column; gap:6px;">
+            <textarea id="edit-inst-${index}" class="form-control form-control-sm"
+                      style="background:#1a1d2e; color:#e0e4ff; border-color:#28a745; min-height:70px;"
+                      dir="rtl">${escapeHtml(text)}</textarea>
+            <div style="display:flex; gap:6px; justify-content:flex-end;">
+                <button class="btn btn-sm btn-success" onclick="saveInstruction(${index})">💾 שמור</button>
+                <button class="btn btn-sm btn-secondary" onclick="openInspector(true)">ביטול</button>
+            </div>
+        </div>`;
+}
+
+async function saveInstruction(index) {
+    const text = document.getElementById(`edit-inst-${index}`).value.trim();
+    if (!text) { alert('הוראה ריקה'); return; }
+    const resp = await fetch(`/api/knowledge/instruction/${index}`, {
+        method: 'PUT',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({text}),
+    });
+    if (resp.ok) { await openInspector(true); } else { alert('שגיאה בשמירה'); }
+}
+
+function showAddInstruction() {
+    const container = document.getElementById('instructionsContainer');
+    const formId = 'add-inst-form';
+    if (document.getElementById(formId)) return;
+    const div = document.createElement('div');
+    div.id = formId;
+    div.style.cssText = 'margin-bottom:1rem; padding:0.8rem; background:rgba(40,167,69,0.15); border-radius:4px; border:1px dashed #28a745;';
+    div.innerHTML = `
+        <div style="display:flex; flex-direction:column; gap:6px;">
+            <textarea id="new-inst-text" class="form-control form-control-sm"
+                      style="background:#1a1d2e; color:#e0e4ff; border-color:#28a745; min-height:70px;"
+                      dir="rtl" placeholder="כתוב הוראה חדשה לבוט..."></textarea>
+            <div style="display:flex; gap:6px; justify-content:flex-end;">
+                <button class="btn btn-sm btn-success" onclick="submitAddInstruction()">💾 הוסף</button>
+                <button class="btn btn-sm btn-secondary" onclick="document.getElementById('add-inst-form').remove()">ביטול</button>
+            </div>
+        </div>`;
+    container.prepend(div);
+    document.getElementById('new-inst-text').focus();
+}
+
+async function submitAddInstruction() {
+    const text = document.getElementById('new-inst-text').value.trim();
+    if (!text) { alert('הוראה ריקה'); return; }
+    const resp = await fetch('/api/knowledge/instruction', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({text}),
+    });
+    if (resp.ok) { await openInspector(true); } else { alert('שגיאה בהוספה'); }
+}
+
 async function reorganizeKnowledge() {
     const btn = document.getElementById('reorgBtn');
     const origText = btn.textContent;
@@ -679,7 +819,10 @@ async function reorganizeKnowledge() {
     document.getElementById('instructionsContainer').innerHTML = '<div style="text-align:center; color:#a8b8d8;">⏳ AI מנתח ומארגן מחדש...</div>';
 
     try {
-        const resp = await fetch('/api/knowledge/reorganize', { method: 'POST' });
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 60000); // 60s client timeout
+        const resp = await fetch('/api/knowledge/reorganize', { method: 'POST', signal: controller.signal });
+        clearTimeout(timeoutId);
         const data = await resp.json();
 
         if (!resp.ok) {
@@ -705,7 +848,11 @@ async function reorganizeKnowledge() {
             btn.textContent = origText;
         }, 1500);
     } catch (e) {
-        alert('שגיאה בארגון מחדש');
+        if (e.name === 'AbortError') {
+            alert('הארגון לוקח יותר מדי זמן — נסה שוב');
+        } else {
+            alert('שגיאה בארגון מחדש');
+        }
         console.error(e);
         btn.disabled = false;
         btn.textContent = origText;

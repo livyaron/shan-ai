@@ -1,6 +1,5 @@
 """Files router — knowledge base file management."""
 
-import os
 import uuid
 from pathlib import Path
 from fastapi import APIRouter, Depends, Request, UploadFile, File, Form, BackgroundTasks, HTTPException
@@ -76,7 +75,7 @@ async def upload_file(
     ext = _ext(file.filename or "")
     if ext not in ALLOWED_EXTENSIONS:
         return RedirectResponse(
-            f"/dashboard/files?error=סוג+קובץ+לא+נתמך.+מותר:+PDF,+DOCX,+XLSX",
+            "/dashboard/files?error=סוג+קובץ+לא+נתמך.+מותר:+PDF,+DOCX,+XLSX",
             status_code=303,
         )
 
@@ -111,14 +110,14 @@ async def upload_file(
         from app.services.knowledge_service import process_master_file
         background_tasks.add_task(process_master_file, kf.id)
         return RedirectResponse(
-            f"/dashboard/files?msg=קובץ+המאסטר+הועלה+ומעובד+בעיבוד+מיוחד.+יופיע+כ%22מוכן%22+בעוד+מספר+שניות.",
+            "/dashboard/files?msg=קובץ+המאסטר+הועלה+ומעובד+בעיבוד+מיוחד.+יופיע+כ%22מוכן%22+בעוד+מספר+שניות.",
             status_code=303,
         )
     else:
         from app.services.knowledge_service import process_file
         background_tasks.add_task(process_file, kf.id)
         return RedirectResponse(
-            f"/dashboard/files?msg=הקובץ+הועלה+ומעובד.+יופיע+כ%22מוכן%22+בעוד+מספר+שניות.",
+            "/dashboard/files?msg=הקובץ+הועלה+ומעובד.+יופיע+כ%22מוכן%22+בעוד+מספר+שניות.",
             status_code=303,
         )
 

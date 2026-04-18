@@ -5,7 +5,6 @@ import logging
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 
-from app.config import settings
 from app.models import User, Decision, DecisionRaciRole, RaciRoleEnum, DecisionStatusEnum
 
 logger = logging.getLogger(__name__)
@@ -85,7 +84,7 @@ async def get_ai_raci_suggestions_from_text(problem_text: str) -> list[dict]:
                 start = raw.find("{")
                 end = raw.rfind("}") + 1
                 if start == -1 or end == 0:
-                    logger.warning(f"get_ai_raci_suggestions_from_text: no JSON in response")
+                    logger.warning("get_ai_raci_suggestions_from_text: no JSON in response")
                     return []
                 parsed = json.loads(raw[start:end])
 
@@ -149,7 +148,7 @@ async def assign_raci_from_ai(decision_id: int) -> None:
             all_users_q = await session.execute(select(User))
             all_users: dict[int, User] = {u.id: u for u in all_users_q.scalars().all()}
             if not all_users:
-                logger.warning(f"assign_raci_from_ai: no users found, skipping")
+                logger.warning("assign_raci_from_ai: no users found, skipping")
                 return
 
             # 3. Build user roster for prompt — includes responsibilities for smarter RACI
@@ -290,7 +289,7 @@ async def assign_raci_from_ai(decision_id: int) -> None:
 
             elif a_count == 0:
                 # No Accountable role: assign to submitter or their manager
-                logger.warning(f"assign_raci_from_ai: no A role found, assigning to submitter or their manager")
+                logger.warning("assign_raci_from_ai: no A role found, assigning to submitter or their manager")
 
                 submitter = all_users.get(decision.submitter_id)
                 a_user_id = decision.submitter_id
@@ -512,6 +511,293 @@ async def notify_changed_raci_users(
         )
     except Exception as e:
         logger.warning(f"notify_changed_raci_users: error for decision {decision_id}: {e}", exc_info=True)
+
+
+# ---------------------------------------------------------------------------
+# Propose → Confirm flow (Telegram inline approval before committing RACI)
+# ---------------------------------------------------------------------------
+
+# keyed by decision_id
+_pending_raci_suggestions: dict[int, dict] = {}
+# value schema: {
+#   "valid_items": list[dict],   # [{user_id, role}]
+#   "user_names": dict[int,str], # for display in proposal message
+#   "parsed": dict,              # full LLM response (incl. responsibility_updates)
+#   "submitter_telegram_id": int,
+#   "is_critical": bool,
+# }
+
+
+async def generate_raci_for_decision(decision_id: int) -> tuple[list[dict], dict[int, str], dict]:
+    """
+    Generate RACI suggestions for a decision WITHOUT saving to DB.
+    Returns (valid_items, user_names_by_id, parsed_llm_response).
+    Returns ([], {}, {}) on any failure.
+    """
+    from app.database import async_session_maker
+
+    try:
+        async with async_session_maker() as session:
+            decision = await session.get(Decision, decision_id)
+            if not decision:
+                logger.warning(f"generate_raci_for_decision: decision {decision_id} not found")
+                return [], {}, {}
+
+            all_users_q = await session.execute(select(User))
+            all_users: dict[int, User] = {u.id: u for u in all_users_q.scalars().all()}
+            if not all_users:
+                return [], {}, {}
+
+            users_desc = []
+            for u in all_users.values():
+                role_he = ROLE_HE.get(u.role.value, u.role.value) if u.role else "—"
+                manager = all_users.get(u.manager_id)
+                manager_str = f", מנהל: {manager.username}" if manager else ""
+                hierarchy = f", רמה {u.hierarchy_level}" if u.hierarchy_level else ""
+                resp_str = f", תחום: {u.responsibilities}" if u.responsibilities else ""
+                users_desc.append(
+                    f"- ID={u.id} | {u.username} | {u.job_title or role_he}{hierarchy}{manager_str}{resp_str}"
+                )
+
+            submitter = all_users.get(decision.submitter_id)
+            submitter_str = f"{submitter.username} | {submitter.job_title or ''}" if submitter else "—"
+            type_he = {
+                "info": "מידע", "normal": "רגיל",
+                "critical": "קריטי", "uncertain": "לא ודאי"
+            }.get(decision.type.value, decision.type.value)
+
+            raci_patterns = ""
+            try:
+                from app.services.lessons_service import get_raci_patterns
+                raci_patterns = await get_raci_patterns(decision.type.value, session)
+            except Exception:
+                pass
+
+            prompt = f"""אתה מומחה לניהול RACI בארגונים.
+
+הגדרות תפקידים:
+- R (Responsible) = האחראי לביצוע ההחלטה
+- A (Accountable) = בעל הסמכות הסופית — חייב להיות אחד בלבד, ורצוי מנהל בכיר
+- C (Consulted) = מייעץ — צריך להישאל לפני ביצוע
+- I (Informed) = מקבל עדכון בלבד לאחר הביצוע
+
+מגיש: {submitter_str}
+סוג החלטה: {type_he}
+סיכום: {decision.summary or '—'}
+פעולה מומלצת: {decision.recommended_action or '—'}
+
+משתמשים זמינים:
+{chr(10).join(users_desc)}
+
+{raci_patterns}
+
+הנחיות RACI:
+1. בחר Accountable מהדרגים הגבוהים — מנהל אגף או סגן מנהל אגף
+2. בחר Responsible מהמבצעים הישירים
+3. הגבל Consulted ל-3 לכל היותר
+4. הוסף Informed לכל מי שצריך לדעת אבל לא לפעול
+5. לכל משתמש תפקיד אחד בלבד
+6. אם יש דפוסי RACI מוצלחים מהעבר — בכר אותם
+
+הנחיות responsibility_updates:
+- אם הסיבה לבחירת משתמש מצביעה על תחום אחריות שאינו רשום — הוסף אותו.
+- כתוב ביטויים קצרים (2-5 מילים), בעברית.
+- אל תחזור על מה שכבר רשום.
+- אם אין מה להוסיף — השאר רשימה ריקה.
+
+החזר JSON בלבד:
+{{
+  "raci_distribution": [{{"user_id": מספר, "role": "R|A|C|I", "reason": "סיבה קצרה"}}],
+  "responsibility_updates": [{{"user_id": מספר, "learned": "תחום חדש שנלמד"}}]
+}}"""
+
+            from app.services.llm_router import llm_chat
+            raw = await llm_chat(
+                "raci_assignment",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.1,
+                json_mode=True,
+            )
+
+            try:
+                parsed = json.loads(raw)
+            except json.JSONDecodeError:
+                start = raw.find("{")
+                end = raw.rfind("}") + 1
+                if start == -1 or end == 0:
+                    logger.warning("generate_raci_for_decision: no JSON in response")
+                    return [], {}, {}
+                parsed = json.loads(raw[start:end])
+
+            raci_list = parsed.get("raci_distribution", [])
+            valid_roles = {e.value for e in RaciRoleEnum}
+            seen_users: set[int] = set()
+            valid_items = []
+            for item in raci_list:
+                try:
+                    uid = int(item["user_id"])
+                    role = str(item.get("role", "")).strip().upper()
+                except (KeyError, TypeError, ValueError):
+                    continue
+                if uid not in all_users or role not in valid_roles or uid in seen_users:
+                    continue
+                seen_users.add(uid)
+                valid_items.append({"user_id": uid, "role": role})
+
+            # Enforce exactly one A
+            a_count = sum(1 for i in valid_items if i["role"] == "A")
+            if a_count > 1:
+                first_a = False
+                valid_items = [i for i in valid_items if i["role"] != "A" or (not first_a and (first_a := True))]
+            elif a_count == 0:
+                for u in all_users.values():
+                    if u.role and u.role.value in ["division_manager", "deputy_division_manager"]:
+                        valid_items.append({"user_id": u.id, "role": "A"})
+                        break
+
+            user_names = {uid: u.username for uid, u in all_users.items()}
+            logger.info(f"generate_raci_for_decision: {len(valid_items)} suggestions for decision {decision_id}")
+            return valid_items, user_names, parsed
+
+    except Exception as e:
+        logger.error(f"generate_raci_for_decision failed: {e}", exc_info=True)
+        return [], {}, {}
+
+
+async def save_pregenerated_raci(decision_id: int, valid_items: list[dict], parsed: dict) -> None:
+    """Save pre-generated RACI to DB, create distributions, apply responsibility updates, notify users."""
+    from app.database import async_session_maker
+    from datetime import datetime as _dt
+
+    try:
+        async with async_session_maker() as session:
+            decision = await session.get(Decision, decision_id)
+            if not decision:
+                logger.warning(f"save_pregenerated_raci: decision {decision_id} not found")
+                return
+
+            # Save RACI rows
+            for item in valid_items:
+                session.add(DecisionRaciRole(
+                    decision_id=decision_id,
+                    user_id=item["user_id"],
+                    role=RaciRoleEnum(item["role"]),
+                    assigned_by_ai=True,
+                ))
+            await session.commit()
+            logger.info(f"save_pregenerated_raci: saved {len(valid_items)} RACI roles for decision {decision_id}")
+
+            # Create distribution records
+            from app.models import DecisionDistribution, DistributionTypeEnum, DistributionStatusEnum
+            _raci_to_dist = {"R": "execution", "C": "info", "I": "info"}
+            for item in valid_items:
+                if item["role"] == "A":
+                    if item["user_id"] == decision.submitter_id:
+                        decision.status = DecisionStatusEnum.APPROVED
+                        decision.completed_at = _dt.utcnow()
+                        continue
+                    dist_type = "approval"
+                elif item["role"] in _raci_to_dist:
+                    dist_type = _raci_to_dist[item["role"]]
+                else:
+                    continue
+                session.add(DecisionDistribution(
+                    decision_id=decision_id,
+                    user_id=item["user_id"],
+                    distribution_type=DistributionTypeEnum(dist_type),
+                    status=DistributionStatusEnum.PENDING,
+                    sent_at=_dt.utcnow(),
+                ))
+            await session.commit()
+
+            # Apply responsibility updates
+            resp_updates = parsed.get("responsibility_updates", [])
+            if isinstance(resp_updates, list):
+                for upd in resp_updates:
+                    try:
+                        uid = int(upd.get("user_id", 0))
+                        learned = str(upd.get("learned", "")).strip()
+                        if not uid or not learned:
+                            continue
+                        db_user = await session.get(User, uid)
+                        if not db_user:
+                            continue
+                        existing = (db_user.responsibilities or "").strip()
+                        if learned.lower() not in existing.lower():
+                            db_user.responsibilities = f"{existing}, {learned}".lstrip(", ") if existing else learned
+                    except Exception as upd_err:
+                        logger.debug(f"save_pregenerated_raci: skipping responsibility update: {upd_err}")
+                await session.commit()
+
+            # Notify all RACI users
+            await notify_all_raci_users(decision_id, session)
+
+    except Exception as e:
+        logger.error(f"save_pregenerated_raci failed for decision {decision_id}: {e}", exc_info=True)
+
+
+async def propose_raci_to_submitter(
+    decision_id: int,
+    submitter_telegram_id: int,
+    is_critical: bool = False,
+) -> None:
+    """
+    Generate RACI suggestions and send a Telegram proposal to the submitter.
+    The submitter approves or edits before RACI is committed.
+    Falls back to silent auto-assign if generation or send fails.
+    """
+    import html as _html
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+
+    valid_items, user_names, parsed = await generate_raci_for_decision(decision_id)
+
+    if not valid_items:
+        logger.warning(f"propose_raci_to_submitter: no suggestions for decision {decision_id}, falling back to auto-assign")
+        await assign_raci_from_ai(decision_id)
+        return
+
+    _pending_raci_suggestions[decision_id] = {
+        "valid_items": valid_items,
+        "user_names": user_names,
+        "parsed": parsed,
+        "submitter_telegram_id": submitter_telegram_id,
+        "is_critical": is_critical,
+    }
+
+    role_label = {
+        "R": "👤 מבצע (R)",
+        "A": "🧠 מוסמך (A)",
+        "C": "💬 יועץ (C)",
+        "I": "📢 מעודכן (I)",
+    }
+    lines = []
+    for item in valid_items:
+        name = user_names.get(item["user_id"], f"#{item['user_id']}")
+        lines.append(f"{role_label.get(item['role'], item['role'])}: <b>{_html.escape(name)}</b>")
+
+    msg = (
+        f"\u200F🤖 <b>הצעת RACI להחלטה #{decision_id}</b>\n\n"
+        + "\n".join(lines)
+        + "\n\n<i>אשר את חלוקת הצוות, או ערוך אותה בלוח הניהול.</i>"
+    )
+    keyboard = InlineKeyboardMarkup([[
+        InlineKeyboardButton("✅ אשר RACI", callback_data=f"raci_approve:{decision_id}"),
+        InlineKeyboardButton("✏️ ערוך", callback_data=f"raci_edit:{decision_id}"),
+    ]])
+
+    try:
+        from app.services.telegram_polling import telegram_bot
+        await telegram_bot.application.bot.send_message(
+            chat_id=submitter_telegram_id,
+            text=msg,
+            parse_mode="HTML",
+            reply_markup=keyboard,
+        )
+        logger.info(f"propose_raci_to_submitter: sent proposal for decision {decision_id}")
+    except Exception as e:
+        logger.error(f"propose_raci_to_submitter: send failed for decision {decision_id}: {e}", exc_info=True)
+        _pending_raci_suggestions.pop(decision_id, None)
+        await assign_raci_from_ai(decision_id)
 
 
 async def get_accountable_user_id(decision_id: int, session: AsyncSession) -> int | None:

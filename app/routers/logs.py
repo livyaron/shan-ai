@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, Request, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
-from sqlalchemy import select, or_, desc
+from sqlalchemy import select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db_session
@@ -298,3 +298,99 @@ async def delete_instruction_by_index(
     logger.info(f"Deleted instruction at index {index}")
 
     return JSONResponse({"ok": True, "deleted_index": index})
+
+
+class SynonymUpdateBody(BaseModel):
+    original: str
+    synonyms: list[str]
+
+
+@router.put("/api/knowledge/entry/{entry_id}")
+async def update_knowledge_entry(
+    entry_id: int,
+    body: SynonymUpdateBody,
+    session: AsyncSession = Depends(get_db_session),
+    current_user: User = Depends(get_current_user),
+):
+    if not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="Admin only")
+    from app.models import QuerySynonym
+    row = await session.get(QuerySynonym, entry_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Entry not found")
+    row.original = body.original.strip()
+    row.synonyms = [s.strip() for s in body.synonyms if s.strip()]
+    await session.commit()
+    return JSONResponse({"ok": True})
+
+
+@router.post("/api/knowledge/entry")
+async def add_knowledge_entry(
+    body: SynonymUpdateBody,
+    session: AsyncSession = Depends(get_db_session),
+    current_user: User = Depends(get_current_user),
+):
+    if not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="Admin only")
+    from app.models import QuerySynonym
+    row = QuerySynonym(
+        original=body.original.strip(),
+        synonyms=[s.strip() for s in body.synonyms if s.strip()],
+        source="manual",
+    )
+    session.add(row)
+    await session.commit()
+    return JSONResponse({"ok": True})
+
+
+class InstructionUpdateBody(BaseModel):
+    text: str
+
+
+@router.put("/api/knowledge/instruction/{index}")
+async def update_instruction(
+    index: int,
+    body: InstructionUpdateBody,
+    session: AsyncSession = Depends(get_db_session),
+    current_user: User = Depends(get_current_user),
+):
+    if not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="Admin only")
+    from app.models import QuerySynonym
+    row = await session.scalar(
+        select(QuerySynonym).where(QuerySynonym.original == "__global_instructions__")
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Global instructions not found")
+    if index < 0 or index >= len(row.synonyms):
+        raise HTTPException(status_code=400, detail="Index out of range")
+    updated = list(row.synonyms)
+    updated[index] = body.text.strip()
+    row.synonyms = updated
+    await session.commit()
+    return JSONResponse({"ok": True})
+
+
+@router.post("/api/knowledge/instruction")
+async def add_instruction(
+    body: InstructionUpdateBody,
+    session: AsyncSession = Depends(get_db_session),
+    current_user: User = Depends(get_current_user),
+):
+    if not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="Admin only")
+    from app.models import QuerySynonym
+    row = await session.scalar(
+        select(QuerySynonym).where(QuerySynonym.original == "__global_instructions__")
+    )
+    if row:
+        row.synonyms = list(row.synonyms) + [body.text.strip()]
+    else:
+        row = QuerySynonym(
+            original="__global_instructions__",
+            synonyms=[body.text.strip()],
+            source="instruction",
+        )
+        session.add(row)
+    await session.commit()
+    return JSONResponse({"ok": True})

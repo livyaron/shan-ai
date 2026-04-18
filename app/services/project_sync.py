@@ -9,7 +9,6 @@ from typing import Any
 import pandas as pd
 from rapidfuzz import process as rf_process
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import async_session_maker
 from app.models import Project
@@ -60,10 +59,11 @@ FUZZY_CUTOFF = 50  # Lowered from 60 for better coverage
 
 # ── Blocking file reader (run in executor) ────────────────────────────────
 
-def _read_file(file_path: str) -> pd.DataFrame:
+def _read_file(file_path: str, sheet_name: str | None = None) -> pd.DataFrame:
     """
     Read XLSX or CSV file into DataFrame.
     Handles header row detection (skips all-NaN first row if present).
+    sheet_name: explicit sheet to read (for XLSX); if None reads the first sheet.
     Returns empty DataFrame on error.
     """
     path = Path(file_path)
@@ -72,9 +72,10 @@ def _read_file(file_path: str) -> pd.DataFrame:
     try:
         if ext in (".xlsx", ".xls"):
             # Probe first two rows to detect header row offset
-            probe = pd.read_excel(path, engine="openpyxl", nrows=2, header=None)
+            kw = dict(sheet_name=sheet_name) if sheet_name else {}
+            probe = pd.read_excel(path, engine="openpyxl", nrows=2, header=None, **kw)
             header_row = 1 if (len(probe) > 0 and probe.iloc[0].isna().all()) else 0
-            df = pd.read_excel(path, engine="openpyxl", header=header_row)
+            df = pd.read_excel(path, engine="openpyxl", header=header_row, **kw)
         elif ext == ".csv":
             df = pd.read_csv(path, encoding="utf-8-sig")
         else:
@@ -222,18 +223,19 @@ async def _generate_weekly_brief(weekly_report: str | None) -> str | None:
 
 # ── Main async entry point ────────────────────────────────────────────────
 
-async def sync_projects_file(file_path: str) -> dict:
+async def sync_projects_file(file_path: str, sheet_name: str | None = None) -> dict:
     """
     Parse project master file and upsert Project records to DB.
 
     Called as a BackgroundTasks callback — creates its own async session.
+    sheet_name: specific sheet to read (detected by process_master_file); None = first sheet.
     Returns result dict: {"processed": N, "created": N, "updated": N, "errors": [...]}
     """
     result = {"processed": 0, "created": 0, "updated": 0, "errors": []}
 
     # 1. Read file in executor thread (pandas is synchronous/blocking)
     loop = asyncio.get_event_loop()
-    df = await loop.run_in_executor(None, _read_file, file_path)
+    df = await loop.run_in_executor(None, _read_file, file_path, sheet_name)
 
     if df.empty:
         result["errors"].append("הקובץ ריק או לא ניתן לקריאה")
@@ -298,11 +300,20 @@ async def sync_projects_file(file_path: str) -> dict:
                 result["processed"] += 1
 
                 if existing:
-                    # Update existing
-                    for attr, val in fields.items():
-                        setattr(existing, attr, val)
-                    existing.last_updated = datetime.utcnow()
-                    result["updated"] += 1
+                    # Only update fields that actually changed
+                    changed = False
+                    for attr, new_val in fields.items():
+                        old_val = getattr(existing, attr, None)
+                        # Normalise for comparison: treat None and "" as equal
+                        old_norm = old_val if old_val not in (None, "") else None
+                        new_norm = new_val if new_val not in (None, "") else None
+                        if old_norm != new_norm:
+                            setattr(existing, attr, new_val)
+                            changed = True
+                    if changed:
+                        existing.last_updated = datetime.utcnow()
+                        result["updated"] += 1
+                    # else: no-op — last_updated stays as-is
                 else:
                     # Create new
                     project = Project(project_identifier=ident, **fields)

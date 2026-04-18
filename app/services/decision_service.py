@@ -116,14 +116,16 @@ class DecisionService:
         except Exception as e:
             logger.warning(f"Embedding generation failed for decision #{decision.id}: {e}")
 
-        # --- 5. Fire RACI assignment in background for non-CRITICAL (synchronous for CRITICAL in _handle_critical) ---
+        # --- 5. Propose RACI to submitter for approval (background) ---
         if result["type"] != "CRITICAL":
             try:
                 import asyncio
-                from app.services.raci_service import assign_raci_from_ai
-                asyncio.get_event_loop().create_task(assign_raci_from_ai(decision.id))
+                from app.services.raci_service import propose_raci_to_submitter
+                asyncio.get_event_loop().create_task(
+                    propose_raci_to_submitter(decision.id, user.telegram_id, is_critical=False)
+                )
             except Exception as e:
-                logger.warning(f"RACI background task could not be scheduled for decision #{decision.id}: {e}")
+                logger.warning(f"RACI proposal task could not be scheduled for decision #{decision.id}: {e}")
 
         # --- 3. Route ---
         dtype = result["type"]
@@ -207,22 +209,20 @@ class DecisionService:
     # ------------------------------------------------------------------
 
     async def _handle_critical(self, submitter: User, decision: Decision, result: dict) -> str:
-        # Assign RACI synchronously for CRITICAL decisions
-        from app.services.raci_service import assign_raci_from_ai, get_accountable_user_id
-        await assign_raci_from_ai(decision.id)
-
-        # Route to RACI A user; fallback to role-hierarchy superior if A not found
-        accountable_id = await get_accountable_user_id(decision.id, self.session)
-        if accountable_id:
-            approver = await self.session.get(User, accountable_id)
-        else:
-            approver = await self._get_superior(submitter)
+        import asyncio
+        from app.services.raci_service import propose_raci_to_submitter
 
         e = self._e
-        if not approver:
+
+        # If submitter is top of hierarchy, auto-approve and still propose RACI informatively
+        superior = await self._get_superior(submitter)
+        if not superior:
             decision.status = DecisionStatusEnum.APPROVED
             decision.completed_at = datetime.utcnow()
             await self.session.commit()
+            asyncio.get_event_loop().create_task(
+                propose_raci_to_submitter(decision.id, submitter.telegram_id, is_critical=False)
+            )
             return (
                 f"\u200F🚨 <b>החלטה #{decision.id} — קריטי</b>\n\n"
                 f"📋 <b>סיכום:</b> {e(result['summary'])}\n"
@@ -230,37 +230,17 @@ class DecisionService:
                 f"<i>אתה בראש ההיררכיה. ההחלטה אושרה אוטומטית.</i>"
             )
 
-        keyboard = InlineKeyboardMarkup([
-            [
-                InlineKeyboardButton("✅ אישור", callback_data=f"approve:{decision.id}"),
-                InlineKeyboardButton("❌ דחייה", callback_data=f"reject:{decision.id}"),
-            ]
-        ])
-
-        risks_html = "\n".join(f"  • {e(r)}" for r in result["self_critique"].get("risks", ["לא זוהו"]))
-        superior_msg = (
-            f"\u200F🚨 <b>החלטה קריטית — נדרש אישור</b>\n\n"
-            f"<b>הוגש על ידי:</b> {e(submitter.username)} ({e(submitter.role.value)})\n"
-            f"<b>החלטה #{decision.id}</b>\n\n"
-            f"📋 <b>סיכום:</b> {e(result['summary'])}\n"
-            f"🎯 <b>פעולה מומלצת:</b> {e(result['recommended_action'])}\n"
-            f"📏 <b>מדידות:</b> {e(result['measurability'])}\n\n"
-            f"⚠️ <b>סיכונים:</b>\n{risks_html}\n\n"
-            f"<b>אנא אשר או דחה החלטה זו:</b>"
+        # Propose RACI in background; after submitter approves RACI, the accountable gets the approval request
+        asyncio.get_event_loop().create_task(
+            propose_raci_to_submitter(decision.id, submitter.telegram_id, is_critical=True)
         )
-
-        try:
-            await self.application.bot.send_message(
-                chat_id=approver.telegram_id,
-                text=superior_msg,
-                parse_mode="HTML",
-                reply_markup=keyboard,
-            )
-            logger.info(f"Sent CRITICAL approval request to {approver.username} for decision #{decision.id}")
-        except Exception as e:
-            logger.error(f"Failed to notify approver {approver.username}: {e}")
-
-        return self._format_critical_pending(decision, result)
+        return (
+            f"\u200F🚨 <b>החלטה #{decision.id} — קריטי</b>\n\n"
+            f"📋 <b>סיכום:</b> {e(result['summary'])}\n"
+            f"🎯 <b>פעולה מומלצת:</b> {e(result['recommended_action'])}\n\n"
+            f"⏳ <b>הצעת RACI נשלחה אליך לאישור.</b>\n"
+            f"לאחר האישור, ההחלטה תועבר לבעל הסמכות לאישור סופי."
+        )
 
     async def _handle_uncertain(self, submitter: User, decision: Decision, result: dict) -> str:
         superior = await self._get_superior(submitter)

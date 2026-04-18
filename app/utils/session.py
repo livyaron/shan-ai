@@ -2,7 +2,6 @@
 
 from datetime import datetime, timedelta
 from jose import JWTError, jwt
-from functools import lru_cache
 
 SECRET_KEY = "shan-ai-secret-key-change-in-production-2024"
 ALGORITHM = "HS256"

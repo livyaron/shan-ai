@@ -5,8 +5,7 @@ import logging
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 
-from app.config import settings
-from app.models import LessonLearned, Decision, DecisionRaciRole, RaciRoleEnum, User, KnowledgeSummary
+from app.models import LessonLearned, Decision, DecisionRaciRole, User, KnowledgeSummary
 
 logger = logging.getLogger(__name__)
 

@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, BigInteger, String, Text, DateTime, Date, Float, Boolean, ForeignKey, Enum, JSON
+from sqlalchemy import Column, Integer, BigInteger, String, Text, DateTime, Date, Boolean, ForeignKey, Enum, JSON
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 from pgvector.sqlalchemy import Vector
@@ -54,6 +54,8 @@ class User(Base):
     email = Column(String(255), nullable=True)
     registration_code = Column(String(10), unique=True, nullable=True, index=True)
     profile_token = Column(String(32), unique=True, nullable=True, index=True)
+    photo_path = Column(String(512), nullable=True)
+    avatar_path = Column(String(512), nullable=True)
     is_admin = Column(Boolean, default=False, nullable=False)
     job_title = Column(String(255), nullable=True)
     responsibilities = Column(Text, nullable=True)   # תחומי אחריות — used for AI RACI assignment
