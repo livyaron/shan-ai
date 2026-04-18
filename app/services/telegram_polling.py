@@ -791,7 +791,12 @@ class TelegramPollingBot:
                 return
 
             if verdict == "NOT_DECISION":
-                # Answer from knowledge base + decisions data
+                # If LLM gave a direct reply (e.g. joke, greeting), use it — skip knowledge base
+                ai_reply = classify_result.get("reply", "")
+                if ai_reply:
+                    await update.message.reply_text(f"\u200F{_html.escape(ai_reply)}", parse_mode="HTML")
+                    return
+                # Otherwise answer from knowledge base
                 kb = None
                 try:
                     from app.services.knowledge_service import answer_with_full_context
@@ -803,8 +808,7 @@ class TelegramPollingBot:
                         kb = _feedback_keyboard(qa_result["log_id"])
                 except Exception as e:
                     logger.warning(f"answer_with_full_context failed: {e}")
-                    ai_reply = classify_result.get("reply", "")
-                    reply = f"\u200F{_html.escape(ai_reply)}" if ai_reply else "\u200Fשאל שאלות עבודה או שלח החלטה לניתוח."
+                    reply = "\u200Fשאל שאלות עבודה או שלח החלטה לניתוח."
                 reply = await _maybe_summarize(reply)
                 await update.message.reply_text(reply, parse_mode="HTML", reply_markup=kb)
                 return
