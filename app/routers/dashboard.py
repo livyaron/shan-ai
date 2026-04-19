@@ -416,6 +416,36 @@ async def regen_code(
     return RedirectResponse("/dashboard/users", status_code=303)
 
 
+@router.get("/users/{user_id}/qr")
+async def user_registration_qr(
+    user_id: int,
+    session: AsyncSession = Depends(get_db_session),
+    current_user: User = Depends(get_current_user),
+):
+    """Return a QR code PNG for the user's Telegram deep-link registration URL."""
+    import io
+    import qrcode
+    from fastapi.responses import StreamingResponse
+    from app.config import settings as _settings
+
+    user = await session.get(User, user_id)
+    if not user or not user.registration_code:
+        return JSONResponse({"error": "no registration code"}, status_code=404)
+
+    bot_username = _settings.TELEGRAM_BOT_USERNAME.lstrip("@")
+    deep_link = f"https://t.me/{bot_username}?start={user.registration_code}"
+
+    qr = qrcode.QRCode(version=1, error_correction=qrcode.constants.ERROR_CORRECT_M, box_size=10, border=4)
+    qr.add_data(deep_link)
+    qr.make(fit=True)
+    img = qr.make_image(fill_color="#0d1117", back_color="white")
+
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    buf.seek(0)
+    return StreamingResponse(buf, media_type="image/png")
+
+
 @router.post("/users/{user_id}/edit")
 async def edit_user(
     user_id: int,

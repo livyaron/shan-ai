@@ -82,58 +82,40 @@ class TelegramPollingBot:
     # ------------------------------------------------------------------
 
     async def handle_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle /start command."""
+        """Handle /start command. If called with a registration code (QR deep link), auto-register."""
+        telegram_id = update.effective_user.id
+        code = context.args[0].strip().upper() if context.args else None
+
+        # Deep-link registration: /start CODE (from QR scan)
+        if code:
+            await self._do_register(update, telegram_id, code)
+            return
+
         async with async_session_maker() as session:
             service = TelegramService(session)
             user = await service._get_or_create_user(
-                update.effective_user.id, update.effective_user.to_dict()
+                telegram_id, update.effective_user.to_dict()
             )
             await update.message.reply_text(
-                f"👋 ברוך הבא ל-<b>Shan-AI</b>, {_html.escape(user.username)}!\n\n"
+                f"\u200F👋 ברוך הבא ל-<b>Shan-AI</b>, {_html.escape(user.username)}!\n\n"
                 f"אני מנתח החלטות טכניות בפרויקטי תשתיות חשמל, טרנספורמטורים ותחנות משנה.\n\n"
                 f"<b>פקודות זמינות:</b>\n"
-                f"/register — הרשמה למערכת\n"
+                f"/register קוד — הרשמה למערכת\n"
                 f"/status — בדיקת סטטוס ותפקיד\n\n"
                 f"לאחר קבלת תפקיד, שלח לי תיאור של הבעיה או ההחלטה ואנתח אותה בעזרת AI.",
                 parse_mode="HTML",
             )
 
-    async def handle_register(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle /register command. Usage: /register CODE"""
-        telegram_id = update.effective_user.id
-        code = context.args[0].strip().upper() if context.args else None
+    async def _do_register(self, update: Update, telegram_id: int, code: str) -> None:
+        """Core registration logic — shared by /start CODE (QR deep link) and /register CODE."""
+        from sqlalchemy import update as _sa_update
+        from app.models import Message as _Message
 
         async with async_session_maker() as session:
-            # If no code provided, show current status
-            if not code:
-                result = await session.execute(
-                    select(User).where(User.telegram_id == telegram_id)
-                )
-                existing = result.scalar_one_or_none()
-                if existing and existing.role:
-                    ROLE_LABELS = {
-                        "project_manager": "מנהל פרויקט",
-                        "department_manager": "מנהל מחלקה",
-                        "deputy_division_manager": "סגן מנהל אגף",
-                        "division_manager": "מנהל אגף",
-                    }
-                    role_label = ROLE_LABELS.get(existing.role.value, existing.role.value)
-                    await update.message.reply_text(
-                        f"\u200F✅ אתה כבר רשום במערכת.\n<b>שם:</b> {_html.escape(existing.username)}\n<b>תפקיד:</b> {_html.escape(role_label)}",
-                        parse_mode="HTML",
-                    )
-                else:
-                    await update.message.reply_text(
-                        "\u200Fכדי להירשם, שלח את הקוד שקיבלת מהמנהל:\n<code>/register קוד</code>",
-                        parse_mode="HTML",
-                    )
-                return
-
-            # Look up user by registration code
-            result = await session.execute(
+            # Look up pre-created user by registration code
+            user = await session.scalar(
                 select(User).where(User.registration_code == code)
             )
-            user = result.scalar_one_or_none()
 
             if not user:
                 await update.message.reply_text(
@@ -141,50 +123,51 @@ class TelegramPollingBot:
                 )
                 return
 
-            if user.telegram_id is not None:
+            if user.telegram_id is not None and user.telegram_id != telegram_id:
                 await update.message.reply_text(
                     "\u200F⚠️ קוד זה כבר נוצמד לחשבון אחר. פנה למנהל לקוד חדש.",
                 )
                 return
 
-            # Remove any roleless placeholder that was auto-created for this telegram_id
-            # (happens when user sent /start or a message before registering)
-            # Must reassign FK references first — deleting a placeholder that has messages
-            # stored under it would violate the messages.user_id FK constraint.
-            from sqlalchemy import update as _sa_update
-            from app.models import Message as _Message
+            if user.telegram_id == telegram_id:
+                # Already linked — just confirm
+                ROLE_LABELS = {
+                    "project_manager": "מנהל פרויקט", "department_manager": "מנהל מחלקה",
+                    "deputy_division_manager": "סגן מנהל אגף", "division_manager": "מנהל אגף",
+                }
+                role_label = ROLE_LABELS.get(user.role.value, user.role.value) if user.role else "—"
+                await update.message.reply_text(
+                    f"\u200F✅ אתה כבר רשום במערכת.\n<b>שם:</b> {_html.escape(user.username)}\n<b>תפקיד:</b> {_html.escape(role_label)}",
+                    parse_mode="HTML",
+                )
+                return
 
-            ph_result = await session.execute(
+            # Remove any roleless placeholder auto-created by /start before registration
+            placeholder = await session.scalar(
                 select(User).where(
                     User.telegram_id == telegram_id,
                     User.role.is_(None),
                     User.id != user.id,
                 )
             )
-            placeholder = ph_result.scalar_one_or_none()
-
             if placeholder:
-                # Reassign messages from placeholder to the admin-created user
                 await session.execute(
                     _sa_update(_Message)
                     .where(_Message.user_id == placeholder.id)
                     .values(user_id=user.id)
                 )
-                await session.flush()        # apply UPDATE before DELETE
+                await session.flush()
                 await session.delete(placeholder)
-                await session.flush()        # apply DELETE before telegram_id UPDATE
+                await session.flush()
 
-            # Link telegram account and clear the registration code
             user.telegram_id = telegram_id
             user.registration_code = None
             await session.commit()
-            await session.refresh(user)  # Re-load attributes after commit
+            await session.refresh(user)
 
             ROLE_LABELS = {
-                "project_manager": "מנהל פרויקט",
-                "department_manager": "מנהל מחלקה",
-                "deputy_division_manager": "סגן מנהל אגף",
-                "division_manager": "מנהל אגף",
+                "project_manager": "מנהל פרויקט", "department_manager": "מנהל מחלקה",
+                "deputy_division_manager": "סגן מנהל אגף", "division_manager": "מנהל אגף",
             }
             role_label = ROLE_LABELS.get(user.role.value, user.role.value) if user.role else "—"
             from app.config import settings as _settings
@@ -198,6 +181,33 @@ class TelegramPollingBot:
                 f"{profile_line}",
                 parse_mode="HTML",
             )
+
+    async def handle_register(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /register command. Usage: /register CODE"""
+        telegram_id = update.effective_user.id
+        code = context.args[0].strip().upper() if context.args else None
+
+        if not code:
+            async with async_session_maker() as session:
+                existing = await session.scalar(select(User).where(User.telegram_id == telegram_id))
+                if existing and existing.role:
+                    ROLE_LABELS = {
+                        "project_manager": "מנהל פרויקט", "department_manager": "מנהל מחלקה",
+                        "deputy_division_manager": "סגן מנהל אגף", "division_manager": "מנהל אגף",
+                    }
+                    role_label = ROLE_LABELS.get(existing.role.value, existing.role.value)
+                    await update.message.reply_text(
+                        f"\u200F✅ אתה כבר רשום במערכת.\n<b>שם:</b> {_html.escape(existing.username)}\n<b>תפקיד:</b> {_html.escape(role_label)}",
+                        parse_mode="HTML",
+                    )
+                else:
+                    await update.message.reply_text(
+                        "\u200Fכדי להירשם, שלח את הקוד שקיבלת מהמנהל:\n<code>/register קוד</code>",
+                        parse_mode="HTML",
+                    )
+            return
+
+        await self._do_register(update, telegram_id, code)
 
     async def handle_status(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /status command."""
