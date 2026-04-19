@@ -500,6 +500,7 @@
         <a href="/dashboard/learning" class="nav-link">🎓 למידה</a>
         <a href="/dashboard/logs"     class="nav-link">📊 לוגים</a>
         <a href="/dashboard/projects" class="nav-link">📂 פרויקטים</a>
+        <a href="/dashboard/raci-intelligence" class="nav-link">🧩 RACI בינה</a>
     </div>
     <div class="d-flex align-items-center gap-2">
         <div class="user-chip"><div class="user-online"></div>{{ current_user.username }}</div>
@@ -1780,6 +1781,13 @@ function checkAutoOpenRaci() {
 }
 
 document.addEventListener('DOMContentLoaded', checkAutoOpenRaci);
+
+if (new URLSearchParams(window.location.search).get('new') === '1') {
+    window.addEventListener('load', () => {
+        new bootstrap.Modal(document.getElementById('addDecisionModal')).show();
+        history.replaceState(null, '', window.location.pathname);
+    });
+}
 </script>
 </body>
 </html>

@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, or_, exists, update, delete
 
 from app.database import get_db_session
-from app.models import Decision, User, DecisionTypeEnum, DecisionStatusEnum, RoleEnum, DecisionDistribution, DistributionTypeEnum, DistributionStatusEnum, DecisionFeedback, DecisionRaciRole, RaciRoleEnum, LessonLearned, Message, KnowledgeFile, QueryLog
+from app.models import Decision, User, DecisionTypeEnum, DecisionStatusEnum, RoleEnum, DecisionDistribution, DistributionTypeEnum, DistributionStatusEnum, DecisionFeedback, DecisionRaciRole, RaciRoleEnum, LessonLearned, Message, KnowledgeFile, QueryLog, RACISuggestion, RACISuggestionStatusEnum, RACIRule
 from app.routers.login import get_current_user
 
 logger = logging.getLogger(__name__)
@@ -1878,6 +1878,321 @@ async def distribution_status(
             "responded_at": dist.responded_at.strftime("%d/%m %H:%M") if dist.responded_at else None,
         })
     return JSONResponse({"distributions": result})
+
+
+# -----------------------------------------------------------------------
+# RACI Intelligence page
+# -----------------------------------------------------------------------
+
+@router.get("/raci-intelligence", response_class=HTMLResponse)
+async def raci_intelligence_page(
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+    current_user: User = Depends(get_current_user),
+):
+    # Load all suggestions with decision info
+    rows = (await session.execute(
+        select(RACISuggestion, Decision)
+        .join(Decision, RACISuggestion.decision_id == Decision.id)
+        .order_by(RACISuggestion.created_at.desc())
+    )).all()
+
+    # Load user name map
+    all_users = (await session.execute(select(User))).scalars().all()
+    user_map = {u.id: u.username for u in all_users}
+
+    # Load active rules
+    rules = (await session.execute(
+        select(RACIRule).order_by(RACIRule.created_at.desc())
+    )).scalars().all()
+
+    pending_approvals = await _pending_approvals_count(current_user.id, session)
+
+    return templates.TemplateResponse("raci_intelligence.html", {
+        "request": request,
+        "current_user": current_user,
+        "suggestions": [{"s": s, "d": d} for s, d in rows],
+        "user_map": user_map,
+        "rules": rules,
+        "pending_approvals": pending_approvals,
+    })
+
+
+@router.post("/raci-intelligence/{suggestion_id}/edit-reason")
+async def save_raci_edit_reason(
+    suggestion_id: int,
+    reason: str = Form(""),
+    session: AsyncSession = Depends(get_db_session),
+    current_user: User = Depends(get_current_user),
+):
+    suggestion = await session.get(RACISuggestion, suggestion_id)
+    if suggestion:
+        new_reason = reason.strip()
+        if new_reason != (suggestion.edit_reason or ""):
+            suggestion.reason_analyzed = False  # reset — changed reason needs re-analysis
+        suggestion.edit_reason = new_reason
+        await session.commit()
+    return RedirectResponse("/dashboard/raci-intelligence", status_code=303)
+
+
+@router.post("/raci-intelligence/rules/analyze-reasons")
+async def analyze_edit_reasons_into_rules(
+    session: AsyncSession = Depends(get_db_session),
+    current_user: User = Depends(get_current_user),
+):
+    """Use AI to extract generalizable RACI rules from all saved edit reasons."""
+    from app.services.llm_router import llm_chat
+
+    # Fetch edited suggestions that have a reason and haven't been analyzed yet
+    edited_rows = (await session.execute(
+        select(RACISuggestion, Decision)
+        .join(Decision, RACISuggestion.decision_id == Decision.id)
+        .where(RACISuggestion.outcome == RACISuggestionStatusEnum.EDITED)
+        .where(RACISuggestion.edit_reason.isnot(None))
+        .where(RACISuggestion.edit_reason != "")
+        .where(RACISuggestion.reason_analyzed == False)
+    )).all()
+
+    if not edited_rows:
+        return RedirectResponse("/dashboard/raci-intelligence?analyze=no_data", status_code=303)
+
+    # Load existing rule texts to avoid duplicates
+    existing_rules = (await session.execute(select(RACIRule))).scalars().all()
+    existing_texts = [r.rule_text for r in existing_rules]
+
+    # Build prompt
+    cases = []
+    all_users = (await session.execute(select(User))).scalars().all()
+    user_map = {u.id: u.username for u in all_users}
+    for suggestion, decision in edited_rows:
+        orig = ", ".join(
+            f"{i['role']}:{user_map.get(i['user_id'], str(i['user_id']))}"
+            for i in (suggestion.suggested_assignments or [])
+        )
+        final = ", ".join(
+            f"{i['role']}:{user_map.get(i['user_id'], str(i['user_id']))}"
+            for i in (suggestion.final_assignments or [])
+        )
+        cases.append(
+            f"- החלטה #{decision.id} ({decision.summary or '—'}[:60])\n"
+            f"  הצעת AI: {orig}\n"
+            f"  תוצאה סופית: {final}\n"
+            f"  סיבת שינוי: {suggestion.edit_reason}"
+        )
+
+    existing_str = "\n".join(f"- {t}" for t in existing_texts) if existing_texts else "אין"
+
+    prompt = f"""אתה מומחה RACI בארגונים. ניתחת מקרים בהם המשתמשים תיקנו הצעות RACI של הבינה המלאכותית.
+
+מקרים:
+{chr(10).join(cases)}
+
+כללים קיימים (אל תשכפל):
+{existing_str}
+
+משימה: זהה דפוסים חוזרים בסיבות העריכה וגזור מהם כללים כלליים ומעשיים לשיפור הצעות RACI עתידיות.
+- כל כלל חייב להיות כלל ניתן ליישום (לא תיאור של מה שהיה)
+- כתוב בעברית, תמציתי
+- אל תוסיף כלל שכבר קיים
+- אם אין מה לגזור — החזר רשימה ריקה
+
+החזר JSON בלבד:
+{{"rules": [{{"title": "כותרת קצרה", "rule_text": "ניסוח הכלל"}}]}}"""
+
+    try:
+        raw = await llm_chat(
+            "raci_rule_extraction",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.2,
+            json_mode=True,
+        )
+        parsed = json.loads(raw)
+    except Exception:
+        try:
+            start = raw.find("{"); end = raw.rfind("}") + 1
+            parsed = json.loads(raw[start:end])
+        except Exception:
+            return RedirectResponse("/dashboard/raci-intelligence?analyze=error", status_code=303)
+
+    new_rules = parsed.get("rules", [])
+    added = 0
+    for r in new_rules:
+        title = str(r.get("title", "")).strip()
+        text = str(r.get("rule_text", "")).strip()
+        if not title or not text:
+            continue
+        if any(text.lower() == ex.lower() for ex in existing_texts):
+            continue
+        session.add(RACIRule(
+            title=title,
+            rule_text=text,
+            is_active=True,
+            created_by_id=current_user.id,
+        ))
+        existing_texts.append(text)
+        added += 1
+
+    if added:
+        await session.commit()
+
+    # Mark all analyzed suggestions so they won't be re-processed unless reason changes
+    for suggestion, _ in edited_rows:
+        suggestion.reason_analyzed = True
+    await session.commit()
+
+    return RedirectResponse(f"/dashboard/raci-intelligence?analyze={added}", status_code=303)
+
+
+@router.post("/raci-intelligence/{suggestion_id}/delete")
+async def delete_raci_suggestion(
+    suggestion_id: int,
+    session: AsyncSession = Depends(get_db_session),
+    current_user: User = Depends(get_current_user),
+):
+    suggestion = await session.get(RACISuggestion, suggestion_id)
+    if suggestion:
+        await session.delete(suggestion)
+        await session.commit()
+    return RedirectResponse("/dashboard/raci-intelligence", status_code=303)
+
+
+@router.post("/raci-intelligence/suggestions/clear-all")
+async def clear_all_raci_suggestions(
+    session: AsyncSession = Depends(get_db_session),
+    current_user: User = Depends(get_current_user),
+):
+    await session.execute(delete(RACISuggestion))
+    await session.commit()
+    return RedirectResponse("/dashboard/raci-intelligence", status_code=303)
+
+
+@router.post("/raci-intelligence/rules/deduplicate")
+async def deduplicate_raci_rules(
+    session: AsyncSession = Depends(get_db_session),
+    current_user: User = Depends(get_current_user),
+):
+    from app.services.llm_router import llm_chat
+
+    rules = (await session.execute(select(RACIRule))).scalars().all()
+    if len(rules) <= 1:
+        return RedirectResponse("/dashboard/raci-intelligence?dedup=no_data", status_code=303)
+
+    rules_str = "\n".join(f"ID={r.id} | {r.title} | {r.rule_text}" for r in rules)
+    prompt = f"""להלן כללי RACI של הארגון (ID | כותרת | טקסט):
+
+{rules_str}
+
+משימה: זהה אך ורק כללים שהם **כפולים ממש** — אותו כלל בדיוק, רק בניסוח שונה.
+כלל המתייחס לתפקיד שונה, סיטואציה שונה, או רמה ארגונית שונה — אינו כפול, אל תמזג אותו.
+ספק בחשד שניסוח שונה = כלל שונה — במקרה ספק, אל תמזג.
+לכל זוג/קבוצה של כפולות ממש — צור כלל אחד משופר שמשלב את שניהם.
+אם אין כפולות ממש — החזר merges ריק.
+
+החזר JSON בלבד:
+{{"merges": [{{"delete_ids": [1, 3], "merged_title": "כותרת משולבת", "merged_rule": "ניסוח משולב ומשופר"}}]}}"""
+
+    try:
+        raw = await llm_chat(
+            "raci_dedup",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.1,
+            json_mode=True,
+        )
+        parsed = json.loads(raw)
+    except Exception:
+        try:
+            start = raw.find("{"); end = raw.rfind("}") + 1
+            parsed = json.loads(raw[start:end])
+        except Exception:
+            return RedirectResponse("/dashboard/raci-intelligence?dedup=error", status_code=303)
+
+    valid_ids = {r.id for r in rules}
+    merges = parsed.get("merges", [])
+    merged_count = 0
+
+    for merge in merges:
+        delete_ids = [int(i) for i in merge.get("delete_ids", []) if int(i) in valid_ids]
+        merged_title = str(merge.get("merged_title", "")).strip()
+        merged_rule = str(merge.get("merged_rule", "")).strip()
+        if not delete_ids or not merged_title or not merged_rule:
+            continue
+        # Delete the originals
+        for rid in delete_ids:
+            rule = await session.get(RACIRule, rid)
+            if rule:
+                await session.delete(rule)
+        # Add the merged replacement
+        session.add(RACIRule(
+            title=merged_title,
+            rule_text=merged_rule,
+            is_active=True,
+            created_by_id=current_user.id,
+        ))
+        merged_count += 1
+
+    if merged_count:
+        await session.commit()
+
+    return RedirectResponse(f"/dashboard/raci-intelligence?dedup={merged_count}", status_code=303)
+
+
+@router.post("/raci-intelligence/rules/{rule_id}/update")
+async def update_raci_rule(
+    rule_id: int,
+    title: str = Form(...),
+    rule_text: str = Form(...),
+    session: AsyncSession = Depends(get_db_session),
+    current_user: User = Depends(get_current_user),
+):
+    rule = await session.get(RACIRule, rule_id)
+    if rule:
+        rule.title = title.strip()
+        rule.rule_text = rule_text.strip()
+        await session.commit()
+    return RedirectResponse("/dashboard/raci-intelligence", status_code=303)
+
+
+@router.post("/raci-intelligence/rules/create")
+async def create_raci_rule(
+    title: str = Form(...),
+    rule_text: str = Form(...),
+    session: AsyncSession = Depends(get_db_session),
+    current_user: User = Depends(get_current_user),
+):
+    session.add(RACIRule(
+        title=title.strip(),
+        rule_text=rule_text.strip(),
+        is_active=True,
+        created_by_id=current_user.id,
+    ))
+    await session.commit()
+    return RedirectResponse("/dashboard/raci-intelligence", status_code=303)
+
+
+@router.post("/raci-intelligence/rules/{rule_id}/toggle")
+async def toggle_raci_rule(
+    rule_id: int,
+    session: AsyncSession = Depends(get_db_session),
+    current_user: User = Depends(get_current_user),
+):
+    rule = await session.get(RACIRule, rule_id)
+    if rule:
+        rule.is_active = not rule.is_active
+        await session.commit()
+    return RedirectResponse("/dashboard/raci-intelligence", status_code=303)
+
+
+@router.post("/raci-intelligence/rules/{rule_id}/delete")
+async def delete_raci_rule(
+    rule_id: int,
+    session: AsyncSession = Depends(get_db_session),
+    current_user: User = Depends(get_current_user),
+):
+    rule = await session.get(RACIRule, rule_id)
+    if rule:
+        await session.delete(rule)
+        await session.commit()
+    return RedirectResponse("/dashboard/raci-intelligence", status_code=303)
 
 
 # -----------------------------------------------------------------------

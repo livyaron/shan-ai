@@ -35,7 +35,7 @@ async def ask_query(
     session: AsyncSession = Depends(get_db_session),
     current_user: User = Depends(get_current_user),
 ):
-    from app.services.telegram_polling import _is_project_query
+    from app.services.telegram_routing import _is_project_query
     from app.services.knowledge_service import answer_with_full_context
 
     _DECISION_KEYWORDS = ("החלטה", "החלטות", "ההחלטה", "ההחלטות")

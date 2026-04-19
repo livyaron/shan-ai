@@ -826,6 +826,7 @@
         <a href="/dashboard/logs"     class="nav-link">📊 לוגים</a>
         <a href="/dashboard/projects"   class="nav-link">📂 פרויקטים</a>
         <a href="/dashboard/llm-config" class="nav-link">🤖 מודל AI</a>
+        <a href="/dashboard/raci-intelligence" class="nav-link">🧩 RACI בינה</a>
     </div>
 
     <div class="d-flex align-items-center gap-2">
@@ -855,10 +856,9 @@
 
     <!-- CTA row -->
     <div class="mb-4 d-flex align-items-center gap-3">
-        <button type="button" class="btn-cmd btn-lg"
-                data-bs-toggle="modal" data-bs-target="#newDecisionModal">
+        <a href="/dashboard/decisions?new=1" class="btn-cmd btn-lg" style="text-decoration:none;">
             + החלטה חדשה
-        </button>
+        </a>
         <button class="btn-cmd" onclick="openDashboardAI()">
             ◈ ניתוח AI
         </button>
@@ -1276,8 +1276,8 @@ async function analyzeDecision() {
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data = await response.json();
 
-        if (data.error) { alert('❌ ' + data.error); return; }
-        if (data.verdict !== 'DECISION') { alert('⚠️ ' + (data.message || 'לא זוהתה החלטה')); return; }
+        if (data.error) { alert('❌ ' + data.error); btn.textContent = '◎ נתח'; return; }
+        if (data.verdict !== 'DECISION') { alert('⚠️ ' + (data.message || 'לא זוהתה החלטה')); btn.textContent = '◎ נתח'; return; }
 
         currentAnalysis = data.analysis;
         allUsers = data.users || [];

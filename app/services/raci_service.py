@@ -5,7 +5,7 @@ import logging
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 
-from app.models import User, Decision, DecisionRaciRole, RaciRoleEnum, DecisionStatusEnum
+from app.models import User, Decision, DecisionRaciRole, RaciRoleEnum, DecisionStatusEnum, RACISuggestion, RACISuggestionStatusEnum, RACIRule
 
 logger = logging.getLogger(__name__)
 
@@ -393,9 +393,12 @@ async def _send_raci_telegram(bot, decision_id: int, decision, user, role: str) 
         "C": "💬 אתה מוגדר כ-<b>יועץ</b> (Consulted)",
         "I": "📢 הנך <b>מעודכן</b> על ההחלטה (Informed)",
     }
+    _type_str = str(decision.type).lower() if decision.type else ""
+    needs_approval = bool(decision.requires_approval) and _type_str == "critical"
+    logger.info(f"_send_raci_telegram: decision #{decision_id} type={decision.type!r} type_str={_type_str!r} requires_approval={decision.requires_approval!r} needs_approval={needs_approval} role={role}")
     role_note = {
         "R": "נדרשת ממך ביצוע הפעולה המומלצת.",
-        "A": "נדרש אישורך לפני ביצוע ההחלטה.",
+        "A": "נדרש אישורך לפני ביצוע ההחלטה." if needs_approval else "אתה בעל הסמכות על החלטה זו — אין צורך בפעולה אקטיבית.",
         "C": "ייתכן שתיפגש לייעוץ לפני הביצוע.",
         "I": "אין צורך בפעולה מצדך.",
     }
@@ -573,6 +576,9 @@ async def generate_raci_for_decision(decision_id: int) -> tuple[list[dict], dict
             except Exception:
                 pass
 
+            few_shots = await _get_raci_few_shots(session)
+            active_rules = await _get_active_rules(session)
+
             prompt = f"""אתה מומחה לניהול RACI בארגונים.
 
 הגדרות תפקידים:
@@ -590,6 +596,8 @@ async def generate_raci_for_decision(decision_id: int) -> tuple[list[dict], dict
 {chr(10).join(users_desc)}
 
 {raci_patterns}
+{few_shots}
+{active_rules}
 
 הנחיות RACI:
 1. בחר Accountable מהדרגים הגבוהים — מנהל אגף או סגן מנהל אגף
@@ -642,7 +650,7 @@ async def generate_raci_for_decision(decision_id: int) -> tuple[list[dict], dict
                 if uid not in all_users or role not in valid_roles or uid in seen_users:
                     continue
                 seen_users.add(uid)
-                valid_items.append({"user_id": uid, "role": role})
+                valid_items.append({"user_id": uid, "role": role, "reason": item.get("reason", "")})
 
             # Enforce exactly one A
             a_count = sum(1 for i in valid_items if i["role"] == "A")
@@ -736,6 +744,110 @@ async def save_pregenerated_raci(decision_id: int, valid_items: list[dict], pars
         logger.error(f"save_pregenerated_raci failed for decision {decision_id}: {e}", exc_info=True)
 
 
+async def _get_raci_few_shots(session: AsyncSession, limit: int = 4) -> str:
+    """Return few-shot examples from recent accepted/edited RACI suggestions for prompt injection."""
+    try:
+        from sqlalchemy import select as _sel
+        rows = (await session.execute(
+            _sel(RACISuggestion, Decision)
+            .join(Decision, RACISuggestion.decision_id == Decision.id)
+            .where(RACISuggestion.outcome.in_([
+                RACISuggestionStatusEnum.ACCEPTED, RACISuggestionStatusEnum.EDITED
+            ]))
+            .order_by(RACISuggestion.accepted_at.desc())
+            .limit(limit)
+        )).all()
+
+        if not rows:
+            return ""
+
+        # Load user names
+        all_users_q = await session.execute(_sel(User))
+        user_map = {u.id: u.username for u in all_users_q.scalars().all()}
+
+        lines = ["דוגמאות RACI מוצלחות מהעבר (ללמוד מהן):"]
+        for suggestion, decision in rows:
+            summary = (decision.summary or "")[:80]
+            assignments = suggestion.suggested_assignments or []
+            raci_str = ", ".join(
+                f"{i['role']}:{user_map.get(i['user_id'], str(i['user_id']))}"
+                for i in assignments
+            )
+            outcome_note = ""
+            if suggestion.outcome == RACISuggestionStatusEnum.EDITED:
+                final = suggestion.final_assignments or []
+                final_str = ", ".join(
+                    f"{i['role']}:{user_map.get(i['user_id'], str(i['user_id']))}"
+                    for i in final
+                )
+                reason = suggestion.edit_reason or "לא צוין"
+                outcome_note = f"\n  ← עוּרך ל: {final_str} (סיבה: {reason})"
+            else:
+                outcome_note = " ✓ (אושר)"
+            lines.append(f"- [{summary}]: {raci_str}{outcome_note}")
+
+        return "\n".join(lines)
+    except Exception as e:
+        logger.debug(f"_get_raci_few_shots failed: {e}")
+        return ""
+
+
+async def _get_active_rules(session: AsyncSession) -> str:
+    """Return active manual RACI rules as text for prompt injection."""
+    try:
+        from sqlalchemy import select as _sel
+        rules = (await session.execute(
+            _sel(RACIRule).where(RACIRule.is_active == True)
+        )).scalars().all()
+        if not rules:
+            return ""
+        lines = ["כללים קבועים שחייבים לנהוג לפיהם:"]
+        for r in rules:
+            lines.append(f"- {r.rule_text}")
+        return "\n".join(lines)
+    except Exception as e:
+        logger.debug(f"_get_active_rules failed: {e}")
+        return ""
+
+
+async def mark_raci_accepted(decision_id: int) -> None:
+    """Mark a pending RACI suggestion as accepted (user approved as-is)."""
+    from app.database import async_session_maker
+    from datetime import datetime as _dt
+    try:
+        async with async_session_maker() as session:
+            suggestion = await session.scalar(
+                select(RACISuggestion).where(RACISuggestion.decision_id == decision_id)
+            )
+            if suggestion:
+                suggestion.outcome = RACISuggestionStatusEnum.ACCEPTED
+                suggestion.final_assignments = suggestion.suggested_assignments
+                suggestion.accepted_at = _dt.utcnow()
+                await session.commit()
+                logger.info(f"mark_raci_accepted: decision {decision_id} → ACCEPTED")
+    except Exception as e:
+        logger.warning(f"mark_raci_accepted: failed for decision {decision_id}: {e}")
+
+
+async def mark_raci_edited(decision_id: int, final_items: list[dict]) -> None:
+    """Mark a RACI suggestion as edited, storing the final assignments."""
+    from app.database import async_session_maker
+    from datetime import datetime as _dt
+    try:
+        async with async_session_maker() as session:
+            suggestion = await session.scalar(
+                select(RACISuggestion).where(RACISuggestion.decision_id == decision_id)
+            )
+            if suggestion:
+                suggestion.outcome = RACISuggestionStatusEnum.EDITED
+                suggestion.final_assignments = [{"user_id": i["user_id"], "role": i["role"]} for i in final_items]
+                suggestion.accepted_at = _dt.utcnow()
+                await session.commit()
+                logger.info(f"mark_raci_edited: decision {decision_id} → EDITED with {len(final_items)} items")
+    except Exception as e:
+        logger.warning(f"mark_raci_edited: failed for decision {decision_id}: {e}")
+
+
 async def propose_raci_to_submitter(
     decision_id: int,
     submitter_telegram_id: int,
@@ -763,6 +875,23 @@ async def propose_raci_to_submitter(
         "submitter_telegram_id": submitter_telegram_id,
         "is_critical": is_critical,
     }
+
+    # Persist the AI suggestion for learning and visibility
+    try:
+        from app.database import async_session_maker as _sm
+        async with _sm() as _sess:
+            existing = await _sess.scalar(
+                select(RACISuggestion).where(RACISuggestion.decision_id == decision_id)
+            )
+            if not existing:
+                _sess.add(RACISuggestion(
+                    decision_id=decision_id,
+                    suggested_assignments=valid_items,
+                    outcome=RACISuggestionStatusEnum.PENDING,
+                ))
+                await _sess.commit()
+    except Exception as e:
+        logger.warning(f"propose_raci_to_submitter: failed to save RACISuggestion for decision {decision_id}: {e}")
 
     role_label = {
         "R": "👤 מבצע (R)",

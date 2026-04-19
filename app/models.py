@@ -257,6 +257,43 @@ class LLMConfig(Base):
     updated_by  = Column(String(255), nullable=True)
 
 
+class RACISuggestionStatusEnum(str, enum.Enum):
+    PENDING = "pending"    # not yet acted upon
+    ACCEPTED = "accepted"  # user accepted as-is
+    EDITED = "edited"      # user changed roles before saving
+
+
+class RACISuggestion(Base):
+    """Stores each AI RACI proposal per decision for learning and visibility."""
+    __tablename__ = "raci_suggestions"
+
+    id                   = Column(Integer, primary_key=True, index=True)
+    decision_id          = Column(Integer, ForeignKey("decisions.id"), unique=True, index=True)
+    suggested_assignments = Column(JSON)          # [{user_id, role, reason}]
+    final_assignments    = Column(JSON, nullable=True)  # [{user_id, role}] after user edits
+    outcome              = Column(Enum(RACISuggestionStatusEnum), default=RACISuggestionStatusEnum.PENDING)
+    edit_reason          = Column(Text, nullable=True)  # entered on web by manager
+    reason_analyzed      = Column(Boolean, default=False, server_default="false")
+    created_at           = Column(DateTime, default=datetime.utcnow)
+    accepted_at          = Column(DateTime, nullable=True)
+
+    decision = relationship("Decision")
+
+
+class RACIRule(Base):
+    """Manual override rules injected into the RACI AI prompt."""
+    __tablename__ = "raci_rules"
+
+    id             = Column(Integer, primary_key=True, index=True)
+    title          = Column(String(255), nullable=False)
+    rule_text      = Column(Text, nullable=False)  # Hebrew text injected verbatim
+    is_active      = Column(Boolean, default=True, nullable=False)
+    created_by_id  = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at     = Column(DateTime, default=datetime.utcnow)
+
+    created_by = relationship("User")
+
+
 class Project(Base):
     """Project management — synced from master file, updated via project_sync service."""
     __tablename__ = "projects"

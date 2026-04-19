@@ -37,9 +37,10 @@ class DecisionService:
         self.application = application
         self.claude = ClaudeService()
 
-    async def process(self, user: User, text: str) -> str:
+    async def process(self, user: User, text: str, force_approval: bool = False) -> str:
         """
         Full pipeline: Claude → store → route.
+        force_approval=True: escalate to CRITICAL regardless of AI classification.
         Returns the reply message to send back to the submitter.
         """
         role_str = user.role.value if user.role else "unknown"
@@ -88,6 +89,11 @@ class DecisionService:
         except Exception as e:
             logger.error(f"Claude analysis failed: {e}")
             return "\u200F⚠️ מנוע ההחלטות אינו זמין כרגע. אנא נסה שוב."
+
+        # Apply force_approval escalation before storing
+        if force_approval and result["type"] in ("INFO", "NORMAL", "UNCERTAIN"):
+            result["type"] = "CRITICAL"
+            result["requires_approval"] = True
 
         # --- 2. Store Decision in DB ---
         decision = Decision(

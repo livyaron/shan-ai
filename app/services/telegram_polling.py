@@ -11,212 +11,31 @@ from app.services.telegram_service import TelegramService
 from app.services.decision_service import DecisionService
 from app.services import feedback_service
 from app.models import User
+from app.services.telegram_state import (
+    _awaiting_rejection_note, _awaiting_dist_rejection,
+    _awaiting_clarification, _awaiting_master_confirm,
+    _awaiting_decision_confirm, _awaiting_mgr_approval_confirm,
+    _raci_edit_state,
+)
+from app.services.telegram_routing import (
+    _is_data_question, _is_project_query, _maybe_summarize,
+    _ai_route_message, _TG_MAX, _DECISION_HISTORY_KEYWORDS,
+)
 from sqlalchemy import select
 
 logger = logging.getLogger(__name__)
 
-# In-memory state: tracks superiors waiting to provide rejection notes
-# { telegram_id (int): decision_id (int) }
-_awaiting_rejection_note: dict[int, int] = {}
-
-# { telegram_id (int): distribution_id (int) }  — waiting for rejection reason on a distribution
-_awaiting_dist_rejection: dict[int, int] = {}
-
-# { telegram_id (int): original_text (str) }  — waiting for clarification on an UNCLEAR message
-_awaiting_clarification: dict[int, str] = {}
-
-# { telegram_id (int): file_id (int) }  — waiting for master-file confirmation after upload
-_awaiting_master_confirm: dict[int, int] = {}
-
-# { telegram_id (int): original_text (str) }  — bot wasn't sure; waiting for user to confirm if it's a decision
-_awaiting_decision_confirm: dict[int, str] = {}
-
-# { telegram_id (int): edit state dict }  — in-progress RACI inline edit session
-# value: { decision_id, items: [{user_id, role, name}], all_users: [{id, name}], is_critical, parsed }
-_raci_edit_state: dict[int, dict] = {}
-
-# Hebrew question prefixes — messages starting with these are treated as data queries, never decisions
-_QUESTION_PREFIXES = (
-    "כמה", "מה ", "מי ", "מתי", "איך ", "האם ", "האם?",
-    "תן לי", "תראה לי", "הצג", "סכם", "רשום לי",
-    "מהם", "מהן", "מאיזה", "מה ה", "מהו", "מהי",
-    "what", "how many", "how much", "show me", "list",
-)
+def _mgr_approval_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton("✅ כן, נדרש אישור", callback_data="mgr_yes:0"),
+        InlineKeyboardButton("❌ לא, בצע ישירות", callback_data="mgr_no:0"),
+    ]])
 
 
-def _is_data_question(text: str) -> bool:
-    """Return True if this looks like a data/info query rather than a decision."""
-    t = text.strip()
-    return (
-        t.endswith("?") or
-        any(t.startswith(kw) for kw in _QUESTION_PREFIXES)
-    )
-
-
-_PROJECT_QUERY_KEYWORDS = (
-    "פרויקט", "פרוייקט", "project", "עדכון שבועי", "מנהל פרויקט",
-    'מנה"פ', "שלב", "סיכון", "חסם", "לטיפול",
-    "סטטוס", "status", "עדכון",
-    "חשמול", "חישמול", "תאריך יעד", 'תאריך ת"פ', "תכנית פיתוח", "מזהה",
-)
-
-# Count-style questions about projects that must go to project_tools, not knowledge_service
-_PROJECT_COUNT_TRIGGERS = (
-    "כמה פרויקט", "כמה פרוייקט", "how many project",
-    "מנהל", "מנהלת", "מנהלים", 'מנה"פ', "מי מנהל", "מי אחראי",
-)
-
-
-_DECISION_HISTORY_KEYWORDS = ("החלטה", "החלטות", "ההחלטה", "ההחלטות")
-
-
-_DECISION_VERBS = (
-    "לאשר", "לבצע", "להחליף", "לשנות", "להוסיף", "להסיר", "לבטל",
-    "לעדכן", "לדחות", "לקדם", "להפעיל", "לסגור", "להשהות",
-    "approve", "execute", "cancel", "update", "replace",
-)
-_BARE_NAME_SKIP = frozenset({
-    "כן", "לא", "אישור", "ביטול", "תודה", "טוב", "בסדר", "ok", "yes", "no",
-    "שלום", "היי", "הי",
-})
-
-
-_ROUTING_PROMPT = """\
-אתה מנתב הודעות במערכת ניהול פרויקטים תשתיות חשמל.
-קבל הודעת משתמש בעברית והחזר JSON בלבד — ללא markdown, ללא הסברים.
-
-פורמט מחייב:
-{"route": "...", "intent": "...", "param": ...}
-
-route:
-- "project"   — שאלה על פרויקט/ים: סטטוס, תאריכים, מנהל, סיכונים, ספירה, עדכון שבועי
-- "knowledge" — שאלה על נהלים, מסמכים, מידע כללי (לא פרויקט ספציפי)
-- "decision"  — תיאור בעיה הדורשת ניתוח או פעולה
-- null        — כל השאר: ברכה, בדיחה, שיחה כללית, מילה בודדת שאינה שם פרויקט
-
-intent (רק כש-route="project", אחרת "general"):
-- "by_identifier" — שאלה על פרויקט אחד לפי שם/מזהה (param = שם/מזהה)
-- "by_manager"    — פרויקטים של מנהל מסוים (param = שם המנהל/ת כפי שנאמר)
-- "count_by_type" — ספירה לפי סוג (param = סוג, או null לכולם)
-- "list_risks"    — פרויקטים עם סיכונים (param = null)
-- "by_year"       — פרויקטים לפי שנת סיום (param = "2026")
-- "general"       — שאלת פרויקט כללית (param = null)
-
-דוגמאות:
-"רעות"                                   → {"route":"project","intent":"by_identifier","param":"רעות"}
-"טרומן"                                  → {"route":"project","intent":"by_identifier","param":"טרומן"}
-"מה סטטוס רעות?"                        → {"route":"project","intent":"by_identifier","param":"רעות"}
-"מה תאריך תכנית הפיתוח של רעות?"        → {"route":"project","intent":"by_identifier","param":"רעות"}
-"מי מנהל את פרויקט רמת חובב?"           → {"route":"project","intent":"by_identifier","param":"רמת חובב"}
-"מה העדכון השבועי של פרויקט X?"         → {"route":"project","intent":"by_identifier","param":"X"}
-"כמה פרויקטים מנהלת ענת אוברקוביץ?"     → {"route":"project","intent":"by_manager","param":"ענת אוברקוביץ"}
-"אלו פרויקטים מנהלת רחלי?"               → {"route":"project","intent":"by_manager","param":"רחלי"}
-"אילו פרויקטים מסתיימים ב-2026?"        → {"route":"project","intent":"by_year","param":"2026"}
-"מה הסיכונים בפרויקטים?"                → {"route":"project","intent":"list_risks","param":null}
-"כמה פרויקטי הקמה יש?"                  → {"route":"project","intent":"count_by_type","param":"הקמה"}
-"כמה פרויקטים יש בסך הכל?"              → {"route":"project","intent":"count_by_type","param":null}
-"מה הנוהל להחלפת טרנספורמטור?"          → {"route":"knowledge","intent":"general","param":null}
-"צריך להחליף שנאי ישן בתחנה 5"          → {"route":"decision","intent":"general","param":null}
-"בדיחה"                                  → {"route":null,"intent":null,"param":null}
-"שלום"                                   → {"route":null,"intent":null,"param":null}
-"תודה"                                   → {"route":null,"intent":null,"param":null}
-
-הודעה: {text}
-
-JSON:"""
-
-
-def _parse_routing_response(response: str) -> dict:
-    """
-    Robustly extract route/intent/param from an LLM response.
-    Tries json.loads first; falls back to per-field regex extraction
-    so that invalid JSON (bad quotes, Hebrew chars) doesn't cause total failure.
-    """
-    import json as _json
-    import re as _re
-
-    valid_routes = {"project", "knowledge", "decision"}
-    valid_intents = {"by_identifier", "by_manager", "count_by_type", "list_risks", "by_year", "general"}
-
-    # Try standard JSON parse on the first {...} block
-    match = _re.search(r'\{[^}]+\}', response, _re.DOTALL)
-    if match:
-        try:
-            data = _json.loads(match.group())
-            route = data.get("route")
-            intent = data.get("intent") or "general"
-            param = data.get("param")
-            if param in (None, "null", "", "None"):
-                param = None
-            if route in valid_routes and intent in valid_intents:
-                return {"route": route, "intent": intent, "param": param}
-        except Exception:
-            pass  # fall through to regex extraction
-
-    # Fallback: extract each field individually with regex
-    def _field(name: str) -> str | None:
-        m = _re.search(rf'"{name}"\s*:\s*"([^"]*)"', response)
-        if m:
-            return m.group(1).strip()
-        m = _re.search(rf'"{name}"\s*:\s*null', response)
-        if m:
-            return None
-        return None
-
-    route = _field("route")
-    intent = _field("intent") or "general"
-    param = _field("param")
-    if param in (None, "null", "", "None"):
-        param = None
-
-    if route in valid_routes:
-        return {"route": route, "intent": intent if intent in valid_intents else "general", "param": param}
-
-    return {"route": None, "intent": None, "param": None}
-
-
-async def _ai_route_message(text: str) -> dict:
-    """One LLM call: classify route (project/knowledge/decision) + extract intent+param."""
-    from app.services.llm_router import llm_chat
-    prompt = _ROUTING_PROMPT.replace("{text}", text)
-    try:
-        response = await llm_chat(
-            "message_routing",
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=100,
-            temperature=0.0,
-        )
-        result = _parse_routing_response(response)
-        if result["route"]:
-            logger.info(f"_ai_route_message: route={result['route']!r} intent={result['intent']!r} param={result['param']!r}")
-            return result
-        logger.warning(f"_ai_route_message: could not parse response: {response!r}")
-    except Exception as e:
-        logger.warning(f"_ai_route_message failed: {e}")
-    return {"route": None, "intent": None, "param": None}
-
-
-def _is_project_query(text: str) -> bool:
-    """Return True if this looks like a project-related query."""
-    t = text.lower().strip()
-    if any(kw.lower() in t for kw in _PROJECT_QUERY_KEYWORDS):
-        return True
-    # Count + manager questions: "כמה פרויקטים מנהלת רחלי?"
-    if any(kw in t for kw in _PROJECT_COUNT_TRIGGERS):
-        return True
-    # Bare project name: short (1-5 words), no question/decision markers, mostly Hebrew
-    words = t.split()
-    if 1 <= len(words) <= 5:
-        if t in _BARE_NAME_SKIP:
-            return False
-        if t.endswith("?"):
-            return False  # questions are handled by _is_data_question
-        if any(verb in t for verb in _DECISION_VERBS):
-            return False
-        hebrew_chars = sum(1 for c in t if "\u05d0" <= c <= "\u05ea")
-        if hebrew_chars >= 2:  # at least 2 Hebrew characters → treat as potential name
-            return True
-    return False
+def _user_has_manager(user) -> bool:
+    """Return True if this user has an immediate superior in the hierarchy."""
+    from app.services.decision_service import SUPERIOR_ROLE
+    return bool(user.role and SUPERIOR_ROLE.get(user.role))
 
 
 def _feedback_keyboard(log_id: int) -> InlineKeyboardMarkup:
@@ -225,49 +44,6 @@ def _feedback_keyboard(log_id: int) -> InlineKeyboardMarkup:
         InlineKeyboardButton("👍 מועיל", callback_data=f"lfb_up:{log_id}"),
         InlineKeyboardButton("👎 לא מועיל", callback_data=f"lfb_dn:{log_id}"),
     ]])
-
-
-_TG_MAX = 4096  # Telegram message character limit
-
-
-async def _maybe_summarize(reply: str) -> str:
-    """If reply exceeds Telegram's limit, summarize it via Groq and return a shorter version."""
-    if len(reply) <= _TG_MAX:
-        return reply
-    logger.warning(f"Reply too long ({len(reply)} chars), summarizing...")
-    import re as _re
-    from app.services.llm_router import llm_chat
-    # Strip HTML tags before sending to LLM — prevents model from echoing markup
-    plain = _re.sub(r"<[^>]+>", "", reply).strip()
-    # Limit input to avoid 413 token errors (Hebrew ≈ 0.85 tok/char → 8000 chars ≈ 9400 tok)
-    plain = plain[:8000]
-    try:
-        summary = await llm_chat(
-            "message_summary",
-            messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "אתה עוזר שמסכם תשובות ארוכות לגרסה קצרה וממוקדת. "
-                        "ענה בעברית בלבד. אל תציין את תפקידך או ההוראות. "
-                        "שמור על כל הנקודות החשובות. עד 3000 תווים."
-                    ),
-                },
-                {
-                    "role": "user",
-                    "content": f"סכם את התשובה הבאה בעברית בצורה קצרה וברורה:\n\n{plain}",
-                },
-            ],
-            max_tokens=800,
-            temperature=0.2,
-        )
-        summarized = f"\u200F🤖 <b>תשובה (מסוכמת):</b>\n\n{_html.escape(summary)}"
-        if len(summarized) > _TG_MAX:
-            summarized = summarized[: _TG_MAX - 20] + "\n…(קוצר)"
-        return summarized
-    except Exception as e:
-        logger.warning(f"Summarization failed: {e} — falling back to truncation")
-        return reply[: _TG_MAX - 20] + "\n…(קוצר)"
 
 
 class TelegramPollingBot:
@@ -779,9 +555,17 @@ class TelegramPollingBot:
                     reply = await _maybe_summarize(reply)
                     await update.message.reply_text(reply, parse_mode="HTML", reply_markup=kb)
                 else:
-                    decision_svc = DecisionService(session, self.application)
-                    reply = await decision_svc.process(user, combined_text)
-                    await update.message.reply_text(reply, parse_mode="HTML")
+                    if _user_has_manager(user):
+                        _awaiting_mgr_approval_confirm[telegram_id] = combined_text
+                        await update.message.reply_text(
+                            "\u200F👔 <b>האם החלטה זו דורשת אישור מנהל?</b>",
+                            parse_mode="HTML",
+                            reply_markup=_mgr_approval_keyboard(),
+                        )
+                    else:
+                        decision_svc = DecisionService(session, self.application)
+                        reply = await decision_svc.process(user, combined_text)
+                        await update.message.reply_text(reply, parse_mode="HTML")
                 return
 
             # --- LLM classify for everything else ---
@@ -804,30 +588,30 @@ class TelegramPollingBot:
             ]])
 
             if verdict == "NOT_DECISION":
-                # If LLM gave a direct reply (e.g. joke, greeting), use it — skip knowledge base
                 ai_reply = classify_result.get("reply", "")
                 if ai_reply:
+                    # Send the AI's reply, then still offer to process as a decision
                     await update.message.reply_text(f"\u200F{_html.escape(ai_reply)}", parse_mode="HTML")
-                    return
-                # Otherwise answer from knowledge base
-                kb = None
-                try:
-                    from app.services.knowledge_service import answer_with_full_context
-                    qa_result = await answer_with_full_context(text, session, user.id)
-                    reply = f"\u200F🤖 <b>תשובה:</b>\n\n{_html.escape(qa_result['answer'])}"
-                    if qa_result.get("sources_text"):
-                        reply += f"\n\n<i>{_html.escape(qa_result['sources_text'])}</i>"
-                    if qa_result.get("log_id"):
-                        kb = _feedback_keyboard(qa_result["log_id"])
-                except Exception as e:
-                    logger.warning(f"answer_with_full_context failed: {e}")
-                    reply = "\u200Fשאל שאלות עבודה או שלח החלטה לניתוח."
-                reply = await _maybe_summarize(reply)
-                await update.message.reply_text(reply, parse_mode="HTML", reply_markup=kb)
-                # Ask if it was actually a decision
+                else:
+                    # Answer from knowledge base
+                    kb = None
+                    try:
+                        from app.services.knowledge_service import answer_with_full_context
+                        qa_result = await answer_with_full_context(text, session, user.id)
+                        reply = f"\u200F🤖 <b>תשובה:</b>\n\n{_html.escape(qa_result['answer'])}"
+                        if qa_result.get("sources_text"):
+                            reply += f"\n\n<i>{_html.escape(qa_result['sources_text'])}</i>"
+                        if qa_result.get("log_id"):
+                            kb = _feedback_keyboard(qa_result["log_id"])
+                    except Exception as e:
+                        logger.warning(f"answer_with_full_context failed: {e}")
+                        reply = "\u200Fשאל שאלות עבודה או שלח החלטה לניתוח."
+                    reply = await _maybe_summarize(reply)
+                    await update.message.reply_text(reply, parse_mode="HTML", reply_markup=kb)
+                # Always ask — user can correct misclassification
                 _awaiting_decision_confirm[telegram_id] = text
                 await update.message.reply_text(
-                    "\u200F❓ <b>האם זוהי החלטה חדשה?</b>",
+                    "\u200F❓ <b>האם זוהי החלטה לתיעוד?</b>",
                     parse_mode="HTML",
                     reply_markup=_dec_confirm_kb,
                 )
@@ -842,7 +626,15 @@ class TelegramPollingBot:
                 await update.message.reply_text(msg, parse_mode="HTML", reply_markup=_dec_confirm_kb)
                 return
 
-            # DECISION — process through decision engine
+            # DECISION — ask manager approval question first (if user has a manager)
+            if _user_has_manager(user):
+                _awaiting_mgr_approval_confirm[telegram_id] = text
+                await update.message.reply_text(
+                    "\u200F👔 <b>האם החלטה זו דורשת אישור מנהל?</b>",
+                    parse_mode="HTML",
+                    reply_markup=_mgr_approval_keyboard(),
+                )
+                return
             decision_svc = DecisionService(session, self.application)
             reply = await decision_svc.process(user, text)
 
@@ -994,6 +786,10 @@ class TelegramPollingBot:
 
                 await save_pregenerated_raci(decision_id, pending["valid_items"], pending["parsed"])
 
+                # Mark suggestion as accepted for learning
+                from app.services.raci_service import mark_raci_accepted as _mark_accepted
+                context.application.create_task(_mark_accepted(decision_id))
+
                 # For CRITICAL decisions: after RACI is saved, send approval request to accountable
                 if pending.get("is_critical"):
                     from app.services.raci_service import get_accountable_user_id as _get_acc
@@ -1037,13 +833,37 @@ class TelegramPollingBot:
                 if action == "dec_conf_n" or not original_text:
                     await query.edit_message_text("\u200Fבסדר, ממשיכים.")
                     return
-                # User confirmed it IS a decision — process through engine
-                await query.edit_message_text(
-                    "\u200F⏳ <b>מעבד את ההחלטה...</b>",
-                    parse_mode="HTML",
-                )
+                # Ask manager approval question before processing (if user has a manager)
+                if _user_has_manager(approver):
+                    _awaiting_mgr_approval_confirm[telegram_id] = original_text
+                    await query.edit_message_text(
+                        "\u200F👔 <b>האם החלטה זו דורשת אישור מנהל?</b>",
+                        parse_mode="HTML",
+                        reply_markup=_mgr_approval_keyboard(),
+                    )
+                    return
+                # No manager — process directly
+                await query.edit_message_text("\u200F⏳ <b>מעבד את ההחלטה...</b>", parse_mode="HTML")
                 decision_svc = DecisionService(session, self.application)
                 reply = await decision_svc.process(approver, original_text)
+                await context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text=reply,
+                    parse_mode="HTML",
+                )
+                return
+
+            # --- Manager approval answer ---
+            if action in ("mgr_yes", "mgr_no"):
+                original_text = _awaiting_mgr_approval_confirm.pop(telegram_id, None)
+                if not original_text:
+                    await query.edit_message_text("\u200F⚠️ פג תוקף הבקשה. שלח את ההחלטה מחדש.")
+                    return
+                await query.edit_message_text("\u200F⏳ <b>מעבד את ההחלטה...</b>", parse_mode="HTML")
+                decision_svc = DecisionService(session, self.application)
+                reply = await decision_svc.process(
+                    approver, original_text, force_approval=(action == "mgr_yes")
+                )
                 await context.bot.send_message(
                     chat_id=update.effective_chat.id,
                     text=reply,
@@ -1175,6 +995,10 @@ class TelegramPollingBot:
 
                 await _spr(decision_id, valid_items, parsed)
 
+                # Mark suggestion as edited for learning
+                from app.services.raci_service import mark_raci_edited as _mark_edited
+                context.application.create_task(_mark_edited(decision_id, valid_items))
+
                 if state.get("is_critical"):
                     from app.services.raci_service import get_accountable_user_id as _get_acc
                     from app.models import Decision as _Dec
@@ -1241,6 +1065,15 @@ class TelegramPollingBot:
             logger.info("Telegram bot application started (webhook mode)")
         except Exception as e:
             logger.error(f"Failed to start bot application: {e}")
+            raise
+
+    async def start_polling(self):
+        """Start bot in polling mode (local dev — no public URL needed)."""
+        try:
+            await self.application.updater.start_polling(drop_pending_updates=True)
+            logger.info("Telegram bot started in polling mode")
+        except Exception as e:
+            logger.error(f"Failed to start polling: {e}")
             raise
 
     async def stop(self):

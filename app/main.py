@@ -120,6 +120,9 @@ async def startup():
                 await conn.execute(_text(
                     "ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_path VARCHAR(512);"
                 ))
+                await conn.execute(_text(
+                    "ALTER TABLE raci_suggestions ADD COLUMN IF NOT EXISTS reason_analyzed BOOLEAN NOT NULL DEFAULT FALSE;"
+                ))
 
                 # LLM config table
                 await conn.execute(_text("""
@@ -174,12 +177,22 @@ async def startup():
     except Exception as e:
         print(f"Warning: User password migration failed: {e}")
 
-    # Start Telegram bot in webhook mode
+    # Start Telegram bot — polling locally, webhook on Railway
     try:
         await telegram_bot.initialize()
         await telegram_bot.start()
-        await telegram_bot.set_webhook()
-        print("Telegram bot started and webhook registered.")
+
+        use_polling = settings.USE_POLLING or (
+            not settings.TELEGRAM_WEBHOOK_URL and
+            any(h in (settings.BASE_URL or "") for h in ["localhost", "127.0.0.1", "0.0.0.0"])
+        )
+
+        if use_polling:
+            await telegram_bot.start_polling()
+            print("Telegram bot started in polling mode (local).")
+        else:
+            await telegram_bot.set_webhook()
+            print("Telegram bot started and webhook registered.")
 
         # Start 48-hour feedback scheduler
         asyncio.create_task(run_feedback_scheduler(telegram_bot.application.bot))
@@ -190,8 +203,12 @@ async def startup():
 
 @app.on_event("shutdown")
 async def shutdown():
-    """Gracefully stop the Telegram bot and remove webhook."""
+    """Gracefully stop the Telegram bot."""
     try:
+        try:
+            await telegram_bot.application.updater.stop()
+        except Exception:
+            pass
         await telegram_bot.delete_webhook()
         await telegram_bot.stop()
         print("Telegram bot stopped and webhook removed.")
