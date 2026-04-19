@@ -1509,6 +1509,11 @@ async def delete_decision(
     if not _can_delete(d, current_user):
         return RedirectResponse("/dashboard/decisions?error=אין+הרשאה+למחיקת+החלטה+זו", status_code=303)
 
+    await session.execute(delete(LessonLearned).where(LessonLearned.decision_id == decision_id))
+    await session.execute(delete(DecisionFeedback).where(DecisionFeedback.decision_id == decision_id))
+    await session.execute(delete(DecisionDistribution).where(DecisionDistribution.decision_id == decision_id))
+    await session.execute(delete(DecisionRaciRole).where(DecisionRaciRole.decision_id == decision_id))
+    await session.execute(delete(RACISuggestion).where(RACISuggestion.decision_id == decision_id))
     await session.delete(d)
     await session.commit()
     return RedirectResponse("/dashboard/decisions?msg=החלטה+נמחקה", status_code=303)
