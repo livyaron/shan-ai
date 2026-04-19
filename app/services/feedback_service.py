@@ -4,7 +4,7 @@ import asyncio
 import logging
 from datetime import datetime, timedelta
 from sqlalchemy import select
-from telegram import Bot
+from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup
 
 from app.database import async_session_maker
 from app.models import Decision, User, DecisionStatusEnum
@@ -40,20 +40,27 @@ async def send_feedback_requests(bot: Bot):
             if not submitter or not submitter.telegram_id:
                 continue
             try:
+                score_labels = {
+                    1: "1️⃣ כישלון",
+                    2: "2️⃣ לא טוב",
+                    3: "3️⃣ בסדר",
+                    4: "4️⃣ טוב",
+                    5: "5️⃣ מצוין",
+                }
+                keyboard = InlineKeyboardMarkup([[
+                    InlineKeyboardButton(label, callback_data=f"dfb_score:{score}:{decision.id}")
+                    for score, label in score_labels.items()
+                ]])
                 await bot.send_message(
                     chat_id=submitter.telegram_id,
                     text=(
-                        f"\u200F📊 *משוב על החלטה #{decision.id} — Shan-AI*\n\n"
-                        f"📋 *סיכום:* {decision.summary}\n"
-                        f"🎯 *פעולה שבוצעה:* {decision.recommended_action}\n\n"
-                        f"כיצד הסתיים הביצוע? שלח מספר בין 1 ל-5:\n\n"
-                        f"1️⃣ — כישלון מוחלט\n"
-                        f"2️⃣ — לא טוב\n"
-                        f"3️⃣ — בסדר\n"
-                        f"4️⃣ — טוב\n"
-                        f"5️⃣ — מצוין"
+                        f"\u200F📊 <b>משוב על החלטה — Shan-AI</b>\n\n"
+                        f"📋 <b>סיכום:</b> {decision.summary}\n"
+                        f"🎯 <b>פעולה:</b> {decision.recommended_action}\n\n"
+                        f"כיצד הסתיים הביצוע? בחר ציון:"
                     ),
-                    parse_mode="Markdown",
+                    parse_mode="HTML",
+                    reply_markup=keyboard,
                 )
                 decision.feedback_requested_at = datetime.utcnow()
                 await session.commit()

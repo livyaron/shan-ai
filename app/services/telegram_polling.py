@@ -375,41 +375,14 @@ class TelegramPollingBot:
             awaiting_fb = feedback_service.get_awaiting_feedback()
             if telegram_id in awaiting_fb:
                 decision_id = awaiting_fb.pop(telegram_id)
-                async with async_session_maker() as fb_session:
-                    await feedback_service.save_feedback_text(fb_session, decision_id, text)
+                if text.strip().lower() != "/skip":
+                    async with async_session_maker() as fb_session:
+                        await feedback_service.save_feedback_text(fb_session, decision_id, text)
                 await update.message.reply_text(
                     "\u200F✅ תודה! הפידבק נשמר ויסייע לשיפור ההחלטות הבאות.",
                     parse_mode="HTML",
                 )
                 return
-
-            # Check if user is providing a numeric rating (1-5) for feedback
-            if text.strip() in ("1", "2", "3", "4", "5"):
-                async with async_session_maker() as fb_session:
-                    stmt = select(User).where(User.telegram_id == telegram_id)
-                    fb_user = await fb_session.scalar(stmt)
-                    if fb_user:
-                        from sqlalchemy import select as sa_select
-                        from app.models import Decision
-                        pending_stmt = (
-                            sa_select(Decision)
-                            .where(Decision.submitter_id == fb_user.id)
-                            .where(Decision.feedback_requested_at.isnot(None))
-                            .where(Decision.feedback_score.is_(None))
-                            .order_by(Decision.feedback_requested_at.desc())
-                            .limit(1)
-                        )
-                        result = await fb_session.execute(pending_stmt)
-                        pending_decision = result.scalar_one_or_none()
-                        if pending_decision:
-                            await feedback_service.save_feedback_score(
-                                fb_session, pending_decision.id, int(text.strip()), telegram_id
-                            )
-                            await update.message.reply_text(
-                                f"\u200F תודה על הדירוג {text.strip()}/5!\n"
-                                f"כעת שלח תיאור קצר של מה שקרה בפועל (post-mortem).",
-                            )
-                            return
 
             # Check if user is providing a rejection reason for a distribution
             if telegram_id in _awaiting_dist_rejection:
@@ -457,7 +430,7 @@ class TelegramPollingBot:
             ai_param = routing["param"]
 
             # Decision history query — answer from decisions DB
-            if any(kw in text for kw in _DECISION_HISTORY_KEYWORDS):
+            if ai_route != "decision" and any(kw in text for kw in _DECISION_HISTORY_KEYWORDS):
                 kb = None
                 try:
                     from app.services.knowledge_service import get_decisions_context, answer_decisions_question
@@ -665,7 +638,13 @@ class TelegramPollingBot:
         try:
             parts = data.split(":")
             action = parts[0]
-            decision_id = int(parts[1]) if len(parts) > 1 else 0
+            # dfb_score:{score}:{decision_id} — 3 parts
+            if action == "dfb_score":
+                dfb_score_val = int(parts[1])
+                decision_id = int(parts[2])
+            else:
+                dfb_score_val = 0
+                decision_id = int(parts[1]) if len(parts) > 1 else 0
         except (ValueError, AttributeError):
             await query.edit_message_text("❌ Invalid action.")
             return
@@ -734,6 +713,32 @@ class TelegramPollingBot:
                     chat_id=update.effective_chat.id,
                     text=f"\u200F{emoji} תודה! הפידבק נשמר.",
                 )
+                return
+
+            # --- Decision feedback score (1-5 inline buttons) ---
+            if action == "dfb_score":
+                saved = await feedback_service.save_feedback_score(
+                    session, decision_id, dfb_score_val, telegram_id
+                )
+                try:
+                    await query.edit_message_reply_markup(reply_markup=None)
+                except Exception:
+                    pass
+                if saved:
+                    score_labels = {1: "כישלון מוחלט", 2: "לא טוב", 3: "בסדר", 4: "טוב", 5: "מצוין"}
+                    await context.bot.send_message(
+                        chat_id=update.effective_chat.id,
+                        text=(
+                            f"\u200F✅ ציון {dfb_score_val} — <b>{score_labels.get(dfb_score_val, '')}</b> נשמר.\n\n"
+                            f"רוצה להוסיף הערה? שלח טקסט, או /skip לדילוג."
+                        ),
+                        parse_mode="HTML",
+                    )
+                else:
+                    await context.bot.send_message(
+                        chat_id=update.effective_chat.id,
+                        text="\u200F❌ לא נמצאה ההחלטה. ייתכן שהפידבק כבר נשמר.",
+                    )
                 return
 
             # --- Distribution responses ---
