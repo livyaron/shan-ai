@@ -1,491 +1,357 @@
 <!DOCTYPE html>
 <html lang="he" dir="rtl">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Shan-AI — כניסה למערכת</title>
-    <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-    <style>
-        :root {
-            --bg:    #070b12;
-            --card:  #0f1826;
-            --brd:   #1a2d47;
-            --brd-hi:#1e3a5f;
-            --cyan:  #00d4ff;
-            --purple:#8b9cf4;
-            --red:   #ef4444;
-            --green: #10b981;
-            --t1:    #e2e8f0;
-            --t2:    #64748b;
-            --t3:    #344156;
-            --mono:  'IBM Plex Mono', monospace;
-            --ui:    'Heebo', sans-serif;
-        }
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Shan-AI — כניסה למערכת</title>
+  <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg:    #0b100d;
+      --ink:   #d5dfd8;
+      --ink2:  #96a39b;
+      --ink3:  #5a6560;
+      --ink4:  #3a4540;
+      --panel: #131a16;
+      --acc:   #00a86b;
+    }
 
-        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-        body {
-            background: var(--bg);
-            font-family: var(--ui);
-            min-height: 100vh;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: var(--t1);
-            background-image:
-                radial-gradient(circle at 20% 30%, rgba(0,212,255,0.04) 0%, transparent 50%),
-                radial-gradient(circle at 80% 70%, rgba(139,156,244,0.04) 0%, transparent 50%),
-                radial-gradient(circle, #1a2d47 1px, transparent 1px);
-            background-size: 100% 100%, 100% 100%, 28px 28px;
-            background-attachment: fixed;
-            overflow-x: hidden;
-        }
+    html, body { width: 100%; min-height: 100vh; font-family: 'Heebo', sans-serif; background: var(--bg); color: var(--ink); direction: rtl; overflow-x: hidden; }
 
-        .login-container {
-            width: 100%;
-            max-width: 600px;
-            display: flex;
-            flex-direction: column;
-            gap: 0.25rem;
-            padding: 2rem;
-            align-items: center;
-            justify-items: center;
-        }
+    body { display: flex; flex-direction: column; position: relative; }
 
-        /* LOGO SECTION - TOP */
-        .logo-section {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            position: relative;
-            width: 100%;
-        }
+    /* SVG electrical diagram background */
+    .sl-bg {
+      position: fixed; inset: 0; width: 100%; height: 100%;
+      pointer-events: none; z-index: 0;
+    }
+    .sl-bg .bus  { stroke: var(--ink2); stroke-width: 4; fill: none; opacity: 0.55; }
+    .sl-bg .feed { stroke: var(--ink3); stroke-width: 1.5; fill: none; opacity: 0.45; }
+    .sl-bg .hot  { stroke: var(--acc); stroke-width: 2; fill: none; stroke-dasharray: 6 4; opacity: 0.6; animation: dashFlow 1.5s linear infinite; }
+    .sl-bg text  { font-family: 'JetBrains Mono', monospace; font-size: 10px; fill: var(--ink3); opacity: 0.5; }
+    .sl-bg .equip { fill: #0b100d; stroke: var(--ink3); opacity: 0.45; }
 
-        .logo-stage {
-            position: relative;
-            width: 380px;
-            height: 304px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
+    /* Radial glow overlay */
+    .bg-glow {
+      position: fixed; inset: 0; pointer-events: none; z-index: 0;
+      background: radial-gradient(ellipse at 50% 20%, color-mix(in oklab, var(--acc) 12%, transparent) 0%, transparent 60%);
+    }
 
-        /* Multi-layer glow system */
-        .glow-layer-1 {
-            position: absolute;
-            inset: -40px;
-            background: radial-gradient(circle, rgba(0,212,255,0.12) 0%, transparent 65%);
-            border-radius: 50%;
-            filter: blur(16px);
-            animation: glowPulse1 4s ease-in-out infinite;
-        }
+    /* Main content */
+    .main {
+      position: relative; z-index: 1; flex: 1;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      padding: 60px 24px 100px;
+      min-height: 100vh;
+    }
 
-        .glow-layer-2 {
-            position: absolute;
-            inset: -60px;
-            background: radial-gradient(circle, rgba(139,156,244,0.08) 0%, transparent 60%);
-            border-radius: 50%;
-            filter: blur(24px);
-            animation: glowPulse2 5s ease-in-out infinite;
-        }
+    /* ── LOGO ── */
+    .logo-wrap {
+      position: relative;
+      width: 240px; height: 240px;
+      margin-bottom: 28px;
+      flex-shrink: 0;
+    }
 
-        .glow-ring {
-            position: absolute;
-            inset: -50px;
-            border: 1.5px solid rgba(0,212,255,0.15);
-            border-radius: 50%;
-            animation: ringSpin 12s linear infinite;
-        }
+    .logo-core {
+      position: absolute; inset: 0;
+      border-radius: 50%; overflow: hidden;
+      display: flex; align-items: center; justify-content: center;
+      background: #000;
+      border: 3px solid #0a0d0b;
+      box-shadow: 0 0 0 6px var(--bg), 0 0 0 7px var(--acc), 0 0 50px color-mix(in oklab, var(--acc) 45%, transparent);
+      animation: bob 5s ease-in-out infinite, glowSoft 2.8s ease-in-out infinite;
+    }
 
-        .glow-ring::after {
-            content: '';
-            position: absolute;
-            inset: -30px;
-            border: 1px solid rgba(139,156,244,0.12);
-            border-radius: 50%;
-            animation: ringSpinReverse 16s linear infinite;
-        }
+    .logo-core img { width: 100%; height: 100%; object-fit: cover; display: block; }
 
-        .logo-wrapper {
-            position: relative;
-            width: 320px;
-            height: 256px;
-            background: rgba(12,18,32,0.35);
-            backdrop-filter: blur(16px);
-            border: 1.5px solid rgba(0,212,255,0.3);
-            border-radius: 24px;
-            padding: 16px;
-            box-shadow:
-                inset 0 2px 4px rgba(255,255,255,0.08),
-                0 0 40px rgba(0,212,255,0.12),
-                0 0 80px rgba(139,156,244,0.08),
-                0 20px 60px rgba(0,0,0,0.4);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            overflow: hidden;
-            transition: all 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
-        }
+    .ring {
+      position: absolute; inset: -18px; border-radius: 50%;
+      border: 1px dashed var(--acc); opacity: 0.6;
+      animation: spin 36s linear infinite;
+      pointer-events: none;
+    }
 
-        .logo-wrapper::before {
-            content: '';
-            position: absolute;
-            inset: 0;
-            background: linear-gradient(135deg, rgba(0,212,255,0.08), rgba(139,156,244,0.08));
-            border-radius: 24px;
-            pointer-events: none;
-        }
+    .ring2 {
+      position: absolute; inset: -34px; border-radius: 50%;
+      border: 1px solid color-mix(in oklab, var(--acc) 26%, transparent);
+      animation: spinR 70s linear infinite;
+      pointer-events: none;
+    }
 
-        .logo-img {
-            width: 100%;
-            height: 100%;
-            object-fit: contain;
-            object-position: center;
-            filter: drop-shadow(0 0 16px rgba(0,212,255,0.4)) drop-shadow(0 0 32px rgba(139,156,244,0.2));
-            position: relative;
-            z-index: 2;
-            animation: logoFloat 3.5s ease-in-out infinite;
-        }
+    /* ── HERO ── */
+    .hero { text-align: center; max-width: 760px; margin-bottom: 32px; animation: fadeIn 0.8s ease-out 0.2s both; }
 
-        /* Hover effect on logo */
-        .logo-stage:hover .logo-wrapper {
-            border-color: rgba(0,212,255,0.5);
-            box-shadow:
-                inset 0 2px 4px rgba(255,255,255,0.12),
-                0 0 60px rgba(0,212,255,0.2),
-                0 0 120px rgba(139,156,244,0.15),
-                0 30px 80px rgba(0,0,0,0.5);
-            transform: scale(1.08);
-        }
+    .hero .tag {
+      font-size: 10px; font-family: 'JetBrains Mono', monospace;
+      letter-spacing: 4px; color: var(--acc);
+      text-shadow: 0 0 8px var(--acc); margin-bottom: 8px;
+    }
 
-        /* LOGIN CARD - RIGHT SIDE */
-        .login-box {
-            width: 100%;
-            max-width: 420px;
-            animation: cardSlideIn 0.8s cubic-bezier(0.34, 1.56, 0.64, 1) 0.2s both;
-        }
+    .hero .dot { animation: flickerDot 2s infinite; }
 
-        .login-card {
-            background: var(--card);
-            border: 1px solid var(--brd);
-            border-radius: 12px;
-            padding: 2rem;
-            position: relative;
-        }
+    .hero h2 {
+      font-size: clamp(22px, 3.5vw, 30px); font-weight: 800;
+      letter-spacing: -0.6px; color: var(--ink); margin: 6px 0;
+    }
 
-        .login-card::before, .login-card::after {
-            content: '';
-            position: absolute;
-            width: 14px; height: 14px;
-            border-color: var(--cyan);
-            border-style: solid;
-            opacity: 0.35;
-        }
+    .hero p { font-size: 13px; color: var(--ink2); line-height: 1.6; max-width: 600px; margin: 0 auto; }
 
-        .login-card::before { top: -1px; right: -1px; border-width: 1px 1px 0 0; border-radius: 0 12px 0 0; }
-        .login-card::after  { bottom: -1px; left: -1px; border-width: 0 0 1px 1px; border-radius: 0 0 0 12px; }
+    /* ── RACI ── */
+    .raci-bar {
+      width: 100%; max-width: 820px;
+      padding: 10px 16px;
+      background: var(--panel); border: 1px solid var(--ink4);
+      display: flex; align-items: center; gap: 14px;
+      direction: rtl; margin-bottom: 10px;
+      animation: slideUp 0.6s ease-out 0.3s both;
+    }
 
-        .card-header-label {
-            font-family: var(--mono);
-            font-size: 0.8rem;
-            letter-spacing: 0.16em;
-            text-transform: uppercase;
-            color: var(--cyan);
-            opacity: 0.6;
-            margin-bottom: 1.5rem;
-            display: flex; align-items: center; gap: 8px;
-            animation: fadeInDown 0.7s ease-out 0.4s both;
-        }
+    .raci-bar .label {
+      font-size: 10px; font-family: 'JetBrains Mono', monospace;
+      letter-spacing: 3px; color: var(--ink3); white-space: nowrap;
+    }
 
-        .card-header-label::before { content: ''; width: 12px; height: 1px; background: var(--cyan); opacity: 0.6; }
+    .raci { display: flex; gap: 8px; flex-wrap: wrap; flex: 1; justify-content: space-between; }
 
-        .alert-err {
-            background: rgba(239,68,68,0.1);
-            border: 1px solid rgba(239,68,68,0.3);
-            border-radius: 6px;
-            padding: 8px 12px;
-            font-size: 0.82rem;
-            color: #fca5a5;
-            margin-bottom: 1.25rem;
-            display: flex; align-items: center; gap: 8px;
-        }
+    .raci-chip {
+      display: flex; align-items: center; gap: 10px; padding: 8px 12px;
+      border: 1px solid color-mix(in oklab, var(--acc) 50%, transparent);
+      border-radius: 4px; font-size: 12px; line-height: 1.2;
+      color: var(--acc); background: transparent;
+      animation: chip 0.5s ease-out both;
+    }
 
-        .form-group {
-            margin-bottom: 1.1rem;
-            animation: fadeInDown 0.7s ease-out both;
-        }
+    .raci-chip .k {
+      width: 22px; height: 22px; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 700;
+      background: var(--acc);
+    }
 
-        .form-group:nth-of-type(1) { animation-delay: 0.5s; }
-        .form-group:nth-of-type(2) { animation-delay: 0.6s; }
+    .raci-chip .k span { color: var(--panel); }
+    .raci-chip .t { font-weight: 600; color: var(--ink); }
+    .raci-chip .d { opacity: 0.7; color: var(--ink2); font-size: 11px; }
 
-        label {
-            display: block;
-            font-size: 0.95rem;
-            font-weight: 500;
-            color: var(--t2);
-            margin-bottom: 0.4rem;
-            letter-spacing: 0.02em;
-        }
+    /* ── ERROR ── */
+    .alert-err {
+      width: 100%; max-width: 820px;
+      background: rgba(239,68,68,0.1);
+      border: 1px solid rgba(239,68,68,0.3);
+      padding: 8px 14px; font-size: 12px; color: #fca5a5;
+      margin-bottom: 10px; direction: rtl;
+      font-family: 'JetBrains Mono', monospace; border-radius: 2px;
+    }
 
-        select, input[type="password"] {
-            width: 100%;
-            padding: 12px 14px;
-            background: rgba(12,18,32,0.8);
-            border: 1px solid var(--brd);
-            border-radius: 6px;
-            color: var(--t1);
-            font-family: var(--ui);
-            font-size: 1.05rem;
-            transition: border-color 0.14s, box-shadow 0.14s;
-            -webkit-appearance: none;
-        }
+    /* ── FORM ── */
+    .form-wrap { width: 100%; max-width: 820px; }
 
-        select:focus, input[type="password"]:focus {
-            outline: none;
-            border-color: rgba(0,212,255,0.4);
-            box-shadow: 0 0 0 2px rgba(0,212,255,0.1);
-        }
+    .form-panel {
+      background: var(--panel); border: 1px solid var(--ink4);
+      padding: 14px 18px;
+      display: flex; gap: 12px; align-items: flex-end;
+      direction: rtl;
+      animation: slideUp 0.6s ease-out 0.5s both;
+    }
 
-        select option { background: var(--card); color: var(--t1); }
-        input::placeholder { color: var(--t3); }
+    .form-panel .col { flex: 1; }
 
-        .btn-login {
-            width: 100%;
-            padding: 14px;
-            margin-top: 0.5rem;
-            background: transparent;
-            border: 1px solid var(--cyan);
-            border-radius: 6px;
-            color: var(--cyan);
-            font-family: var(--mono);
-            font-size: 1rem;
-            font-weight: 500;
-            letter-spacing: 0.1em;
-            cursor: pointer;
-            transition: all 0.14s;
-            animation: fadeInDown 0.7s ease-out 0.7s both;
-        }
+    .field-lbl {
+      font-size: 11px; font-family: 'JetBrains Mono', monospace;
+      letter-spacing: 1px; margin-bottom: 5px; color: var(--ink3);
+    }
 
-        .btn-login:hover {
-            background: rgba(0,212,255,0.09);
-            box-shadow: 0 0 18px rgba(0,212,255,0.18);
-        }
+    .field-ctl {
+      width: 100%; height: 40px; padding: 0 12px;
+      background: #000; border: 1px solid var(--ink4);
+      color: var(--ink); font-family: 'Heebo', sans-serif; font-size: 13px;
+      border-radius: 2px; box-shadow: inset 0 2px 4px rgba(0,0,0,0.6);
+      -webkit-appearance: none; appearance: none; direction: rtl;
+      transition: border-color 0.15s;
+    }
 
-        .btn-login:disabled { opacity: 0.35; cursor: not-allowed; }
+    .field-ctl:focus { outline: none; border-color: var(--acc); box-shadow: inset 0 2px 4px rgba(0,0,0,0.6), 0 0 0 1px var(--acc); }
+    .field-ctl option { background: var(--panel); }
 
-        .login-footer {
-            text-align: center;
-            margin-top: 1.25rem;
-            font-family: var(--mono);
-            font-size: 0.85rem;
-            letter-spacing: 0.1em;
-            color: var(--t3);
-            animation: fadeInDown 0.7s ease-out 0.8s both;
-        }
+    .btn-energize {
+      padding: 0 20px; height: 40px;
+      font-size: 13px; font-weight: 700;
+      border: none; cursor: pointer;
+      font-family: 'JetBrains Mono', monospace; letter-spacing: 2px;
+      border-radius: 2px;
+      background: var(--acc); color: var(--bg);
+      box-shadow: 0 0 16px color-mix(in oklab, var(--acc) 40%, transparent);
+      transition: transform 0.18s, box-shadow 0.18s;
+      white-space: nowrap; align-self: flex-end; flex-shrink: 0;
+    }
 
-        .status-bar {
-            position: fixed;
-            bottom: 20px;
-            right: 20px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 6px;
-            font-family: var(--mono);
-            font-size: 0.8rem;
-            letter-spacing: 0.1em;
-            color: var(--t3);
-            animation: fadeInUp 0.7s ease-out 1s both;
-        }
+    .btn-energize:hover { transform: translateY(-1px); box-shadow: 0 0 28px color-mix(in oklab, var(--acc) 60%, transparent); }
 
-        .status-dot {
-            width: 5px; height: 5px;
-            background: var(--green);
-            border-radius: 50%;
-            box-shadow: 0 0 6px var(--green);
-            animation: blink 2.2s ease-in-out infinite;
-        }
+    .hint {
+      font-size: 10px; font-family: 'JetBrains Mono', monospace;
+      color: var(--ink3); letter-spacing: 2px;
+      margin-top: 8px; text-align: right;
+    }
 
-        /* ANIMATIONS */
-        @keyframes logoFloat {
-            0%, 100% { transform: translateY(0px); }
-            50% { transform: translateY(-12px); }
-        }
+    /* ── TELEMETRY BAR ── */
+    .telem {
+      position: fixed; left: 0; right: 0; bottom: 0; height: 32px;
+      border-top: 1px solid var(--ink4); background: var(--panel);
+      display: flex; align-items: center;
+      font-family: 'JetBrains Mono', monospace; font-size: 10px;
+      color: var(--ink3); letter-spacing: 1px; z-index: 10; direction: ltr;
+    }
 
-        @keyframes glowPulse1 {
-            0%, 100% { opacity: 0.6; }
-            50% { opacity: 1; }
-        }
+    .telem > span {
+      padding: 0 14px; border-right: 1px solid var(--ink4);
+      height: 100%; display: flex; align-items: center; gap: 6px;
+    }
 
-        @keyframes glowPulse2 {
-            0%, 100% { opacity: 0.3; }
-            50% { opacity: 0.7; }
-        }
+    .telem > span:last-child { border: none; margin-left: auto; }
+    .telem .ok { color: var(--acc); }
 
-        @keyframes ringSpin {
-            from { transform: rotate(0deg); }
-            to { transform: rotate(360deg); }
-        }
+    /* ── ANIMATIONS ── */
+    @keyframes spin     { to { transform: rotate(360deg); } }
+    @keyframes spinR    { to { transform: rotate(-360deg); } }
+    @keyframes bob      { 0%,100% { transform: translateY(0);   } 50% { transform: translateY(-4px); } }
+    @keyframes glowSoft {
+      0%,100% { box-shadow: 0 0 0 6px var(--bg), 0 0 0 7px var(--acc), 0 0 30px color-mix(in oklab, var(--acc) 30%, transparent); }
+      50%      { box-shadow: 0 0 0 6px var(--bg), 0 0 0 7px var(--acc), 0 0 60px color-mix(in oklab, var(--acc) 55%, transparent); }
+    }
+    @keyframes dashFlow   { to { stroke-dashoffset: -30; } }
+    @keyframes flickerDot { 0%,60%,100% { opacity: 1; } 70%,90% { opacity: 0.3; } }
+    @keyframes slideUp    { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
+    @keyframes chip       { from { opacity: 0; transform: translateY(8px) scale(0.96); } to { opacity: 1; transform: translateY(0) scale(1); } }
+    @keyframes fadeIn     { from { opacity: 0; } to { opacity: 1; } }
+    @keyframes vibrate    {
+      0%,100% { transform: translate(0,0) rotate(0deg); }
+      15%     { transform: translate(-3px, 1px) rotate(-1deg); }
+      30%     { transform: translate(3px, -1px) rotate(1deg); }
+      45%     { transform: translate(-2px, 2px) rotate(-0.5deg); }
+      60%     { transform: translate(2px, -2px) rotate(0.5deg); }
+      75%     { transform: translate(-1px, 1px) rotate(-0.3deg); }
+      90%     { transform: translate(1px, -1px) rotate(0.3deg); }
+    }
 
-        @keyframes ringSpinReverse {
-            from { transform: rotate(360deg); }
-            to { transform: rotate(0deg); }
-        }
+    .logo-wrap:hover .logo-core {
+      animation: vibrate 0.18s linear infinite, glowSoft 2.8s ease-in-out infinite;
+    }
 
-        @keyframes cardSlideIn {
-            from {
-                opacity: 0;
-                transform: translateX(40px);
-            }
-            to {
-                opacity: 1;
-                transform: translateX(0);
-            }
-        }
-
-        @keyframes fadeInDown {
-            from {
-                opacity: 0;
-                transform: translateY(-12px);
-            }
-            to {
-                opacity: 1;
-                transform: translateY(0);
-            }
-        }
-
-        @keyframes fadeInUp {
-            from {
-                opacity: 0;
-                transform: translateY(12px);
-            }
-            to {
-                opacity: 1;
-                transform: translateY(0);
-            }
-        }
-
-        @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
-
-        /* RESPONSIVE */
-        @media (max-width: 768px) {
-            .logo-stage {
-                width: 280px;
-                height: 224px;
-            }
-
-            .logo-wrapper {
-                width: 240px;
-                height: 192px;
-                padding: 12px;
-            }
-
-            .glow-ring {
-                inset: -35px;
-            }
-
-            .glow-ring::after {
-                inset: -25px;
-            }
-        }
-
-        @media (max-width: 480px) {
-            .login-container {
-                gap: 1.5rem;
-                padding: 1rem;
-            }
-
-            .logo-stage {
-                width: 240px;
-                height: 192px;
-            }
-
-            .logo-wrapper {
-                width: 210px;
-                height: 168px;
-                padding: 10px;
-            }
-
-            .login-box {
-                width: 100%;
-            }
-
-            .glow-layer-1 {
-                inset: -30px;
-                filter: blur(12px);
-            }
-
-            .glow-layer-2 {
-                inset: -45px;
-                filter: blur(18px);
-            }
-
-            .glow-ring {
-                inset: -25px;
-            }
-
-            .glow-ring::after {
-                inset: -18px;
-            }
-
-            .status-bar {
-                bottom: 12px;
-                right: 12px;
-            }
-        }
-    </style>
+    /* ── RESPONSIVE ── */
+    @media (max-width: 640px) {
+      .logo-wrap { width: 180px; height: 180px; }
+      .ring  { inset: -14px; }
+      .ring2 { inset: -26px; }
+      .raci  { gap: 6px; }
+      .raci-chip { padding: 6px 8px; font-size: 11px; }
+      .raci-bar  { flex-direction: column; align-items: flex-start; gap: 8px; }
+      .form-panel { flex-direction: column; align-items: stretch; }
+      .btn-energize { width: 100%; justify-content: center; }
+      .telem > span:nth-child(n+3) { display: none; }
+    }
+  </style>
 </head>
 <body>
 
-<div class="login-container">
-    <!-- LOGO SECTION -->
-    <div class="logo-section">
-        <div class="logo-stage">
-            <div class="glow-layer-1"></div>
-            <div class="glow-layer-2"></div>
-            <div class="glow-ring"></div>
-            <div class="logo-wrapper">
-                <img src="/static/logo.png" alt="Shan-AI Logo" class="logo-img">
-            </div>
-        </div>
+<!-- Electrical single-line diagram background -->
+<svg class="sl-bg" viewBox="0 0 1040 680" preserveAspectRatio="xMidYMid slice" xmlns="http://www.w3.org/2000/svg">
+  <line class="bus" x1="0" y1="110" x2="1040" y2="110"/>
+  <text x="30" y="102">BUS-A · 161 kV</text>
+  <line class="feed" x1="120" y1="110" x2="120" y2="540"/>
+  <rect class="equip" x="112" y="330" width="16" height="16"/>
+  <circle cx="120" cy="190" r="8" fill="none" stroke="#5a6560" stroke-width="1.2" opacity="0.45"/>
+  <text x="120" y="560" text-anchor="middle">F-01</text>
+  <line class="feed" x1="920" y1="110" x2="920" y2="540"/>
+  <rect class="equip" x="912" y="330" width="16" height="16"/>
+  <circle cx="920" cy="190" r="8" fill="none" stroke="#5a6560" stroke-width="1.2" opacity="0.45"/>
+  <text x="920" y="560" text-anchor="middle">F-02</text>
+  <line class="bus" x1="0" y1="540" x2="1040" y2="540"/>
+  <text x="30" y="560">BUS-B · 22 kV</text>
+  <line class="hot" x1="520" y1="110" x2="520" y2="200"/>
+</svg>
+
+<div class="bg-glow"></div>
+
+<div class="main">
+
+  <!-- Logo with spinning rings -->
+  <div class="logo-wrap">
+    <div class="ring2"></div>
+    <div class="ring"></div>
+    <div class="logo-core">
+      <img src="/static/logo.png" alt="Shan-AI">
     </div>
+  </div>
 
-    <!-- LOGIN CARD SECTION -->
-    <div class="login-box">
-        <div class="login-card">
-            <div class="card-header-label">כניסה למערכת</div>
+  <!-- Hero text -->
+  <div class="hero">
+    <div class="tag"><span class="dot">●</span> SYSTEM · ONLINE · SUB-04</div>
+    <h2>‏המוח החשמלי של אגף השנאה.</h2>
+    <p>‏Shan-AI לומדת כל החלטה ותיעוד בפרויקטי תחנות המשנה שלך.</p>
+  </div>
 
-            {% if error %}
-            <div class="alert-err">❌ {{ error }}</div>
-            {% endif %}
-
-            <form method="POST" action="/login">
-                <div class="form-group">
-                    <label>בחר משתמש</label>
-                    <select name="user_id" required>
-                        <option value="">-- בחר משתמש --</option>
-                        {% for u in users %}
-                        <option value="{{ u.id }}">{{ u.username }}{% if u.job_title %} — {{ u.job_title }}{% endif %}</option>
-                        {% endfor %}
-                    </select>
-                </div>
-
-                <div class="form-group">
-                    <label>סיסמה</label>
-                    <input type="password" name="password" placeholder="הזן סיסמה" required>
-                </div>
-
-                <button type="submit" class="btn-login">כניסה ←</button>
-            </form>
-
-            <div class="login-footer">סיסמה ברירת מחדל: 1234</div>
-        </div>
+  <!-- RACI bar -->
+  <div class="raci-bar">
+    <div class="label">RACI · תפקידים</div>
+    <div class="raci">
+      <div class="raci-chip" style="animation-delay:0.1s;">
+        <div class="k"><span>R</span></div>
+        <div><div class="t">Responsible</div><div class="d">מבצע בפועל</div></div>
+      </div>
+      <div class="raci-chip" style="animation-delay:0.2s;">
+        <div class="k"><span>A</span></div>
+        <div><div class="t">Accountable</div><div class="d">אחראי — אישור יחיד</div></div>
+      </div>
+      <div class="raci-chip" style="animation-delay:0.3s;">
+        <div class="k"><span>C</span></div>
+        <div><div class="t">Consulted</div><div class="d">מקור ידע · מתייעצים</div></div>
+      </div>
+      <div class="raci-chip" style="animation-delay:0.4s;">
+        <div class="k"><span>I</span></div>
+        <div><div class="t">Informed</div><div class="d">מיודע על התוצאה</div></div>
+      </div>
     </div>
+  </div>
+
+  <!-- Error -->
+  {% if error %}
+  <div class="alert-err">❌ {{ error }}</div>
+  {% endif %}
+
+  <!-- Login form -->
+  <div class="form-wrap">
+    <form method="POST" action="/login">
+      <div class="form-panel">
+        <div class="col">
+          <div class="field-lbl">OPERATOR · משתמש</div>
+          <select name="user_id" required class="field-ctl">
+            <option value="">— בחר —</option>
+            {% for u in users %}
+            <option value="{{ u.id }}">{{ u.username }}{% if u.job_title %} — {{ u.job_title }}{% endif %}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col">
+          <div class="field-lbl">KEY · סיסמה</div>
+          <input type="password" name="password" required class="field-ctl" placeholder="••••">
+        </div>
+        <button type="submit" class="btn-energize">⏻ ENERGIZE</button>
+      </div>
+    </form>
+    <div class="hint">DEFAULT KEY · 1234</div>
+  </div>
+
 </div>
 
-<div class="status-bar">
-    <div class="status-dot"></div>
-    SYSTEM ONLINE
+<!-- Telemetry bar -->
+<div class="telem">
+  <span><b class="ok">●</b> SCADA · ONLINE</span>
+  <span>RAG · <b class="ok">READY</b></span>
+  <span>GROQ · llama-3.3-70b</span>
+  <span>PGVECTOR · 384</span>
+  <span>v2.4.1 · UTC+3</span>
 </div>
 
 </body>

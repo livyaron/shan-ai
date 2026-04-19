@@ -55,7 +55,7 @@ def _can_change_status(decision: Decision, user: User, my_raci_roles: dict = Non
 
 def _can_delete(decision: Decision, user: User) -> bool:
     """Check if user can delete decision."""
-    return user.is_admin or (decision.submitter_id == user.id and decision.status == DecisionStatusEnum.PENDING)
+    return user.is_admin or decision.submitter_id == user.id
 
 
 async def _pending_approvals_count(user_id: int, session: AsyncSession) -> int:
