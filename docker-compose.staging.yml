@@ -7,7 +7,7 @@ services:
     container_name: shan_db_staging
     environment:
       - POSTGRES_USER=shan_user
-      - POSTGRES_PASSWORD=shan_secure_pass_2025
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
       - POSTGRES_DB=shan_ai_staging
     ports:
       - "5433:5432"

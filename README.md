@@ -42,7 +42,7 @@ A backend system for organizational decision intelligence in electrical infrastr
 3. **Access**:
    - FastAPI Docs: http://localhost:8000/docs
    - Health Check: http://localhost:8000/health
-   - Database: localhost:5432 (shan_user / shan_secure_pass_2025)
+   - Database: localhost:5432 (shan_user / your_db_password_here)
 
 ## Project Structure
 ```

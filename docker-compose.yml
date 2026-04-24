@@ -5,7 +5,7 @@ services:
     environment:
       POSTGRES_DB: shan_ai
       POSTGRES_USER: shan_user
-      POSTGRES_PASSWORD: shan_secure_pass_2025
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     ports:
       - "5432:5432"
     volumes:
@@ -27,7 +27,7 @@ services:
     env_file:
       - .env
     environment:
-      DATABASE_URL: postgresql+asyncpg://shan_user:shan_secure_pass_2025@postgres:5432/shan_ai
+      DATABASE_URL: postgresql+asyncpg://shan_user:${POSTGRES_PASSWORD}@postgres:5432/shan_ai
       PYTHONUNBUFFERED: "1"
       FASTEMBED_CACHE_PATH: /app/fastembed_cache
     ports:

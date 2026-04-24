@@ -3,7 +3,7 @@ from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     # Database
-    DATABASE_URL: str = "postgresql+asyncpg://shan_user:shan_secure_pass_2025@localhost:5432/shan_ai"
+    DATABASE_URL: str = "postgresql+asyncpg://shan_user:@localhost:5432/shan_ai"
 
     # FastAPI
     PROJECT_NAME: str = "Shan-AI - מערכת ניהול החלטות"

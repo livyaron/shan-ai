@@ -13,7 +13,7 @@ Ensure PostgreSQL 16+ is running on:
 - Host: localhost
 - Port: 5432
 - User: shan_user
-- Password: shan_secure_pass_2025
+- Password: your_db_password_here
 - Database: shan_ai
 
 ## Start the Server
@@ -91,7 +91,7 @@ http://localhost:8000/docs
 
 ### Connect to PostgreSQL
 ```bash
-psql "postgresql://shan_user:shan_secure_pass_2025@localhost:5432/shan_ai"
+psql "postgresql://shan_user:your_db_password_here@localhost:5432/shan_ai"
 ```
 
 ### View Users

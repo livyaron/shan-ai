@@ -61,7 +61,7 @@ Try these:
 
 Connect to PostgreSQL:
 ```bash
-psql "postgresql://shan_user:shan_secure_pass_2025@localhost:5432/shan_ai"
+psql "postgresql://shan_user:your_db_password_here@localhost:5432/shan_ai"
 ```
 
 View data:
