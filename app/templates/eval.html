@@ -1,0 +1,744 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Shan-AI — אבחון Q&A</title>
+    <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        :root {
+            --bg-deep:   #070b12;
+            --bg-card:   #0f1826;
+            --border:    #1a2d47;
+            --border-hi: #1e3a5f;
+            --cyan:      #00d4ff;
+            --cyan-dim:  rgba(0,212,255,0.09);
+            --purple:    #8b9cf4;
+            --green:     #10b981;
+            --red:       #ef4444;
+            --yellow:    #f59e0b;
+            --text-1:    #e2e8f0;
+            --text-2:    #64748b;
+            --text-3:    #344156;
+            --mono:      'IBM Plex Mono', monospace;
+            --ui:        'Heebo', sans-serif;
+        }
+        @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
+        @keyframes pulse-border { 0%,100%{border-color:var(--border)} 50%{border-color:var(--cyan)} }
+        body { background: var(--bg-deep); color: var(--text-1); font-family: var(--ui); margin: 0; }
+        .navbar {
+            background: rgba(7,11,18,0.96) !important;
+            border-bottom: 1px solid var(--border);
+            padding: 0 1.5rem; height: 50px;
+            position: sticky; top: 0; z-index: 1000;
+        }
+        .navbar-brand {
+            font-family: var(--mono); font-size: 1.02rem; font-weight: 600;
+            color: var(--cyan) !important; letter-spacing: 0.08em;
+            display: flex; align-items: center; gap: 7px; text-decoration: none;
+        }
+        .brand-pulse { width: 5px; height: 5px; background: var(--cyan); border-radius: 50%; box-shadow: 0 0 8px var(--cyan); animation: blink 2.4s ease-in-out infinite; }
+        .nav-link { font-size: 0.95rem; font-weight: 500; color: var(--text-2) !important; padding: 0.22rem 0.6rem !important; }
+        .nav-link.nav-active { color: var(--cyan) !important; }
+        main { max-width: 1600px; margin: 1.5rem auto; padding: 0 1.5rem; }
+        h1 { font-family: var(--mono); font-size: 1.4rem; color: var(--cyan); letter-spacing: 0.05em; margin-bottom: 1rem; }
+        .toolbar {
+            background: var(--bg-card); border: 1px solid var(--border);
+            border-radius: 6px; padding: 0.85rem 1rem; margin-bottom: 1rem;
+            display: flex; gap: 0.6rem; align-items: center; flex-wrap: wrap;
+        }
+        .btn-cyan  { background: var(--cyan); color: var(--bg-deep); border: none; font-weight: 600; }
+        .btn-cyan:hover { background: #33ddff; color: var(--bg-deep); }
+        .btn-purple { background: rgba(139,156,244,0.15); color: var(--purple); border: 1px solid var(--purple); }
+        .btn-purple:hover { background: rgba(139,156,244,0.28); color: var(--purple); }
+        .btn-warn  { background: transparent; color: var(--yellow); border: 1px solid var(--yellow); }
+        .btn-danger-outline { background: transparent; color: var(--red); border: 1px solid var(--red); }
+        .btn-green-outline  { background: transparent; color: var(--green); border: 1px solid var(--green); }
+        .badge-pill { font-family: var(--mono); font-size: 0.72rem; padding: 0.18rem 0.5rem; border-radius: 999px; display:inline-block; }
+        .b-pass    { background: rgba(16,185,129,0.16); color: var(--green); }
+        .b-fail    { background: rgba(239,68,68,0.16);  color: var(--red); }
+        .b-partial { background: rgba(245,158,11,0.16); color: var(--yellow); }
+        .b-neutral { background: rgba(100,116,139,0.16); color: var(--text-2); }
+        .b-cyan    { background: var(--cyan-dim); color: var(--cyan); }
+        .b-pulse   { animation: pulse-border 1.4s ease-in-out infinite; }
+        .grid2 { display: grid; grid-template-columns: 1fr 1.4fr; gap: 1rem; }
+        .panel {
+            background: var(--bg-card); border: 1px solid var(--border);
+            border-radius: 6px; padding: 1rem;
+        }
+        .panel h2 { font-family: var(--mono); font-size: 0.95rem; color: var(--cyan); letter-spacing: 0.06em; margin: 0 0 0.6rem 0; }
+        table { width: 100%; font-size: 0.88rem; border-collapse: collapse; }
+        th { font-family: var(--mono); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-2); border-bottom: 1px solid var(--border); padding: 0.4rem 0.3rem; text-align: right; }
+        td { border-bottom: 1px solid var(--border); padding: 0.5rem 0.3rem; vertical-align: top; }
+        .prop-card {
+            border: 1px solid var(--border); border-radius: 4px; padding: 0.7rem;
+            margin-bottom: 0.7rem; background: rgba(0,0,0,0.18);
+        }
+        .prop-head { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin-bottom: 0.4rem; }
+        .patch-json {
+            background: rgba(0,0,0,0.4); border-radius: 4px; padding: 0.5rem;
+            font-family: var(--mono); font-size: 0.78rem; color: #c5e0ff;
+            white-space: pre-wrap; word-break: break-word;
+            max-height: 180px; overflow: auto;
+        }
+        .delta-pos { color: var(--green); font-weight: 600; }
+        .delta-neg { color: var(--red); font-weight: 600; }
+        .delta-zero { color: var(--text-2); }
+        .actions { display: flex; gap: 0.4rem; margin-top: 0.5rem; flex-wrap: wrap; }
+        .actions button { font-size: 0.8rem; padding: 0.25rem 0.6rem; }
+        .paused-banner {
+            background: rgba(239,68,68,0.18); color: var(--red); border: 1px solid var(--red);
+            padding: 0.5rem 0.9rem; border-radius: 4px; font-family: var(--mono); font-size: 0.85rem;
+            margin-bottom: 1rem;
+        }
+        .runs-row { font-family: var(--mono); font-size: 0.82rem; }
+        .empty { color: var(--text-2); font-size: 0.88rem; padding: 1rem; text-align: center; }
+        /* Live feed */
+        #live-feed-panel { margin-bottom: 1rem; }
+        .live-entry {
+            border-bottom: 1px solid var(--border); padding: 0.45rem 0;
+            font-size: 0.83rem;
+        }
+        .live-entry:last-child { border-bottom: none; }
+        .live-entries-scroll { max-height: 340px; overflow-y: auto; }
+        .live-counter { font-family: var(--mono); font-size: 0.78rem; color: var(--text-2); margin-bottom: 0.5rem; display: flex; gap: 1rem; }
+        /* Questions panel */
+        #questions-panel { margin-bottom: 1rem; display: none; }
+        .q-row td { padding: 0.35rem 0.25rem; font-size: 0.85rem; }
+        .q-row input[type=text] {
+            background: transparent; border: 1px solid var(--border); color: var(--text-1);
+            border-radius: 3px; padding: 0.2rem 0.4rem; width: 100%; font-size: 0.83rem;
+        }
+        .q-row input[type=text]:focus { border-color: var(--cyan); outline: none; }
+        .q-row select {
+            background: var(--bg-deep); border: 1px solid var(--border); color: var(--text-1);
+            border-radius: 3px; padding: 0.18rem 0.4rem; font-size: 0.8rem;
+        }
+        .suggestion-card {
+            border: 1px solid var(--border); border-radius: 4px; padding: 0.6rem;
+            margin-bottom: 0.5rem; background: rgba(0,0,0,0.2); font-size: 0.83rem;
+        }
+        /* Before/after diff */
+        .diff-table { font-size: 0.78rem; }
+        .diff-table td { padding: 0.28rem 0.3rem; }
+        .diff-before { color: var(--red); background: rgba(239,68,68,0.06); }
+        .diff-after  { color: var(--green); background: rgba(16,185,129,0.06); }
+        /* Pass-rate bar */
+        .pass-bar-wrap { height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; margin-top: 3px; }
+        .pass-bar { height: 100%; background: var(--green); border-radius: 3px; transition: width 0.4s; }
+    </style>
+</head>
+<body>
+<nav class="navbar">
+    <a href="/dashboard/" class="navbar-brand"><div class="brand-pulse"></div>SHAN-AI / DSS</a>
+    <div class="d-flex" style="gap:0.4rem; align-items:center;">
+        <a href="/dashboard/"         class="nav-link">📊 דשבורד</a>
+        <a href="/dashboard/decisions" class="nav-link">📋 החלטות</a>
+        <a href="/dashboard/users"    class="nav-link">👥 משתמשים</a>
+        <a href="/dashboard/files"    class="nav-link">📁 קבצים</a>
+        <a href="/dashboard/ask"      class="nav-link">💬 שאל</a>
+        <a href="/dashboard/learning" class="nav-link">🎓 למידה</a>
+        <a href="/dashboard/logs"     class="nav-link">📊 לוגים</a>
+        <a href="/dashboard/eval"     class="nav-link nav-active">🧪 אבחון Q&A</a>
+        <a href="/dashboard/projects" class="nav-link">📂 פרויקטים</a>
+    </div>
+</nav>
+
+<main>
+    <h1>🧪 אבחון Q&A — לולאת תיקון אוטומטית</h1>
+
+    {% if paused %}
+    <div class="paused-banner">⏸ הלולאה מושהית. ריצות חדשות לא ייצאו לפועל.</div>
+    {% endif %}
+
+    <!-- ── Toolbar ──────────────────────────────────────────────────────── -->
+    <div class="toolbar">
+        <button id="run-btn"       class="btn btn-cyan btn-sm">▶ הפעל מחזור</button>
+        <button id="questions-btn" class="btn btn-purple btn-sm">📋 שאלות הבדיקה</button>
+        <button id="kill-btn"      class="btn {% if paused %}btn-warn{% else %}btn-danger-outline{% endif %} btn-sm"
+                disabled title="זמין רק כאשר מחזור רץ">
+            {% if paused %}🔓 חדש פעולה{% else %}🛑 מפסק{% endif %}
+        </button>
+        {% if last_delta is not none %}
+        <span class="badge-pill {% if last_delta > 0 %}b-pass{% elif last_delta < 0 %}b-fail{% else %}b-neutral{% endif %}">
+            מחזור אחרון: Δ {{ "{:+.0%}".format(last_delta) }}
+        </span>
+        {% endif %}
+        <span id="live-status-badge" style="display:none;" class="badge-pill b-cyan b-pulse">⚡ רץ כעת</span>
+        <span style="margin-right:auto; font-family: var(--mono); font-size: 0.78rem; color: var(--text-2);">
+            אישור אוטומטי: Δ ≥ +30% &nbsp;|&nbsp; אפס רגרסיות
+        </span>
+    </div>
+
+    <!-- ── Live Feed ────────────────────────────────────────────────────── -->
+    <div id="live-feed-panel" style="display:none;">
+        <div class="panel">
+            <h2>📡 פיד חי <span id="live-run-label" style="color:var(--text-2); font-size:0.8rem;"></span></h2>
+            <div class="live-counter">
+                <span>✓ PASS: <strong id="lc-pass">0</strong></span>
+                <span>⚡ PARTIAL: <strong id="lc-partial">0</strong></span>
+                <span>✗ FAIL: <strong id="lc-fail">0</strong></span>
+            </div>
+            <div class="live-entries-scroll" id="live-entries"></div>
+        </div>
+    </div>
+
+    <!-- ── Questions Panel ──────────────────────────────────────────────── -->
+    <div id="questions-panel">
+        <div class="panel">
+            <h2>📋 שאלות הבדיקה
+                <span style="color:var(--text-2); font-size:0.8rem; font-weight:400;" id="q-count-label"></span>
+            </h2>
+            <div style="display:flex; gap:0.5rem; margin-bottom:0.8rem; flex-wrap:wrap;">
+                <button class="btn btn-cyan btn-sm" onclick="saveQuestions()">💾 שמור שינויים</button>
+                <button class="btn btn-purple btn-sm" onclick="addBlankRow()">+ הוסף שאלה</button>
+                <button class="btn btn-warn btn-sm" id="suggest-btn" onclick="loadSuggestions()">🔍 הצג שאלות שנכשלו מהלוגים</button>
+            </div>
+
+            <!-- Existing questions table -->
+            <div style="overflow-x:auto;">
+                <table id="q-table">
+                    <thead>
+                        <tr>
+                            <th style="width:2rem;">#</th>
+                            <th>שאלה</th>
+                            <th style="width:7rem;">מסלול צפוי</th>
+                            <th style="width:7rem;">פרויקט יעד</th>
+                            <th style="width:2.5rem;"></th>
+                        </tr>
+                    </thead>
+                    <tbody id="q-tbody"></tbody>
+                </table>
+            </div>
+
+            <!-- Suggestions from bad logs -->
+            <div id="suggestions-area" style="display:none; margin-top:1rem;">
+                <div style="font-family:var(--mono); font-size:0.8rem; color:var(--cyan); margin-bottom:0.5rem; border-top: 1px solid var(--border); padding-top:0.7rem;">
+                    שאלות שנכשלו בלוגים — בחר להוסיף לבדיקה:
+                </div>
+                <div id="suggestions-list"></div>
+                <div id="suggestions-empty" style="display:none;" class="empty">לא נמצאו שאלות שנכשלו שאינן כבר בבדיקה.</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ── Main Grid ────────────────────────────────────────────────────── -->
+    <div class="grid2">
+        <!-- Left: Eval Runs -->
+        <div class="panel">
+            <h2>📜 ריצות אחרונות</h2>
+            {% if not runs %}
+                <div class="empty">אין ריצות עדיין. לחץ "הפעל מחזור" להתחיל.</div>
+            {% else %}
+            <table>
+                <thead>
+                    <tr>
+                        <th>#</th><th>סטטוס</th><th>שאלות</th><th>פס%</th><th>חלקי</th><th>נכשל</th><th>הצעות</th><th>בוצעו</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for r in runs %}
+                <tr class="runs-row">
+                    <td>{{ r.id }}</td>
+                    <td>
+                        <span class="badge-pill
+                            {% if r.status == 'completed' %}b-pass
+                            {% elif r.status == 'running' %}b-cyan
+                            {% elif r.status == 'failed' %}b-fail
+                            {% else %}b-neutral{% endif %}">{{ r.status }}</span>
+                    </td>
+                    <td>{{ r.n_probes or 0 }}</td>
+                    <td>
+                        {% set total = (r.n_pass or 0) + (r.n_partial or 0) + (r.n_fail or 0) %}
+                        {% if total > 0 %}
+                            {% set pct = ((r.n_pass or 0) / total * 100)|int %}
+                            <span class="{% if pct >= 70 %}delta-pos{% elif pct >= 40 %}delta-zero{% else %}delta-neg{% endif %}">{{ pct }}%</span>
+                            <div class="pass-bar-wrap"><div class="pass-bar" style="width:{{ pct }}%"></div></div>
+                        {% else %}—{% endif %}
+                    </td>
+                    <td>{{ r.n_partial or 0 }}</td>
+                    <td class="delta-neg">{{ r.n_fail or 0 }}</td>
+                    <td>{{ r.n_proposals_created or 0 }}</td>
+                    <td class="delta-pos">{{ r.n_proposals_applied or 0 }}</td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+            {% endif %}
+        </div>
+
+        <!-- Right: Repair Proposals -->
+        <div class="panel">
+            <h2>🔧 הצעות תיקון</h2>
+            {% if not proposals %}
+                <div class="empty">לא נוצרו הצעות עדיין.</div>
+            {% else %}
+                {% for p in proposals %}
+                <div class="prop-card" data-id="{{ p.id }}">
+                    <div class="prop-head">
+                        <span class="badge-pill b-cyan">#{{ p.id }}</span>
+                        <span class="badge-pill b-neutral">{{ p.type }}</span>
+                        <span class="badge-pill
+                            {% if p.risk == 'low' %}b-pass
+                            {% elif p.risk == 'high' %}b-fail
+                            {% else %}b-partial{% endif %}">סיכון: {{ p.risk }}</span>
+                        <span class="badge-pill
+                            {% if p.status == 'applied' %}b-pass
+                            {% elif p.status == 'rejected' %}b-fail
+                            {% elif p.status == 'awaiting_approval' %}b-partial
+                            {% elif p.status == 'reverted' %}b-neutral
+                            {% else %}b-cyan{% endif %}">{{ p.status }}</span>
+                        {% if p.delta_pass_rate is not none %}
+                        <span class="badge-pill {% if p.delta_pass_rate > 0 %}b-pass{% elif p.delta_pass_rate < 0 %}b-fail{% else %}b-neutral{% endif %}">
+                            Δ {{ "{:+.0%}".format(p.delta_pass_rate) }}
+                        </span>
+                        {% endif %}
+                        {% if p.regression_count is not none and p.regression_count > 0 %}
+                        <span class="badge-pill b-fail">רגרסיות: {{ p.regression_count }}</span>
+                        {% endif %}
+                    </div>
+                    <div style="font-size: 0.84rem; color: var(--text-1); margin-bottom: 0.4rem;">
+                        {{ p.rationale or '—' }}
+                    </div>
+                    <pre class="patch-json">{{ p.patch_json | json_pretty | safe }}</pre>
+
+                    {% if p.reject_reason %}
+                    <div style="font-size: 0.78rem; color: var(--red); margin-top: 0.3rem;">
+                        סיבת דחייה: {{ p.reject_reason }}
+                    </div>
+                    {% endif %}
+
+                    {% if p.before_snapshot or p.after_snapshot %}
+                    <details style="margin-top:0.5rem;">
+                        <summary style="cursor:pointer; font-size:0.8rem; color:var(--text-2);">⚖ השוואה לפני/אחרי ({{ (p.before_snapshot or [])|length }} שאלות)</summary>
+                        <div style="margin-top:0.4rem; overflow-x:auto;">
+                        <table class="diff-table">
+                            <thead>
+                                <tr>
+                                    <th>שאלה</th>
+                                    <th>לפני</th>
+                                    <th>אחרי</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                            {% if p.before_snapshot and p.after_snapshot %}
+                                {% for after_s in p.after_snapshot %}
+                                {% set before_s = namespace(item=none) %}
+                                {% for b in p.before_snapshot %}
+                                    {% if b.question == after_s.question %}{% set before_s.item = b %}{% endif %}
+                                {% endfor %}
+                                <tr>
+                                    <td style="color:var(--text-2); max-width:180px; word-break:break-word;">{{ after_s.question[:80] }}</td>
+                                    <td class="diff-before">
+                                        {% if before_s.item %}
+                                            <span class="badge-pill b-fail" style="font-size:0.65rem;">{{ before_s.item.verdict }}</span>
+                                            <div style="color:var(--text-2); margin-top:2px;">{{ (before_s.item.answer or '')[:120] }}</div>
+                                        {% else %}—{% endif %}
+                                    </td>
+                                    <td class="diff-after">
+                                        <span class="badge-pill {% if after_s.verdict == 'PASS' %}b-pass{% elif after_s.verdict == 'FAIL' %}b-fail{% else %}b-partial{% endif %}" style="font-size:0.65rem;">{{ after_s.verdict }}</span>
+                                        <div style="color:var(--text-2); margin-top:2px;">{{ (after_s.answer or '')[:120] }}</div>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            {% endif %}
+                            </tbody>
+                        </table>
+                        </div>
+                    </details>
+                    {% endif %}
+
+                    <div class="actions">
+                        {% if p.status in ['pending', 'awaiting_approval'] %}
+                        <button class="btn btn-cyan btn-sm" onclick="approveProposal({{ p.id }})">✓ אשר</button>
+                        <button class="btn btn-danger-outline btn-sm" onclick="rejectProposal({{ p.id }})">✗ דחה</button>
+                        {% elif p.status == 'applied' %}
+                        <button class="btn btn-warn btn-sm" onclick="rollbackProposal({{ p.id }})">↶ בטל</button>
+                        {% endif %}
+                    </div>
+                </div>
+                {% endfor %}
+            {% endif %}
+        </div>
+    </div>
+</main>
+
+<script>
+// ── Utilities ──────────────────────────────────────────────────────────────
+function escapeHtml(s) {
+    if (!s) return '';
+    return String(s)
+        .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+        .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+async function postJSON(url, body) {
+    const r = await fetch(url, {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify(body || {}),
+    });
+    if (!r.ok) { const t = await r.text(); alert(`שגיאה: ${r.status}\n${t}`); throw new Error(t); }
+    return r.json();
+}
+
+// ── Question count (loaded once on page init) ─────────────────────────────
+let _totalQuestions = 0;
+
+(async () => {
+    try {
+        const qs = await fetch('/dashboard/eval/questions').then(r => r.json());
+        _totalQuestions = qs.length;
+        document.getElementById('run-btn').textContent = `▶ הפעל מחזור (${_totalQuestions} שאלות)`;
+    } catch(e) {}
+})();
+
+// ── Live Feed ──────────────────────────────────────────────────────────────
+let livePollInterval = null;
+let lastEntryCount = 0;
+
+function startLivePoll() {
+    if (livePollInterval) return;
+    document.getElementById('live-feed-panel').style.display = 'block';
+    document.getElementById('live-status-badge').style.display = 'inline-block';
+    document.getElementById('kill-btn').disabled = false;
+    livePollInterval = setInterval(pollLiveFeed, 2500);
+    pollLiveFeed();
+}
+
+function stopLivePoll() {
+    clearInterval(livePollInterval);
+    livePollInterval = null;
+    document.getElementById('live-status-badge').style.display = 'none';
+    document.getElementById('kill-btn').disabled = true;
+}
+
+async function pollLiveFeed() {
+    try {
+        const r = await fetch('/dashboard/eval/runs/latest/log');
+        const data = await r.json();
+        if (!data.run_id) return;
+
+        // Count only actual probe/retry entries (not iteration markers)
+        const entries = data.entries || [];
+        const probeEntries = entries.filter(e => e.type === 'probe' || e.type === 'retry' || !e.type);
+        const probeCount = probeEntries.length;
+        const total = data.n_probes || _totalQuestions || '?';
+        document.getElementById('live-run-label').textContent =
+            `ריצה #${data.run_id} — שאלה ${probeCount} מתוך ${total}`;
+
+        // Compute pass/fail/partial from live entries (DB counters only set at run end)
+        const nPass    = probeEntries.filter(e => e.verdict === 'PASS').length;
+        const nPartial = probeEntries.filter(e => e.verdict === 'PARTIAL').length;
+        const nFail    = probeEntries.filter(e => e.verdict === 'FAIL').length;
+        document.getElementById('lc-pass').textContent    = nPass    || (data.n_pass    || 0);
+        document.getElementById('lc-partial').textContent = nPartial || (data.n_partial || 0);
+        document.getElementById('lc-fail').textContent    = nFail    || (data.n_fail    || 0);
+
+        if (entries.length !== lastEntryCount) {
+            lastEntryCount = entries.length;
+            _liveEntries = entries;
+            renderEntries(entries);
+        }
+
+        if (data.status === 'running') {
+            document.getElementById('live-feed-panel').style.display = 'block';
+            document.getElementById('kill-btn').disabled = false;
+        } else {
+            stopLivePoll();
+            document.getElementById('kill-btn').disabled = true;
+            if (data.status === 'completed' || data.status === 'failed') {
+                setTimeout(() => location.reload(), 1800);
+            }
+        }
+    } catch(e) { /* silently ignore network errors during poll */ }
+}
+
+function renderEntries(entries) {
+    const container = document.getElementById('live-entries');
+    // Newest first
+    const reversed = [...entries].reverse();
+    container.innerHTML = reversed.map((e, idx) => {
+        // Iteration separator
+        if (e.type === 'iteration') {
+            return `<div style="
+                text-align:center; color:var(--cyan); font-family:var(--mono); font-size:0.78rem;
+                padding:0.5rem 0; border-top:1px solid var(--border); border-bottom:1px solid var(--border);
+                margin:0.3rem 0; background:rgba(0,212,255,0.04);
+            ">── מחזור תיקון פנימי ${escapeHtml(String(e.pass))} — ${escapeHtml(String(e.n_still_failing))} שאלות עדיין נכשלות ──</div>`;
+        }
+        // Run summary entry — emitted at end of cycle
+        if (e.type === 'summary') {
+            const total = (e.n_pass || 0) + (e.n_partial || 0) + (e.n_fail || 0);
+            const passPct = total > 0 ? Math.round((e.n_pass || 0) / total * 100) : 0;
+            const appliedHtml = (e.applied || []).length === 0
+                ? '<div style="color:var(--text-2); font-size:0.82rem;">לא בוצעו שינויים בריצה זו.</div>'
+                : (e.applied || []).map(a => `
+                    <div style="border:1px solid var(--green); border-radius:4px; padding:0.5rem; margin-bottom:0.4rem; background:rgba(16,185,129,0.06);">
+                        <div style="display:flex; gap:0.5rem; align-items:center; margin-bottom:0.3rem;">
+                            <span class="badge-pill b-pass">#${a.id}</span>
+                            <span class="badge-pill b-neutral">${escapeHtml(a.type)}</span>
+                            ${a.delta != null ? `<span class="badge-pill b-pass">Δ ${(a.delta*100).toFixed(0)}%</span>` : ''}
+                        </div>
+                        <div style="font-size:0.83rem; color:var(--text-1); margin-bottom:0.3rem;">${escapeHtml(a.rationale || '')}</div>
+                        <pre style="background:rgba(0,0,0,0.3); padding:0.4rem; font-size:0.74rem; color:#c5e0ff; border-radius:3px; max-height:140px; overflow:auto; margin:0;">${escapeHtml(JSON.stringify(a.patch, null, 2))}</pre>
+                    </div>
+                `).join('');
+            const stillFailingHtml = (e.still_failing || []).length === 0
+                ? '<div style="color:var(--green); font-size:0.85rem;">✓ כל השאלות עברו!</div>'
+                : (e.still_failing || []).map(s => `
+                    <div style="border:1px solid var(--red); border-radius:4px; padding:0.5rem; margin-bottom:0.4rem; background:rgba(239,68,68,0.06);">
+                        <div style="font-weight:500; color:var(--text-1); margin-bottom:0.2rem;">${escapeHtml(s.question)}</div>
+                        <div style="color:var(--text-2); font-size:0.78rem;">תשובה אחרונה: ${escapeHtml(s.last_answer || '—')}</div>
+                    </div>
+                `).join('');
+            return `<div style="
+                border:2px solid var(--cyan); border-radius:6px; padding:1rem;
+                margin:1rem 0; background:rgba(0,212,255,0.04);
+            ">
+                <div style="font-family:var(--mono); font-size:1rem; color:var(--cyan); margin-bottom:0.6rem;">📊 סיכום מחזור</div>
+                <div style="display:flex; gap:1.2rem; margin-bottom:0.8rem; font-family:var(--mono); font-size:0.85rem;">
+                    <span>סה״כ: <strong>${total}</strong></span>
+                    <span class="delta-pos">✓ ${e.n_pass || 0}</span>
+                    <span style="color:var(--yellow);">⚡ ${e.n_partial || 0}</span>
+                    <span class="delta-neg">✗ ${e.n_fail || 0}</span>
+                    <span class="${passPct >= 70 ? 'delta-pos' : passPct >= 40 ? 'delta-zero' : 'delta-neg'}">${passPct}%</span>
+                </div>
+                <div style="font-family:var(--mono); font-size:0.85rem; color:var(--cyan); margin-top:0.6rem; margin-bottom:0.4rem;">🔧 שינויים שהוחלו (${(e.applied||[]).length}):</div>
+                ${appliedHtml}
+                <div style="font-family:var(--mono); font-size:0.85rem; color:var(--cyan); margin-top:0.6rem; margin-bottom:0.4rem;">❌ שאלות שעדיין נכשלות (${(e.still_failing||[]).length}):</div>
+                ${stillFailingHtml}
+            </div>`;
+        }
+
+        const isRetry = e.type === 'retry';
+        const vClass = e.verdict === 'PASS' ? 'b-pass' : e.verdict === 'FAIL' ? 'b-fail' : 'b-partial';
+        const retryBadge = isRetry ? `<span class="badge-pill b-neutral" style="font-size:0.62rem; opacity:0.7;">חזרה ${e.pass}</span>` : '';
+        const realIdx = entries.length - 1 - idx;
+        return `<div class="live-entry" id="le-${realIdx}">
+            <div style="display:flex; gap:0.4rem; align-items:flex-start; flex-wrap:wrap;">
+                <span class="badge-pill ${vClass}" style="margin-top:2px;">${escapeHtml(e.verdict)}</span>
+                ${e.failure_type ? `<span class="badge-pill b-neutral" style="font-size:0.65rem; margin-top:2px;">${escapeHtml(e.failure_type)}</span>` : ''}
+                ${retryBadge}
+                <span style="color:var(--text-1); font-weight:500; word-break:break-word; flex:1;">${escapeHtml(e.probe)}</span>
+                <span style="display:flex; gap:0.2rem; flex-shrink:0;">
+                    <button title="תשובה נכונה" onclick="giveFeedback(${realIdx}, 'PASS')"
+                        style="background:rgba(16,185,129,0.15); border:1px solid var(--green); color:var(--green);
+                               border-radius:3px; padding:0.1rem 0.4rem; font-size:0.72rem; cursor:pointer; line-height:1;">✓</button>
+                    <button title="תשובה שגויה" onclick="giveFeedback(${realIdx}, 'FAIL')"
+                        style="background:rgba(239,68,68,0.15); border:1px solid var(--red); color:var(--red);
+                               border-radius:3px; padding:0.1rem 0.4rem; font-size:0.72rem; cursor:pointer; line-height:1;">✗</button>
+                </span>
+            </div>
+            ${e.answer ? `<div style="color:var(--text-2); padding-right:0.5rem; margin-top:2px; font-size:0.8rem;">${escapeHtml(e.answer)}</div>` : ''}
+            ${e.evidence ? `<div style="color:var(--yellow); font-size:0.75rem; margin-top:2px;">🔍 ${escapeHtml(e.evidence)}</div>` : ''}
+        </div>`;
+    }).join('');
+}
+
+// Store entries globally so giveFeedback() can reference them
+let _liveEntries = [];
+
+async function giveFeedback(idx, verdict) {
+    const e = _liveEntries[idx];
+    if (!e || !e.probe) return;
+    const el = document.getElementById(`le-${idx}`);
+    try {
+        await postJSON('/dashboard/eval/feedback', {
+            question: e.probe,
+            answer: e.answer || '',
+            verdict: verdict,
+        });
+        // Visual confirmation
+        if (el) {
+            el.style.background = verdict === 'PASS'
+                ? 'rgba(16,185,129,0.12)' : 'rgba(239,68,68,0.12)';
+            const badge = el.querySelector('.badge-pill');
+            if (badge) {
+                badge.className = `badge-pill ${verdict === 'PASS' ? 'b-pass' : 'b-fail'}`;
+                badge.textContent = verdict + ' ✎';
+            }
+        }
+    } catch(err) { /* alert already shown by postJSON */ }
+}
+
+// Check on page load if a run is already in progress
+(async () => {
+    try {
+        const r = await fetch('/dashboard/eval/runs/latest/log');
+        const data = await r.json();
+        if (data.run_id && data.status === 'running' && (data.entries || []).length > 0) {
+            startLivePoll();
+        } else if (data.run_id && data.entries && data.entries.length > 0) {
+            // Show last completed run's feed
+            document.getElementById('live-feed-panel').style.display = 'block';
+            document.getElementById('live-run-label').textContent = `ריצה #${data.run_id} (הושלמה)`;
+            document.getElementById('lc-pass').textContent    = data.n_pass    || 0;
+            document.getElementById('lc-partial').textContent = data.n_partial || 0;
+            document.getElementById('lc-fail').textContent    = data.n_fail    || 0;
+            _liveEntries = data.entries;
+            renderEntries(data.entries);
+        }
+    } catch(e) {}
+})();
+
+// ── Toolbar buttons ────────────────────────────────────────────────────────
+document.getElementById('run-btn').addEventListener('click', async () => {
+    const n = _totalQuestions || 20;
+    await postJSON('/dashboard/eval/run', {n_probes: n, seed_failures: true});
+    startLivePoll();
+});
+
+document.getElementById('kill-btn').addEventListener('click', async () => {
+    const paused = {{ 'true' if paused else 'false' }};
+    if (paused) {
+        if (!confirm('להמשיך הרצת מחזורי אבחון?')) return;
+        await postJSON('/dashboard/eval/kill', {paused: false});
+    } else {
+        if (!confirm('לעצור את כל מחזורי האבחון?')) return;
+        await postJSON('/dashboard/eval/kill', {paused: true});
+    }
+    location.reload();
+});
+
+document.getElementById('questions-btn').addEventListener('click', () => {
+    const panel = document.getElementById('questions-panel');
+    if (panel.style.display === 'none') {
+        panel.style.display = 'block';
+        loadQuestions();
+    } else {
+        panel.style.display = 'none';
+    }
+});
+
+// ── Questions management ───────────────────────────────────────────────────
+let questionsData = [];
+
+async function loadQuestions() {
+    try {
+        const r = await fetch('/dashboard/eval/questions');
+        questionsData = await r.json();
+        renderQTable();
+    } catch(e) { alert('שגיאה בטעינת שאלות'); }
+}
+
+function renderQTable() {
+    const tbody = document.getElementById('q-tbody');
+    document.getElementById('q-count-label').textContent = `(${questionsData.length} שאלות)`;
+    tbody.innerHTML = questionsData.map((q, i) => `
+        <tr class="q-row" data-idx="${i}">
+            <td style="color:var(--text-2); font-family:var(--mono); font-size:0.75rem;">${i+1}</td>
+            <td><input type="text" value="${escapeHtml(q.question)}" onchange="questionsData[${i}].question=this.value" style="min-width:280px;"></td>
+            <td>
+                <select onchange="questionsData[${i}].expected_route=this.value">
+                    <option value="knowledge"  ${q.expected_route==='knowledge'  ?'selected':''}>knowledge</option>
+                    <option value="project"    ${q.expected_route==='project'    ?'selected':''}>project</option>
+                    <option value="decision"   ${q.expected_route==='decision'   ?'selected':''}>decision</option>
+                </select>
+            </td>
+            <td><input type="text" value="${escapeHtml(q.target_project||'')}" onchange="questionsData[${i}].target_project=this.value" placeholder="—" style="min-width:90px;"></td>
+            <td><button class="btn btn-danger-outline btn-sm" style="padding:0.1rem 0.4rem; font-size:0.75rem;" onclick="deleteQuestion(${i})">✕</button></td>
+        </tr>
+    `).join('');
+}
+
+function deleteQuestion(idx) {
+    questionsData.splice(idx, 1);
+    renderQTable();
+}
+
+function addBlankRow() {
+    questionsData.push({id:`manual-${Date.now()}`, question:'', expected_route:'knowledge', notes:'ידני'});
+    renderQTable();
+    // Scroll to bottom of table
+    const el = document.getElementById('q-tbody').lastElementChild;
+    if (el) el.scrollIntoView({behavior:'smooth', block:'nearest'});
+}
+
+async function saveQuestions() {
+    // Sync DOM values back to questionsData (for any unsaved onchange)
+    document.querySelectorAll('#q-tbody tr').forEach((row) => {
+        const i = parseInt(row.dataset.idx);
+        if (!isNaN(i) && questionsData[i] !== undefined) {
+            const inputs = row.querySelectorAll('input[type=text]');
+            if (inputs[0]) questionsData[i].question = inputs[0].value;
+            if (inputs[1]) questionsData[i].target_project = inputs[1].value || undefined;
+            const sel = row.querySelector('select');
+            if (sel) questionsData[i].expected_route = sel.value;
+        }
+    });
+    try {
+        const res = await postJSON('/dashboard/eval/questions', {questions: questionsData});
+        alert(`✓ נשמרו ${res.count} שאלות`);
+        document.getElementById('q-count-label').textContent = `(${res.count} שאלות)`;
+    } catch(e) {}
+}
+
+async function loadSuggestions() {
+    document.getElementById('suggest-btn').textContent = '⏳ טוען...';
+    try {
+        const r = await fetch('/dashboard/eval/questions/suggestions');
+        const suggestions = await r.json();
+        const area = document.getElementById('suggestions-area');
+        const list = document.getElementById('suggestions-list');
+        const empty = document.getElementById('suggestions-empty');
+        area.style.display = 'block';
+
+        if (!suggestions || suggestions.length === 0) {
+            list.innerHTML = '';
+            empty.style.display = 'block';
+        } else {
+            empty.style.display = 'none';
+            list.innerHTML = suggestions.map((s, si) => `
+                <div class="suggestion-card">
+                    <div style="display:flex; gap:0.4rem; align-items:flex-start; margin-bottom:0.3rem;">
+                        <span class="badge-pill b-fail" style="font-size:0.65rem; margin-top:2px;">FAIL</span>
+                        <span style="font-weight:600; word-break:break-word;">${escapeHtml(s.question)}</span>
+                    </div>
+                    ${s.answer_preview ? `<div style="color:var(--text-2); font-size:0.78rem; margin-bottom:0.4rem;">${escapeHtml(s.answer_preview)}</div>` : ''}
+                    <div style="color:var(--text-2); font-size:0.72rem; margin-bottom:0.4rem; font-family:var(--mono);">${escapeHtml(s.notes||'')}</div>
+                    <button class="btn btn-green-outline btn-sm" style="font-size:0.75rem;" onclick="addSuggestion(${si})">+ הוסף לבדיקה</button>
+                </div>
+            `).join('');
+            // Store suggestions globally for addSuggestion()
+            window._suggestions = suggestions;
+        }
+    } catch(e) { alert('שגיאה בטעינת הצעות'); }
+    document.getElementById('suggest-btn').textContent = '🔍 הצג שאלות שנכשלו מהלוגים';
+}
+
+function addSuggestion(si) {
+    const s = window._suggestions && window._suggestions[si];
+    if (!s) return;
+    questionsData.push({
+        id: s.id,
+        question: s.question,
+        expected_route: s.expected_route || 'knowledge',
+        notes: s.notes || '',
+    });
+    renderQTable();
+    // Remove from suggestions list
+    const cards = document.querySelectorAll('#suggestions-list .suggestion-card');
+    if (cards[si]) cards[si].style.opacity = '0.3';
+}
+
+// ── Proposals ──────────────────────────────────────────────────────────────
+async function approveProposal(id) {
+    if (!confirm(`לאשר ולהחיל את הצעה #${id}?`)) return;
+    await postJSON(`/dashboard/eval/proposals/${id}/approve`, {});
+    location.reload();
+}
+async function rejectProposal(id) {
+    const reason = prompt('סיבת דחייה (אופציונלי):') || 'rejected by admin';
+    await postJSON(`/dashboard/eval/proposals/${id}/reject`, {reason});
+    location.reload();
+}
+async function rollbackProposal(id) {
+    if (!confirm(`לבטל את הצעה #${id}? התיקון יוסר מהמערכת.`)) return;
+    await postJSON(`/dashboard/eval/proposals/${id}/rollback`, {});
+    location.reload();
+}
+</script>
+</body>
+</html>

@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, BigInteger, String, Text, DateTime, Date, Boolean, ForeignKey, Enum, JSON
+from sqlalchemy import Column, Integer, BigInteger, String, Text, DateTime, Date, Boolean, ForeignKey, Enum, JSON, Float, Index
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 from pgvector.sqlalchemy import Vector
@@ -230,6 +230,7 @@ class QueryLog(Base):
     timestamp     = Column(DateTime, default=datetime.utcnow, index=True)
     llm_provider  = Column(String(50), nullable=True)   # "Groq" | "Gemma"
     is_fallback   = Column(Boolean, nullable=True)      # True if backup provider was used
+    judge_verdict = Column(String(10), nullable=True)   # "PASS" | "PARTIAL" | "FAIL" — set by eval_judge_service
 
     user = relationship("User")
 
@@ -312,3 +313,97 @@ class Project(Base):
     estimated_finish_date = Column(Date, nullable=True)
     last_updated          = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     is_active             = Column(Boolean, default=True, nullable=False)
+
+
+# =============================================================================
+# Eval & Self-Repair Loop tables
+# =============================================================================
+
+class EvalRun(Base):
+    """One pass of the 4-agent eval loop: probe -> judge -> repair -> verify."""
+    __tablename__ = "eval_runs"
+
+    id                     = Column(Integer, primary_key=True, index=True)
+    started_at             = Column(DateTime, default=datetime.utcnow, index=True)
+    finished_at            = Column(DateTime, nullable=True)
+    status                 = Column(String(20), default="running")  # running | completed | failed | aborted
+    error                  = Column(Text, nullable=True)
+    n_probes               = Column(Integer, default=0)
+    n_pass                 = Column(Integer, default=0)
+    n_partial              = Column(Integer, default=0)
+    n_fail                 = Column(Integer, default=0)
+    n_proposals_created    = Column(Integer, default=0)
+    n_proposals_applied    = Column(Integer, default=0)
+    triggered_by_user_id   = Column(Integer, ForeignKey("users.id"), nullable=True)
+    config_json            = Column(JSON, nullable=True)   # batch size, seed_failures flag, audit log array
+
+    triggered_by = relationship("User")
+
+
+# Only one EvalRun may be 'running' at a time — partial unique index on Postgres.
+Index(
+    "ix_eval_runs_only_one_running",
+    EvalRun.status,
+    unique=True,
+    postgresql_where=(EvalRun.status == "running"),
+)
+
+
+class RepairProposal(Base):
+    """One proposed fix produced by the Repair agent. NOT applied until verifier approves."""
+    __tablename__ = "repair_proposals"
+
+    id                  = Column(Integer, primary_key=True, index=True)
+    eval_run_id         = Column(Integer, ForeignKey("eval_runs.id"), nullable=True, index=True)
+    type                = Column(String(32), nullable=False)
+    # type ∈ {add_synonym, add_abbreviation, prompt_patch, stop_word_remove, field_alias}
+    patch_json          = Column(JSON, nullable=False)        # the structured change to apply
+    rationale           = Column(Text, nullable=True)
+    risk                = Column(String(10), default="low")   # low | medium | high
+    predicted_log_ids   = Column(JSON, nullable=True)         # list[int] — QueryLog rows the patch should help
+    status              = Column(String(20), default="pending", index=True)
+    # status ∈ {pending, awaiting_approval, applied, rejected, reverted}
+    reject_reason       = Column(Text, nullable=True)
+    delta_pass_rate     = Column(Float, nullable=True)        # after - before on failing set
+    regression_count    = Column(Integer, nullable=True)      # how many control queries broke
+    before_snapshot     = Column(JSON, nullable=True)         # [{q, a, verdict}] for failing set BEFORE
+    after_snapshot      = Column(JSON, nullable=True)         # [{q, a, verdict}] for failing set AFTER
+    created_at          = Column(DateTime, default=datetime.utcnow, index=True)
+    applied_at          = Column(DateTime, nullable=True)
+    applied_by_id       = Column(Integer, ForeignKey("users.id"), nullable=True)
+
+    eval_run    = relationship("EvalRun")
+    applied_by  = relationship("User")
+
+
+class PromptOverride(Base):
+    """Override for one of the canned RAG system prompts. Set active=True to take effect."""
+    __tablename__ = "prompt_overrides"
+
+    id                  = Column(Integer, primary_key=True, index=True)
+    usage               = Column(String(64), nullable=False, index=True)
+    # usage ∈ {rag_specific, rag_list}  (matches knowledge_service prompt slots)
+    content             = Column(Text, nullable=False)
+    active              = Column(Boolean, default=False)
+    created_at          = Column(DateTime, default=datetime.utcnow)
+    source_proposal_id  = Column(Integer, ForeignKey("repair_proposals.id"), nullable=True)
+
+    source_proposal = relationship("RepairProposal")
+
+
+# At most one active PromptOverride per usage.
+Index(
+    "ix_prompt_overrides_one_active_per_usage",
+    PromptOverride.usage,
+    unique=True,
+    postgresql_where=(PromptOverride.active.is_(True)),
+)
+
+
+class SystemFlag(Base):
+    """Single-row toggles read by long-running services. Used for the eval-loop kill switch."""
+    __tablename__ = "system_flags"
+
+    key        = Column(String(64), primary_key=True)
+    value      = Column(String(255), nullable=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

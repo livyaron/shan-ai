@@ -41,6 +41,11 @@ USAGE_LABELS: dict[str, str] = {
     "message_summary":         "סיכום תשובת בוט ארוכה",
     "dashboard_analysis":      "ניתוח AI בדשבורד",
     "message_routing":         "ניתוב הודעה + זיהוי כוונה",
+    # Eval & self-repair loop (4-agent system)
+    "eval_probe":              "אבחון: יצירת שאלות בדיקה",
+    "eval_judge":              "אבחון: שיפוט תשובות",
+    "eval_repair":             "אבחון: הצעת תיקון",
+    "eval_verify":             "אבחון: אימות תיקון",
 }
 
 

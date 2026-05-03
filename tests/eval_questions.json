@@ -1,0 +1,159 @@
+{
+  "_about": "Smoke-test fixture for Shan-AI Q&A. Each entry: question + expected_route + (optional) target_project / target_field for ground-truth judge. expected_route values: 'decision' (recorded as a decision), 'project' (project_tools answer), 'knowledge' (RAG via knowledge_service).",
+  "_routes_under_test": {
+    "decision": "Telegram and /dashboard/ask both record this as a decision and run the decision-analysis pipeline. Detected by the LLM message router OR by raw decision phrasing (no '?', has imperative verb).",
+    "project": "_is_project_query() — short Hebrew text containing project keywords or 1–5 Hebrew words = bare project name lookup via project_tools.",
+    "knowledge": "Falls through to knowledge_service.answer_with_full_context — RAG over the master file."
+  },
+  "questions": [
+    {
+      "id": "decision-1",
+      "question": "החלטתי להשהות את עבודות העפר בתחמ\"ש דימונה עד לקבלת אישור איכות סביבה.",
+      "expected_route": "decision",
+      "notes": "Imperative + 'החלטתי' — must enter decision-recording flow, not Q&A."
+    },
+    {
+      "id": "decision-2",
+      "question": "אני מאשר את החלפת הטרנספורמטור הראשי בשעות הלילה ביום שלישי הקרוב.",
+      "expected_route": "decision",
+      "notes": "Operational decision phrasing — should record + classify INFO/NORMAL/CRITICAL."
+    },
+    {
+      "id": "decision-3",
+      "question": "כל קבלן שלא יגיש דו\"ח בטיחות שבועי עד יום ראשון יושעה לאלתר.",
+      "expected_route": "decision",
+      "notes": "Org-policy decision (no question mark) — must NOT be misrouted as Q&A."
+    },
+    {
+      "id": "decision-history-1",
+      "question": "אילו החלטות הגשתי החודש?",
+      "expected_route": "knowledge",
+      "notes": "Has 'החלטות' keyword — routes to decisions DB query (NOT to record). Uses get_decisions_context."
+    },
+    {
+      "id": "decision-history-2",
+      "question": "הצג את ההחלטה האחרונה שאישרתי",
+      "expected_route": "knowledge",
+      "notes": "ההחלטה keyword — decisions DB read."
+    },
+    {
+      "id": "project-bare-1",
+      "question": "חולה",
+      "expected_route": "project",
+      "target_project": "חולה",
+      "notes": "Bare project name — full project card expected (manager, status, dates, weekly update)."
+    },
+    {
+      "id": "project-bare-2",
+      "question": "יזרעאל",
+      "expected_route": "project",
+      "target_project": "יזרעאל",
+      "notes": "Single Hebrew word, ≥2 chars, no question mark, no decision verb → project lookup."
+    },
+    {
+      "id": "project-status-1",
+      "question": "מה הסטטוס של פרויקט נתניה?",
+      "expected_route": "project",
+      "target_project": "נתניה",
+      "target_field": "סטטוס",
+      "notes": "Lookup status field. Judge compares answer to Project.stage."
+    },
+    {
+      "id": "project-manager-1",
+      "question": "מי המנהל של פרויקט יזרעאל?",
+      "expected_route": "project",
+      "target_project": "יזרעאל",
+      "target_field": "מנהל",
+      "notes": "Manager lookup. Judge compares answer to Project.manager."
+    },
+    {
+      "id": "project-date-1",
+      "question": "מה תאריך החישמול של פרויקט בת ים?",
+      "expected_route": "project",
+      "target_project": "בת ים",
+      "target_field": "תאריך חישמול",
+      "notes": "Date lookup → Project.estimated_finish_date. 'חישמול' must expand to 'חשמול' via HEBREW_ABBREVS."
+    },
+    {
+      "id": "project-date-2",
+      "question": "מתי יחושמל פרויקט גליל מזרחי?",
+      "expected_route": "project",
+      "target_project": "גליל מזרחי",
+      "target_field": "יעד חשמול",
+      "notes": "Same target column, different phrasing — tests the field-alias mapping in the system prompt."
+    },
+    {
+      "id": "project-tofa-1",
+      "question": "מה תאריך הת\"פ של פרויקט עפולה?",
+      "expected_route": "project",
+      "target_project": "עפולה",
+      "target_field": "תאריך ת\"פ",
+      "notes": "ת\"פ contains a quote — must survive the gershayim sanitizer. Maps to Project.dev_plan_date."
+    },
+    {
+      "id": "project-update-1",
+      "question": "מה העדכון השבועי של פרויקט קרית גת?",
+      "expected_route": "project",
+      "target_project": "קרית גת",
+      "target_field": "פירוט שבועי",
+      "notes": "Tests the 'Update:' / weekly_report field alias. Free-text — judge should be lenient."
+    },
+    {
+      "id": "agg-by-manager-1",
+      "question": "כמה פרויקטים יש למנהל משה ברקוביץ?",
+      "expected_route": "project",
+      "target_field": "מנהל",
+      "notes": "Aggregation. _is_project_query() catches 'פרויקטים'+'מנהל' so this routes to project_tools (which itself runs the count) — NOT to knowledge_service.answer_with_full_context."
+    },
+    {
+      "id": "agg-by-stage-1",
+      "question": "כמה פרויקטים בסטטוס תכנון מוקדם?",
+      "expected_route": "project",
+      "target_field": "סטטוס",
+      "notes": "Aggregation by stage. project_tools handles count-by-stage."
+    },
+    {
+      "id": "agg-list-1",
+      "question": "תן רשימה של כל הפרויקטים שמסתיימים השנה",
+      "expected_route": "project",
+      "notes": "Full-list query with date filter — project_tools handles list-style queries."
+    },
+    {
+      "id": "abbrev-1",
+      "question": "מי המנה\"פ של תחמ\"ש קצרין?",
+      "expected_route": "project",
+      "target_project": "קצרין",
+      "target_field": "מנהל",
+      "notes": "Two abbreviations: מנה\"פ (already in HEBREW_ABBREVS), תחמ\"ש (NOT in static dict — eval loop should propose adding it)."
+    },
+    {
+      "id": "abbrev-2",
+      "question": "אילו פרויקטים בשלב קבלן אזרחי?",
+      "expected_route": "project",
+      "target_project": "אילת",
+      "target_field": "סטטוס",
+      "notes": "תו\"ב in static dict = תכנון ובנייה. Tests existing expansion."
+    },
+    {
+      "id": "edge-missing-1",
+      "question": "מה הסטטוס של פרויקט חולה",
+      "expected_route": "project",
+      "target_project": "פרויקט שאינו קיים בכלל",
+      "notes": "Edge: project does not exist. Correct answer = 'לא נמצא במסד הידע'. Hallucination = FAIL."
+    },
+    {
+      "id": "edge-empty-1",
+      "question": "באילו פרויקטים נדרש טיפול של מנהל מגזר תכנון?",
+      "expected_route": "project",
+      "target_field": "סיכונים",
+      "notes": "Edge: field exists but value is NULL. Answer should say 'לא צוינו סיכונים' rather than fabricating."
+    },
+    {
+      "id": "edge-ambiguous-1",
+      "question": "פרויקט גליל",
+      "expected_route": "project",
+      "target_project": "גליל",
+      "notes": "Edge: ambiguous prefix — could match 'גליל מזרחי' or 'גליל מערבי'. Judge accepts disambiguation question OR a list of matches."
+    }
+  ]
+}

@@ -3,7 +3,9 @@
 import asyncio
 import logging
 import re
+import time
 import unicodedata
+from contextvars import ContextVar
 from pathlib import Path
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, or_
@@ -13,6 +15,21 @@ from app.services.embedding_service import embed
 from app.database import async_session_maker
 
 logger = logging.getLogger(__name__)
+
+# ─── Eval-loop shadow ContextVars (set by eval_verifier_service.shadow_config) ──
+# When non-empty, they OVERRIDE the production config for the current async task.
+# Defaults are empty so production paths are unaffected when no shadow is active.
+_shadow_abbrevs: ContextVar[dict] = ContextVar("shadow_abbrevs", default={})
+_shadow_stop_word_drops: ContextVar[set] = ContextVar("shadow_stop_word_drops", default=set())
+_shadow_synonyms: ContextVar[dict] = ContextVar("shadow_synonyms", default={})
+_shadow_prompt_override: ContextVar[dict] = ContextVar("shadow_prompt_override", default={})
+
+# ─── DB-backed config caches (refreshed lazily by _ensure_eval_caches) ─────────
+_DB_ABBREVS_CACHE: dict[str, str] = {}
+_DB_STOP_WORD_DROPS_CACHE: set[str] = set()
+_DB_PROMPT_OVERRIDES_CACHE: dict[str, str] = {}   # usage -> content
+_EVAL_CACHE_TS: float = 0.0
+_EVAL_CACHE_TTL: float = 30.0  # seconds, mirrors llm_router._cache
 
 UPLOAD_DIR = Path("uploads")
 
@@ -52,21 +69,75 @@ CHUNK_SIZE = 600
 CHUNK_OVERLAP = 100
 
 # ─── Hebrew Abbreviation Expansion ───
+# BEGIN_AUTOGEN_ABBREVS
 HEBREW_ABBREVS = {
-    'מנה"פ': 'מנהל פרויקט',
-    'פ"מ': 'מנהל פרויקט',
-    'תו"ב': 'תכנון ובנייה',
-    "מנה''פ": 'מנהל פרויקט',
-    "פ''מ": 'מנהל פרויקט',
-    # Spelling variants: user writes חישמול, data stores חשמול
-    'חישמול': 'חשמול',
-    'חישמל': 'חשמול',
+    "פ": "מנהל פרויקט",
+    "מ": "מנהל פרויקט",
+    "ב": "תכנון ובנייה",
+    "חישמול": "חשמול",
+    "חישמל": "חשמול",
 }
+# END_AUTOGEN_ABBREVS
+
+
+async def _ensure_eval_caches(session: AsyncSession | None = None) -> None:
+    """Refresh DB-backed config caches if stale. Cheap on cache-hit (single timestamp check).
+
+    Always uses its OWN session — a missing-table error here must not poison the
+    caller's transaction (asyncpg propagates InFailedSQLTransactionError otherwise).
+    """
+    global _EVAL_CACHE_TS, _DB_ABBREVS_CACHE, _DB_STOP_WORD_DROPS_CACHE, _DB_PROMPT_OVERRIDES_CACHE
+
+    now = time.monotonic()
+    if now - _EVAL_CACHE_TS < _EVAL_CACHE_TTL:
+        return
+    # Mark fresh up-front so a transient failure doesn't trigger a hot-loop of retries
+    _EVAL_CACHE_TS = now
+
+    try:
+        from app.models import QuerySynonym, PromptOverride
+
+        async with async_session_maker() as own_session:
+            sent_stmt = select(QuerySynonym).where(
+                QuerySynonym.original.in_(["__hebrew_abbrevs__", "__stop_word_drops__"])
+            )
+            sent_rows = (await own_session.execute(sent_stmt)).scalars().all()
+
+            new_abbrevs: dict[str, str] = {}
+            new_drops: set[str] = set()
+            for row in sent_rows:
+                if row.original == "__hebrew_abbrevs__":
+                    # synonyms stored as ["k=v", "k=v", ...] for portability
+                    for entry in (row.synonyms or []):
+                        if isinstance(entry, str) and "=" in entry:
+                            k, v = entry.split("=", 1)
+                            new_abbrevs[k.strip()] = v.strip()
+                        elif isinstance(entry, dict) and "k" in entry and "v" in entry:
+                            new_abbrevs[entry["k"]] = entry["v"]
+                elif row.original == "__stop_word_drops__":
+                    new_drops = {s for s in (row.synonyms or []) if isinstance(s, str)}
+
+            po_stmt = select(PromptOverride).where(PromptOverride.active.is_(True))
+            po_rows = (await own_session.execute(po_stmt)).scalars().all()
+            new_overrides = {row.usage: row.content for row in po_rows}
+
+        _DB_ABBREVS_CACHE = new_abbrevs
+        _DB_STOP_WORD_DROPS_CACHE = new_drops
+        _DB_PROMPT_OVERRIDES_CACHE = new_overrides
+    except Exception as e:
+        # Common before first deploy: prompt_overrides table doesn't exist yet.
+        # Keep previous cache values; do not raise — caller's transaction must stay alive.
+        logger.debug(f"_ensure_eval_caches: skipped ({type(e).__name__}: {e})")
 
 
 def _expand_hebrew_abbrevs(text: str) -> str:
-    """Expand common Hebrew abbreviations before search/embedding."""
-    for abbrev, full in HEBREW_ABBREVS.items():
+    """Expand common Hebrew abbreviations before search/embedding.
+
+    Effective dict = static HEBREW_ABBREVS | DB-backed cache | shadow override.
+    Caller must have awaited _ensure_eval_caches(session) earlier in the async task.
+    """
+    effective = {**HEBREW_ABBREVS, **_DB_ABBREVS_CACHE, **_shadow_abbrevs.get()}
+    for abbrev, full in effective.items():
         text = text.replace(abbrev, full)
     return text
 
@@ -1399,6 +1470,16 @@ async def answer_question(
     try:
         from app.services.llm_router import llm_chat
 
+        # Eval-loop hook: a shadow override (during shadow_config) takes precedence;
+        # otherwise fall back to the active PromptOverride DB row for this usage slot.
+        # `usage_slot` keys: rag_specific (single-fact answers) | rag_list (aggregations).
+        usage_slot = "rag_specific" if specific else "rag_list"
+        shadow_po = _shadow_prompt_override.get()
+        override_content: str | None = (
+            shadow_po.get(usage_slot)
+            if shadow_po else _DB_PROMPT_OVERRIDES_CACHE.get(usage_slot)
+        )
+
         # Build the learned-instructions addon (appended at END of system prompt with override framing)
         instructions_addon = ""
         if learned_instructions:
@@ -1419,6 +1500,20 @@ async def answer_question(
         format_rules = _TELEGRAM_FORMAT_RULES_DETAIL if wants_details else _TELEGRAM_FORMAT_RULES_LIST
 
         if specific:
+            if override_content is not None:
+                # Override always wraps with format_rules + instructions_addon so
+                # downstream behaviour (telegram formatting, learned instructions) is preserved.
+                system_prompt = override_content + format_rules + instructions_addon
+                max_tokens = 400
+                return await llm_chat(
+                    "rag_answer",
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": f"{context}\n\nשאלה: {question}"},
+                    ],
+                    max_tokens=max_tokens,
+                    temperature=0.1,
+                )
             system_prompt = (
                 "אתה מומחה לבקרת פרויקטים הנדסיים. "
                 "קיבלת שאלה ספציפית הדורשת תשובה ממוקדת וקצרה."
@@ -1452,6 +1547,18 @@ async def answer_question(
                 "\n5. אם שאלו 'כמה פרויקטים יש ל[מנהל]' — ספור כל בלוק שבו `Manager:` מכיל את שמו, ורשום את שמות הפרויקטים."
             ) if full_list else ""
 
+            if override_content is not None:
+                system_prompt = override_content + format_rules + (auditor_addon if full_list else "") + instructions_addon
+                max_tokens = 2000
+                return await llm_chat(
+                    "rag_answer",
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": f"{context}\n\nשאלה: {question}"},
+                    ],
+                    max_tokens=max_tokens,
+                    temperature=0.3,
+                )
             system_prompt = (
                 "אתה מומחה לבקרת פרויקטים הנדסיים של חברת החשמל."
                 "קיבלת קטעי נתונים ממסד הידע של הארגון — זוהי רשימת פרויקטים מאסטר. "
@@ -1680,19 +1787,28 @@ def _extract_stage_filter_from_question(question: str) -> str | None:
     return None
 
 
-async def answer_with_full_context(question: str, session: AsyncSession, user_id: int) -> dict:
+async def answer_with_full_context(
+    question: str,
+    session: AsyncSession,
+    user_id: int,
+    log_to_db: bool = True,
+) -> dict:
     """Search knowledge base + decisions, then answer with two-step retrieval.
 
     Step 0: Hebrew abbreviation expansion + learned synonyms
     Step 1: LLM query expansion for better semantic understanding
     Step 2: Hybrid search (semantic + keyword) — limit boosted to 150 for full-list queries
     Step 3: LLM answers with formatted context
-    Step 4: Log the query+answer to query_logs
+    Step 4: Log the query+answer to query_logs (skipped when log_to_db=False — used by eval verifier shadow runs)
     """
     from app.models import QueryLog
 
     # Save the original question for database logging (no expansion, no synonyms)
     original_question = question
+
+    # Refresh eval-loop config caches (abbreviations, stop-word drops, prompt overrides)
+    # before any sync helpers consume them.
+    await _ensure_eval_caches(session)
 
     # Step 0: Abbreviation expansion + query-type detection on the RAW question
     # (must happen before learned-synonym expansion so noisy synonyms don't
@@ -1801,8 +1917,9 @@ async def answer_with_full_context(question: str, session: AsyncSession, user_id
             # translate or rewrite Hebrew proper nouns, losing exact strings like 'בת ים'.
             # Search for phrases directly in content (not label-restricted) so nothing is missed.
             phrases = _extract_query_phrases(question)
-            # Hebrew stop words that appear in questions but not in project data
-            _STOP_WORDS = {'מה', 'כל', 'של', 'על', 'את', 'הנתונים', 'הפרויקט',
+            # Hebrew stop words that appear in questions but not in project data.
+            # Effective set = static base − DB drops − shadow drops (eval-loop tunable).
+            _STOP_WORDS_BASE = {'מה', 'כל', 'של', 'על', 'את', 'הנתונים', 'הפרויקט',
                            'בפרויקט', 'לגבי', 'אנא', 'תוכל', 'ספר', 'לי',
                            'כמה', 'מתי', 'איזה', 'אילו', 'יש', 'הם', 'הן',
                            'תן', 'הצג', 'רשום', 'תרשום', 'תציג',
@@ -1813,6 +1930,7 @@ async def answer_with_full_context(question: str, session: AsyncSession, user_id
                            'מי', 'איפה', 'למה', 'מדוע', 'כיצד', 'איך',
                            # Domain verbs/nouns appearing in every Manager/Status field
                            'מנהל', 'מנהלת', 'סטטוס', 'עדכון', 'שלב'}
+            _STOP_WORDS = _STOP_WORDS_BASE - _DB_STOP_WORD_DROPS_CACHE - _shadow_stop_word_drops.get()
             # Multi-word phrases: filter out generic question phrases (stop-word combos)
             multi = [p for p in phrases if ' ' in p
                      and not all(w in _STOP_WORDS for w in p.split())]
@@ -1939,20 +2057,23 @@ async def answer_with_full_context(question: str, session: AsyncSession, user_id
 
     if not parts:
         answer = "לא נמצא מידע רלוונטי. העלה קבצים או הגש החלטות תחילה."
-        from app.services.llm_router import get_last_llm_meta
-        _provider, _is_fb = get_last_llm_meta()
-        log = QueryLog(question=original_question, ai_response=answer, sources_used=[], user_id=user_id,
-                       llm_provider=_provider or None, is_fallback=_is_fb or None)
-        session.add(log)
-        await session.commit()
-        await session.refresh(log)
+        log_id = None
+        if log_to_db:
+            from app.services.llm_router import get_last_llm_meta
+            _provider, _is_fb = get_last_llm_meta()
+            log = QueryLog(question=original_question, ai_response=answer, sources_used=[], user_id=user_id,
+                           llm_provider=_provider or None, is_fallback=_is_fb or None)
+            session.add(log)
+            await session.commit()
+            await session.refresh(log)
+            log_id = log.id
         return {
             "answer": answer,
             "has_files": False,
             "has_decisions": False,
             "file_names": [],
             "sources_text": "",
-            "log_id": log.id,
+            "log_id": log_id,
         }
 
     combined = "\n\n".join(parts)
@@ -1999,23 +2120,26 @@ async def answer_with_full_context(question: str, session: AsyncSession, user_id
         source_parts.append("📁 " + " | ".join(file_names))
     sources_text = "מקורות: " + " · ".join(source_parts) if source_parts else ""
 
-    # Step 4: Log query to DB
+    # Step 4: Log query to DB (skipped when log_to_db=False, e.g. eval-verifier shadow runs)
     sources_payload = [{"file": name} for name in file_names]
     if decisions_ctx:
         sources_payload.append({"source": "decisions_db"})
-    from app.services.llm_router import get_last_llm_meta
-    _provider, _is_fb = get_last_llm_meta()
-    log = QueryLog(
-        question=original_question,
-        ai_response=answer,
-        sources_used=sources_payload,
-        user_id=user_id,
-        llm_provider=_provider or None,
-        is_fallback=_is_fb or None,
-    )
-    session.add(log)
-    await session.commit()
-    await session.refresh(log)
+    log_id = None
+    if log_to_db:
+        from app.services.llm_router import get_last_llm_meta
+        _provider, _is_fb = get_last_llm_meta()
+        log = QueryLog(
+            question=original_question,
+            ai_response=answer,
+            sources_used=sources_payload,
+            user_id=user_id,
+            llm_provider=_provider or None,
+            is_fallback=_is_fb or None,
+        )
+        session.add(log)
+        await session.commit()
+        await session.refresh(log)
+        log_id = log.id
 
     return {
         "answer": answer,
@@ -2023,5 +2147,5 @@ async def answer_with_full_context(question: str, session: AsyncSession, user_id
         "has_decisions": bool(decisions_ctx),
         "file_names": file_names,
         "sources_text": sources_text,
-        "log_id": log.id,
+        "log_id": log_id,
     }
