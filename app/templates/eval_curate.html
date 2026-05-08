@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <title>Shan-AI — אימות תשובות זהב</title>
+    <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #070b12; --card: #0f1826; --border: #1a2d47;
+            --cyan: #00d4ff; --green: #10b981; --orange: #f59e0b; --red: #ef4444;
+            --text: #e2e8f0; --text-2: #64748b;
+        }
+        body { background: var(--bg); color: var(--text); font-family: 'Heebo', sans-serif; margin: 0; padding: 1rem 1.5rem; }
+        h1 { color: var(--cyan); font-size: 1.4rem; margin: 0 0 0.5rem; }
+        .topbar { display: flex; justify-content: space-between; align-items: center; gap: 1rem; padding: 0.5rem 0 1rem; border-bottom: 1px solid var(--border); margin-bottom: 1rem; }
+        .counter { font-weight: 600; color: var(--green); }
+        button { background: var(--card); color: var(--text); border: 1px solid var(--border); padding: 0.4rem 0.9rem; border-radius: 4px; cursor: pointer; font-family: inherit; }
+        button:hover { border-color: var(--cyan); color: var(--cyan); }
+        button.primary { background: var(--cyan); color: var(--bg); border-color: var(--cyan); }
+        button.danger { color: var(--red); }
+        button.success { background: var(--green); color: var(--bg); border-color: var(--green); }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 0.6rem; border-bottom: 1px solid var(--border); vertical-align: top; text-align: right; }
+        th { color: var(--text-2); font-weight: 500; font-size: 0.9rem; }
+        textarea { width: 100%; min-height: 80px; background: var(--card); color: var(--text); border: 1px solid var(--border); padding: 0.5rem; border-radius: 4px; font-family: inherit; resize: vertical; }
+        .badge { display: inline-block; padding: 0.15rem 0.5rem; border-radius: 10px; font-size: 0.75rem; }
+        .badge.db { background: #1e3a5f; color: var(--cyan); }
+        .badge.llm { background: #3b2a1a; color: var(--orange); }
+        .badge.manual { background: #1f3a2c; color: var(--green); }
+        .badge.approved { background: var(--green); color: var(--bg); margin-right: 0.3rem; }
+        .row-approved td { background: rgba(16,185,129,0.05); }
+        .actions { white-space: nowrap; }
+        .actions button { margin-inline-start: 0.3rem; }
+        a.nav { color: var(--cyan); text-decoration: none; margin-inline-end: 1rem; }
+    </style>
+</head>
+<body>
+    <div class="topbar">
+        <div>
+            <a class="nav" href="/dashboard">⟵ דשבורד</a>
+            <a class="nav" href="/dashboard/eval">▶ הפעלה</a>
+            <h1 style="display:inline-block; margin: 0 1rem 0 0;">🎯 אימות תשובות זהב</h1>
+        </div>
+        <div>
+            <span class="counter" id="counter">0/0 מאושרים</span>
+            <button id="bulk-approve" class="primary">אישור כל תשובות ה-DB</button>
+            <button id="reload">רענון</button>
+        </div>
+    </div>
+
+    <table>
+        <thead>
+            <tr>
+                <th style="width: 30%;">שאלה</th>
+                <th style="width: 45%;">תשובה מוצעת</th>
+                <th style="width: 10%;">מקור</th>
+                <th style="width: 15%;">פעולות</th>
+            </tr>
+        </thead>
+        <tbody id="rows">
+            <tr><td colspan="4" style="text-align:center; color: var(--text-2);">טוען…</td></tr>
+        </tbody>
+    </table>
+
+<script>
+const rowsEl = document.getElementById("rows");
+const counterEl = document.getElementById("counter");
+
+function badge(source) {
+    if (source === "db_lookup") return '<span class="badge db">🔵 DB</span>';
+    if (source === "llm_proposed") return '<span class="badge llm">🟡 LLM</span>';
+    return '<span class="badge manual">🟢 ידני</span>';
+}
+
+function render(proposals) {
+    rowsEl.innerHTML = "";
+    let approved = 0;
+    proposals.forEach((p, idx) => {
+        if (p.approved) approved++;
+        const tr = document.createElement("tr");
+        if (p.approved) tr.classList.add("row-approved");
+        tr.innerHTML = `
+            <td>${p.approved ? '<span class="badge approved">✓</span>' : ''}${escapeHtml(p.question)}</td>
+            <td><textarea data-idx="${idx}">${escapeHtml(p.proposed_answer || "")}</textarea></td>
+            <td>${badge(p.source)}</td>
+            <td class="actions">
+                <button class="success" data-action="approve" data-idx="${idx}">${p.approved ? 'עדכון' : '✓ אישור'}</button>
+                <button data-action="skip" data-idx="${idx}">דילוג</button>
+                ${p.approved ? `<button class="danger" data-action="delete" data-idx="${idx}">✗</button>` : ''}
+            </td>
+        `;
+        rowsEl.appendChild(tr);
+    });
+    counterEl.textContent = `${approved}/${proposals.length} מאושרים`;
+    window._proposals = proposals;
+}
+
+function escapeHtml(s) {
+    return (s || "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c]));
+}
+
+async function load() {
+    const res = await fetch("/dashboard/eval/gold/proposals");
+    const data = await res.json();
+    render(data.proposals);
+}
+
+rowsEl.addEventListener("click", async (e) => {
+    const btn = e.target.closest("button");
+    if (!btn) return;
+    const idx = parseInt(btn.dataset.idx);
+    const p = window._proposals[idx];
+    if (btn.dataset.action === "approve") {
+        const ta = document.querySelector(`textarea[data-idx="${idx}"]`);
+        await fetch("/dashboard/eval/gold/save", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({
+                question: p.question,
+                gold_answer: ta.value,
+                target_project: p.target_project,
+                target_field: p.target_field,
+                source: p.source === "db_lookup" ? "db_lookup" : "manual",
+            }),
+        });
+        await load();
+    } else if (btn.dataset.action === "delete") {
+        if (!confirm("למחוק תשובת זהב?")) return;
+        await fetch(`/dashboard/eval/gold/${p.question_hash}`, {method: "DELETE"});
+        await load();
+    } else if (btn.dataset.action === "skip") {
+        btn.closest("tr").style.opacity = 0.4;
+    }
+});
+
+document.getElementById("bulk-approve").onclick = async () => {
+    const r = await fetch("/dashboard/eval/gold/bulk_approve", {method: "POST"});
+    const d = await r.json();
+    alert(`אושרו ${d.approved} תשובות מתוך ה-DB`);
+    await load();
+};
+document.getElementById("reload").onclick = load;
+
+load();
+</script>
+</body>
+</html>

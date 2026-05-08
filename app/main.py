@@ -21,6 +21,7 @@ from app.routers import ask as ask_router  # noqa: E402
 from app.routers import logs as logs_router  # noqa: E402
 from app.routers import projects as projects_router  # noqa: E402
 from app.routers import llm_config as llm_config_router  # noqa: E402
+from app.routers import eval_loop as eval_loop_router  # noqa: E402
 from app.services.telegram_polling import telegram_bot  # noqa: E402
 from app.services.feedback_service import run_feedback_scheduler  # noqa: E402
 
@@ -45,6 +46,7 @@ app.include_router(ask_router.router)
 app.include_router(logs_router.router)
 app.include_router(projects_router.router)
 app.include_router(llm_config_router.router)
+app.include_router(eval_loop_router.router)
 app.include_router(profile_router)
 
 @app.on_event("startup")
@@ -124,6 +126,11 @@ async def startup():
                     "ALTER TABLE raci_suggestions ADD COLUMN IF NOT EXISTS reason_analyzed BOOLEAN NOT NULL DEFAULT FALSE;"
                 ))
 
+                # Eval-loop: judge_verdict on existing query_logs rows
+                await conn.execute(_text(
+                    "ALTER TABLE query_logs ADD COLUMN IF NOT EXISTS judge_verdict VARCHAR(10);"
+                ))
+
                 # LLM config table
                 await conn.execute(_text("""
                     CREATE TABLE IF NOT EXISTS llm_config (
@@ -154,6 +161,21 @@ async def startup():
                             label_he=label_he,
                         ))
                 await _seed_session.commit()
+
+            # Clean up stale eval runs left over from a previous crash/restart
+            from app.models import EvalRun as _EvalRun
+            from datetime import datetime as _dt
+            async with async_session_maker() as _es:
+                _stale = (await _es.execute(
+                    __import__("sqlalchemy").select(_EvalRun).where(_EvalRun.status == "running")
+                )).scalars().all()
+                for _r in _stale:
+                    _r.status = "failed"
+                    _r.error = "interrupted by server restart"
+                    _r.finished_at = _dt.utcnow()
+                if _stale:
+                    await _es.commit()
+                    print(f"Marked {len(_stale)} stale eval run(s) as failed.")
 
             print("Database tables initialized.")
             break
@@ -201,6 +223,13 @@ async def startup():
         print(f"Warning: Telegram bot failed to start: {e}")
         logger.error(f"Telegram bot startup error: {e}")
 
+    # Start eval-loop nightly cron (03:00 UTC) + abbrev sync (03:30 UTC)
+    try:
+        from app.services.eval_cron import start_scheduler as start_eval_scheduler
+        start_eval_scheduler()
+    except Exception as e:
+        logger.warning(f"Eval cron scheduler failed to start: {e}")
+
 @app.on_event("shutdown")
 async def shutdown():
     """Gracefully stop the Telegram bot."""
@@ -215,6 +244,11 @@ async def shutdown():
     except Exception as e:
         print(f"Error stopping bot: {e}")
         logger.error(f"Telegram bot shutdown error: {e}")
+    try:
+        from app.services.eval_cron import stop_scheduler as stop_eval_scheduler
+        stop_eval_scheduler()
+    except Exception:
+        pass
 
 
 @app.get("/")
