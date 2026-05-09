@@ -131,6 +131,11 @@ async def startup():
                     "ALTER TABLE query_logs ADD COLUMN IF NOT EXISTS judge_verdict VARCHAR(10);"
                 ))
 
+                # Phase 0 (rag-quality): rollback pointer on repair_proposals
+                await conn.execute(_text(
+                    "ALTER TABLE repair_proposals ADD COLUMN IF NOT EXISTS applied_artifact_id INTEGER;"
+                ))
+
                 # LLM config table
                 await conn.execute(_text("""
                     CREATE TABLE IF NOT EXISTS llm_config (
