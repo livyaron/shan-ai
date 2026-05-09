@@ -371,6 +371,9 @@ class RepairProposal(Base):
     created_at          = Column(DateTime, default=datetime.utcnow, index=True)
     applied_at          = Column(DateTime, nullable=True)
     applied_by_id       = Column(Integer, ForeignKey("users.id"), nullable=True)
+    applied_artifact_id = Column(Integer, nullable=True)
+    # ↑ id of the row created in the fix-type's target table on apply,
+    # used by _unapply_patch for clean rollback.
 
     eval_run    = relationship("EvalRun")
     applied_by  = relationship("User")
@@ -425,3 +428,43 @@ class EvalGoldAnswer(Base):
     created_at           = Column(DateTime, default=datetime.utcnow)
 
     approved_by = relationship("User")
+
+
+class ProjectAlias(Base):
+    """Free-text project-name -> project_id mapping. Looked up before fuzzy match.
+
+    Created by the repair loop's `project_alias` fix-type, by manual admin entry,
+    or by a /ask thumbs-down correction. Multiple aliases may point to the same project.
+    """
+    __tablename__ = "project_aliases"
+
+    id                = Column(Integer, primary_key=True)
+    project_id        = Column(Integer, ForeignKey("projects.id", ondelete="CASCADE"),
+                               nullable=False, index=True)
+    alias_text        = Column(String(255), nullable=False)
+    normalized_alias  = Column(String(255), unique=True, nullable=False, index=True)
+    source            = Column(String(32),  nullable=False, default="manual")
+    created_by_id     = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at        = Column(DateTime, default=datetime.utcnow)
+
+    project    = relationship("Project")
+    created_by = relationship("User")
+
+
+class IntentOverride(Base):
+    """Pin a normalized question to a forced project_tools intent + param.
+
+    Skips LLM intent detection for that exact question. Hash-keyed so no fuzzy
+    overlap with other questions is possible.
+    """
+    __tablename__ = "intent_overrides"
+
+    id                      = Column(Integer, primary_key=True)
+    question_pattern_hash   = Column(String(64), unique=True, nullable=False, index=True)
+    forced_intent           = Column(String(32), nullable=False)
+    forced_param            = Column(String(255), nullable=True)
+    source                  = Column(String(32), nullable=False, default="manual")
+    created_by_id           = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at              = Column(DateTime, default=datetime.utcnow)
+
+    created_by = relationship("User")
