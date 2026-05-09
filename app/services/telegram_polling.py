@@ -429,94 +429,31 @@ class TelegramPollingBot:
             ai_intent = routing["intent"]
             ai_param = routing["param"]
 
-            # Decision history query — answer from decisions DB
-            if ai_route != "decision" and any(kw in text for kw in _DECISION_HISTORY_KEYWORDS):
-                kb = None
-                try:
-                    from app.services.knowledge_service import get_decisions_context, answer_decisions_question
-                    decisions_ctx = await get_decisions_context(session, user.id)
-                    if decisions_ctx:
-                        dec_answer = await answer_decisions_question(text, decisions_ctx)
-                    else:
-                        dec_answer = "לא נמצאו החלטות עבורך במסד הנתונים."
-                    reply = f"\u200F{dec_answer}"
-                except Exception as e:
-                    logger.warning(f"decisions query failed: {e}")
-                    reply = "\u200Fלא הצלחתי לשלוף את ההחלטות."
-                await update.message.reply_text(reply, parse_mode="HTML", reply_markup=kb)
-                return
-
-            if ai_route == "project":
-                kb = None
-                try:
-                    from app.services.project_tools import answer_project_query
-                    reply_text, proj_log_id = await answer_project_query(
-                        text, session, context.user_data, user_id=user.id,
-                        precomputed_intent=ai_intent, precomputed_param=ai_param,
-                    )
-                    reply = f"\u200F{reply_text}"
-                    if proj_log_id:
-                        kb = _feedback_keyboard(proj_log_id)
-                except Exception as e:
-                    logger.warning(f"project_tools failed: {e}")
-                    reply = "\u200Fלא הצלחתי למצוא נתוני פרויקט. ודא שהקובץ הראשי הועלה."
-                reply = await _maybe_summarize(reply)
-                await update.message.reply_text(reply, parse_mode="HTML", reply_markup=kb)
-                return
-
-            if ai_route == "knowledge":
-                kb = None
-                try:
-                    from app.services.knowledge_service import answer_with_full_context
-                    qa_result = await answer_with_full_context(text, session, user.id)
-                    reply = f"\u200F🤖 <b>תשובה:</b>\n\n{_html.escape(qa_result['answer'])}"
-                    if qa_result.get("sources_text"):
-                        reply += f"\n\n<i>{_html.escape(qa_result['sources_text'])}</i>"
-                    if qa_result.get("log_id"):
-                        kb = _feedback_keyboard(qa_result["log_id"])
-                except Exception as e:
-                    logger.warning(f"answer_with_full_context failed: {e}")
-                    reply = "\u200Fלא הצלחתי למצוא תשובה. נסה לנסח אחרת."
-                reply = await _maybe_summarize(reply)
-                await update.message.reply_text(reply, parse_mode="HTML", reply_markup=kb)
-                return
-
             if ai_route == "decision":
                 pass  # falls through to ClaudeService().classify() below
 
-            # AI routing failed — keyword fallback
-            if ai_route is None:
-                _NON_WORK = {"בדיחה", "בדיחות", "שלום", "היי", "הי", "תודה", "להתראות", "ביי", "בוקר טוב", "ערב טוב", "לילה טוב"}
-                if text.strip() not in _NON_WORK and _is_project_query(text):
-                    kb = None
-                    try:
-                        from app.services.project_tools import answer_project_query
-                        reply_text, proj_log_id = await answer_project_query(text, session, context.user_data, user_id=user.id)
-                        reply = f"\u200F{reply_text}"
-                        if proj_log_id:
-                            kb = _feedback_keyboard(proj_log_id)
-                    except Exception as e:
-                        logger.warning(f"project_tools failed (keyword fallback): {e}")
-                        reply = "\u200Fלא הצלחתי למצוא נתוני פרויקט. ודא שהקובץ הראשי הועלה."
-                    reply = await _maybe_summarize(reply)
-                    await update.message.reply_text(reply, parse_mode="HTML", reply_markup=kb)
-                    return
-                if _is_data_question(text):
-                    kb = None
-                    try:
-                        from app.services.knowledge_service import answer_with_full_context
-                        qa_result = await answer_with_full_context(text, session, user.id)
-                        reply = f"\u200F🤖 <b>תשובה:</b>\n\n{_html.escape(qa_result['answer'])}"
-                        if qa_result.get("sources_text"):
-                            reply += f"\n\n<i>{_html.escape(qa_result['sources_text'])}</i>"
-                        if qa_result.get("log_id"):
-                            kb = _feedback_keyboard(qa_result["log_id"])
-                    except Exception as e:
-                        logger.warning(f"answer_with_full_context failed (keyword fallback): {e}")
-                        reply = "\u200Fלא הצלחתי למצוא תשובה. נסה לנסח אחרת."
-                    reply = await _maybe_summarize(reply)
-                    await update.message.reply_text(reply, parse_mode="HTML", reply_markup=kb)
-                    return
+            # All non-decision routes go through the shared ask_router
+            elif ai_route in ("project", "knowledge", None):
+                kb = None
+                try:
+                    from app.services.ask_router import route as _ask_route
+                    result = await _ask_route(text, session, user.id, log_to_db=True)
+                    answer = result.answer
+                    if result.path == "decision":
+                        # decisions-DB path: plain RTL reply, no robot header
+                        reply = f"‏{answer}"
+                    else:
+                        reply = f"\u200F\U0001F916 <b>\u05EA\u05E9\u05D5\u05D1\u05D4:</b>\n\n{_html.escape(answer)}"
+                        if result.sources_text:
+                            reply += f"\n\n<i>{_html.escape(result.sources_text)}</i>"
+                    if result.log_id:
+                        kb = _feedback_keyboard(result.log_id)
+                except Exception as e:
+                    logger.warning(f"ask_router.route failed: {e}")
+                    reply = "‏לא הצלחתי למצוא תשובה. נסה לנסח אחרת."
+                reply = await _maybe_summarize(reply)
+                await update.message.reply_text(reply, parse_mode="HTML", reply_markup=kb)
+                return
 
             # --- Check if this is a clarification response ---
             if telegram_id in _awaiting_clarification:
