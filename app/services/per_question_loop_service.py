@@ -113,10 +113,16 @@ def _patch_to_shadow(proposal_type: str, patch_json: dict) -> dict:
 
 
 async def _answer(question: str, user_id: int) -> str:
-    """Run the production answering pipeline without DB logging."""
+    """Run the production answering pipeline without DB logging.
+
+    Routes through ask_router.route() so eval mirrors what real users hit on
+    /dashboard/ask and Telegram. log_to_db=False keeps eval cycles out of
+    QueryLog history.
+    """
+    from app.services.ask_router import route
     async with async_session_maker() as s:
-        result = await ks.answer_with_full_context(question, s, user_id, log_to_db=False)
-    return result.get("answer", "")
+        result = await route(question, s, user_id, log_to_db=False)
+    return result.answer
 
 
 async def _snapshot_passing(
