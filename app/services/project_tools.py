@@ -52,6 +52,18 @@ async def find_projects_by_identifier(identifier: str, session: AsyncSession) ->
     Exact-code match short-circuits to that single row (preserves short-code UX
     when a unique code collides with a common substring).
     """
+    import re
+    # Alias hint: route() may have injected `project_alias_id=N` into the
+    # question text; if so, return that project directly and skip fuzzy match.
+    m = re.search(r"project_alias_id=(\d+)", identifier or "")
+    if m:
+        pid = int(m.group(1))
+        proj = await session.get(Project, pid)
+        if proj:
+            return [_project_to_dict(proj)]
+        # fall through if the id is stale (project deleted)
+
+    # ── existing fuzzy-match logic stays below (unchanged) ──
     stmt = select(Project).where(
         or_(
             Project.project_identifier == identifier,

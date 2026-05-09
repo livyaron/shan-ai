@@ -62,6 +62,47 @@ async def route(
     from app.services.telegram_routing import _is_project_query
     from app.services import project_tools
 
+    # ── Pre-rules (Phase 1) ───────────────────────────────────────────────
+    # Refresh DB-backed caches before pre-rule lookup.
+    await ks._ensure_eval_caches(session)
+
+    q_hash = _normalize_q_hash(question)
+
+    # 0a. Intent override (hash-keyed; exact match on normalized question)
+    intent_overrides = {**ks._DB_INTENT_OVERRIDES_CACHE, **ks._shadow_intent_overrides.get()}
+    pinned = intent_overrides.get(q_hash)
+    if pinned:
+        answer, log_id = await project_tools.answer_project_query(
+            question, session, {},
+            user_id=user_id,
+            precomputed_intent=pinned["forced_intent"],
+            precomputed_param=pinned["forced_param"],
+        )
+        return AnswerResult(
+            answer=answer,
+            sources_used=[{"source": "intent_override", "q_hash": q_hash}],
+            log_id=log_id,
+            path="project_tools",
+            intent=pinned["forced_intent"],
+            param=pinned["forced_param"],
+            has_files=True,
+            has_decisions=False,
+            file_names=[],
+            sources_text="📂 מסד הפרויקטים",
+        )
+
+    # 0b. Project alias resolve — inject hint into question text so downstream
+    # find_projects_by_identifier can pick the exact project.
+    aliases = {**ks._DB_PROJECT_ALIASES_CACHE, **ks._shadow_project_aliases.get()}
+    if aliases:
+        norm_q = ks.normalize_hebrew(question)
+        for normalized_alias, project_id in aliases.items():
+            if normalized_alias and normalized_alias in norm_q:
+                question = f"{question} (project_alias_id={project_id})"
+                logger.info(f"alias resolve: '{normalized_alias}' -> project {project_id}")
+                break  # one alias hit is enough
+    # ── End pre-rules ─────────────────────────────────────────────────────
+
     # 1. Decision history queries
     if any(kw in question for kw in _DECISION_KEYWORDS):
         decisions_ctx = await ks.get_decisions_context(session, user_id)

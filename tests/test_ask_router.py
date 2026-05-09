@@ -114,3 +114,69 @@ async def test_route_decision_no_context_fallback(db_session):
     assert result.has_decisions is False
     assert result.sources_text == ""
     assert result.answer == "לא נמצאו החלטות עבורך במסד הנתונים."
+
+
+from sqlalchemy import text as _sql_text
+
+from app.services import knowledge_service as _ks
+from app.services.ask_router import _normalize_q_hash
+
+
+@pytest.mark.asyncio
+async def test_route_intent_override_skips_llm_intent_detection(db_session):
+    q = "באיזה שלב נמצא פרויקט בית הגדי?"
+    h = _normalize_q_hash(q)
+    await db_session.execute(_sql_text(
+        "INSERT INTO intent_overrides "
+        "(question_pattern_hash, forced_intent, forced_param, source) "
+        "VALUES (:h, 'by_identifier', 'בית הגדי', 'manual')"
+    ), {"h": h})
+    await db_session.commit()
+    _ks.invalidate_eval_caches()
+    await _ks._ensure_eval_caches(db_session)
+
+    captured = {}
+
+    async def fake_apq(text_, sess, user_data, *, user_id, precomputed_intent=None, precomputed_param=None):
+        captured["intent"] = precomputed_intent
+        captured["param"] = precomputed_param
+        return ("ok", 1)
+
+    with patch("app.services.project_tools.answer_project_query", new=fake_apq):
+        result = await route(q, db_session, user_id=1, log_to_db=False)
+
+    assert result.path == "project_tools"
+    assert captured["intent"] == "by_identifier"
+    assert captured["param"] == "בית הגדי"
+    assert result.intent == "by_identifier"
+
+
+@pytest.mark.asyncio
+async def test_route_project_alias_enriches_question(db_session):
+    """When 'בית הגדי' is a known alias for project 47, route() injects an
+    identifier hint that find_projects_by_identifier can latch onto."""
+    # Seed an alias pointing to whatever project exists. We need a real id
+    # so insert via SELECT and capture it back.
+    proj_id = (await db_session.execute(_sql_text(
+        "SELECT id FROM projects LIMIT 1"
+    ))).scalar()
+    await db_session.execute(_sql_text(
+        "INSERT INTO project_aliases (project_id, alias_text, normalized_alias, source) "
+        "VALUES (:pid, 'בית הגדי טסט', 'בית הגדי טסט', 'manual')"
+    ), {"pid": proj_id})
+    await db_session.commit()
+    _ks.invalidate_eval_caches()
+    await _ks._ensure_eval_caches(db_session)
+
+    captured = {}
+
+    async def fake_apq(text_, sess, user_data, *, user_id, precomputed_intent=None, precomputed_param=None):
+        captured["text"] = text_
+        return ("ok", 1)
+
+    with patch("app.services.project_tools.answer_project_query", new=fake_apq):
+        await route("באיזה שלב נמצא פרויקט בית הגדי טסט?",
+                    db_session, user_id=1, log_to_db=False)
+
+    assert f"project_alias_id={proj_id}" in captured["text"], \
+        f"expected alias hint in question text, got: {captured['text']!r}"
