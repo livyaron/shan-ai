@@ -54,10 +54,9 @@ class _AsyncSessionContext:
 async def db_session(_test_engine, monkeypatch) -> AsyncSession:
     """Yield an AsyncSession joined to an external transaction (with SAVEPOINTs).
 
-    Also monkey-patches app.database.async_session_maker so that production
-    code under test (e.g. _ensure_eval_caches, _answer, _apply_patch) which
-    opens its OWN session via `async with async_session_maker() as s:` ends
-    up bound to this same connection. All internal commits roll back at end.
+    Also monkey-patches app.database.async_session_maker AND every already-
+    imported module that has the name bound (via `from app.database import
+    async_session_maker`). All of those bindings are restored on teardown.
 
     Pattern: SQLAlchemy "joining a session into an external transaction"
     https://docs.sqlalchemy.org/en/20/orm/session_transaction.html#joining-a-session-into-an-external-transaction-such-as-for-test-suites
@@ -86,7 +85,22 @@ async def db_session(_test_engine, monkeypatch) -> AsyncSession:
         def _factory():
             return _AsyncSessionContext(TestSessionLocal())
 
+        # Patch every module that has bound `async_session_maker` as an attribute,
+        # not just app.database itself. `from app.database import async_session_maker`
+        # creates new module-level bindings that don't update when we patch the
+        # source module — so we walk sys.modules to find them all.
+        import sys
+        original = _app_db.async_session_maker
         monkeypatch.setattr(_app_db, "async_session_maker", _factory)
+        for mod_name, mod in list(sys.modules.items()):
+            if mod is None or mod is _app_db:
+                continue
+            try:
+                bound = getattr(mod, "async_session_maker", None)
+            except Exception:
+                continue
+            if bound is original:
+                monkeypatch.setattr(mod, "async_session_maker", _factory)
 
         try:
             yield sess
