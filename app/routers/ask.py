@@ -38,18 +38,10 @@ async def ask_query(
     from app.services.ask_router import route
     result = await route(body.question, session, current_user.id)
     return JSONResponse({
-        "answer": result.answer,
-        "sources_text": _sources_text(result),
-        "has_files":     any(s.get("source") == "rag" for s in result.sources_used),
-        "has_decisions": any(s.get("source") == "decisions_db" for s in result.sources_used),
-        "file_names": [],
-        "log_id": result.log_id,
+        "answer":        result.answer,
+        "sources_text":  result.sources_text,
+        "has_files":     result.has_files,
+        "has_decisions": result.has_decisions,
+        "file_names":    result.file_names,
+        "log_id":        result.log_id,
     })
-
-
-def _sources_text(result) -> str:
-    if result.path == "decision":
-        return "📋 מסד ההחלטות"
-    if result.path == "project_tools":
-        return "📂 מסד הפרויקטים"
-    return ""

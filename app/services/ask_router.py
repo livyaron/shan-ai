@@ -6,10 +6,15 @@ per-question repair loop. Eval = production from this module on.
 from __future__ import annotations
 
 import hashlib
-from dataclasses import dataclass
+import logging
+from dataclasses import dataclass, field
 from typing import Optional
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.services.knowledge_service import normalize_hebrew
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -20,18 +25,16 @@ class AnswerResult:
     path: str          # "correction_pin" | "decision" | "project_tools" | "rag"
     intent: Optional[str]
     param: Optional[str]
+    has_files: bool = False
+    has_decisions: bool = False
+    file_names: list[str] = field(default_factory=list)
+    sources_text: str = ""
 
 
 def _normalize_q_hash(question: str) -> str:
     """sha256 of Hebrew-normalized question. Used as a hash key for pin/override lookups."""
     return hashlib.sha256(normalize_hebrew(question.strip()).encode("utf-8")).hexdigest()
 
-
-import logging
-
-from sqlalchemy.ext.asyncio import AsyncSession
-
-logger = logging.getLogger(__name__)
 
 _DECISION_KEYWORDS = ("החלטה", "החלטות", "ההחלטה", "ההחלטות")
 
@@ -75,6 +78,10 @@ async def route(
             path="decision",
             intent=None,
             param=None,
+            has_files=False,
+            has_decisions=bool(decisions_ctx),
+            file_names=[],
+            sources_text="📋 מסד ההחלטות" if decisions_ctx else "",
         )
 
     # 2. Project queries
@@ -90,9 +97,13 @@ async def route(
                 path="project_tools",
                 intent=None,
                 param=None,
+                has_files=True,        # parity with original ask.py
+                has_decisions=False,
+                file_names=[],
+                sources_text="📂 מסד הפרויקטים",
             )
-        except Exception as e:
-            logger.warning(f"project_tools failed, falling through to RAG: {e}")
+        except Exception:
+            logger.warning("project_tools failed, falling through to RAG", exc_info=True)
 
     # 3. Default RAG
     result = await ks.answer_with_full_context(
@@ -105,6 +116,10 @@ async def route(
         path="rag",
         intent=None,
         param=None,
+        has_files=bool(result.get("has_files")),
+        has_decisions=bool(result.get("has_decisions")),
+        file_names=list(result.get("file_names", []) or []),
+        sources_text=result.get("sources_text", "") or "",
     )
 
 
