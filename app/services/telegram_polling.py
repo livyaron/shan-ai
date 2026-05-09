@@ -426,30 +426,30 @@ class TelegramPollingBot:
             else:
                 routing = await _ai_route_message(text)
             ai_route = routing["route"]
-            ai_intent = routing["intent"]
-            ai_param = routing["param"]
 
-            if ai_route == "decision":
-                pass  # falls through to ClaudeService().classify() below
-
-            # All non-decision routes go through the shared ask_router
-            elif ai_route in ("project", "knowledge", None):
+            # All non-decision routes go through the shared ask_router.
+            # decision-route falls through to ClaudeService().classify() below.
+            if ai_route in ("project", "knowledge", None):
                 kb = None
                 try:
                     from app.services.ask_router import route as _ask_route
                     result = await _ask_route(text, session, user.id, log_to_db=True)
                     answer = result.answer
                     if result.path == "decision":
-                        # decisions-DB path: plain RTL reply, no robot header
+                        # Decision-DB plain reply — matches OLD pre-route handler.
+                        reply = f"‏{answer}"
+                    elif result.path == "project_tools":
+                        # answer already HTML-formatted by project_tools — do NOT escape.
                         reply = f"‏{answer}"
                     else:
+                        # rag path — escape answer, prepend robot header.
                         reply = f"\u200F\U0001F916 <b>\u05EA\u05E9\u05D5\u05D1\u05D4:</b>\n\n{_html.escape(answer)}"
                         if result.sources_text:
                             reply += f"\n\n<i>{_html.escape(result.sources_text)}</i>"
                     if result.log_id:
                         kb = _feedback_keyboard(result.log_id)
-                except Exception as e:
-                    logger.warning(f"ask_router.route failed: {e}")
+                except Exception:
+                    logger.warning("ask_router.route failed", exc_info=True)
                     reply = "‏לא הצלחתי למצוא תשובה. נסה לנסח אחרת."
                 reply = await _maybe_summarize(reply)
                 await update.message.reply_text(reply, parse_mode="HTML", reply_markup=kb)
