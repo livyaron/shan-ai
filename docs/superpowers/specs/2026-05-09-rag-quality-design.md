@@ -27,9 +27,9 @@ The question contains a real project name; the AI dumps unrelated projects.
 
 ## Goals
 
-- Eval pass-rate ≥ 85% on the current `EvalGoldAnswer` set within 7 days of full rollout
+- Eval pass-rate ≥ 85% on the gold set frozen at the start of Phase 3, measured within 7 days of Phase 3 merge
 - "בית הגדי" reproducer: ask → wrong → 👎+correct → ~60 seconds later, ask again → correct
-- Telegram + `/ask` + eval loop return string-equal answers for the same question
+- Telegram + `/ask` + eval loop produce the same `path`/`intent`/`param` for the same question and the same gold-comparable answer (HTML/Markdown rendering differences allowed; canonical text content equivalent)
 - All four learning channels live: gold-truth loop · inline thumbs+correction · manual admin rules · auto-cache from 👍
 
 ## Non-Goals
@@ -251,7 +251,7 @@ Each answer card gets two buttons under the answer text:
 
 - Insert `answer_feedback(vote="down", correction_text=...)`
 - Call `save_gold(question, gold_answer=correction_text, source="user_correction")`
-- Trigger `run_one_question` in a FastAPI background task for THIS gold row only
+- Trigger `run_one_question` for THIS gold row via FastAPI `BackgroundTasks` (single-process, fire-and-forget — no Celery/queue dependency added). Existing `EvalRun.status='running'` partial-unique index already prevents concurrent cycles.
 - Return `{status: "learning", run_id}` so UI shows toast `🔄 לומד מהתיקון... (run #123)` linked to `/dashboard/eval-curate?focus=<gold_id>`
 
 ### 5.2 Admin rules page — `/dashboard/learning/rules`
@@ -387,7 +387,7 @@ Source: `EvalRun`, `RepairProposal`, `AnswerFeedback`. If pass-rate doesn't tren
 
 | Phase | Ship | Gate before next |
 |---|---|---|
-| **0 — Prep** | New tables (migration), `ask_router.route()` extracted, `_answer()` switched to use it. No user-visible change. | Pass-rate on existing gold set unchanged ±1% |
+| **0 — Prep** | New tables (migration), `ask_router.route()` extracted, `_answer()` switched to use it. No user-visible change. | A 20-question curated smoke set passes; on the full gold set, no individual question drops from PASS to FAIL with > 10% pass-rate decrease overall. If overall drop > 10%, halt rollout and investigate (likely a routing-coverage gap in `ask_router`). |
 | **1 — Aliases + intent_override** | Add 2 fix-types + admin tabs. No UI thumbs yet. | "בית הגדי" reproducer passes; 7-day eval cycle shows pass-rate up |
 | **2 — Thumbs UI + auto-gold** | 👍/👎 buttons on `/ask`. Background single-question repair on 👎. | At least 10 user thumbs collected; 0 unhandled exceptions |
 | **3 — `field_alias_real` + `correction_pin`** | Last fix-types. correction_pin requires admin approval before apply. | Manual smoke: pin a known-bad question, confirm verbatim return, expire after TTL |
@@ -404,8 +404,8 @@ Each phase is a separate PR. Phase 0 must merge and soak ~24h before Phase 1.
 ### 7.4 Definition of done
 
 - "בית הגדי" example: ask → wrong → 👎+correct → ~60 seconds later, ask again → correct (end-to-end on real prod)
-- Eval pass-rate ≥ 85% on the current `EvalGoldAnswer` set within 7 days of Phase 3 merge
-- Telegram + `/ask` + eval all return string-equal answers for the same question (parity test passes daily in CI)
+- Eval pass-rate ≥ 85% on the gold set frozen at start of Phase 3, measured within 7 days of Phase 3 merge
+- Telegram + `/ask` + eval produce equivalent answers (same `path`/`intent`/`param`; canonical text content matches under rendering normalization) for the same question (parity test passes daily in CI)
 - Zero `correction_pin` auto-applies — guardrail check; must be 100% human-approved
 
 ---
