@@ -25,3 +25,109 @@ class AnswerResult:
 def _normalize_q_hash(question: str) -> str:
     """sha256 of Hebrew-normalized question. Used as a hash key for pin/override lookups."""
     return hashlib.sha256(normalize_hebrew(question.strip()).encode("utf-8")).hexdigest()
+
+
+import logging
+
+from sqlalchemy.ext.asyncio import AsyncSession
+
+logger = logging.getLogger(__name__)
+
+_DECISION_KEYWORDS = ("החלטה", "החלטות", "ההחלטה", "ההחלטות")
+
+
+async def route(
+    question: str,
+    session: AsyncSession,
+    user_id: int,
+    *,
+    log_to_db: bool = True,
+    snapshot_mode: bool = False,
+) -> AnswerResult:
+    """Route a question to the right answerer and return a uniform AnswerResult.
+
+    Order of dispatch:
+      1. Decision keyword → answer_decisions_question
+      2. _is_project_query → project_tools.answer_project_query
+      3. Default → knowledge_service.answer_with_full_context
+
+    Phase 1 will insert correction-pin lookup, alias resolve, and intent-override
+    BEFORE step 1. This task ports existing behavior only.
+    """
+    # Lazy imports keep the module light and avoid cycles.
+    from app.services import knowledge_service as ks
+    from app.services.telegram_routing import _is_project_query
+    from app.services import project_tools
+
+    # 1. Decision history queries
+    if any(kw in question for kw in _DECISION_KEYWORDS):
+        decisions_ctx = await ks.get_decisions_context(session, user_id)
+        if decisions_ctx:
+            answer = await ks.answer_decisions_question(question, decisions_ctx)
+        else:
+            answer = "לא נמצאו החלטות עבורך במסד הנתונים."
+        log_id = await _log_query(session, question, answer,
+                                  [{"source": "decisions_db"}], user_id, log_to_db)
+        return AnswerResult(
+            answer=answer,
+            sources_used=[{"source": "decisions_db"}],
+            log_id=log_id,
+            path="decision",
+            intent=None,
+            param=None,
+        )
+
+    # 2. Project queries
+    if _is_project_query(question):
+        try:
+            answer, log_id = await project_tools.answer_project_query(
+                question, session, {}, user_id=user_id,
+            )
+            return AnswerResult(
+                answer=answer,
+                sources_used=[{"source": "projects_db"}],
+                log_id=log_id,
+                path="project_tools",
+                intent=None,
+                param=None,
+            )
+        except Exception as e:
+            logger.warning(f"project_tools failed, falling through to RAG: {e}")
+
+    # 3. Default RAG
+    result = await ks.answer_with_full_context(
+        question, session, user_id, log_to_db=log_to_db,
+    )
+    return AnswerResult(
+        answer=result.get("answer", ""),
+        sources_used=[{"source": "rag"}],
+        log_id=result.get("log_id"),
+        path="rag",
+        intent=None,
+        param=None,
+    )
+
+
+async def _log_query(
+    session: AsyncSession,
+    question: str,
+    answer: str,
+    sources: list[dict],
+    user_id: int,
+    log_to_db: bool,
+) -> int | None:
+    """Write a QueryLog row and return its id. No-op when log_to_db=False."""
+    if not log_to_db:
+        return None
+    from app.models import QueryLog
+    from app.services.llm_router import get_last_llm_meta
+    provider, is_fb = get_last_llm_meta()
+    log = QueryLog(
+        question=question, ai_response=answer,
+        sources_used=sources, user_id=user_id,
+        llm_provider=provider or None, is_fallback=is_fb or None,
+    )
+    session.add(log)
+    await session.commit()
+    await session.refresh(log)
+    return log.id
