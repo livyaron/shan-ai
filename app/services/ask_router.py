@@ -91,16 +91,34 @@ async def route(
             sources_text="📂 מסד הפרויקטים",
         )
 
-    # 0b. Project alias resolve — inject hint into question text so downstream
-    # find_projects_by_identifier can pick the exact project.
+    # 0b. Project alias resolve — bypass LLM intent detection, call
+    # answer_project_query with precomputed by_identifier+project_alias_id hint.
+    # find_projects_by_identifier extracts the id directly and returns the project.
     aliases = {**ks._DB_PROJECT_ALIASES_CACHE, **ks._shadow_project_aliases.get()}
     if aliases:
         norm_q = ks.normalize_hebrew(question)
         for normalized_alias, project_id in aliases.items():
             if normalized_alias and normalized_alias in norm_q:
-                question = f"{question} (project_alias_id={project_id})"
                 logger.info(f"alias resolve: '{normalized_alias}' -> project {project_id}")
-                break  # one alias hit is enough
+                hint_param = f"project_alias_id={project_id}"
+                answer, log_id = await project_tools.answer_project_query(
+                    question, session, {},
+                    user_id=user_id,
+                    precomputed_intent="by_identifier",
+                    precomputed_param=hint_param,
+                )
+                return AnswerResult(
+                    answer=answer,
+                    sources_used=[{"source": "project_alias", "project_id": project_id}],
+                    log_id=log_id,
+                    path="project_tools",
+                    intent="by_identifier",
+                    param=hint_param,
+                    has_files=True,
+                    has_decisions=False,
+                    file_names=[],
+                    sources_text="📂 מסד הפרויקטים",
+                )
     # ── End pre-rules ─────────────────────────────────────────────────────
 
     # 1. Decision history queries

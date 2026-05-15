@@ -152,11 +152,11 @@ async def test_route_intent_override_skips_llm_intent_detection(db_session):
 
 
 @pytest.mark.asyncio
-async def test_route_project_alias_enriches_question(db_session):
-    """When 'בית הגדי' is a known alias for project 47, route() injects an
-    identifier hint that find_projects_by_identifier can latch onto."""
-    # Seed an alias pointing to whatever project exists. We need a real id
-    # so insert via SELECT and capture it back.
+async def test_route_project_alias_bypasses_intent_detection(db_session):
+    """When an alias matches the question, route() must skip LLM intent detection
+    and call answer_project_query with precomputed_intent=by_identifier and
+    precomputed_param=project_alias_id=<pid>. find_projects_by_identifier then
+    extracts the pid from the param directly."""
     proj_id = (await db_session.execute(_sql_text(
         "SELECT id FROM projects LIMIT 1"
     ))).scalar()
@@ -171,12 +171,16 @@ async def test_route_project_alias_enriches_question(db_session):
     captured = {}
 
     async def fake_apq(text_, sess, user_data, *, user_id, precomputed_intent=None, precomputed_param=None):
-        captured["text"] = text_
+        captured["intent"] = precomputed_intent
+        captured["param"] = precomputed_param
         return ("ok", 1)
 
     with patch("app.services.project_tools.answer_project_query", new=fake_apq):
-        await route("באיזה שלב נמצא פרויקט בית הגדי טסט?",
-                    db_session, user_id=1, log_to_db=False)
+        result = await route("באיזה שלב נמצא פרויקט בית הגדי טסט?",
+                             db_session, user_id=1, log_to_db=False)
 
-    assert f"project_alias_id={proj_id}" in captured["text"], \
-        f"expected alias hint in question text, got: {captured['text']!r}"
+    assert captured["intent"] == "by_identifier"
+    assert captured["param"] == f"project_alias_id={proj_id}"
+    assert result.path == "project_tools"
+    assert result.intent == "by_identifier"
+    assert result.sources_used == [{"source": "project_alias", "project_id": proj_id}]
