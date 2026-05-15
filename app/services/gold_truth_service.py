@@ -90,6 +90,13 @@ async def save_gold(
 
 def _detect_field(question: str) -> str | None:
     nq = normalize_hebrew(question)
+    # Phase 3: DB-backed + shadow overrides take precedence over the static dict
+    from app.services import knowledge_service as ks
+    effective = {**ks._DB_FIELD_ALIASES_CACHE, **ks._shadow_field_aliases.get()}
+    for alias, field in effective.items():
+        if normalize_hebrew(alias) in nq:
+            return field
+    # Fall through to static keyword map
     for field, keywords in _FIELD_KEYWORDS.items():
         for kw in keywords:
             if normalize_hebrew(kw) in nq:

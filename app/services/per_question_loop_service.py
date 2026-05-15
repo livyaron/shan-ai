@@ -35,6 +35,7 @@ FIX_TYPES = [
     "add_abbreviation", "add_synonym", "stop_word_remove",
     "field_alias", "prompt_patch",
     "project_alias", "intent_override",   # NEW — Phase 1
+    "field_alias_real",                   # NEW — Phase 3.3
 ]
 
 
@@ -79,6 +80,8 @@ async def shadow_config(patch: dict):
             tokens.append(("project_aliases", ks._shadow_project_aliases.set(dict(patch["project_aliases"]))))
         if "intent_overrides" in patch:
             tokens.append(("intent_overrides", ks._shadow_intent_overrides.set(dict(patch["intent_overrides"]))))
+        if "field_aliases" in patch:
+            tokens.append(("field_aliases", ks._shadow_field_aliases.set(dict(patch["field_aliases"]))))
         yield
     finally:
         for name, tok in reversed(tokens):
@@ -89,6 +92,7 @@ async def shadow_config(patch: dict):
                 "prompt_override": ks._shadow_prompt_override,
                 "project_aliases":  ks._shadow_project_aliases,
                 "intent_overrides": ks._shadow_intent_overrides,
+                "field_aliases": ks._shadow_field_aliases,
             }[name]
             cv.reset(tok)
 
@@ -134,6 +138,12 @@ def _patch_to_shadow(proposal_type: str, patch_json: dict) -> dict:
         forced_param = patch_json.get("forced_param")
         if h and forced_intent:
             return {"intent_overrides": {h: {"forced_intent": forced_intent, "forced_param": forced_param}}}
+        return {}
+    if proposal_type == "field_alias_real":
+        a = (patch_json.get("alias") or "").strip()
+        f = (patch_json.get("field") or "").strip()
+        if a and f:
+            return {"field_aliases": {a: f}}
         return {}
     return {}
 
@@ -185,11 +195,14 @@ _REPAIR_SYS = (
     "2. intent_override — AI picked the wrong project_tools intent. "
     "patch_json = {'question': '<original q>', 'forced_intent': 'by_identifier|by_year|by_manager|count_by_type|list_risks|list_delayed', "
     "'forced_param': '<param>'}.\n"
-    "3. add_abbreviation — patch_json = {'abbrevs': {'מנה\\\"פ': 'מנהל פרויקט'}}.\n"
-    "4. add_synonym — patch_json = {'synonyms': {'תחמ\\\"ש': ['תחנת משנה']}}.\n"
-    "5. stop_word_remove — patch_json = {'words': ['מנהל']}.\n"
-    "6. field_alias — patch_json = {'synonyms': {'מנהפ': ['manager']}}.\n"
-    "7. prompt_patch — patch_json = {'prompt_override': {'rag_specific': '...'}}.\n"
+    "3. field_alias_real — AI couldn't map a Hebrew word/abbreviation to a Project column. "
+    "patch_json = {'alias': 'מנה\\\"פ', 'field': 'manager|stage|risks|weekly_report|to_handle|estimated_finish_date|dev_plan_date'}. "
+    "Use when the question contains a Hebrew column-synonym that the static _FIELD_KEYWORDS dict misses.\n"
+    "4. add_abbreviation — patch_json = {'abbrevs': {'מנה\\\"פ': 'מנהל פרויקט'}}.\n"
+    "5. add_synonym — patch_json = {'synonyms': {'תחמ\\\"ש': ['תחנת משנה']}}.\n"
+    "6. stop_word_remove — patch_json = {'words': ['מנהל']}.\n"
+    "7. field_alias — patch_json = {'synonyms': {'מנהפ': ['manager']}}.\n"
+    "8. prompt_patch — patch_json = {'prompt_override': {'rag_specific': '...'}}.\n"
     "Reply ONLY with strict JSON: "
     "{\"type\": \"...\", \"patch_json\": {...}, \"rationale\": \"...\", \"risk\": \"low|medium|high\"} "
     "or {\"type\": null} if no patch can plausibly help."
@@ -363,6 +376,23 @@ async def _apply_patch(session: AsyncSession, proposal: RepairProposal, user_id:
         session.add(row)
         await session.flush()
         p.applied_artifact_id = row.id
+
+    elif p.type == "field_alias_real":
+        from app.models import QuerySynonym as _QS
+        alias = (pj.get("alias") or "").strip()
+        field_name = (pj.get("field") or "").strip()
+        if not alias or not field_name:
+            raise ValueError(f"field_alias_real proposal {p.id} missing alias or field")
+        # Reuse the sentinel-row helper used by add_abbreviation
+        await _upsert_synonym_sentinel(
+            session, "__field_aliases__",
+            merge_pairs={alias: field_name},
+        )
+        # Find the sentinel row id for rollback
+        sentinel = await session.scalar(
+            select(_QS).where(_QS.original == "__field_aliases__"))
+        if sentinel:
+            p.applied_artifact_id = sentinel.id
 
     p.status = "applied"
     p.applied_at = datetime.utcnow()
