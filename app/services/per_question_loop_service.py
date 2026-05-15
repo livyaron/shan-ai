@@ -31,7 +31,11 @@ logger = logging.getLogger(__name__)
 
 EmitFn = Callable[[dict], Any]
 
-FIX_TYPES = ["add_abbreviation", "add_synonym", "stop_word_remove", "field_alias", "prompt_patch"]
+FIX_TYPES = [
+    "add_abbreviation", "add_synonym", "stop_word_remove",
+    "field_alias", "prompt_patch",
+    "project_alias", "intent_override",   # NEW — Phase 1
+]
 
 
 @dataclass
@@ -71,6 +75,10 @@ async def shadow_config(patch: dict):
             tokens.append(("stop_word_drops", ks._shadow_stop_word_drops.set(set(patch["stop_word_drops"]))))
         if "prompt_override" in patch:
             tokens.append(("prompt_override", ks._shadow_prompt_override.set(dict(patch["prompt_override"]))))
+        if "project_aliases" in patch:
+            tokens.append(("project_aliases", ks._shadow_project_aliases.set(dict(patch["project_aliases"]))))
+        if "intent_overrides" in patch:
+            tokens.append(("intent_overrides", ks._shadow_intent_overrides.set(dict(patch["intent_overrides"]))))
         yield
     finally:
         for name, tok in reversed(tokens):
@@ -79,6 +87,8 @@ async def shadow_config(patch: dict):
                 "synonyms": ks._shadow_synonyms,
                 "stop_word_drops": ks._shadow_stop_word_drops,
                 "prompt_override": ks._shadow_prompt_override,
+                "project_aliases":  ks._shadow_project_aliases,
+                "intent_overrides": ks._shadow_intent_overrides,
             }[name]
             cv.reset(tok)
 
@@ -109,6 +119,22 @@ def _patch_to_shadow(proposal_type: str, patch_json: dict) -> dict:
         return {"synonyms": patch_json.get("synonyms", {})}
     if proposal_type == "prompt_patch":
         return {"prompt_override": patch_json.get("prompt_override", {})}
+    if proposal_type == "project_alias":
+        from app.services.knowledge_service import normalize_hebrew
+        alias = normalize_hebrew(patch_json.get("alias_text", ""))
+        pid = patch_json.get("project_id")
+        if alias and pid:
+            return {"project_aliases": {alias: int(pid)}}
+        return {}
+    if proposal_type == "intent_override":
+        from app.services.ask_router import _normalize_q_hash
+        q = patch_json.get("question", "")
+        h = _normalize_q_hash(q) if q else None
+        forced_intent = patch_json.get("forced_intent")
+        forced_param = patch_json.get("forced_param")
+        if h and forced_intent:
+            return {"intent_overrides": {h: {"forced_intent": forced_intent, "forced_param": forced_param}}}
+        return {}
     return {}
 
 
@@ -150,15 +176,22 @@ async def _snapshot_passing(
 # ───────────────────────── repair proposal ─────────────────────────
 
 _REPAIR_SYS = (
-    "You are a repair agent for a Hebrew RAG system. Given a question, the AI's wrong answer, and the gold answer, "
-    "propose ONE minimal config patch that would make the AI produce the gold answer. "
-    "Available fix types: "
-    "add_abbreviation (expand a Hebrew abbreviation, patch_json={'abbrevs': {'מנה\\\"פ': 'מנהל פרויקט'}}), "
-    "add_synonym (expand a term, patch_json={'synonyms': {'תחמ\\\"ש': ['תחנת משנה']}}), "
-    "stop_word_remove (remove word from stop list so it's used as a search term, patch_json={'words': ['מנהל']}), "
-    "field_alias (alias a field, patch_json={'synonyms': {'מנהפ': ['manager']}}), "
-    "prompt_patch (rewrite the rag_specific or rag_list system prompt, patch_json={'prompt_override': {'rag_specific': '...'}}). "
-    "Reply ONLY with strict JSON: {\"type\": \"...\", \"patch_json\": {...}, \"rationale\": \"...\", \"risk\": \"low|medium|high\"} "
+    "You are a repair agent for a Hebrew RAG system. Given a question, the AI's wrong answer, "
+    "and the gold answer, propose ONE minimal config patch that would make the AI produce the "
+    "gold answer. Available fix types and selection rubric (try in this order):\n"
+    "1. project_alias — AI failed because a project name wasn't recognized. "
+    "patch_json = {'alias_text': '<free text from question>', 'project_id': <int>}. "
+    "Pick this when the question names a project but the AI returned 'לא נמצא' or wrong project.\n"
+    "2. intent_override — AI picked the wrong project_tools intent. "
+    "patch_json = {'question': '<original q>', 'forced_intent': 'by_identifier|by_year|by_manager|count_by_type|list_risks|list_delayed', "
+    "'forced_param': '<param>'}.\n"
+    "3. add_abbreviation — patch_json = {'abbrevs': {'מנה\\\"פ': 'מנהל פרויקט'}}.\n"
+    "4. add_synonym — patch_json = {'synonyms': {'תחמ\\\"ש': ['תחנת משנה']}}.\n"
+    "5. stop_word_remove — patch_json = {'words': ['מנהל']}.\n"
+    "6. field_alias — patch_json = {'synonyms': {'מנהפ': ['manager']}}.\n"
+    "7. prompt_patch — patch_json = {'prompt_override': {'rag_specific': '...'}}.\n"
+    "Reply ONLY with strict JSON: "
+    "{\"type\": \"...\", \"patch_json\": {...}, \"rationale\": \"...\", \"risk\": \"low|medium|high\"} "
     "or {\"type\": null} if no patch can plausibly help."
 )
 
@@ -240,6 +273,41 @@ async def _apply_patch(session: AsyncSession, proposal: RepairProposal, user_id:
                 active=True,
                 source_proposal_id=p.id,
             ))
+
+    elif p.type == "project_alias":
+        from app.models import ProjectAlias
+        from app.services.knowledge_service import normalize_hebrew
+        alias_text = pj.get("alias_text", "")
+        project_id = pj.get("project_id")
+        if not alias_text or not project_id:
+            raise ValueError(f"project_alias proposal {p.id} missing alias_text or project_id")
+        row = ProjectAlias(
+            project_id=int(project_id),
+            alias_text=alias_text,
+            normalized_alias=normalize_hebrew(alias_text),
+            source="ai",
+            created_by_id=user_id,
+        )
+        session.add(row)
+        await session.flush()
+        p.applied_artifact_id = row.id
+
+    elif p.type == "intent_override":
+        from app.models import IntentOverride
+        from app.services.ask_router import _normalize_q_hash
+        q = pj.get("question", "")
+        if not q or not pj.get("forced_intent"):
+            raise ValueError(f"intent_override proposal {p.id} missing question or forced_intent")
+        row = IntentOverride(
+            question_pattern_hash=_normalize_q_hash(q),
+            forced_intent=pj["forced_intent"],
+            forced_param=pj.get("forced_param"),
+            source="ai",
+            created_by_id=user_id,
+        )
+        session.add(row)
+        await session.flush()
+        p.applied_artifact_id = row.id
 
     p.status = "applied"
     p.applied_at = datetime.utcnow()
