@@ -36,6 +36,7 @@ FIX_TYPES = [
     "field_alias", "prompt_patch",
     "project_alias", "intent_override",   # NEW — Phase 1
     "field_alias_real",                   # NEW — Phase 3.3
+    "correction_pin",                     # NEW — Phase 3.4 (needs human approval)
 ]
 
 
@@ -82,6 +83,8 @@ async def shadow_config(patch: dict):
             tokens.append(("intent_overrides", ks._shadow_intent_overrides.set(dict(patch["intent_overrides"]))))
         if "field_aliases" in patch:
             tokens.append(("field_aliases", ks._shadow_field_aliases.set(dict(patch["field_aliases"]))))
+        if "correction_pins" in patch:
+            tokens.append(("correction_pins", ks._shadow_correction_pins.set(dict(patch["correction_pins"]))))
         yield
     finally:
         for name, tok in reversed(tokens):
@@ -93,6 +96,7 @@ async def shadow_config(patch: dict):
                 "project_aliases":  ks._shadow_project_aliases,
                 "intent_overrides": ks._shadow_intent_overrides,
                 "field_aliases": ks._shadow_field_aliases,
+                "correction_pins": ks._shadow_correction_pins,
             }[name]
             cv.reset(tok)
 
@@ -145,6 +149,18 @@ def _patch_to_shadow(proposal_type: str, patch_json: dict) -> dict:
         if a and f:
             return {"field_aliases": {a: f}}
         return {}
+    if proposal_type == "correction_pin":
+        from app.services.ask_router import _normalize_q_hash
+        q = patch_json.get("question", "")
+        ans = patch_json.get("pinned_answer", "")
+        if not q or not ans:
+            return {}
+        h = _normalize_q_hash(q)
+        return {"correction_pins": {h: {
+            "pinned_answer": ans,
+            "scope_project_id": patch_json.get("scope_project_id"),
+            "expires_at": None,
+        }}}
     return {}
 
 
@@ -203,6 +219,10 @@ _REPAIR_SYS = (
     "6. stop_word_remove — patch_json = {'words': ['מנהל']}.\n"
     "7. field_alias — patch_json = {'synonyms': {'מנהפ': ['manager']}}.\n"
     "8. prompt_patch — patch_json = {'prompt_override': {'rag_specific': '...'}}.\n"
+    "9. correction_pin — LAST RESORT. AI is consistently wrong on a specific question and "
+    "no alias/synonym tweak fixes it. patch_json = {'question': '<original q>', 'pinned_answer': '<gold>', "
+    "'scope_project_id': <int|null>, 'ttl_days': 30}. The pin returns the answer VERBATIM with zero LLM "
+    "calls. ALWAYS set risk='high'. Requires admin approval before activation.\n"
     "Reply ONLY with strict JSON: "
     "{\"type\": \"...\", \"patch_json\": {...}, \"rationale\": \"...\", \"risk\": \"low|medium|high\"} "
     "or {\"type\": null} if no patch can plausibly help."
@@ -394,11 +414,68 @@ async def _apply_patch(session: AsyncSession, proposal: RepairProposal, user_id:
         if sentinel:
             p.applied_artifact_id = sentinel.id
 
+    elif p.type == "correction_pin":
+        # Defer DB insert to approve_pin(). Mark proposal awaiting_approval.
+        if not pj.get("question") or not pj.get("pinned_answer"):
+            raise ValueError(f"correction_pin proposal {p.id} missing question or pinned_answer")
+        p.status = "awaiting_approval"
+        p.applied_at = None
+        await session.commit()
+        return  # Do NOT fall through to the `p.status = "applied"` line below
+
     p.status = "applied"
     p.applied_at = datetime.utcnow()
     p.applied_by_id = user_id
     await session.commit()
     ks.invalidate_eval_caches()
+
+
+async def approve_pin(
+    session: AsyncSession,
+    proposal_id: int,
+    user_id: int | None,
+) -> RepairProposal:
+    """Admin-triggered approval for an awaiting_approval correction_pin proposal.
+    Creates the CorrectionPin row, marks proposal applied."""
+    from app.models import CorrectionPin
+    from datetime import timedelta
+    from app.services.ask_router import _normalize_q_hash
+
+    proposal = await session.get(RepairProposal, proposal_id)
+    if proposal is None:
+        raise LookupError(f"proposal {proposal_id} not found")
+    if proposal.status != "awaiting_approval":
+        raise ValueError(
+            f"proposal {proposal_id} is not awaiting approval (status={proposal.status})"
+        )
+    if proposal.type != "correction_pin":
+        raise ValueError(f"proposal {proposal_id} is not a correction_pin")
+
+    pj = proposal.patch_json or {}
+    question = pj.get("question", "")
+    answer = pj.get("pinned_answer", "")
+    ttl_days = int(pj.get("ttl_days") or 30)
+    scope = pj.get("scope_project_id")
+
+    expires_at = datetime.utcnow() + timedelta(days=ttl_days) if ttl_days > 0 else None
+    pin = CorrectionPin(
+        question_hash=_normalize_q_hash(question),
+        pinned_answer=answer,
+        scope_project_id=scope,
+        expires_at=expires_at,
+        source="ai_approved",
+        created_by_id=user_id,
+    )
+    session.add(pin)
+    await session.flush()
+
+    proposal.status = "applied"
+    proposal.applied_at = datetime.utcnow()
+    proposal.applied_by_id = user_id
+    proposal.applied_artifact_id = pin.id
+    await session.commit()
+    ks.invalidate_eval_caches()
+    return proposal
 
 
 async def _unapply_patch(session: AsyncSession, proposal: RepairProposal) -> None:
@@ -425,6 +502,11 @@ async def _unapply_patch(session: AsyncSession, proposal: RepairProposal) -> Non
         row = await session.get(PromptOverride, proposal.applied_artifact_id)
         if row:
             row.active = False  # PromptOverride is soft-deactivated, not deleted
+    elif proposal.type == "correction_pin":
+        from app.models import CorrectionPin
+        row = await session.get(CorrectionPin, proposal.applied_artifact_id)
+        if row:
+            await session.delete(row)
     elif proposal.type in ("add_abbreviation", "add_synonym",
                            "field_alias", "stop_word_remove"):
         # These mutate sentinel rows in query_synonyms — reverse mutation is
