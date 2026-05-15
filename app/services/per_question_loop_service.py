@@ -316,6 +316,42 @@ async def _apply_patch(session: AsyncSession, proposal: RepairProposal, user_id:
     ks.invalidate_eval_caches()
 
 
+async def _unapply_patch(session: AsyncSession, proposal: RepairProposal) -> None:
+    """Reverse the artifact created by _apply_patch and mark the proposal rolled_back."""
+    if not proposal.applied_artifact_id:
+        # No artifact to delete — older proposals from before applied_artifact_id existed.
+        proposal.status = "rolled_back"
+        await session.commit()
+        ks.invalidate_eval_caches()
+        return
+
+    if proposal.type == "project_alias":
+        from app.models import ProjectAlias
+        row = await session.get(ProjectAlias, proposal.applied_artifact_id)
+        if row:
+            await session.delete(row)
+    elif proposal.type == "intent_override":
+        from app.models import IntentOverride
+        row = await session.get(IntentOverride, proposal.applied_artifact_id)
+        if row:
+            await session.delete(row)
+    elif proposal.type == "prompt_patch":
+        from app.models import PromptOverride
+        row = await session.get(PromptOverride, proposal.applied_artifact_id)
+        if row:
+            row.active = False  # PromptOverride is soft-deactivated, not deleted
+    elif proposal.type in ("add_abbreviation", "add_synonym",
+                           "field_alias", "stop_word_remove"):
+        # These mutate sentinel rows in query_synonyms — reverse mutation is
+        # noisy and rarely useful; mark rolled_back without DB deletion. Admin
+        # can edit the sentinel row manually if needed.
+        pass
+
+    proposal.status = "rolled_back"
+    await session.commit()
+    ks.invalidate_eval_caches()
+
+
 async def _upsert_synonym(session: AsyncSession, original: str, synonyms: list[str]) -> None:
     row = await session.scalar(select(QuerySynonym).where(QuerySynonym.original == original))
     if row:

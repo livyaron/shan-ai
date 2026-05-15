@@ -86,3 +86,64 @@ async def test_apply_intent_override_writes_row(db_session):
     await db_session.refresh(proposal)
     assert proposal.status == "applied"
     assert proposal.applied_artifact_id == row.id
+
+# ───────────────── Task 1.4: unapply round-trip tests ─────────────────
+
+from app.services.per_question_loop_service import _unapply_patch
+
+
+@pytest.mark.asyncio
+async def test_unapply_project_alias_deletes_row(db_session):
+    pid = (await db_session.execute(text(
+        "SELECT id FROM projects LIMIT 1"
+    ))).scalar()
+    proposal = RepairProposal(
+        type="project_alias",
+        patch_json={"alias_text": "TestAlias-RB", "project_id": pid},
+        status="pending",
+    )
+    db_session.add(proposal)
+    await db_session.commit()
+    await db_session.refresh(proposal)
+
+    await _apply_patch(db_session, proposal, user_id=None)
+    assert proposal.applied_artifact_id is not None
+
+    await _unapply_patch(db_session, proposal)
+
+    row = await db_session.scalar(
+        select(ProjectAlias).where(ProjectAlias.alias_text == "TestAlias-RB")
+    )
+    assert row is None, "alias row should have been deleted"
+    await db_session.refresh(proposal)
+    assert proposal.status == "rolled_back"
+
+
+@pytest.mark.asyncio
+async def test_unapply_intent_override_deletes_row(db_session):
+    proposal = RepairProposal(
+        type="intent_override",
+        patch_json={
+            "question": "UnapplyTestQ-XYZ",
+            "forced_intent": "by_identifier",
+            "forced_param": "TestParam",
+        },
+        status="pending",
+    )
+    db_session.add(proposal)
+    await db_session.commit()
+    await db_session.refresh(proposal)
+
+    await _apply_patch(db_session, proposal, user_id=None)
+    assert proposal.applied_artifact_id is not None
+
+    await _unapply_patch(db_session, proposal)
+
+    from app.services.ask_router import _normalize_q_hash
+    h = _normalize_q_hash("UnapplyTestQ-XYZ")
+    row = await db_session.scalar(
+        select(IntentOverride).where(IntentOverride.question_pattern_hash == h)
+    )
+    assert row is None, "intent_override row should have been deleted"
+    await db_session.refresh(proposal)
+    assert proposal.status == "rolled_back"
