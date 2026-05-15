@@ -231,8 +231,9 @@ _REPAIR_SYS = (
 
 async def _candidate_projects(session: AsyncSession, question: str, limit: int = 15) -> list[dict]:
     """Return up to `limit` projects whose name/identifier/manager overlaps the question's
-    tokens. Gives the repair-proposer concrete `(id, name, identifier)` triples to choose
-    from instead of having to invent project_ids.
+    tokens. Results are reranked: rows whose NAME contains a question token come FIRST,
+    then identifier-matches, then manager-matches. This gives the LLM-proposer a strong
+    hint to pick the right project when several share a manager.
     """
     from app.models import Project
     from app.services.knowledge_service import normalize_hebrew
@@ -242,7 +243,6 @@ async def _candidate_projects(session: AsyncSession, question: str, limit: int =
     if not tokens:
         return []
 
-    # Build OR of ILIKE clauses over name + project_identifier + manager.
     clauses = []
     for t in tokens:
         clauses.append(Project.name.ilike(f"%{t}%"))
@@ -252,13 +252,31 @@ async def _candidate_projects(session: AsyncSession, question: str, limit: int =
         select(Project.id, Project.project_identifier, Project.name, Project.manager)
         .where(or_(*clauses))
         .where(Project.is_active.is_(True))
-        .limit(limit)
+        .limit(limit * 3)  # over-fetch for reranking
     )
     rows = (await session.execute(stmt)).all()
+
+    # Rerank: score each row by which field matched. Name > identifier > manager.
+    # Use word-set intersection (not substring) so "של" doesn't score inside "השלמת".
+    token_set = set(tokens)
+
+    def _score(row) -> int:
+        name_words = set(normalize_hebrew(row.name or "").split())
+        id_words   = set(normalize_hebrew(row.project_identifier or "").split())
+        mgr_words  = set(normalize_hebrew(row.manager or "").split())
+        if token_set & name_words:
+            return 3
+        if token_set & id_words:
+            return 2
+        if token_set & mgr_words:
+            return 1
+        return 0
+
+    ranked = sorted(rows, key=_score, reverse=True)[:limit]
     return [
         {"id": r.id, "project_identifier": r.project_identifier,
          "name": r.name, "manager": r.manager}
-        for r in rows
+        for r in ranked
     ]
 
 
