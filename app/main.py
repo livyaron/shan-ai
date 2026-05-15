@@ -157,6 +157,28 @@ async def startup():
                     "ON answer_feedback (created_at)"
                 ))
 
+                # Phase 3 (rag-quality): correction-pin verbatim answers
+                await conn.execute(_text("""
+                    CREATE TABLE IF NOT EXISTS correction_pins (
+                        id               SERIAL PRIMARY KEY,
+                        question_hash    VARCHAR(64) NOT NULL UNIQUE,
+                        pinned_answer    TEXT NOT NULL,
+                        scope_project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL,
+                        expires_at       TIMESTAMP,
+                        source           VARCHAR(32) NOT NULL DEFAULT 'manual',
+                        created_by_id    INTEGER REFERENCES users(id),
+                        created_at       TIMESTAMP DEFAULT NOW()
+                    )
+                """))
+                await conn.execute(_text(
+                    "CREATE INDEX IF NOT EXISTS ix_correction_pins_hash "
+                    "ON correction_pins (question_hash)"
+                ))
+                await conn.execute(_text(
+                    "CREATE INDEX IF NOT EXISTS ix_correction_pins_expires "
+                    "ON correction_pins (expires_at)"
+                ))
+
                 # LLM config table
                 await conn.execute(_text("""
                     CREATE TABLE IF NOT EXISTS llm_config (

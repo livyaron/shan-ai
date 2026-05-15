@@ -489,4 +489,24 @@ class AnswerFeedback(Base):
 
     query_log = relationship("QueryLog")
     user      = relationship("User")
-    gold      = relationship("EvalGoldAnswer")
+
+
+class CorrectionPin(Base):
+    """Verbatim pinned answer for a normalized question. Highest-priority
+    lookup in ask_router — bypasses all LLM calls when hit.
+    Pin proposals from the repair loop need human approval before insertion.
+    """
+    __tablename__ = "correction_pins"
+
+    id                = Column(Integer, primary_key=True)
+    question_hash     = Column(String(64), unique=True, nullable=False, index=True)
+    pinned_answer     = Column(Text, nullable=False)
+    scope_project_id  = Column(Integer, ForeignKey("projects.id", ondelete="SET NULL"),
+                               nullable=True)
+    expires_at        = Column(DateTime, nullable=True)
+    source            = Column(String(32), nullable=False, default="manual")
+    created_by_id     = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at        = Column(DateTime, default=datetime.utcnow)
+
+    scope_project = relationship("Project")
+    created_by    = relationship("User")
