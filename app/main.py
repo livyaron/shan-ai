@@ -136,6 +136,27 @@ async def startup():
                     "ALTER TABLE repair_proposals ADD COLUMN IF NOT EXISTS applied_artifact_id INTEGER;"
                 ))
 
+                # Phase 2 (rag-quality): per-click thumbs feedback
+                await conn.execute(_text("""
+                    CREATE TABLE IF NOT EXISTS answer_feedback (
+                        id              SERIAL PRIMARY KEY,
+                        query_log_id    INTEGER NOT NULL REFERENCES query_logs(id) ON DELETE CASCADE,
+                        user_id         INTEGER REFERENCES users(id),
+                        vote            VARCHAR(4) NOT NULL,
+                        correction_text TEXT,
+                        gold_id         INTEGER REFERENCES eval_gold_answers(id),
+                        created_at      TIMESTAMP DEFAULT NOW()
+                    )
+                """))
+                await conn.execute(_text(
+                    "CREATE INDEX IF NOT EXISTS ix_answer_feedback_log "
+                    "ON answer_feedback (query_log_id)"
+                ))
+                await conn.execute(_text(
+                    "CREATE INDEX IF NOT EXISTS ix_answer_feedback_created "
+                    "ON answer_feedback (created_at)"
+                ))
+
                 # LLM config table
                 await conn.execute(_text("""
                     CREATE TABLE IF NOT EXISTS llm_config (

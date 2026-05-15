@@ -467,4 +467,26 @@ class IntentOverride(Base):
     created_by_id           = Column(Integer, ForeignKey("users.id"), nullable=True)
     created_at              = Column(DateTime, default=datetime.utcnow)
 
-    created_by = relationship("User")
+
+class AnswerFeedback(Base):
+    """Per-click feedback row for a /ask answer.
+
+    Written on every thumbs-up/down click. 👍 may trigger auto-gold conversion
+    (handled by answer_feedback_service); 👎 may trigger a single-question
+    repair cycle. The row records the action regardless of whether the
+    follow-up step ran.
+    """
+    __tablename__ = "answer_feedback"
+
+    id              = Column(Integer, primary_key=True)
+    query_log_id    = Column(Integer, ForeignKey("query_logs.id", ondelete="CASCADE"),
+                             nullable=False, index=True)
+    user_id         = Column(Integer, ForeignKey("users.id"), nullable=True)
+    vote            = Column(String(4), nullable=False)  # "up" | "down"
+    correction_text = Column(Text, nullable=True)
+    gold_id         = Column(Integer, ForeignKey("eval_gold_answers.id"), nullable=True)
+    created_at      = Column(DateTime, default=datetime.utcnow, index=True)
+
+    query_log = relationship("QueryLog")
+    user      = relationship("User")
+    gold      = relationship("EvalGoldAnswer")
