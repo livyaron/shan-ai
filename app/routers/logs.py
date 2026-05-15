@@ -74,7 +74,20 @@ async def submit_feedback(
         raise HTTPException(status_code=404, detail="log not found")
 
     log.user_feedback = body.feedback
-    await session.commit()
+
+    # Phase 2: also write a per-click AnswerFeedback row. For 👍, the service
+    # may also create an auto_user_confirmed gold answer when eligible.
+    from app.services.answer_feedback_service import record_thumbs_up
+    from app.models import AnswerFeedback
+    if body.feedback == 1:
+        await record_thumbs_up(session, body.log_id, current_user.id)
+    else:
+        # Bare 👎 with no correction text — record the vote but defer the
+        # save_gold + repair-loop trigger to /dashboard/ask/correct.
+        session.add(AnswerFeedback(
+            query_log_id=body.log_id, user_id=current_user.id, vote="down",
+        ))
+        await session.commit()
     return {"ok": True}
 
 

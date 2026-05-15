@@ -121,3 +121,86 @@ async def test_is_rate_limited_returns_false_below_threshold(db_session):
         db_session.add(AnswerFeedback(query_log_id=log.id, user_id=99, vote="up"))
     await db_session.commit()
     assert await _is_rate_limited(db_session, user_id=99) is False
+
+
+@pytest.mark.asyncio
+async def test_legacy_logs_feedback_endpoint_writes_answer_feedback(db_session):
+    """POST /api/logs/feedback with feedback=1 must create both
+    QueryLog.user_feedback AND an AnswerFeedback row (vote='up')."""
+    from httpx import AsyncClient, ASGITransport
+    from app.main import app
+    from app.routers.login import get_current_user
+    from app.models import User
+
+    # Seed a real user (the auth dependency stub needs a User object,
+    # but the FK in AnswerFeedback also expects user_id to exist in DB)
+    await db_session.execute(text(
+        "INSERT INTO users (id, telegram_id, username, role, password_hash, is_admin) "
+        "VALUES (501, 999000501, 'fb_t', 'PROJECT_MANAGER', '', false) "
+        "ON CONFLICT (id) DO NOTHING"
+    ))
+    await db_session.commit()
+
+    log = await _seed_log(db_session, question="legacy-q-008")
+
+    async def fake_user():
+        return User(id=501, username="fb_t", role="PROJECT_MANAGER",
+                    telegram_id=999000501, password_hash="", is_admin=False)
+
+    app.dependency_overrides[get_current_user] = fake_user
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app),
+                               base_url="http://test") as client:
+            r = await client.post("/api/logs/feedback",
+                                  json={"log_id": log.id, "feedback": 1})
+        assert r.status_code == 200, f"got {r.status_code}: {r.text}"
+    finally:
+        app.dependency_overrides.clear()
+
+    fb = (await db_session.execute(
+        select(AnswerFeedback).where(AnswerFeedback.query_log_id == log.id)
+    )).scalar_one_or_none()
+    assert fb is not None
+    assert fb.vote == "up"
+
+
+@pytest.mark.asyncio
+async def test_legacy_logs_feedback_endpoint_bare_thumbs_down(db_session):
+    """POST /api/logs/feedback with feedback=-1 must create a bare AnswerFeedback
+    row (vote='down', no correction_text, no gold). save_gold + repair are
+    only triggered by /dashboard/ask/correct in Task 2.3."""
+    from httpx import AsyncClient, ASGITransport
+    from app.main import app
+    from app.routers.login import get_current_user
+    from app.models import User
+
+    await db_session.execute(text(
+        "INSERT INTO users (id, telegram_id, username, role, password_hash, is_admin) "
+        "VALUES (502, 999000502, 'fb_d', 'PROJECT_MANAGER', '', false) "
+        "ON CONFLICT (id) DO NOTHING"
+    ))
+    await db_session.commit()
+
+    log = await _seed_log(db_session, question="legacy-down-q-009")
+
+    async def fake_user():
+        return User(id=502, username="fb_d", role="PROJECT_MANAGER",
+                    telegram_id=999000502, password_hash="", is_admin=False)
+
+    app.dependency_overrides[get_current_user] = fake_user
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app),
+                               base_url="http://test") as client:
+            r = await client.post("/api/logs/feedback",
+                                  json={"log_id": log.id, "feedback": -1})
+        assert r.status_code == 200
+    finally:
+        app.dependency_overrides.clear()
+
+    fb = (await db_session.execute(
+        select(AnswerFeedback).where(AnswerFeedback.query_log_id == log.id)
+    )).scalar_one_or_none()
+    assert fb is not None
+    assert fb.vote == "down"
+    assert fb.correction_text is None
+    assert fb.gold_id is None
