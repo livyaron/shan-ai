@@ -196,6 +196,39 @@ _REPAIR_SYS = (
 )
 
 
+async def _candidate_projects(session: AsyncSession, question: str, limit: int = 15) -> list[dict]:
+    """Return up to `limit` projects whose name/identifier/manager overlaps the question's
+    tokens. Gives the repair-proposer concrete `(id, name, identifier)` triples to choose
+    from instead of having to invent project_ids.
+    """
+    from app.models import Project
+    from app.services.knowledge_service import normalize_hebrew
+    from sqlalchemy import or_
+
+    tokens = [t for t in normalize_hebrew(question).split() if len(t) >= 2]
+    if not tokens:
+        return []
+
+    # Build OR of ILIKE clauses over name + project_identifier + manager.
+    clauses = []
+    for t in tokens:
+        clauses.append(Project.name.ilike(f"%{t}%"))
+        clauses.append(Project.project_identifier.ilike(f"%{t}%"))
+        clauses.append(Project.manager.ilike(f"%{t}%"))
+    stmt = (
+        select(Project.id, Project.project_identifier, Project.name, Project.manager)
+        .where(or_(*clauses))
+        .where(Project.is_active.is_(True))
+        .limit(limit)
+    )
+    rows = (await session.execute(stmt)).all()
+    return [
+        {"id": r.id, "project_identifier": r.project_identifier,
+         "name": r.name, "manager": r.manager}
+        for r in rows
+    ]
+
+
 async def propose_targeted_fix(
     session: AsyncSession,
     question: str,
@@ -203,12 +236,22 @@ async def propose_targeted_fix(
     gold_answer: str,
     eval_run_id: int | None,
 ) -> RepairProposal | None:
-    user = json.dumps({
+    candidates = await _candidate_projects(session, question)
+    user_payload = {
         "question": question,
         "ai_answer": ai_answer,
         "gold_answer": gold_answer,
         "available_fix_types": FIX_TYPES,
-    }, ensure_ascii=False)
+    }
+    if candidates:
+        user_payload["candidate_projects"] = candidates
+        user_payload["_hint"] = (
+            "For project_alias fixes: alias_text must be the project NAME or "
+            "NICKNAME extracted from the question (e.g. 'בת ים'), NOT the gold answer. "
+            "project_id MUST be one of the integer ids in candidate_projects above. "
+            "Do not invent ids. If no candidate fits, choose a different fix type."
+        )
+    user = json.dumps(user_payload, ensure_ascii=False)
     try:
         raw = await llm_chat(
             "eval_repair",
@@ -275,14 +318,26 @@ async def _apply_patch(session: AsyncSession, proposal: RepairProposal, user_id:
             ))
 
     elif p.type == "project_alias":
-        from app.models import ProjectAlias
+        from app.models import ProjectAlias, Project
         from app.services.knowledge_service import normalize_hebrew
-        alias_text = pj.get("alias_text", "")
-        project_id = pj.get("project_id")
-        if not alias_text or not project_id:
-            raise ValueError(f"project_alias proposal {p.id} missing alias_text or project_id")
+        alias_text = (pj.get("alias_text") or "").strip()
+        try:
+            project_id = int(pj.get("project_id") or 0)
+        except (TypeError, ValueError):
+            project_id = 0
+        if not alias_text or project_id <= 0:
+            raise ValueError(
+                f"project_alias proposal {p.id} missing alias_text or invalid project_id"
+            )
+        # Validate the project actually exists before we try to insert (FK
+        # would error otherwise and leave the proposal stuck in 'pending').
+        proj = await session.get(Project, project_id)
+        if proj is None:
+            raise ValueError(
+                f"project_alias proposal {p.id} references nonexistent project_id={project_id}"
+            )
         row = ProjectAlias(
-            project_id=int(project_id),
+            project_id=project_id,
             alias_text=alias_text,
             normalized_alias=normalize_hebrew(alias_text),
             source="ai",
@@ -470,7 +525,30 @@ async def run_one_question(
         res.score_final = new_score
 
         if new_score >= threshold and not regressions:
-            await _apply_patch(session, proposal, user_id)
+            try:
+                await _apply_patch(session, proposal, user_id)
+            except Exception as apply_err:
+                # _apply_patch validates patch_json content (e.g. project_id must
+                # reference a real Project). On validation/FK failure, mark
+                # rejected with the exception text rather than leaving the
+                # proposal stuck in 'pending' forever.
+                logger.warning(f"_apply_patch failed for proposal {proposal.id}: {apply_err}")
+                await session.rollback()
+                proposal = await session.merge(proposal)
+                proposal.status = "rejected"
+                proposal.reject_reason = f"apply_error: {str(apply_err)[:200]}"
+                await session.commit()
+                rejected_entry = {
+                    "proposal_id": proposal.id,
+                    "type": proposal.type,
+                    "patch": proposal.patch_json,
+                    "reject_reason": proposal.reject_reason,
+                    "regressions": [],
+                    "new_score": new_score,
+                }
+                res.rejected_fixes.append(rejected_entry)
+                emit({"type": "repair_rejected", "question_hash": gold.question_hash, **rejected_entry})
+                continue
             proposal.regression_count = 0
             proposal.delta_pass_rate = (new_score - score)
             await session.commit()
