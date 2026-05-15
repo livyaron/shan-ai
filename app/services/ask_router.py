@@ -68,6 +68,23 @@ async def route(
 
     q_hash = _normalize_q_hash(question)
 
+    # 0. Correction-pin (highest priority — verbatim answer, zero LLM calls)
+    pins = {**ks._DB_CORRECTION_PINS_CACHE, **ks._shadow_correction_pins.get()}
+    pin_entry = pins.get(q_hash)
+    if pin_entry:
+        return AnswerResult(
+            answer=pin_entry["pinned_answer"],
+            sources_used=[{"source": "correction_pin", "q_hash": q_hash}],
+            log_id=None,
+            path="correction_pin",
+            intent=None,
+            param=None,
+            has_files=False,
+            has_decisions=False,
+            file_names=[],
+            sources_text="📌 תשובה מאושרת",
+        )
+
     # 0a. Intent override (hash-keyed; exact match on normalized question)
     intent_overrides = {**ks._DB_INTENT_OVERRIDES_CACHE, **ks._shadow_intent_overrides.get()}
     pinned = intent_overrides.get(q_hash)

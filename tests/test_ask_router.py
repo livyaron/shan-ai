@@ -184,3 +184,34 @@ async def test_route_project_alias_bypasses_intent_detection(db_session):
     assert result.path == "project_tools"
     assert result.intent == "by_identifier"
     assert result.sources_used == [{"source": "project_alias", "project_id": proj_id}]
+
+
+@pytest.mark.asyncio
+async def test_route_correction_pin_short_circuits(db_session):
+    """A pinned answer must return verbatim with zero LLM calls and
+    path='correction_pin'."""
+    q = "PIN-Q-001: questionable question for pin"
+    h = _normalize_q_hash(q)
+    await db_session.execute(_sql_text(
+        "INSERT INTO correction_pins (question_hash, pinned_answer, source) "
+        "VALUES (:h, :ans, 'manual')"
+    ), {"h": h, "ans": "verbatim pinned answer"})
+    await db_session.commit()
+    _ks.invalidate_eval_caches()
+    await _ks._ensure_eval_caches(db_session)
+
+    # Patch every downstream call site that route() could fall into. None
+    # should be hit when the pin lookup wins.
+    apq = AsyncMock(return_value=("should-not-fire", 0))
+    awfc = AsyncMock(return_value={"answer": "rag-should-not-fire"})
+    adq = AsyncMock(return_value="decision-should-not-fire")
+    with patch("app.services.project_tools.answer_project_query", new=apq), \
+         patch("app.services.knowledge_service.answer_with_full_context", new=awfc), \
+         patch("app.services.knowledge_service.answer_decisions_question", new=adq):
+        result = await route(q, db_session, user_id=1, log_to_db=False)
+
+    assert result.path == "correction_pin"
+    assert result.answer == "verbatim pinned answer"
+    apq.assert_not_called()
+    awfc.assert_not_called()
+    adq.assert_not_called()
