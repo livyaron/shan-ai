@@ -481,10 +481,29 @@ function appendAIMsg(answer, hasFiles, hasDecisions, fileNames, sourcesText, log
     }
 
     const feedbackHtml = logId ? `
-        <div class="feedback-row">
+        <div class="feedback-row" id="fb-row-${logId}">
             <button class="feedback-btn" id="up-${logId}" onclick="sendFeedback(${logId}, 1)">👍</button>
-            <button class="feedback-btn" id="dn-${logId}" onclick="sendFeedback(${logId}, -1)">👎</button>
+            <button class="feedback-btn" id="dn-${logId}" onclick="openCorrectionBox(${logId})">👎</button>
             <span class="feedback-done" id="fd-${logId}">✓ נשמר</span>
+        </div>
+        <div class="correction-box" id="cb-${logId}" style="display:none; margin-top:8px;">
+            <div style="font-size:.85rem; color:#a8b0d0; margin-bottom:4px;">מה היית מצפה לשמוע?</div>
+            <textarea id="cb-text-${logId}" rows="3" style="width:100%; background:#0f1117;
+                color:#fff; border:1px solid #2d3047; border-radius:8px; padding:6px;
+                font-family:Heebo,sans-serif; resize:vertical;"></textarea>
+            <div style="margin-top:6px; display:flex; gap:8px;">
+                <button class="feedback-btn"
+                    onclick="submitCorrection(${logId})"
+                    style="background:rgba(54,226,115,.18); border:1px solid #36e273; color:#a0ffb0;">
+                    שמור ולמד
+                </button>
+                <button class="feedback-btn"
+                    onclick="closeCorrectionBox(${logId})"
+                    style="background:#2d3047; color:#e0e0e0;">
+                    ביטול
+                </button>
+            </div>
+            <div id="cb-status-${logId}" style="margin-top:6px; font-size:.8rem; color:#8b9cf4;"></div>
         </div>` : '';
 
     div.innerHTML = `
@@ -498,22 +517,64 @@ function appendAIMsg(answer, hasFiles, hasDecisions, fileNames, sourcesText, log
 }
 
 async function sendFeedback(logId, value) {
+    // value=1 only here — value=-1 routes via openCorrectionBox / submitCorrection.
     const upBtn = document.getElementById(`up-${logId}`);
     const dnBtn = document.getElementById(`dn-${logId}`);
     const doneSpan = document.getElementById(`fd-${logId}`);
     upBtn.disabled = true; dnBtn.disabled = true;
-    upBtn.classList.remove('selected-up', 'selected-down');
-    dnBtn.classList.remove('selected-up', 'selected-down');
-    if (value === 1) upBtn.classList.add('selected-up');
-    else dnBtn.classList.add('selected-down');
+    upBtn.classList.add('selected-up');
     try {
         await fetch('/api/logs/feedback', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ log_id: logId, feedback: value }),
+            body: JSON.stringify({ log_id: logId, feedback: 1 }),
         });
         doneSpan.style.display = 'inline';
-    } catch (e) { upBtn.disabled = false; dnBtn.disabled = false; }
+    } catch (e) {
+        upBtn.disabled = false; dnBtn.disabled = false;
+        upBtn.classList.remove('selected-up');
+    }
+}
+
+function openCorrectionBox(logId) {
+    const cb = document.getElementById(`cb-${logId}`);
+    if (cb) cb.style.display = 'block';
+    const ta = document.getElementById(`cb-text-${logId}`);
+    if (ta) ta.focus();
+}
+
+function closeCorrectionBox(logId) {
+    const cb = document.getElementById(`cb-${logId}`);
+    if (cb) cb.style.display = 'none';
+}
+
+async function submitCorrection(logId) {
+    const text = (document.getElementById(`cb-text-${logId}`).value || "").trim();
+    const status = document.getElementById(`cb-status-${logId}`);
+    if (!text) {
+        status.textContent = "נא להזין תיקון";
+        status.style.color = "#ff6b7a";
+        return;
+    }
+    status.textContent = "שולח...";
+    status.style.color = "#8b9cf4";
+    try {
+        const resp = await fetch('/dashboard/ask/correct', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ log_id: logId, correction_text: text }),
+        });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const data = await resp.json();
+        status.innerHTML = `🔄 לומד מהתיקון... <a href="/dashboard/eval/curate?focus=${data.gold_id}" target="_blank" style="color:#36e273;">צפה בלמידה →</a>`;
+        status.style.color = "#36e273";
+        document.getElementById(`dn-${logId}`).disabled = true;
+        document.getElementById(`up-${logId}`).disabled = true;
+        document.getElementById(`dn-${logId}`).classList.add('selected-down');
+    } catch (e) {
+        status.textContent = "שגיאה: " + e.message;
+        status.style.color = "#ff6b7a";
+    }
 }
 
 function escapeHtml(text) {
