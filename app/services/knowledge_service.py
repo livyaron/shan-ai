@@ -23,11 +23,19 @@ _shadow_abbrevs: ContextVar[dict] = ContextVar("shadow_abbrevs", default={})
 _shadow_stop_word_drops: ContextVar[set] = ContextVar("shadow_stop_word_drops", default=set())
 _shadow_synonyms: ContextVar[dict] = ContextVar("shadow_synonyms", default={})
 _shadow_prompt_override: ContextVar[dict] = ContextVar("shadow_prompt_override", default={})
+_shadow_project_aliases: ContextVar[dict] = ContextVar("shadow_project_aliases", default={})
+_shadow_intent_overrides: ContextVar[dict] = ContextVar("shadow_intent_overrides", default={})
+_shadow_correction_pins: ContextVar[dict] = ContextVar("shadow_correction_pins", default={})
+_shadow_field_aliases: ContextVar[dict] = ContextVar("shadow_field_aliases", default={})
 
 # ─── DB-backed config caches (refreshed lazily by _ensure_eval_caches) ─────────
 _DB_ABBREVS_CACHE: dict[str, str] = {}
 _DB_STOP_WORD_DROPS_CACHE: set[str] = set()
 _DB_PROMPT_OVERRIDES_CACHE: dict[str, str] = {}   # usage -> content
+_DB_PROJECT_ALIASES_CACHE: dict[str, int] = {}              # normalized_alias -> project_id
+_DB_INTENT_OVERRIDES_CACHE: dict[str, dict] = {}            # q_hash -> {forced_intent, forced_param}
+_DB_CORRECTION_PINS_CACHE: dict[str, dict] = {}   # q_hash -> {"pinned_answer", "scope_project_id", "expires_at"}
+_DB_FIELD_ALIASES_CACHE: dict[str, str] = {}      # alias_text -> field_name
 _EVAL_CACHE_TS: float = 0.0
 _EVAL_CACHE_TTL: float = 30.0  # seconds, mirrors llm_router._cache
 
@@ -87,6 +95,8 @@ async def _ensure_eval_caches(session: AsyncSession | None = None) -> None:
     caller's transaction (asyncpg propagates InFailedSQLTransactionError otherwise).
     """
     global _EVAL_CACHE_TS, _DB_ABBREVS_CACHE, _DB_STOP_WORD_DROPS_CACHE, _DB_PROMPT_OVERRIDES_CACHE
+    global _DB_PROJECT_ALIASES_CACHE, _DB_INTENT_OVERRIDES_CACHE
+    global _DB_CORRECTION_PINS_CACHE, _DB_FIELD_ALIASES_CACHE
 
     now = time.monotonic()
     if now - _EVAL_CACHE_TS < _EVAL_CACHE_TTL:
@@ -95,7 +105,7 @@ async def _ensure_eval_caches(session: AsyncSession | None = None) -> None:
     _EVAL_CACHE_TS = now
 
     try:
-        from app.models import QuerySynonym, PromptOverride
+        from app.models import QuerySynonym, PromptOverride, ProjectAlias, IntentOverride, CorrectionPin
 
         async with async_session_maker() as own_session:
             sent_stmt = select(QuerySynonym).where(
@@ -121,9 +131,53 @@ async def _ensure_eval_caches(session: AsyncSession | None = None) -> None:
             po_rows = (await own_session.execute(po_stmt)).scalars().all()
             new_overrides = {row.usage: row.content for row in po_rows}
 
+            alias_rows = (await own_session.execute(select(ProjectAlias))).scalars().all()
+            new_aliases = {row.normalized_alias: row.project_id for row in alias_rows}
+
+            io_rows = (await own_session.execute(select(IntentOverride))).scalars().all()
+            new_overrides_intent = {
+                row.question_pattern_hash: {
+                    "forced_intent": row.forced_intent,
+                    "forced_param": row.forced_param,
+                }
+                for row in io_rows
+            }
+
+            # Correction pins — load only those not yet expired
+            from datetime import datetime as _dt
+            now = _dt.utcnow()
+            cp_rows = (await own_session.execute(
+                select(CorrectionPin).where(
+                    (CorrectionPin.expires_at.is_(None)) | (CorrectionPin.expires_at > now)
+                )
+            )).scalars().all()
+            new_pins = {
+                row.question_hash: {
+                    "pinned_answer": row.pinned_answer,
+                    "scope_project_id": row.scope_project_id,
+                    "expires_at": row.expires_at,
+                }
+                for row in cp_rows
+            }
+
+            # Field aliases from __field_aliases__ sentinel — stored as ['alias=field', ...]
+            fa_sentinel = await own_session.scalar(
+                select(QuerySynonym).where(QuerySynonym.original == "__field_aliases__")
+            )
+            new_field_aliases: dict[str, str] = {}
+            if fa_sentinel and fa_sentinel.synonyms:
+                for entry in fa_sentinel.synonyms:
+                    if isinstance(entry, str) and "=" in entry:
+                        a, f = entry.split("=", 1)
+                        new_field_aliases[a.strip()] = f.strip()
+
         _DB_ABBREVS_CACHE = new_abbrevs
         _DB_STOP_WORD_DROPS_CACHE = new_drops
         _DB_PROMPT_OVERRIDES_CACHE = new_overrides
+        _DB_PROJECT_ALIASES_CACHE = new_aliases
+        _DB_INTENT_OVERRIDES_CACHE = new_overrides_intent
+        _DB_CORRECTION_PINS_CACHE = new_pins
+        _DB_FIELD_ALIASES_CACHE = new_field_aliases
     except Exception as e:
         # Common before first deploy: prompt_overrides table doesn't exist yet.
         # Keep previous cache values; do not raise — caller's transaction must stay alive.

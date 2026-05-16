@@ -371,6 +371,9 @@ class RepairProposal(Base):
     created_at          = Column(DateTime, default=datetime.utcnow, index=True)
     applied_at          = Column(DateTime, nullable=True)
     applied_by_id       = Column(Integer, ForeignKey("users.id"), nullable=True)
+    applied_artifact_id = Column(Integer, nullable=True)
+    # ↑ id of the row created in the fix-type's target table on apply,
+    # used by _unapply_patch for clean rollback.
 
     eval_run    = relationship("EvalRun")
     applied_by  = relationship("User")
@@ -425,3 +428,108 @@ class EvalGoldAnswer(Base):
     created_at           = Column(DateTime, default=datetime.utcnow)
 
     approved_by = relationship("User")
+
+
+class ProjectAlias(Base):
+    """Free-text project-name -> project_id mapping. Looked up before fuzzy match.
+
+    Created by the repair loop's `project_alias` fix-type, by manual admin entry,
+    or by a /ask thumbs-down correction. Multiple aliases may point to the same project.
+    """
+    __tablename__ = "project_aliases"
+
+    id                = Column(Integer, primary_key=True)
+    project_id        = Column(Integer, ForeignKey("projects.id", ondelete="CASCADE"),
+                               nullable=False, index=True)
+    alias_text        = Column(String(255), nullable=False)
+    normalized_alias  = Column(String(255), unique=True, nullable=False, index=True)
+    source            = Column(String(32),  nullable=False, default="manual")
+    created_by_id     = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at        = Column(DateTime, default=datetime.utcnow)
+
+    project    = relationship("Project")
+    created_by = relationship("User")
+
+
+class IntentOverride(Base):
+    """Pin a normalized question to a forced project_tools intent + param.
+
+    Skips LLM intent detection for that exact question. Hash-keyed so no fuzzy
+    overlap with other questions is possible.
+    """
+    __tablename__ = "intent_overrides"
+
+    id                      = Column(Integer, primary_key=True)
+    question_pattern_hash   = Column(String(64), unique=True, nullable=False, index=True)
+    forced_intent           = Column(String(32), nullable=False)
+    forced_param            = Column(String(255), nullable=True)
+    source                  = Column(String(32), nullable=False, default="manual")
+    created_by_id           = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at              = Column(DateTime, default=datetime.utcnow)
+
+
+class AnswerFeedback(Base):
+    """Per-click feedback row for a /ask answer.
+
+    Written on every thumbs-up/down click. 👍 may trigger auto-gold conversion
+    (handled by answer_feedback_service); 👎 may trigger a single-question
+    repair cycle. The row records the action regardless of whether the
+    follow-up step ran.
+    """
+    __tablename__ = "answer_feedback"
+
+    id              = Column(Integer, primary_key=True)
+    query_log_id    = Column(Integer, ForeignKey("query_logs.id", ondelete="CASCADE"),
+                             nullable=False, index=True)
+    user_id         = Column(Integer, ForeignKey("users.id"), nullable=True)
+    vote            = Column(String(4), nullable=False)  # "up" | "down"
+    correction_text = Column(Text, nullable=True)
+    gold_id         = Column(Integer, ForeignKey("eval_gold_answers.id"), nullable=True)
+    created_at      = Column(DateTime, default=datetime.utcnow, index=True)
+
+    query_log = relationship("QueryLog")
+    user      = relationship("User")
+
+
+class CorrectionPin(Base):
+    """Verbatim pinned answer for a normalized question. Highest-priority
+    lookup in ask_router — bypasses all LLM calls when hit.
+    Pin proposals from the repair loop need human approval before insertion.
+    """
+    __tablename__ = "correction_pins"
+
+    id                = Column(Integer, primary_key=True)
+    question_hash     = Column(String(64), unique=True, nullable=False, index=True)
+    pinned_answer     = Column(Text, nullable=False)
+    scope_project_id  = Column(Integer, ForeignKey("projects.id", ondelete="SET NULL"),
+                               nullable=True)
+    expires_at        = Column(DateTime, nullable=True)
+    source            = Column(String(32), nullable=False, default="manual")
+    created_by_id     = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at        = Column(DateTime, default=datetime.utcnow)
+
+    scope_project = relationship("Project")
+    created_by    = relationship("User")
+
+
+class RouteTrace(Base):
+    """Per-answer routing trace. 1:1 with QueryLog (when log_to_db=True).
+
+    Used by the learning-effectiveness dashboard to answer "which rules fire
+    most?" and "where does the loop spend its time?" without parsing the
+    sources_used JSON on QueryLog.
+    """
+    __tablename__ = "route_traces"
+
+    id                = Column(Integer, primary_key=True)
+    query_log_id      = Column(Integer, ForeignKey("query_logs.id", ondelete="CASCADE"),
+                               nullable=False, index=True)
+    path              = Column(String(32), nullable=False)   # correction_pin | decision | project_tools | rag
+    intent            = Column(String(32), nullable=True)
+    param             = Column(String(255), nullable=True)
+    applied_rule_ids  = Column(JSON, nullable=True)          # list[str] e.g. ["project_alias:12"]
+    ms_total          = Column(Integer, nullable=True)
+    ms_llm            = Column(Integer, nullable=True)
+    created_at        = Column(DateTime, default=datetime.utcnow, index=True)
+
+    query_log = relationship("QueryLog")

@@ -90,6 +90,13 @@ async def save_gold(
 
 def _detect_field(question: str) -> str | None:
     nq = normalize_hebrew(question)
+    # Phase 3: DB-backed + shadow overrides take precedence over the static dict
+    from app.services import knowledge_service as ks
+    effective = {**ks._DB_FIELD_ALIASES_CACHE, **ks._shadow_field_aliases.get()}
+    for alias, field in effective.items():
+        if normalize_hebrew(alias) in nq:
+            return field
+    # Fall through to static keyword map
     for field, keywords in _FIELD_KEYWORDS.items():
         for kw in keywords:
             if normalize_hebrew(kw) in nq:
@@ -245,7 +252,21 @@ def _rule_check(ai_answer: str, gold_answer: str) -> float | None:
 
 async def compare_to_gold(question: str, ai_answer: str, gold_answer: str) -> float:
     """Return similarity score 0.0..1.0. Tries cheap rule check first, then LLM judge."""
+    # Phase 3: entity-token guard. If the question mentions a non-stop-word
+    # token AND that token does NOT appear in ai_answer, treat as wrong entity
+    # regardless of substring containment of the gold elsewhere.
+    nq = normalize_hebrew(question)
+    na = normalize_hebrew(ai_answer)
+    _ENTITY_STOPS = {"של", "את", "על", "מה", "מי", "כמה", "איזה", "באיזה",
+                     "פרויקט", "הפרויקט", "מנהל", "המנהל", "שלב", "סטטוס"}
+    q_tokens = [t for t in nq.split() if len(t) >= 3 and t not in _ENTITY_STOPS]
     rule = _rule_check(ai_answer, gold_answer)
+    if q_tokens:
+        entity = q_tokens[-1]
+        if entity not in na and rule == 1.0:
+            # Entity not mentioned in answer → suppress false-positive substring match
+            # Defer to LLM judge below
+            rule = None
     if rule is not None:
         return rule
 

@@ -160,6 +160,7 @@
         <a href="/dashboard/files"    class="nav-link">📁 קבצים</a>
         <a href="/dashboard/ask"      class="nav-link">💬 שאל</a>
         <a href="/dashboard/learning" class="nav-link nav-active">🎓 למידה</a>
+        <a href="/dashboard/learning/rules" class="nav-link">⚙ כללי למידה</a>
         <a href="/dashboard/logs"     class="nav-link">📊 לוגים</a>
         <a href="/dashboard/projects" class="nav-link">📂 פרויקטים</a>
         <a href="/dashboard/raci-intelligence" class="nav-link">🧩 RACI בינה</a>
@@ -172,6 +173,53 @@
 
 
 <div class="container-fluid py-4 px-4">
+
+        <!-- Phase 4: learning-effectiveness card -->
+        <div id="learn-eff-card" style="background: #0e1020; border: 1px solid #1a1e38;
+             border-radius: 14px; padding: 18px 22px; margin-bottom: 24px;">
+            <div style="color: #8b9cf4; font-size: .85rem; font-weight: 600; margin-bottom: 12px;">
+                לולאת למידה — 7 ימים אחרונים
+            </div>
+            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px;">
+                <div>
+                    <div style="color: #a8b0d0; font-size: .8rem;">pass-rate</div>
+                    <div id="eff-pass" style="color: #36e273; font-size: 1.6rem; font-weight: 700;">—</div>
+                    <div id="eff-pass-baseline" style="color: #64748b; font-size: .75rem;"></div>
+                </div>
+                <div>
+                    <div style="color: #a8b0d0; font-size: .8rem;">rules-applied</div>
+                    <div id="eff-rules" style="color: #00d4ff; font-size: 1.6rem; font-weight: 700;">—</div>
+                </div>
+                <div>
+                    <div style="color: #a8b0d0; font-size: .8rem;">corrections-in</div>
+                    <div id="eff-corr" style="color: #ffd700; font-size: 1.6rem; font-weight: 700;">—</div>
+                </div>
+            </div>
+        </div>
+        <script>
+        (async function loadLearnEff() {
+            try {
+                const r = await fetch('/dashboard/learning/stats');
+                if (!r.ok) return;
+                const d = await r.json();
+                const passEl = document.getElementById('eff-pass');
+                if (d.pass_rate_7d !== null && d.pass_rate_7d !== undefined) {
+                    passEl.textContent = (d.pass_rate_7d * 100).toFixed(1) + '%';
+                    if (d.pass_rate_baseline !== null && d.pass_rate_baseline !== undefined) {
+                        const delta = d.pass_rate_7d - d.pass_rate_baseline;
+                        const arrow = delta > 0 ? '↑' : (delta < 0 ? '↓' : '→');
+                        const color = delta > 0 ? '#36e273' : (delta < 0 ? '#ff6b7a' : '#64748b');
+                        document.getElementById('eff-pass-baseline').innerHTML =
+                            `baseline ${(d.pass_rate_baseline * 100).toFixed(1)}% <span style="color:${color}">${arrow} ${(delta*100).toFixed(1)}pp</span>`;
+                    }
+                } else {
+                    passEl.textContent = '—';
+                }
+                document.getElementById('eff-rules').textContent = d.rules_applied_7d ?? '0';
+                document.getElementById('eff-corr').textContent = d.corrections_7d ?? '0';
+            } catch (e) { /* card stays at — placeholders */ }
+        })();
+        </script>
 
     <!-- Phase 4: Batch Extraction Banner -->
     <div id="batchBanner" class="alert d-flex align-items-center justify-content-between mb-4"

@@ -481,10 +481,29 @@ function appendAIMsg(answer, hasFiles, hasDecisions, fileNames, sourcesText, log
     }
 
     const feedbackHtml = logId ? `
-        <div class="feedback-row">
+        <div class="feedback-row" id="fb-row-${logId}">
             <button class="feedback-btn" id="up-${logId}" onclick="sendFeedback(${logId}, 1)">👍</button>
-            <button class="feedback-btn" id="dn-${logId}" onclick="sendFeedback(${logId}, -1)">👎</button>
+            <button class="feedback-btn" id="dn-${logId}" onclick="openCorrectionBox(${logId})">👎</button>
             <span class="feedback-done" id="fd-${logId}">✓ נשמר</span>
+        </div>
+        <div class="correction-box" id="cb-${logId}" style="display:none; margin-top:8px;">
+            <div style="font-size:.85rem; color:#a8b0d0; margin-bottom:4px;">מה היית מצפה לשמוע?</div>
+            <textarea id="cb-text-${logId}" rows="3" style="width:100%; background:#0f1117;
+                color:#fff; border:1px solid #2d3047; border-radius:8px; padding:6px;
+                font-family:Heebo,sans-serif; resize:vertical;"></textarea>
+            <div style="margin-top:6px; display:flex; gap:8px;">
+                <button class="feedback-btn"
+                    onclick="submitCorrection(${logId})"
+                    style="background:rgba(54,226,115,.18); border:1px solid #36e273; color:#a0ffb0;">
+                    שמור ולמד
+                </button>
+                <button class="feedback-btn"
+                    onclick="closeCorrectionBox(${logId})"
+                    style="background:#2d3047; color:#e0e0e0;">
+                    ביטול
+                </button>
+            </div>
+            <div id="cb-status-${logId}" style="margin-top:6px; font-size:.8rem; color:#8b9cf4;"></div>
         </div>` : '';
 
     div.innerHTML = `
@@ -498,22 +517,204 @@ function appendAIMsg(answer, hasFiles, hasDecisions, fileNames, sourcesText, log
 }
 
 async function sendFeedback(logId, value) {
+    // value=1 only here — value=-1 routes via openCorrectionBox / submitCorrection.
     const upBtn = document.getElementById(`up-${logId}`);
     const dnBtn = document.getElementById(`dn-${logId}`);
     const doneSpan = document.getElementById(`fd-${logId}`);
     upBtn.disabled = true; dnBtn.disabled = true;
-    upBtn.classList.remove('selected-up', 'selected-down');
-    dnBtn.classList.remove('selected-up', 'selected-down');
-    if (value === 1) upBtn.classList.add('selected-up');
-    else dnBtn.classList.add('selected-down');
+    upBtn.classList.add('selected-up');
     try {
         await fetch('/api/logs/feedback', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ log_id: logId, feedback: value }),
+            body: JSON.stringify({ log_id: logId, feedback: 1 }),
         });
         doneSpan.style.display = 'inline';
-    } catch (e) { upBtn.disabled = false; dnBtn.disabled = false; }
+    } catch (e) {
+        upBtn.disabled = false; dnBtn.disabled = false;
+        upBtn.classList.remove('selected-up');
+    }
+}
+
+function openCorrectionBox(logId) {
+    const cb = document.getElementById(`cb-${logId}`);
+    if (cb) cb.style.display = 'block';
+    const ta = document.getElementById(`cb-text-${logId}`);
+    if (ta) ta.focus();
+}
+
+function closeCorrectionBox(logId) {
+    const cb = document.getElementById(`cb-${logId}`);
+    if (cb) cb.style.display = 'none';
+}
+
+async function submitCorrection(logId) {
+    const text = (document.getElementById(`cb-text-${logId}`).value || "").trim();
+    const status = document.getElementById(`cb-status-${logId}`);
+    if (!text) {
+        status.textContent = "נא להזין תיקון";
+        status.style.color = "#ff6b7a";
+        return;
+    }
+    status.textContent = "שולח...";
+    status.style.color = "#8b9cf4";
+    try {
+        const resp = await fetch('/dashboard/ask/correct', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ log_id: logId, correction_text: text }),
+        });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const data = await resp.json();
+        status.innerHTML = `🔄 לומד מהתיקון... <a href="/dashboard/eval/curate?focus=${data.gold_id}" target="_blank" style="color:#36e273;">צפה בלמידה →</a>`;
+        status.style.color = "#36e273";
+        document.getElementById(`dn-${logId}`).disabled = true;
+        document.getElementById(`up-${logId}`).disabled = true;
+        document.getElementById(`dn-${logId}`).classList.add('selected-down');
+    } catch (e) {
+        status.textContent = "שגיאה: " + e.message;
+        status.style.color = "#ff6b7a";
+    }
+}
+
+function appendDecisionPreview(problem, data) {
+    document.getElementById('loadingMsg')?.remove();
+    const a = data.analysis || {};
+    const users = data.users || [];
+    const raci = data.raci_suggestions || {};
+    const uid = 'dec-' + Date.now();
+
+    const div = document.createElement('div');
+    div.className = 'msg-ai';
+
+    const typeBadge = ({INFO:'🔵 מידע',NORMAL:'🟢 רגיל',CRITICAL:'🔴 קריטי',UNCERTAIN:'🟡 לא ודאי'}[(a.type||'').toUpperCase()] || a.type || '—');
+    const assumptionsStr = Array.isArray(a.assumptions) ? a.assumptions.join(' · ') : (a.self_critique?.assumptions || []).join(' · ');
+    const risksStr = Array.isArray(a.risks) ? a.risks.join(' · ') : (a.self_critique?.risks || []).join(' · ');
+
+    let raciRows = '';
+    users.forEach(u => {
+        const cur = raci[String(u.id)] || '';
+        raciRows += `<tr style="border-bottom:1px solid #1a1e38;">
+            <td style="padding:4px 8px;">${escapeHtml(u.username)}</td>
+            ${['R','A','C','I'].map(r =>
+                `<td style="text-align:center;"><input type="radio" name="raci-${uid}-${u.id}" value="${r}" ${cur===r?'checked':''} data-user="${u.id}" data-role="${r}"></td>`
+            ).join('')}
+        </tr>`;
+    });
+
+    div.innerHTML = `
+        <div class="ai-label">SHAN-AI — זוהתה החלטה</div>
+        <div style="background:#0a1410; border:1px solid rgba(54,226,115,.35); border-radius:10px; padding:12px; margin-bottom:8px;">
+            <div style="color:#36e273; font-weight:700; margin-bottom:6px;">✅ זוהתה החלטה — אישור לתיעוד</div>
+            <div><b>סוג:</b> ${typeBadge}</div>
+            <div><b>סיכום:</b> ${escapeHtml(a.summary || '—')}</div>
+            <div><b>פעולה מומלצת:</b> ${escapeHtml(a.recommended_action || '—')}</div>
+            ${assumptionsStr ? `<div><b>הנחות:</b> ${escapeHtml(assumptionsStr)}</div>` : ''}
+            ${risksStr ? `<div><b>סיכונים:</b> ${escapeHtml(risksStr)}</div>` : ''}
+            <div><b>מדידות:</b> ${escapeHtml(a.measurability || '—')}</div>
+            <div><b>דורש אישור:</b> ${a.requires_approval ? 'כן' : 'לא'}</div>
+        </div>
+        <div style="margin-top:10px; font-size:.85rem; color:#8b9cf4; font-weight:600;">👥 הקצאת RACI</div>
+        <div style="overflow-x:auto; max-height:260px; overflow-y:auto;">
+        <table id="raci-${uid}" style="width:100%; font-size:.85rem; margin-top:6px;">
+            <thead><tr style="color:#8b9cf4;">
+                <th style="text-align:right; padding:4px 8px;">משתמש</th>
+                <th>R</th><th>A</th><th>C</th><th>I</th>
+            </tr></thead>
+            <tbody>${raciRows}</tbody>
+        </table>
+        </div>
+        <div id="raci-msg-${uid}" style="color:#ff6b7a; font-size:.78rem; margin-top:6px;">⚠ חייב להיות בעל סמכות אחד (A)</div>
+        <div style="margin-top:10px; display:flex; gap:8px;">
+            <button class="feedback-btn" id="submit-${uid}" onclick="submitDecisionFromAsk('${uid}', this)" disabled
+                style="background:rgba(54,226,115,.2); color:#36e273; border:1px solid #36e273;">✓ אשר ושלח</button>
+            <button class="feedback-btn" onclick="cancelDecisionPreview('${uid}', this)"
+                style="background:#2d3047; color:#e0e0e0;">❌ בטל — זו שאלה</button>
+        </div>
+        <div id="status-${uid}" style="margin-top:6px; font-size:.85rem;"></div>
+        <input type="hidden" id="payload-${uid}" />
+    `;
+    document.getElementById('payload-' + uid)?.setAttribute('value', JSON.stringify({problem, analysis: a}));
+    div.dataset.payload = JSON.stringify({problem, analysis: a});
+    document.getElementById('chatHistory').appendChild(div);
+    div.querySelectorAll('input[type=radio]').forEach(r => r.addEventListener('change', () => validateRaci(uid)));
+    validateRaci(uid);
+    scrollDown();
+}
+
+function validateRaci(uid) {
+    const checked = document.querySelectorAll(`#raci-${uid} input[type=radio]:checked`);
+    const aCount = Array.from(checked).filter(x => x.value === 'A').length;
+    const msg = document.getElementById(`raci-msg-${uid}`);
+    const submitBtn = document.getElementById(`submit-${uid}`);
+    if (aCount === 0) {
+        msg.textContent = '⚠ חייב להיות בעל סמכות אחד (A)';
+        msg.style.color = '#ff6b7a';
+        submitBtn.disabled = true;
+    } else if (aCount === 1) {
+        msg.textContent = '✓ הקצאת RACI תקינה';
+        msg.style.color = '#36e273';
+        submitBtn.disabled = false;
+    } else {
+        msg.textContent = '✕ רק בעל סמכות אחד (A)';
+        msg.style.color = '#ff6b7a';
+        submitBtn.disabled = true;
+    }
+}
+
+async function submitDecisionFromAsk(uid, btn) {
+    const card = btn.closest('.msg-ai');
+    const payload = JSON.parse(card.dataset.payload || '{}');
+    const a = payload.analysis || {};
+    const raci = {R: [], A: [], C: [], I: []};
+    document.querySelectorAll(`#raci-${uid} input[type=radio]:checked`).forEach(el => {
+        raci[el.value].push(el.dataset.user);
+    });
+
+    const status = document.getElementById(`status-${uid}`);
+    status.textContent = 'שולח...';
+    status.style.color = '#8b9cf4';
+    btn.disabled = true;
+
+    const form = new FormData();
+    form.append('problem_description', payload.problem || '');
+    form.append('type', a.type || '');
+    form.append('summary', a.summary || '');
+    form.append('recommended_action', a.recommended_action || '');
+    form.append('requires_approval', a.requires_approval ? 'true' : 'false');
+    form.append('measurability', a.measurability || '');
+    form.append('assumptions', JSON.stringify(a.self_critique?.assumptions || a.assumptions || []));
+    form.append('risks', JSON.stringify(a.self_critique?.risks || a.risks || []));
+    form.append('raci_r', raci.R.join(','));
+    form.append('raci_a', raci.A.join(','));
+    form.append('raci_c', raci.C.join(','));
+    form.append('raci_i', raci.I.join(','));
+
+    try {
+        const resp = await fetch('/dashboard/decisions/confirm', { method: 'POST', body: form, redirect: 'manual' });
+        // /decisions/confirm returns a redirect on success — anything in 200/303 range = OK
+        if (resp.ok || resp.status === 303 || resp.status === 302 || resp.type === 'opaqueredirect') {
+            status.innerHTML = '✅ ההחלטה נשמרה. <a href="/dashboard/decisions" style="color:#36e273;">צפה ברשימה →</a>';
+            status.style.color = '#36e273';
+            card.querySelectorAll('button, input').forEach(el => el.disabled = true);
+        } else {
+            status.textContent = 'שגיאה: HTTP ' + resp.status;
+            status.style.color = '#ff6b7a';
+            btn.disabled = false;
+        }
+    } catch (e) {
+        status.textContent = 'שגיאה: ' + e.message;
+        status.style.color = '#ff6b7a';
+        btn.disabled = false;
+    }
+}
+
+function cancelDecisionPreview(uid, btn) {
+    const card = btn.closest('.msg-ai');
+    const status = document.getElementById(`status-${uid}`);
+    status.innerHTML = '✕ בוטל. שלח שוב כשאלה.';
+    status.style.color = '#8b9cf4';
+    card.querySelectorAll('button:not([disabled]), input').forEach(el => el.disabled = true);
 }
 
 function escapeHtml(text) {
@@ -541,7 +742,11 @@ async function sendQuestion() {
             body: JSON.stringify({ question }),
         });
         const data = await resp.json();
-        appendAIMsg(data.answer, data.has_files, data.has_decisions, data.file_names, data.sources_text, data.log_id);
+        if (data.is_decision) {
+            appendDecisionPreview(question, data);
+        } else {
+            appendAIMsg(data.answer, data.has_files, data.has_decisions, data.file_names, data.sources_text, data.log_id);
+        }
     } catch (err) {
         document.getElementById('loadingMsg')?.remove();
         appendAIMsg('שגיאה בתקשורת עם השרת. נסה שוב.', false, false, [], '', null);

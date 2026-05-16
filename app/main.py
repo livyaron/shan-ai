@@ -22,6 +22,7 @@ from app.routers import logs as logs_router  # noqa: E402
 from app.routers import projects as projects_router  # noqa: E402
 from app.routers import llm_config as llm_config_router  # noqa: E402
 from app.routers import eval_loop as eval_loop_router  # noqa: E402
+from app.routers import learning_rules as learning_rules_router  # noqa: E402
 from app.services.telegram_polling import telegram_bot  # noqa: E402
 from app.services.feedback_service import run_feedback_scheduler  # noqa: E402
 
@@ -47,6 +48,7 @@ app.include_router(logs_router.router)
 app.include_router(projects_router.router)
 app.include_router(llm_config_router.router)
 app.include_router(eval_loop_router.router)
+app.include_router(learning_rules_router.router)
 app.include_router(profile_router)
 
 @app.on_event("startup")
@@ -129,6 +131,77 @@ async def startup():
                 # Eval-loop: judge_verdict on existing query_logs rows
                 await conn.execute(_text(
                     "ALTER TABLE query_logs ADD COLUMN IF NOT EXISTS judge_verdict VARCHAR(10);"
+                ))
+
+                # Phase 0 (rag-quality): rollback pointer on repair_proposals
+                await conn.execute(_text(
+                    "ALTER TABLE repair_proposals ADD COLUMN IF NOT EXISTS applied_artifact_id INTEGER;"
+                ))
+
+                # Phase 2 (rag-quality): per-click thumbs feedback
+                await conn.execute(_text("""
+                    CREATE TABLE IF NOT EXISTS answer_feedback (
+                        id              SERIAL PRIMARY KEY,
+                        query_log_id    INTEGER NOT NULL REFERENCES query_logs(id) ON DELETE CASCADE,
+                        user_id         INTEGER REFERENCES users(id),
+                        vote            VARCHAR(4) NOT NULL,
+                        correction_text TEXT,
+                        gold_id         INTEGER REFERENCES eval_gold_answers(id),
+                        created_at      TIMESTAMP DEFAULT NOW()
+                    )
+                """))
+                await conn.execute(_text(
+                    "CREATE INDEX IF NOT EXISTS ix_answer_feedback_log "
+                    "ON answer_feedback (query_log_id)"
+                ))
+                await conn.execute(_text(
+                    "CREATE INDEX IF NOT EXISTS ix_answer_feedback_created "
+                    "ON answer_feedback (created_at)"
+                ))
+
+                # Phase 3 (rag-quality): correction-pin verbatim answers
+                await conn.execute(_text("""
+                    CREATE TABLE IF NOT EXISTS correction_pins (
+                        id               SERIAL PRIMARY KEY,
+                        question_hash    VARCHAR(64) NOT NULL UNIQUE,
+                        pinned_answer    TEXT NOT NULL,
+                        scope_project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL,
+                        expires_at       TIMESTAMP,
+                        source           VARCHAR(32) NOT NULL DEFAULT 'manual',
+                        created_by_id    INTEGER REFERENCES users(id),
+                        created_at       TIMESTAMP DEFAULT NOW()
+                    )
+                """))
+                await conn.execute(_text(
+                    "CREATE INDEX IF NOT EXISTS ix_correction_pins_hash "
+                    "ON correction_pins (question_hash)"
+                ))
+                await conn.execute(_text(
+                    "CREATE INDEX IF NOT EXISTS ix_correction_pins_expires "
+                    "ON correction_pins (expires_at)"
+                ))
+
+                # Phase 4 (rag-quality): per-answer routing trace
+                await conn.execute(_text("""
+                    CREATE TABLE IF NOT EXISTS route_traces (
+                        id               SERIAL PRIMARY KEY,
+                        query_log_id     INTEGER NOT NULL REFERENCES query_logs(id) ON DELETE CASCADE,
+                        path             VARCHAR(32) NOT NULL,
+                        intent           VARCHAR(32),
+                        param            VARCHAR(255),
+                        applied_rule_ids JSONB,
+                        ms_total         INTEGER,
+                        ms_llm           INTEGER,
+                        created_at       TIMESTAMP DEFAULT NOW()
+                    )
+                """))
+                await conn.execute(_text(
+                    "CREATE INDEX IF NOT EXISTS ix_route_traces_log "
+                    "ON route_traces (query_log_id)"
+                ))
+                await conn.execute(_text(
+                    "CREATE INDEX IF NOT EXISTS ix_route_traces_created "
+                    "ON route_traces (created_at)"
                 ))
 
                 # LLM config table

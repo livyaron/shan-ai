@@ -31,7 +31,13 @@ logger = logging.getLogger(__name__)
 
 EmitFn = Callable[[dict], Any]
 
-FIX_TYPES = ["add_abbreviation", "add_synonym", "stop_word_remove", "field_alias", "prompt_patch"]
+FIX_TYPES = [
+    "add_abbreviation", "add_synonym", "stop_word_remove",
+    "field_alias", "prompt_patch",
+    "project_alias", "intent_override",   # NEW — Phase 1
+    "field_alias_real",                   # NEW — Phase 3.3
+    "correction_pin",                     # NEW — Phase 3.4 (needs human approval)
+]
 
 
 @dataclass
@@ -71,6 +77,14 @@ async def shadow_config(patch: dict):
             tokens.append(("stop_word_drops", ks._shadow_stop_word_drops.set(set(patch["stop_word_drops"]))))
         if "prompt_override" in patch:
             tokens.append(("prompt_override", ks._shadow_prompt_override.set(dict(patch["prompt_override"]))))
+        if "project_aliases" in patch:
+            tokens.append(("project_aliases", ks._shadow_project_aliases.set(dict(patch["project_aliases"]))))
+        if "intent_overrides" in patch:
+            tokens.append(("intent_overrides", ks._shadow_intent_overrides.set(dict(patch["intent_overrides"]))))
+        if "field_aliases" in patch:
+            tokens.append(("field_aliases", ks._shadow_field_aliases.set(dict(patch["field_aliases"]))))
+        if "correction_pins" in patch:
+            tokens.append(("correction_pins", ks._shadow_correction_pins.set(dict(patch["correction_pins"]))))
         yield
     finally:
         for name, tok in reversed(tokens):
@@ -79,6 +93,10 @@ async def shadow_config(patch: dict):
                 "synonyms": ks._shadow_synonyms,
                 "stop_word_drops": ks._shadow_stop_word_drops,
                 "prompt_override": ks._shadow_prompt_override,
+                "project_aliases":  ks._shadow_project_aliases,
+                "intent_overrides": ks._shadow_intent_overrides,
+                "field_aliases": ks._shadow_field_aliases,
+                "correction_pins": ks._shadow_correction_pins,
             }[name]
             cv.reset(tok)
 
@@ -109,14 +127,54 @@ def _patch_to_shadow(proposal_type: str, patch_json: dict) -> dict:
         return {"synonyms": patch_json.get("synonyms", {})}
     if proposal_type == "prompt_patch":
         return {"prompt_override": patch_json.get("prompt_override", {})}
+    if proposal_type == "project_alias":
+        from app.services.knowledge_service import normalize_hebrew
+        alias = normalize_hebrew(patch_json.get("alias_text", ""))
+        pid = patch_json.get("project_id")
+        if alias and pid:
+            return {"project_aliases": {alias: int(pid)}}
+        return {}
+    if proposal_type == "intent_override":
+        from app.services.ask_router import _normalize_q_hash
+        q = patch_json.get("question", "")
+        h = _normalize_q_hash(q) if q else None
+        forced_intent = patch_json.get("forced_intent")
+        forced_param = patch_json.get("forced_param")
+        if h and forced_intent:
+            return {"intent_overrides": {h: {"forced_intent": forced_intent, "forced_param": forced_param}}}
+        return {}
+    if proposal_type == "field_alias_real":
+        a = (patch_json.get("alias") or "").strip()
+        f = (patch_json.get("field") or "").strip()
+        if a and f:
+            return {"field_aliases": {a: f}}
+        return {}
+    if proposal_type == "correction_pin":
+        from app.services.ask_router import _normalize_q_hash
+        q = patch_json.get("question", "")
+        ans = patch_json.get("pinned_answer", "")
+        if not q or not ans:
+            return {}
+        h = _normalize_q_hash(q)
+        return {"correction_pins": {h: {
+            "pinned_answer": ans,
+            "scope_project_id": patch_json.get("scope_project_id"),
+            "expires_at": None,
+        }}}
     return {}
 
 
 async def _answer(question: str, user_id: int) -> str:
-    """Run the production answering pipeline without DB logging."""
+    """Run the production answering pipeline without DB logging.
+
+    Routes through ask_router.route() so eval mirrors what real users hit on
+    /dashboard/ask and Telegram. log_to_db=False keeps eval cycles out of
+    QueryLog history.
+    """
+    from app.services.ask_router import route
     async with async_session_maker() as s:
-        result = await ks.answer_with_full_context(question, s, user_id, log_to_db=False)
-    return result.get("answer", "")
+        result = await route(question, s, user_id, log_to_db=False)
+    return result.answer
 
 
 async def _snapshot_passing(
@@ -144,17 +202,82 @@ async def _snapshot_passing(
 # ───────────────────────── repair proposal ─────────────────────────
 
 _REPAIR_SYS = (
-    "You are a repair agent for a Hebrew RAG system. Given a question, the AI's wrong answer, and the gold answer, "
-    "propose ONE minimal config patch that would make the AI produce the gold answer. "
-    "Available fix types: "
-    "add_abbreviation (expand a Hebrew abbreviation, patch_json={'abbrevs': {'מנה\\\"פ': 'מנהל פרויקט'}}), "
-    "add_synonym (expand a term, patch_json={'synonyms': {'תחמ\\\"ש': ['תחנת משנה']}}), "
-    "stop_word_remove (remove word from stop list so it's used as a search term, patch_json={'words': ['מנהל']}), "
-    "field_alias (alias a field, patch_json={'synonyms': {'מנהפ': ['manager']}}), "
-    "prompt_patch (rewrite the rag_specific or rag_list system prompt, patch_json={'prompt_override': {'rag_specific': '...'}}). "
-    "Reply ONLY with strict JSON: {\"type\": \"...\", \"patch_json\": {...}, \"rationale\": \"...\", \"risk\": \"low|medium|high\"} "
+    "You are a repair agent for a Hebrew RAG system. Given a question, the AI's wrong answer, "
+    "and the gold answer, propose ONE minimal config patch that would make the AI produce the "
+    "gold answer. Available fix types and selection rubric (try in this order):\n"
+    "1. project_alias — AI failed because a project name wasn't recognized. "
+    "patch_json = {'alias_text': '<free text from question>', 'project_id': <int>}. "
+    "Pick this when the question names a project but the AI returned 'לא נמצא' or wrong project.\n"
+    "2. intent_override — AI picked the wrong project_tools intent. "
+    "patch_json = {'question': '<original q>', 'forced_intent': 'by_identifier|by_year|by_manager|count_by_type|list_risks|list_delayed', "
+    "'forced_param': '<param>'}.\n"
+    "3. field_alias_real — AI couldn't map a Hebrew word/abbreviation to a Project column. "
+    "patch_json = {'alias': 'מנה\\\"פ', 'field': 'manager|stage|risks|weekly_report|to_handle|estimated_finish_date|dev_plan_date'}. "
+    "Use when the question contains a Hebrew column-synonym that the static _FIELD_KEYWORDS dict misses.\n"
+    "4. add_abbreviation — patch_json = {'abbrevs': {'מנה\\\"פ': 'מנהל פרויקט'}}.\n"
+    "5. add_synonym — patch_json = {'synonyms': {'תחמ\\\"ש': ['תחנת משנה']}}.\n"
+    "6. stop_word_remove — patch_json = {'words': ['מנהל']}.\n"
+    "7. field_alias — patch_json = {'synonyms': {'מנהפ': ['manager']}}.\n"
+    "8. prompt_patch — patch_json = {'prompt_override': {'rag_specific': '...'}}.\n"
+    "9. correction_pin — LAST RESORT. AI is consistently wrong on a specific question and "
+    "no alias/synonym tweak fixes it. patch_json = {'question': '<original q>', 'pinned_answer': '<gold>', "
+    "'scope_project_id': <int|null>, 'ttl_days': 30}. The pin returns the answer VERBATIM with zero LLM "
+    "calls. ALWAYS set risk='high'. Requires admin approval before activation.\n"
+    "Reply ONLY with strict JSON: "
+    "{\"type\": \"...\", \"patch_json\": {...}, \"rationale\": \"...\", \"risk\": \"low|medium|high\"} "
     "or {\"type\": null} if no patch can plausibly help."
 )
+
+
+async def _candidate_projects(session: AsyncSession, question: str, limit: int = 15) -> list[dict]:
+    """Return up to `limit` projects whose name/identifier/manager overlaps the question's
+    tokens. Results are reranked: rows whose NAME contains a question token come FIRST,
+    then identifier-matches, then manager-matches. This gives the LLM-proposer a strong
+    hint to pick the right project when several share a manager.
+    """
+    from app.models import Project
+    from app.services.knowledge_service import normalize_hebrew
+    from sqlalchemy import or_
+
+    tokens = [t for t in normalize_hebrew(question).split() if len(t) >= 2]
+    if not tokens:
+        return []
+
+    clauses = []
+    for t in tokens:
+        clauses.append(Project.name.ilike(f"%{t}%"))
+        clauses.append(Project.project_identifier.ilike(f"%{t}%"))
+        clauses.append(Project.manager.ilike(f"%{t}%"))
+    stmt = (
+        select(Project.id, Project.project_identifier, Project.name, Project.manager)
+        .where(or_(*clauses))
+        .where(Project.is_active.is_(True))
+        .limit(limit * 3)  # over-fetch for reranking
+    )
+    rows = (await session.execute(stmt)).all()
+
+    # Rerank: score each row by which field matched. Name > identifier > manager.
+    # Use word-set intersection (not substring) so "של" doesn't score inside "השלמת".
+    token_set = set(tokens)
+
+    def _score(row) -> int:
+        name_words = set(normalize_hebrew(row.name or "").split())
+        id_words   = set(normalize_hebrew(row.project_identifier or "").split())
+        mgr_words  = set(normalize_hebrew(row.manager or "").split())
+        if token_set & name_words:
+            return 3
+        if token_set & id_words:
+            return 2
+        if token_set & mgr_words:
+            return 1
+        return 0
+
+    ranked = sorted(rows, key=_score, reverse=True)[:limit]
+    return [
+        {"id": r.id, "project_identifier": r.project_identifier,
+         "name": r.name, "manager": r.manager}
+        for r in ranked
+    ]
 
 
 async def propose_targeted_fix(
@@ -164,12 +287,22 @@ async def propose_targeted_fix(
     gold_answer: str,
     eval_run_id: int | None,
 ) -> RepairProposal | None:
-    user = json.dumps({
+    candidates = await _candidate_projects(session, question)
+    user_payload = {
         "question": question,
         "ai_answer": ai_answer,
         "gold_answer": gold_answer,
         "available_fix_types": FIX_TYPES,
-    }, ensure_ascii=False)
+    }
+    if candidates:
+        user_payload["candidate_projects"] = candidates
+        user_payload["_hint"] = (
+            "For project_alias fixes: alias_text must be the project NAME or "
+            "NICKNAME extracted from the question (e.g. 'בת ים'), NOT the gold answer. "
+            "project_id MUST be one of the integer ids in candidate_projects above. "
+            "Do not invent ids. If no candidate fits, choose a different fix type."
+        )
+    user = json.dumps(user_payload, ensure_ascii=False)
     try:
         raw = await llm_chat(
             "eval_repair",
@@ -235,9 +368,171 @@ async def _apply_patch(session: AsyncSession, proposal: RepairProposal, user_id:
                 source_proposal_id=p.id,
             ))
 
+    elif p.type == "project_alias":
+        from app.models import ProjectAlias, Project
+        from app.services.knowledge_service import normalize_hebrew
+        alias_text = (pj.get("alias_text") or "").strip()
+        try:
+            project_id = int(pj.get("project_id") or 0)
+        except (TypeError, ValueError):
+            project_id = 0
+        if not alias_text or project_id <= 0:
+            raise ValueError(
+                f"project_alias proposal {p.id} missing alias_text or invalid project_id"
+            )
+        # Validate the project actually exists before we try to insert (FK
+        # would error otherwise and leave the proposal stuck in 'pending').
+        proj = await session.get(Project, project_id)
+        if proj is None:
+            raise ValueError(
+                f"project_alias proposal {p.id} references nonexistent project_id={project_id}"
+            )
+        row = ProjectAlias(
+            project_id=project_id,
+            alias_text=alias_text,
+            normalized_alias=normalize_hebrew(alias_text),
+            source="ai",
+            created_by_id=user_id,
+        )
+        session.add(row)
+        await session.flush()
+        p.applied_artifact_id = row.id
+
+    elif p.type == "intent_override":
+        from app.models import IntentOverride
+        from app.services.ask_router import _normalize_q_hash
+        q = pj.get("question", "")
+        if not q or not pj.get("forced_intent"):
+            raise ValueError(f"intent_override proposal {p.id} missing question or forced_intent")
+        row = IntentOverride(
+            question_pattern_hash=_normalize_q_hash(q),
+            forced_intent=pj["forced_intent"],
+            forced_param=pj.get("forced_param"),
+            source="ai",
+            created_by_id=user_id,
+        )
+        session.add(row)
+        await session.flush()
+        p.applied_artifact_id = row.id
+
+    elif p.type == "field_alias_real":
+        from app.models import QuerySynonym as _QS
+        alias = (pj.get("alias") or "").strip()
+        field_name = (pj.get("field") or "").strip()
+        if not alias or not field_name:
+            raise ValueError(f"field_alias_real proposal {p.id} missing alias or field")
+        # Reuse the sentinel-row helper used by add_abbreviation
+        await _upsert_synonym_sentinel(
+            session, "__field_aliases__",
+            merge_pairs={alias: field_name},
+        )
+        # Find the sentinel row id for rollback
+        sentinel = await session.scalar(
+            select(_QS).where(_QS.original == "__field_aliases__"))
+        if sentinel:
+            p.applied_artifact_id = sentinel.id
+
+    elif p.type == "correction_pin":
+        # Defer DB insert to approve_pin(). Mark proposal awaiting_approval.
+        if not pj.get("question") or not pj.get("pinned_answer"):
+            raise ValueError(f"correction_pin proposal {p.id} missing question or pinned_answer")
+        p.status = "awaiting_approval"
+        p.applied_at = None
+        await session.commit()
+        return  # Do NOT fall through to the `p.status = "applied"` line below
+
     p.status = "applied"
     p.applied_at = datetime.utcnow()
     p.applied_by_id = user_id
+    await session.commit()
+    ks.invalidate_eval_caches()
+
+
+async def approve_pin(
+    session: AsyncSession,
+    proposal_id: int,
+    user_id: int | None,
+) -> RepairProposal:
+    """Admin-triggered approval for an awaiting_approval correction_pin proposal.
+    Creates the CorrectionPin row, marks proposal applied."""
+    from app.models import CorrectionPin
+    from datetime import timedelta
+    from app.services.ask_router import _normalize_q_hash
+
+    proposal = await session.get(RepairProposal, proposal_id)
+    if proposal is None:
+        raise LookupError(f"proposal {proposal_id} not found")
+    if proposal.status != "awaiting_approval":
+        raise ValueError(
+            f"proposal {proposal_id} is not awaiting approval (status={proposal.status})"
+        )
+    if proposal.type != "correction_pin":
+        raise ValueError(f"proposal {proposal_id} is not a correction_pin")
+
+    pj = proposal.patch_json or {}
+    question = pj.get("question", "")
+    answer = pj.get("pinned_answer", "")
+    ttl_days = int(pj.get("ttl_days") or 30)
+    scope = pj.get("scope_project_id")
+
+    expires_at = datetime.utcnow() + timedelta(days=ttl_days) if ttl_days > 0 else None
+    pin = CorrectionPin(
+        question_hash=_normalize_q_hash(question),
+        pinned_answer=answer,
+        scope_project_id=scope,
+        expires_at=expires_at,
+        source="ai_approved",
+        created_by_id=user_id,
+    )
+    session.add(pin)
+    await session.flush()
+
+    proposal.status = "applied"
+    proposal.applied_at = datetime.utcnow()
+    proposal.applied_by_id = user_id
+    proposal.applied_artifact_id = pin.id
+    await session.commit()
+    ks.invalidate_eval_caches()
+    return proposal
+
+
+async def _unapply_patch(session: AsyncSession, proposal: RepairProposal) -> None:
+    """Reverse the artifact created by _apply_patch and mark the proposal rolled_back."""
+    if not proposal.applied_artifact_id:
+        # No artifact to delete — older proposals from before applied_artifact_id existed.
+        proposal.status = "rolled_back"
+        await session.commit()
+        ks.invalidate_eval_caches()
+        return
+
+    if proposal.type == "project_alias":
+        from app.models import ProjectAlias
+        row = await session.get(ProjectAlias, proposal.applied_artifact_id)
+        if row:
+            await session.delete(row)
+    elif proposal.type == "intent_override":
+        from app.models import IntentOverride
+        row = await session.get(IntentOverride, proposal.applied_artifact_id)
+        if row:
+            await session.delete(row)
+    elif proposal.type == "prompt_patch":
+        from app.models import PromptOverride
+        row = await session.get(PromptOverride, proposal.applied_artifact_id)
+        if row:
+            row.active = False  # PromptOverride is soft-deactivated, not deleted
+    elif proposal.type == "correction_pin":
+        from app.models import CorrectionPin
+        row = await session.get(CorrectionPin, proposal.applied_artifact_id)
+        if row:
+            await session.delete(row)
+    elif proposal.type in ("add_abbreviation", "add_synonym",
+                           "field_alias", "stop_word_remove"):
+        # These mutate sentinel rows in query_synonyms — reverse mutation is
+        # noisy and rarely useful; mark rolled_back without DB deletion. Admin
+        # can edit the sentinel row manually if needed.
+        pass
+
+    proposal.status = "rolled_back"
     await session.commit()
     ks.invalidate_eval_caches()
 
@@ -360,7 +655,30 @@ async def run_one_question(
         res.score_final = new_score
 
         if new_score >= threshold and not regressions:
-            await _apply_patch(session, proposal, user_id)
+            try:
+                await _apply_patch(session, proposal, user_id)
+            except Exception as apply_err:
+                # _apply_patch validates patch_json content (e.g. project_id must
+                # reference a real Project). On validation/FK failure, mark
+                # rejected with the exception text rather than leaving the
+                # proposal stuck in 'pending' forever.
+                logger.warning(f"_apply_patch failed for proposal {proposal.id}: {apply_err}")
+                await session.rollback()
+                proposal = await session.merge(proposal)
+                proposal.status = "rejected"
+                proposal.reject_reason = f"apply_error: {str(apply_err)[:200]}"
+                await session.commit()
+                rejected_entry = {
+                    "proposal_id": proposal.id,
+                    "type": proposal.type,
+                    "patch": proposal.patch_json,
+                    "reject_reason": proposal.reject_reason,
+                    "regressions": [],
+                    "new_score": new_score,
+                }
+                res.rejected_fixes.append(rejected_entry)
+                emit({"type": "repair_rejected", "question_hash": gold.question_hash, **rejected_entry})
+                continue
             proposal.regression_count = 0
             proposal.delta_pass_rate = (new_score - score)
             await session.commit()
