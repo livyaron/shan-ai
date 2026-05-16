@@ -181,6 +181,29 @@ async def startup():
                     "ON correction_pins (expires_at)"
                 ))
 
+                # Phase 4 (rag-quality): per-answer routing trace
+                await conn.execute(_text("""
+                    CREATE TABLE IF NOT EXISTS route_traces (
+                        id               SERIAL PRIMARY KEY,
+                        query_log_id     INTEGER NOT NULL REFERENCES query_logs(id) ON DELETE CASCADE,
+                        path             VARCHAR(32) NOT NULL,
+                        intent           VARCHAR(32),
+                        param            VARCHAR(255),
+                        applied_rule_ids JSONB,
+                        ms_total         INTEGER,
+                        ms_llm           INTEGER,
+                        created_at       TIMESTAMP DEFAULT NOW()
+                    )
+                """))
+                await conn.execute(_text(
+                    "CREATE INDEX IF NOT EXISTS ix_route_traces_log "
+                    "ON route_traces (query_log_id)"
+                ))
+                await conn.execute(_text(
+                    "CREATE INDEX IF NOT EXISTS ix_route_traces_created "
+                    "ON route_traces (created_at)"
+                ))
+
                 # LLM config table
                 await conn.execute(_text("""
                     CREATE TABLE IF NOT EXISTS llm_config (

@@ -510,3 +510,26 @@ class CorrectionPin(Base):
 
     scope_project = relationship("Project")
     created_by    = relationship("User")
+
+
+class RouteTrace(Base):
+    """Per-answer routing trace. 1:1 with QueryLog (when log_to_db=True).
+
+    Used by the learning-effectiveness dashboard to answer "which rules fire
+    most?" and "where does the loop spend its time?" without parsing the
+    sources_used JSON on QueryLog.
+    """
+    __tablename__ = "route_traces"
+
+    id                = Column(Integer, primary_key=True)
+    query_log_id      = Column(Integer, ForeignKey("query_logs.id", ondelete="CASCADE"),
+                               nullable=False, index=True)
+    path              = Column(String(32), nullable=False)   # correction_pin | decision | project_tools | rag
+    intent            = Column(String(32), nullable=True)
+    param             = Column(String(255), nullable=True)
+    applied_rule_ids  = Column(JSON, nullable=True)          # list[str] e.g. ["project_alias:12"]
+    ms_total          = Column(Integer, nullable=True)
+    ms_llm            = Column(Integer, nullable=True)
+    created_at        = Column(DateTime, default=datetime.utcnow, index=True)
+
+    query_log = relationship("QueryLog")
