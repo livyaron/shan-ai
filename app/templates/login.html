@@ -195,6 +195,23 @@
       margin-top: 8px; text-align: right;
     }
 
+    .manual-dl {
+      display: inline-flex; align-items: center; gap: 8px;
+      margin-top: 14px; padding: 8px 14px;
+      background: transparent;
+      border: 1px solid color-mix(in oklab, var(--acc) 45%, transparent);
+      border-radius: 2px;
+      color: var(--acc); text-decoration: none;
+      font-family: 'JetBrains Mono', monospace; font-size: 11px;
+      letter-spacing: 2px;
+      transition: background 0.15s, box-shadow 0.15s;
+    }
+    .manual-dl:hover {
+      background: color-mix(in oklab, var(--acc) 10%, transparent);
+      box-shadow: 0 0 16px color-mix(in oklab, var(--acc) 25%, transparent);
+    }
+    .manual-dl .ico { font-size: 14px; }
+
     /* ── TELEMETRY BAR ── */
     .telem {
       position: fixed; left: 0; right: 0; bottom: 0; height: 32px;
@@ -341,6 +358,12 @@
       </div>
     </form>
     <div class="hint">DEFAULT KEY · 1234</div>
+    <div style="text-align:right; margin-top: 10px;">
+      <a href="/static/manual.pdf" download="Shan-AI-Manual.pdf" class="manual-dl">
+        <span class="ico">📘</span>
+        <span>הורד מדריך משתמש · PDF</span>
+      </a>
+    </div>
   </div>
 
 </div>
