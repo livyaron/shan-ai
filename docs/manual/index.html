@@ -499,7 +499,53 @@ figcaption { font-size: .85em; color: var(--muted); margin-top: 6px; text-align:
     </div>
 </section>
 
-<!-- Content sections go here (Tasks 8-9) -->
+<section class="page-break">
+    <h1>7. איך המערכת לומדת</h1>
+    <p>כל לחיצה על 👍 או 👎 משפיעה. המערכת שומרת תיקונים, מציעה תיקון אוטומטי,
+       ומעדכנת את התשובות העתידיות. את/ה לא צריך/ה לעשות שום דבר טכני — רק
+       להגיב.</p>
+
+    <figure><svg width="100%" viewBox="0 0 600 360"><use href="#diag-learning"/></svg></figure>
+
+    <h2>איך לעבוד עם המערכת</h2>
+    <ol class="step-list">
+        <li>שאל/י שאלה ב-<span class="badge badge-purple">💬 שאל</span>.</li>
+        <li>אם התשובה נכונה — לחיצה על 👍. (זה שומר את התשובה כמודל ל-future).</li>
+        <li>אם התשובה שגויה — לחיצה על 👎. ייפתח חלון "מה היית מצפה לשמוע?"</li>
+        <li>הקלד/י את התשובה הנכונה — לחיצה על "שמור ולמד".</li>
+        <li>תוך 30-90 שניות המערכת תנסה לתקן את עצמה. ההודעה תעדכן: "🔄 לומד מהתיקון".</li>
+        <li>בפעם הבאה שמישהו ישאל את אותה שאלה — תקבל את התשובה הנכונה.</li>
+    </ol>
+
+    <h2>איפה רואים את הפעילות</h2>
+    <p>בעמוד <span class="badge badge-purple">🎓 למידה</span>, כרטיס בראש הדף מציג:</p>
+    <div class="grid grid-3 avoid-break">
+        <div class="card"><div class="card-num" style="color:var(--brand-green);">87%</div>
+            <div class="card-label">pass-rate — אחוז השאלות שהמערכת ענתה נכון השבוע</div></div>
+        <div class="card"><div class="card-num" style="color:var(--brand-cyan);">12</div>
+            <div class="card-label">rules-applied — כללים שהמערכת למדה השבוע</div></div>
+        <div class="card"><div class="card-num" style="color:var(--brand-amber);">5</div>
+            <div class="card-label">corrections-in — תיקונים שקיבלה השבוע</div></div>
+    </div>
+
+    <h2>אישורי תשובות זהב</h2>
+    <p>בעמוד <span class="badge badge-purple">🎯 אימות תשובות זהב</span> (קישור מהדף "למידה"):</p>
+    <ul>
+        <li>רואה/ה את כל ה<strong>תשובות הנכונות</strong> שהמערכת שמרה (gold answers).</li>
+        <li>יכול/ה לאשר/לערוך/למחוק לפני שהמערכת תשתמש בהן.</li>
+        <li>"הפעל מחזור" — הרצת בדיקה מלאה: כל השאלות נשאלות שוב, וכל אחת מקבלת ציון.</li>
+    </ul>
+
+    <div class="callout warn"><div class="callout-title">⚠ הבדל קריטי</div>
+        <ul>
+            <li><strong>👍 / 👎</strong> — לכולם. השפעה מיידית.</li>
+            <li><strong>אימות תשובות זהב</strong> — לפני הרצת מחזור הבדיקה. כאן מאשרים את ה-gold answers שייקבעו את ציון המערכת.</li>
+            <li><strong>הפעלת מחזור</strong> — אחרי האישור. המערכת בודקת את עצמה ומציעה תיקונים.</li>
+        </ul>
+    </div>
+</section>
+
+<!-- Content sections go here (Task 9) -->
 
 </body>
 </html>
