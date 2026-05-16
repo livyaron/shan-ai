@@ -466,7 +466,40 @@ figcaption { font-size: .85em; color: var(--muted); margin-top: 6px; text-align:
     </ul>
 </section>
 
-<!-- Content sections go here (Tasks 7-9) -->
+<section class="page-break">
+    <h1>6. רשימת ההחלטות</h1>
+    <p>בעמוד <span class="badge badge-purple">📋 החלטות</span> רואה/ה את כל ההחלטות —
+       שלך, של הצוות, ואלה שמחכות לאישור שלך.</p>
+
+    <h2>הצבעים והאיקונים</h2>
+    <table>
+        <thead><tr><th>תווית</th><th>משמעות</th></tr></thead>
+        <tbody>
+        <tr><td><span class="badge badge-info">מידע</span></td><td>החלטה מסוג INFO — לוג בלבד, אין צורך בפעולה</td></tr>
+        <tr><td><span class="badge badge-normal">רגיל</span></td><td>NORMAL — לוג + הודעות + ביצוע</td></tr>
+        <tr><td><span class="badge badge-critical">קריטי</span></td><td>CRITICAL — דורש אישור בעל סמכות לפני ביצוע</td></tr>
+        <tr><td><span class="badge badge-uncertain">לא ודאי</span></td><td>UNCERTAIN — דורש בירור ידני</td></tr>
+        <tr><td>⏳ ממתין</td><td>החלטה שעדיין לא אושרה</td></tr>
+        <tr><td>✅ מאושר</td><td>בעל הסמכות אישר — תבוצע</td></tr>
+        <tr><td>❌ נדחה</td><td>בעל הסמכות דחה — לא תבוצע</td></tr>
+        <tr><td>⚡ בוצע</td><td>הפעולה בוצעה בפועל</td></tr>
+        </tbody>
+    </table>
+
+    <h2>פעולות נפוצות</h2>
+    <ol class="step-list">
+        <li><strong>אישור / דחיית החלטה</strong> — אם את/ה הבעל סמכות (A), כפתורי "✅ אשר" ו"❌ דחה" יופיעו ישירות על הכרטיס.</li>
+        <li><strong>הוספת פידבק</strong> — אחרי שההחלטה הסתיימה, ניתן להוסיף ציון 1-5 + הערה. הציון נכנס ל-RAG ומשפיע על המלצות עתידיות.</li>
+        <li><strong>צפייה בפרטים</strong> — לחיצה על הסיכום פותחת חלון עם כל הנתונים, RACI, ופידבק.</li>
+        <li><strong>סינון</strong> — לפי סוג / סטטוס / פרויקט בעזרת התפריט העליון.</li>
+    </ol>
+
+    <div class="callout tip"><div class="callout-title">💡 איך לאשר בטלגרם</div>
+        כשמגיעה הודעת אישור — לחיצה על ✅ או ❌. אם דוחה — תקבל/י שדה הזנה לסיבת הדחייה.
+    </div>
+</section>
+
+<!-- Content sections go here (Tasks 8-9) -->
 
 </body>
 </html>
