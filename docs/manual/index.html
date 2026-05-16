@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<title>Shan-AI — מדריך משתמש</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500;600;700;800&display=swap');
+
+:root {
+    --bg: #ffffff;
+    --ink: #0e1020;
+    --muted: #64748b;
+    --brand-navy: #0e1020;
+    --brand-purple: #8b9cf4;
+    --brand-cyan: #00d4ff;
+    --brand-green: #36e273;
+    --brand-amber: #ffd700;
+    --brand-red: #ff6b7a;
+    --brand-line: #1a1e38;
+    --accent-bg: #f8fafc;
+}
+
+* { box-sizing: border-box; }
+
+@page {
+    size: A4;
+    margin: 18mm 16mm;
+    @bottom-center {
+        content: counter(page) " / " counter(pages);
+        font-family: 'Heebo', sans-serif;
+        font-size: 9pt;
+        color: #94a3b8;
+    }
+}
+
+html, body { background: var(--bg); color: var(--ink);
+    font-family: 'Heebo', sans-serif; font-size: 11pt; line-height: 1.55;
+    margin: 0; padding: 0; }
+
+.page { padding: 0; }
+.page-break { page-break-after: always; }
+.avoid-break { page-break-inside: avoid; }
+
+h1 { font-size: 28pt; font-weight: 800; color: var(--brand-navy);
+    margin: 0 0 .5em 0; letter-spacing: -.01em; }
+h2 { font-size: 18pt; font-weight: 700; color: var(--brand-navy);
+    margin: 1.4em 0 .4em 0; border-bottom: 2px solid var(--brand-purple);
+    padding-bottom: 4px; }
+h3 { font-size: 13pt; font-weight: 600; color: var(--brand-navy);
+    margin: 1.1em 0 .3em 0; }
+p { margin: .5em 0; }
+ul, ol { margin: .4em 0; padding-right: 1.4em; }
+li { margin: .2em 0; }
+strong { color: var(--brand-navy); font-weight: 700; }
+code { font-family: 'Heebo', monospace; background: var(--accent-bg);
+    padding: 1px 5px; border-radius: 4px; font-size: .95em; }
+
+.cover {
+    display: flex; flex-direction: column; justify-content: center;
+    align-items: center; min-height: 250mm; text-align: center;
+    background: linear-gradient(135deg, #0e1020 0%, #1a2240 100%);
+    color: #fff; padding: 40mm 20mm; page-break-after: always;
+}
+.cover .logo { font-size: 60pt; margin-bottom: 12mm; }
+.cover h1 { color: #fff; font-size: 36pt; font-weight: 800; margin: 0 0 6mm 0; }
+.cover .tagline { font-size: 14pt; color: #cbd5e1; margin: 0; }
+.cover .meta { margin-top: 30mm; font-size: 10pt; color: #94a3b8; }
+.cover .glyph { color: var(--brand-cyan); }
+
+.toc { padding: 10mm 0; }
+.toc h2 { border: none; margin-top: 0; }
+.toc ol { list-style: none; padding-right: 0; counter-reset: tocitem; }
+.toc li { counter-increment: tocitem; display: flex; align-items: baseline;
+    gap: 10px; padding: 6px 0; border-bottom: 1px dotted #cbd5e1; }
+.toc li::before { content: counter(tocitem, decimal-leading-zero);
+    color: var(--brand-purple); font-weight: 700; min-width: 28px; }
+.toc .page-num { color: var(--muted); font-variant-numeric: tabular-nums;
+    margin-right: auto; }
+
+.callout { background: var(--accent-bg); border-right: 4px solid var(--brand-purple);
+    padding: 12px 16px; margin: 1em 0; border-radius: 6px; }
+.callout.tip { border-color: var(--brand-green); }
+.callout.warn { border-color: var(--brand-amber); }
+.callout.danger { border-color: var(--brand-red); }
+.callout-title { font-weight: 700; margin-bottom: 4px; color: var(--brand-navy); }
+
+.kbd { background: #1f2937; color: #fff; padding: 2px 8px; border-radius: 4px;
+    font-family: 'Heebo', monospace; font-size: .85em; }
+
+.badge { display: inline-block; padding: 2px 10px; border-radius: 14px;
+    font-size: .85em; font-weight: 600; }
+.badge-info     { background: #0e3d47; color: #17d8f5; }
+.badge-normal   { background: #0d3320; color: var(--brand-green); }
+.badge-critical { background: #3d1018; color: var(--brand-red); }
+.badge-uncertain{ background: #3a2e00; color: var(--brand-amber); }
+.badge-purple   { background: #1f2342; color: var(--brand-purple); }
+
+.grid { display: grid; gap: 12px; }
+.grid-2 { grid-template-columns: 1fr 1fr; }
+.grid-3 { grid-template-columns: repeat(3, 1fr); }
+.grid-4 { grid-template-columns: repeat(4, 1fr); }
+
+.card { background: var(--accent-bg); border: 1px solid #e2e8f0;
+    border-radius: 10px; padding: 14px 16px; }
+.card-num { font-size: 22pt; font-weight: 800; color: var(--brand-purple); line-height: 1; }
+.card-label { color: var(--muted); font-size: .9em; margin-top: 4px; }
+
+table { width: 100%; border-collapse: collapse; margin: .8em 0; font-size: .95em; }
+th, td { padding: 8px 10px; text-align: right; border-bottom: 1px solid #e2e8f0; }
+th { background: var(--accent-bg); color: var(--brand-navy); font-weight: 700; }
+
+figure { margin: 1em 0; }
+figure svg { max-width: 100%; height: auto; display: block; }
+figcaption { font-size: .85em; color: var(--muted); margin-top: 6px; text-align: center; }
+
+.step-list { counter-reset: step; padding-right: 0; list-style: none; }
+.step-list li { counter-increment: step; position: relative; padding-right: 38px;
+    margin-bottom: 10px; }
+.step-list li::before { content: counter(step); position: absolute; right: 0;
+    top: 0; width: 28px; height: 28px; background: var(--brand-purple); color: #fff;
+    border-radius: 50%; display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 11pt; }
+
+.glossary dt { font-weight: 700; color: var(--brand-purple); margin-top: 10px; }
+.glossary dd { margin: 4px 0 0 0; padding-right: 14px; color: #334155; }
+</style>
+</head>
+<body>
+
+<!-- Cover -->
+<section class="cover">
+    <div class="logo">🛰️</div>
+    <h1>Shan-AI</h1>
+    <div class="tagline">מערכת בינה תפעולית לתחנות משנה — מדריך המשתמש</div>
+    <div class="meta">גרסה 1.0 · אגף הקמה · החברה לחשמל</div>
+</section>
+
+<!-- TOC -->
+<section class="toc page-break">
+    <h2>תוכן עניינים</h2>
+    <ol>
+        <li>ברוכים הבאים — מה Shan-AI ומה היא נותנת לך<span class="page-num">3</span></li>
+        <li>התחברות וסיור בדשבורד<span class="page-num">6</span></li>
+        <li>שאלות ותשובות בעמוד "שאל"<span class="page-num">9</span></li>
+        <li>תיעוד החלטה — הזרימה המלאה כולל RACI<span class="page-num">12</span></li>
+        <li>בוט הטלגרם — שימוש בשטח<span class="page-num">16</span></li>
+        <li>לולאת הלמידה — איך המערכת נעשית חכמה יותר<span class="page-num">19</span></li>
+        <li>ניהול כללים (מנהלים בלבד)<span class="page-num">23</span></li>
+        <li>שאלות נפוצות ומונחים<span class="page-num">26</span></li>
+    </ol>
+</section>
+
+<!-- Content sections go here (Tasks 3-9) -->
+
+</body>
+</html>
