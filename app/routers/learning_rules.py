@@ -194,3 +194,64 @@ async def test_now(
         "answer": result.answer[:1000],
         "sources_text": result.sources_text,
     }
+
+
+@router.get("/dashboard/learning/stats")
+async def learning_stats(
+    session: AsyncSession = Depends(get_db_session),
+    current_user: User = Depends(get_current_user),
+):
+    """Three metrics: 7-day pass-rate (most recent EvalRun), rules applied
+    this week, corrections received this week.
+
+    NO admin gate — any logged-in user can see these read-only counters.
+    """
+    from datetime import datetime as _dt, timedelta as _td
+    from app.models import EvalRun, RepairProposal, AnswerFeedback, SystemFlag
+    from sqlalchemy import func as _func
+
+    cutoff = _dt.utcnow() - _td(days=7)
+
+    # Most recent EvalRun's pass-rate (within last 7 days)
+    eval_run = await session.scalar(
+        select(EvalRun)
+        .where(EvalRun.status == "completed")
+        .where(EvalRun.finished_at >= cutoff)
+        .order_by(EvalRun.id.desc())
+    )
+    pass_rate_7d = None
+    if eval_run and eval_run.n_probes:
+        pass_rate_7d = round(eval_run.n_pass / eval_run.n_probes, 3)
+
+    # Baseline stored at Phase 1 completion (key=phase1_baseline_pass_rate)
+    baseline_row = await session.scalar(
+        select(SystemFlag).where(SystemFlag.key == "phase1_baseline_pass_rate")
+    )
+    pass_rate_baseline = None
+    if baseline_row and baseline_row.value:
+        try:
+            pass_rate_baseline = round(float(baseline_row.value), 3)
+        except (TypeError, ValueError):
+            pass_rate_baseline = None
+
+    # Rules applied in last 7 days
+    rules_applied_7d = await session.scalar(
+        select(_func.count(RepairProposal.id))
+        .where(RepairProposal.status == "applied")
+        .where(RepairProposal.applied_at >= cutoff)
+    ) or 0
+
+    # Corrections received in last 7 days
+    corrections_7d = await session.scalar(
+        select(_func.count(AnswerFeedback.id))
+        .where(AnswerFeedback.vote == "down")
+        .where(AnswerFeedback.correction_text.isnot(None))
+        .where(AnswerFeedback.created_at >= cutoff)
+    ) or 0
+
+    return {
+        "pass_rate_7d": pass_rate_7d,
+        "pass_rate_baseline": pass_rate_baseline,
+        "rules_applied_7d": int(rules_applied_7d),
+        "corrections_7d": int(corrections_7d),
+    }
