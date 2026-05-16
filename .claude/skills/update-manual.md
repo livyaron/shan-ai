@@ -1,81 +1,127 @@
 ---
 name: update-manual
-description: Update the Shan-AI user manual (docs/manual/index.html + sources/*.md + manual.pdf) when a major app change has shipped — new feature, renamed surface, changed flow, new UI page, new admin capability. TRIGGER on user requests like "update the manual", "refresh the docs", "regenerate the user manual", "the manual is out of date", or after the user announces a major release. Do NOT trigger for tiny bug fixes or internal refactors that users never see.
+description: Autonomously update the Shan-AI user manual after major user-visible app changes. Detects what changed since the last `user-manual-vX.Y` tag — no user input needed for change description. TRIGGER on user requests like "update the manual", "refresh the docs", "regenerate the user manual", or after the user announces a major release. Do NOT trigger for tiny bug fixes or internal refactors that users never see — the skill itself filters non-user-visible diffs.
 ---
 
-# Update the Shan-AI User Manual
+# Update the Shan-AI User Manual — Autonomous
 
 The user manual lives at `docs/manual/`:
 
 - `index.html` — single-page HTML, 9 chapters, embedded SVG infographics, Heebo font (Hebrew RTL).
 - `sources/*.md` — per-chapter Markdown twins (used for NotebookLM uploads).
-- `manual.pdf` — built artifact (also copied to `static/manual.pdf` so the login page can serve it).
+- `manual.pdf` — built artifact (also copied to `static/manual.pdf` so the login page serves it).
+- `archive/manual-vX.Y.pdf` — every prior version, retained for diff/comparison.
 - `render_pdf.sh` — one-shot Chromium renderer.
 
 The original spec is `docs/superpowers/plans/2026-05-16-user-manual.md`. Chapter inventory:
 
-1. Welcome + benefits — `sources/00_intro.md`
-2. Login + dashboard tour — `sources/01_login_dashboard.md`
-3. Ask page + decisions + RACI — `sources/02_ask.md`
-4. Telegram bot — `sources/03_telegram.md`
-5. Decisions list + approval flow — `sources/04_decisions.md`
-6. Learning loop — `sources/05_learning_loop.md`
-7. Admin rules + FAQ + glossary — `sources/06_admin.md`
+| # | Chapter | HTML anchor | Markdown twin | Triggered by changes to |
+|---|---------|-------------|----------------|-------------------------|
+| 1 | Welcome + benefits | `<h1>1. ברוכים הבאים</h1>` | `sources/00_intro.md` | High-level architecture, new surfaces |
+| 2 | Login + dashboard tour | `<h1>2. התחברות וסיור</h1>` | `sources/01_login_dashboard.md` | `app/templates/login.html`, navbar in any layout template |
+| 3 | Ask page + decisions + RACI | `<h1>3. עמוד "שאל"</h1>` + `<h1>4. RACI</h1>` | `sources/02_ask.md` | `app/templates/ask.html`, `app/routers/ask.py`, `app/services/ask_router.py`, `app/services/claude_service.py`, `app/services/raci_service.py` |
+| 5 | Telegram bot | `<h1>5. בוט הטלגרם</h1>` | `sources/03_telegram.md` | `app/services/telegram_polling.py`, `app/services/telegram_routing.py`, `app/routers/telegram.py` |
+| 6 | Decisions list + approval | `<h1>6. רשימת ההחלטות</h1>` | `sources/04_decisions.md` | `app/templates/decisions.html`, `app/templates/decision_review.html`, `app/services/decision_service.py`, `app/services/distribution_service.py` |
+| 7 | Learning loop | `<h1>7. איך המערכת לומדת</h1>` | `sources/05_learning_loop.md` | `app/templates/eval.html`, `app/templates/eval_curate.html`, `app/services/per_question_loop_service.py`, `app/services/gold_truth_service.py`, `app/services/answer_feedback_service.py` |
+| 8 | Admin rules + FAQ + glossary | `<h1>8. ניהול כללים</h1>` + `<h1>9. שאלות נפוצות</h1>` | `sources/06_admin.md` | `app/templates/learning_rules.html`, `app/templates/learning.html`, `app/routers/learning_rules.py`, new fix-types, new models in `app/models.py` |
 
-## When to update
+---
 
-Run this skill ONLY when a user-visible change shipped. Examples that warrant an update:
+## Execution flow
 
-- New page/route added (e.g., a new admin tab, a new endpoint exposed to users)
-- An existing flow's UI changed substantially (button moved, label renamed)
-- A new feature exposed to users (e.g., a new fix-type they can author manually)
-- A new RACI rule, new decision type, new badge meaning
-- A renamed nav item or a new keyboard shortcut
+The skill runs end-to-end with ZERO user input on the change description. It self-discovers what changed.
 
-Do NOT update for:
+### Step 1: Find the last manual baseline
 
-- Internal refactors with no user-visible effect
-- Bug fixes that restore previously-documented behavior
-- Tests, CI, dependencies
-- Anything that doesn't change what the user sees or clicks
+```bash
+LAST_TAG=$(git tag -l "user-manual-v*" | sort -V | tail -1)
+echo "Last manual tag: $LAST_TAG"
+```
 
-If unsure, ask the user "what changed that users will notice?" before proceeding.
+If no tag exists, baseline is the initial commit of `docs/manual/index.html` (find via `git log --reverse --format=%H -- docs/manual/index.html | head -1`).
 
-## How to update
+### Step 2: Compute the changed-files set since baseline
 
-### Step 1: Identify what changed
+```bash
+git diff --name-only "$LAST_TAG..HEAD" | sort -u > /tmp/manual_diff.txt
+wc -l /tmp/manual_diff.txt
+head -30 /tmp/manual_diff.txt
+```
 
-Run `git log --oneline -n 20` and read the user-facing commit messages. Ask the user to confirm what they consider the "major change" that triggered this update. Note WHICH chapters are affected — usually 1-3 chapters, rarely all 7.
+If empty → nothing to update. Report "no changes since $LAST_TAG" and exit.
 
-### Step 2: Read the affected chapter section(s)
+### Step 3: Classify which chapters are affected
 
-Use `Read` on `docs/manual/index.html` to locate the relevant `<section class="page-break">` block. Each chapter is wrapped by a `<!-- Chapter N -->` comment or starts with `<h1>N. ...</h1>`.
+For each line in `/tmp/manual_diff.txt`, map to chapter(s) per the table above. Use this exact mapping logic (run as a Bash script for determinism — `awk`/`grep` patterns):
 
-Also read the matching `docs/manual/sources/0X_*.md` twin.
+```bash
+AFFECTED=""
+while IFS= read -r f; do
+    case "$f" in
+        app/templates/login.html|app/templates/dashboard.html) AFFECTED="$AFFECTED 2" ;;
+        app/templates/ask.html|app/routers/ask.py|app/services/ask_router.py|app/services/claude_service.py|app/services/raci_service.py) AFFECTED="$AFFECTED 3" ;;
+        app/services/telegram_polling.py|app/services/telegram_routing.py|app/routers/telegram.py) AFFECTED="$AFFECTED 5" ;;
+        app/templates/decisions.html|app/templates/decision_review.html|app/services/decision_service.py|app/services/distribution_service.py) AFFECTED="$AFFECTED 6" ;;
+        app/templates/eval.html|app/templates/eval_curate.html|app/services/per_question_loop_service.py|app/services/gold_truth_service.py|app/services/answer_feedback_service.py) AFFECTED="$AFFECTED 7" ;;
+        app/templates/learning_rules.html|app/templates/learning.html|app/routers/learning_rules.py) AFFECTED="$AFFECTED 8" ;;
+        app/models.py) AFFECTED="$AFFECTED 8" ;;
+        app/services/knowledge_service.py|app/services/embedding_service.py) AFFECTED="$AFFECTED 3 7" ;;
+    esac
+done < /tmp/manual_diff.txt
+AFFECTED=$(echo $AFFECTED | tr ' ' '\n' | sort -u | tr '\n' ' ')
+echo "Affected chapters: $AFFECTED"
+```
 
-### Step 3: Edit BOTH the HTML and the Markdown
+Files NOT in any case branch (tests/, docs/, migrations, .claude/, etc.) are ignored — they're not user-visible.
 
-This is critical: the HTML powers the PDF and the .md powers NotebookLM. Both must stay in sync.
+If `$AFFECTED` is empty after classification → nothing user-visible changed → report "no user-visible changes since $LAST_TAG" and exit without modifying anything.
 
-- Use the `Edit` tool for surgical changes (one line, one table row, one bullet).
-- Use the `Write` tool only for full-section rewrites (rare).
-- Hebrew text byte-for-byte. Use the same SVG `<use href="#diag-...">` references for existing diagrams.
+### Step 4: For each affected chapter, summarize the diff and apply edits
 
-### Step 4: Add a new SVG infographic only if essential
+For each chapter number N in `$AFFECTED`:
 
-If the change introduces a flow that needs visual explanation, add a new `<symbol id="diag-newname">...</symbol>` inside the existing `<svg>` `<defs>` block (near the top of `index.html`, right after the TOC). Then reference it from the relevant chapter via `<figure><svg width="100%" viewBox="..."><use href="#diag-newname"/></svg></figure>`.
+a) Identify the specific files that triggered chapter N (from the case statement match).
 
-Prefer extending an existing diagram (modify the SVG `<symbol>`) over adding a new one — keeps the visual language consistent.
+b) Read the diff for those files:
+```bash
+git diff "$LAST_TAG..HEAD" -- <file1> <file2> ... | head -400
+```
 
-### Step 5: Re-render the PDF
+c) Summarize the user-visible change in 1-3 sentences. Examples:
+- "New 'הורד מדריך משתמש' download link added below the login form."
+- "Decision-detection now runs BEFORE Q&A routing on /ask; an inline RACI confirm card appears for decision-shaped input."
+- "Admin rules page added with 5 tabs: Aliases, Intent Overrides, Pins, Synonyms, Pending Approvals."
+
+d) Locate the chapter in `docs/manual/index.html` (anchor in the table above) AND its `.md` twin. Update BOTH with the new behavior:
+- Add/edit a paragraph, table row, step in the numbered list, or callout
+- Keep the existing structure (don't restructure unless required)
+- Hebrew RTL byte-for-byte
+- If a new diagram is essential, add `<symbol id="diag-newname">...</symbol>` inside the existing `<svg>` `<defs>` block
+
+e) If the change deletes a feature, REMOVE the corresponding text from both files.
+
+### Step 5: Archive the previous PDF
+
+```bash
+mkdir -p docs/manual/archive
+if [ -f docs/manual/manual.pdf ]; then
+    PREV_TAG_VER=$(echo "$LAST_TAG" | sed 's/user-manual-//')
+    cp docs/manual/manual.pdf "docs/manual/archive/manual-${PREV_TAG_VER}.pdf"
+    echo "Archived prior PDF → docs/manual/archive/manual-${PREV_TAG_VER}.pdf"
+fi
+```
+
+Each version is retained, so the user can diff PDFs over time.
+
+### Step 6: Re-render the PDF
 
 ```bash
 ./docs/manual/render_pdf.sh
 ```
 
-This produces `docs/manual/manual.pdf` via headless Chromium. Verify the new file size is reasonable (700KB – 1.5MB; if much smaller, render likely failed).
+Verify output ~700KB–1.5MB. If much smaller, render failed — abort, restore HTML/MD from baseline, report error.
 
-### Step 6: Sync the download artifact
+### Step 7: Sync the static copy
 
 ```bash
 cp docs/manual/manual.pdf static/manual.pdf
@@ -83,52 +129,103 @@ cp docs/manual/manual.pdf static/manual.pdf
 
 The login page serves `/static/manual.pdf`. Without this copy, the download link still points to the previous version.
 
-### Step 7: Visual verification (manual gate)
+### Step 8: Bump the version tag
 
-Open `docs/manual/manual.pdf` in a viewer. Confirm:
-
-- The updated chapter reads correctly
-- Hebrew RTL still rendering
-- Any new SVG diagram displays
-- Page numbers + TOC still aligned
-- No layout breakage in adjacent chapters
-
-If broken: revert (`git checkout docs/manual/index.html`) and try a smaller, more targeted edit.
-
-### Step 8: Commit + bump tag
+Compute next version. Read the last tag (`user-manual-v1.0`) and increment the MINOR for most changes, MAJOR for structural rewrites (new chapter or chapter removed):
 
 ```bash
-git add docs/manual/ static/manual.pdf
-git commit -m "docs(manual): update for <one-line description of the change>"
+LAST_VER=$(echo "$LAST_TAG" | sed 's/user-manual-v//')
+LAST_MAJOR=$(echo "$LAST_VER" | cut -d. -f1)
+LAST_MINOR=$(echo "$LAST_VER" | cut -d. -f2)
+# Default: bump minor.
+NEXT_VER="${LAST_MAJOR}.$((LAST_MINOR + 1))"
+NEW_TAG="user-manual-v${NEXT_VER}"
+echo "Next tag: $NEW_TAG"
 ```
 
-If this is a significant content addition (new chapter, multiple chapter changes, new feature documented), bump the tag:
+If a new chapter was added or removed (the HTML's `<section class="page-break">` count changed), bump MAJOR instead: `NEXT_VER="$((LAST_MAJOR + 1)).0"`.
+
+### Step 9: Commit + tag + push
 
 ```bash
-# Existing tags: user-manual-v1.0
-# Increment minor: v1.1, v1.2, ...
-# Increment major: v2.0 if the manual structure changed
-git tag user-manual-v1.1
+# Compose commit message from the summaries collected in Step 4d.
+COMMIT_MSG="docs(manual): autonomous update for $NEW_TAG
+
+Affected chapters: $AFFECTED
+Source diff range: $LAST_TAG..HEAD
+
+Changes:
+<bullet list of 1-3 sentence summaries from Step 4c, one per chapter>"
+
+git add docs/manual/ static/manual.pdf
+git commit -m "$COMMIT_MSG"
+git tag "$NEW_TAG"
 git push origin master --tags
 ```
 
-For small wording fixes, no tag — just commit.
+### Step 10: Report
 
-## Constraints
+Output a 4-line summary:
 
-- Do NOT change the manual's brand color palette without explicit user approval — colors match the live app and the user has visual expectations.
-- Do NOT change the chapter ordering or numbering without asking — users may have shared page numbers with colleagues.
-- Hebrew RTL is mandatory — never switch to LTR for any chapter.
-- Keep the .md twins in lock-step with the HTML — NotebookLM uploads break otherwise.
-- The skill runs against the production master branch by default. If working on a feature branch, ask the user whether to commit there or wait for merge.
+```
+Updated chapters: <list>
+Diff range: <last_tag>..HEAD (<N> files, <M> non-test changes)
+Archived: docs/manual/archive/manual-<prev>.pdf
+New tag: user-manual-v<X.Y> · pushed
+```
 
-## Reporting
+---
 
-After completing an update, report:
+## Safety rails
 
-1. Which chapters were touched.
-2. Whether the PDF was regenerated (size + path).
-3. Whether the static copy was updated.
-4. Commit SHA + tag (if bumped).
+- **Never run on a dirty working tree.** First: `git status --short` — if there are uncommitted changes that aren't `docs/manual/` or `static/manual.pdf`, abort and tell the user to commit/stash first.
+- **If a chapter's content would shrink to nothing**, that signals a feature removal — confirm with the user before deleting the section entirely.
+- **If render fails** (PDF size < 200KB or non-zero exit), revert manually-edited HTML/MD via `git checkout HEAD docs/manual/` and report the render error. Do NOT push a broken manual.
+- **Telegram-only changes** (e.g., new `/command`) update only chapter 5. Don't touch other chapters.
+- **`app/models.py` changes** affect chapter 8 ONLY if the new model is user-facing (referenced by an admin page or settings UI). Internal models like `RouteTrace` don't need a manual update.
+- **Skill never asks the user "what changed"** — that's the whole point of the autonomous mode. If the diff is genuinely ambiguous (e.g., a renamed field appears in 4 places with different meanings), the skill should pick the most user-visible interpretation and note it in the commit message.
 
-Brief — 3-5 lines. The user can read `git log` for detail.
+---
+
+## Constraints (carried over from v1)
+
+- Brand color palette is fixed — never change CSS variables without explicit approval.
+- Chapter ordering and numbering are fixed — never reorder or renumber.
+- Hebrew RTL is mandatory.
+- HTML and `.md` twin must stay in lockstep — never update one without the other.
+
+---
+
+## Example end-to-end
+
+A typical run (after the user added a "Download Manual" link to the login page):
+
+```
+$ /update-manual
+Last manual tag: user-manual-v1.0
+Diff range: user-manual-v1.0..HEAD (3 files, 2 user-visible)
+  app/templates/login.html → chapter 2
+  static/manual.pdf → ignored (artifact)
+  .claude/skills/update-manual.md → ignored (skill)
+Affected chapters: 2
+
+Reading diff for chapter 2:
+  app/templates/login.html added a 'manual-dl' button below the login form
+  pointing to /static/manual.pdf with the Hebrew label "הורד מדריך משתמש".
+
+Editing docs/manual/index.html chapter 2 + sources/01_login_dashboard.md:
+  Added a new bullet under "כניסה למערכת": "🔽 לחיצה על 'הורד מדריך משתמש'
+  שולחת לך את המדריך הזה כ-PDF — ללא צורך בכניסה."
+
+Archived docs/manual/manual.pdf → docs/manual/archive/manual-v1.0.pdf
+Rendered new PDF: 851234 bytes
+Synced static/manual.pdf
+Committed: c5a8b34 docs(manual): autonomous update for user-manual-v1.1
+Tagged: user-manual-v1.1
+Pushed to origin/master with tags
+
+Updated chapters: 2
+Diff range: user-manual-v1.0..HEAD (3 files, 1 user-visible)
+Archived: docs/manual/archive/manual-v1.0.pdf
+New tag: user-manual-v1.1 · pushed
+```
