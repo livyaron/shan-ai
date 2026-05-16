@@ -101,7 +101,7 @@
 
     /* ── RACI ── */
     .raci-bar {
-      width: 100%; max-width: 820px;
+      width: 100%; max-width: 1200px;
       padding: 10px 16px;
       background: var(--panel); border: 1px solid var(--ink4);
       display: flex; align-items: center; gap: 14px;
@@ -137,7 +137,7 @@
 
     /* ── ERROR ── */
     .alert-err {
-      width: 100%; max-width: 820px;
+      width: 100%; max-width: 1200px;
       background: rgba(239,68,68,0.1);
       border: 1px solid rgba(239,68,68,0.3);
       padding: 8px 14px; font-size: 12px; color: #fca5a5;
@@ -146,7 +146,7 @@
     }
 
     /* ── FORM ── */
-    .form-wrap { width: 100%; max-width: 820px; }
+    .form-wrap { width: 100%; max-width: 1200px; }
 
     .form-panel {
       background: var(--panel); border: 1px solid var(--ink4);
@@ -195,22 +195,32 @@
       margin-top: 8px; text-align: right;
     }
 
-    .manual-dl {
-      display: inline-flex; align-items: center; gap: 8px;
-      margin-top: 14px; padding: 8px 14px;
-      background: transparent;
-      border: 1px solid color-mix(in oklab, var(--acc) 45%, transparent);
+    /* ── MEDIA BAR ── */
+    .media-bar {
+      width: 100%; max-width: 1200px;
+      display: flex; gap: 16px;
+      margin-bottom: 18px;
+      animation: slideUp 0.6s ease-out 0.25s both;
+    }
+    .media-btn {
+      flex: 1 1 0;
+      display: inline-flex; align-items: center; justify-content: center;
+      gap: 14px; padding: 18px 24px;
+      background: color-mix(in oklab, var(--acc) 8%, transparent);
+      border: 1px solid color-mix(in oklab, var(--acc) 55%, transparent);
       border-radius: 2px;
       color: var(--acc); text-decoration: none;
-      font-family: 'JetBrains Mono', monospace; font-size: 11px;
-      letter-spacing: 2px;
-      transition: background 0.15s, box-shadow 0.15s;
+      font-family: 'JetBrains Mono', monospace; font-size: 15px;
+      letter-spacing: 2px; font-weight: 600;
+      transition: background 0.15s, box-shadow 0.15s, transform 0.15s;
     }
-    .manual-dl:hover {
-      background: color-mix(in oklab, var(--acc) 10%, transparent);
-      box-shadow: 0 0 16px color-mix(in oklab, var(--acc) 25%, transparent);
+    .media-btn:hover {
+      background: color-mix(in oklab, var(--acc) 18%, transparent);
+      box-shadow: 0 0 20px color-mix(in oklab, var(--acc) 35%, transparent);
+      transform: translateY(-1px);
     }
-    .manual-dl .ico { font-size: 14px; }
+    .media-btn .ico { font-size: 24px; }
+    .media-btn .label-he { color: var(--ink); font-family: 'Heebo', sans-serif; font-size: 18px; font-weight: 700; letter-spacing: 0; }
 
     /* ── TELEMETRY BAR ── */
     .telem {
@@ -309,6 +319,18 @@
     <p>‏Shan-AI לומדת כל החלטה ותיעוד בפרויקטי תחנות המשנה שלך.</p>
   </div>
 
+  <!-- Media bar: video + presentation -->
+  <div class="media-bar">
+    <a href="/static/Shan-AI-Overview.mp4" target="_blank" rel="noopener" class="media-btn">
+      <span class="ico">▶</span>
+      <span class="label-he">‏צפה בסרטון ההסבר</span>
+    </a>
+    <a href="#" onclick="window.open('https://view.officeapps.live.com/op/view.aspx?src=' + encodeURIComponent(window.location.origin + '/static/Shan-AI-Presentation.pptx'), '_blank'); return false;" class="media-btn">
+      <span class="ico">📊</span>
+      <span class="label-he">‏צפה במצגת המערכת</span>
+    </a>
+  </div>
+
   <!-- RACI bar -->
   <div class="raci-bar">
     <div class="label">RACI · תפקידים</div>
@@ -358,12 +380,6 @@
       </div>
     </form>
     <div class="hint">DEFAULT KEY · 1234</div>
-    <div style="text-align:right; margin-top: 10px;">
-      <a href="/static/manual.pdf" download="Shan-AI-Manual.pdf" class="manual-dl">
-        <span class="ico">📘</span>
-        <span>הורד מדריך משתמש · PDF</span>
-      </a>
-    </div>
   </div>
 
 </div>
