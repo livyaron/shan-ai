@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Shan-AI — כללי למידה</title>
+    <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body { background: #080a12; color: #e0e0e0; font-family: 'Heebo', sans-serif; }
+        h2 { color: #d8e0fa; }
+        .tab-btn { background: #0e1020; border: 1px solid #1a1e38; color: #8b9cf4;
+                   padding: 10px 18px; border-radius: 10px 10px 0 0; cursor: pointer;
+                   margin: 0 4px; font-weight: 600; }
+        .tab-btn.active { background: #5865f2; color: #fff; border-color: #5865f2; }
+        .tab-panel { display: none; padding: 24px; background: #0e1020; border: 1px solid #1a1e38;
+                     border-radius: 0 14px 14px 14px; min-height: 400px; }
+        .tab-panel.active { display: block; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 10px; text-align: right; border-bottom: 1px solid #1a1e38; }
+        th { color: #8b9cf4; }
+        .btn-mini { padding: 4px 10px; font-size: .85rem; border-radius: 6px; border: none; cursor: pointer; }
+        .btn-del { background: rgba(239,68,68,.2); color: #fca5a5; }
+        .btn-test { background: rgba(0,212,255,.2); color: #00d4ff; }
+        .btn-approve { background: rgba(54,226,115,.2); color: #36e273; }
+        .add-form { background: #0a0c18; padding: 16px; border-radius: 10px; margin-bottom: 18px;
+                    border: 1px solid #1a1e38; }
+        .add-form input { background: #0f1117; color: #fff; border: 1px solid #2d3047;
+            border-radius: 6px; padding: 6px 10px; margin-right: 8px; }
+        code { color: #8b9cf4; font-size: .85rem; }
+        .navbar { background: rgba(7,11,18,0.96); border-bottom: 1px solid #1a2d47;
+                  padding: 0 1.5rem; height: 50px; position: sticky; top: 0; z-index: 1000; }
+        .nav-link { font-size: 0.95rem; font-weight: 500; color: #64748b !important;
+                    padding: 0.22rem 0.6rem !important; border-radius: 4px; transition: all 0.14s; }
+        .nav-link:hover { color: #e2e8f0 !important; background: rgba(255,255,255,0.04); }
+        .nav-link.nav-active { color: #00d4ff !important; background: rgba(0,212,255,0.09); }
+        .navbar-brand { font-size: 1.02rem; font-weight: 600; color: #00d4ff !important;
+                        text-decoration: none; }
+        .user-chip { display: flex; align-items: center; gap: 6px; padding: 3px 10px;
+                     background: #0f1826; border: 1px solid #1a2d47; border-radius: 20px;
+                     font-size: 0.92rem; color: #64748b; }
+        .user-online { width: 5px; height: 5px; background: #10b981; border-radius: 50%; }
+        .logout-btn { font-size: 0.88rem; color: #344156 !important; text-decoration: none;
+                      padding: 3px 8px; border-radius: 4px; transition: all 0.14s; }
+        .logout-btn:hover { color: #ef4444 !important; background: rgba(239,68,68,0.1); }
+    </style>
+</head>
+<body>
+
+<nav class="navbar navbar-dark d-flex align-items-center justify-content-between">
+    <a href="/dashboard/" class="navbar-brand">SHAN-AI / DSS</a>
+    <div class="d-flex align-items-center gap-1 flex-wrap">
+        <a href="/dashboard/" class="nav-link">דשבורד</a>
+        <a href="/dashboard/decisions" class="nav-link">החלטות</a>
+        <a href="/dashboard/users" class="nav-link">משתמשים</a>
+        <a href="/dashboard/files" class="nav-link">קבצים</a>
+        <a href="/dashboard/ask" class="nav-link">שאל</a>
+        <a href="/dashboard/learning" class="nav-link">למידה</a>
+        <a href="/dashboard/learning/rules" class="nav-link nav-active">כללי למידה</a>
+        <a href="/dashboard/logs" class="nav-link">לוגים</a>
+        <a href="/dashboard/projects" class="nav-link">פרויקטים</a>
+    </div>
+    <div class="d-flex align-items-center gap-2">
+        <div class="user-chip"><div class="user-online"></div>{{ current_user.username }}</div>
+        <a href="/logout" class="logout-btn">יציאה</a>
+    </div>
+</nav>
+
+<div class="container-fluid p-4">
+    <h2>כללי למידה</h2>
+    <p style="color:#8b9cf4;">CRUD על הכללים שהמערכת לומדת — אליאסים, אינטנט-אוברייד, פינים, סינונימים, ואישורי המתנה.</p>
+
+    <div style="margin-top: 20px;">
+        <button class="tab-btn active" onclick="showTab('aliases', event)">אליאסים ({{ aliases|length }})</button>
+        <button class="tab-btn" onclick="showTab('intents', event)">אינטנט אוברייד ({{ intents|length }})</button>
+        <button class="tab-btn" onclick="showTab('pins', event)">פינים ({{ pins|length }})</button>
+        <button class="tab-btn" onclick="showTab('synonyms', event)">סינונימים ({{ synonyms|length }})</button>
+        <button class="tab-btn" onclick="showTab('pending', event)">ממתינים לאישור ({{ pending|length }})</button>
+    </div>
+
+    <!-- Tab: Aliases -->
+    <div id="tab-aliases" class="tab-panel active">
+        <div class="add-form">
+            <input id="new-alias-text" placeholder="alias_text" />
+            <input id="new-alias-pid" type="number" placeholder="project_id" />
+            <button class="btn-mini btn-test" onclick="createAlias()">הוסף אליאס</button>
+        </div>
+        <table>
+            <thead><tr><th>ID</th><th>Alias</th><th>Project ID</th><th>Source</th><th></th></tr></thead>
+            <tbody>
+            {% for a in aliases %}
+            <tr>
+                <td>{{ a.id }}</td>
+                <td>{{ a.alias_text }}</td>
+                <td>{{ a.project_id }}</td>
+                <td>{{ a.source }}</td>
+                <td><button class="btn-mini btn-del" onclick="del('aliases', {{ a.id }})">מחק</button></td>
+            </tr>
+            {% else %}
+            <tr><td colspan="5" style="text-align:center; color:#64748b; padding:24px;">אין אליאסים</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Tab: Intent Overrides -->
+    <div id="tab-intents" class="tab-panel">
+        <table>
+            <thead><tr><th>ID</th><th>Hash</th><th>Forced Intent</th><th>Param</th><th></th></tr></thead>
+            <tbody>
+            {% for i in intents %}
+            <tr>
+                <td>{{ i.id }}</td>
+                <td><code>{{ i.question_pattern_hash[:10] }}…</code></td>
+                <td>{{ i.forced_intent }}</td>
+                <td>{{ i.forced_param or '—' }}</td>
+                <td><button class="btn-mini btn-del" onclick="del('intent_overrides', {{ i.id }})">מחק</button></td>
+            </tr>
+            {% else %}
+            <tr><td colspan="5" style="text-align:center; color:#64748b; padding:24px;">אין אוברייד</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Tab: Correction Pins -->
+    <div id="tab-pins" class="tab-panel">
+        <table>
+            <thead><tr><th>ID</th><th>Hash</th><th>Pinned Answer</th><th>Expires</th><th></th></tr></thead>
+            <tbody>
+            {% for p in pins %}
+            <tr>
+                <td>{{ p.id }}</td>
+                <td><code>{{ p.question_hash[:10] }}…</code></td>
+                <td style="max-width:300px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{{ p.pinned_answer }}</td>
+                <td>{{ p.expires_at or '—' }}</td>
+                <td><button class="btn-mini btn-del" onclick="del('correction_pins', {{ p.id }})">מחק</button></td>
+            </tr>
+            {% else %}
+            <tr><td colspan="5" style="text-align:center; color:#64748b; padding:24px;">אין פינים</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Tab: Synonyms -->
+    <div id="tab-synonyms" class="tab-panel">
+        <table>
+            <thead><tr><th>Original</th><th>Synonyms</th><th>Source</th></tr></thead>
+            <tbody>
+            {% for s in synonyms %}
+            <tr>
+                <td>{{ s.original }}</td>
+                <td><code>{{ s.synonyms|tojson }}</code></td>
+                <td>{{ s.source }}</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="3" style="text-align:center; color:#64748b; padding:24px;">אין סינונימים</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Tab: Pending Approval -->
+    <div id="tab-pending" class="tab-panel">
+        <table>
+            <thead><tr><th>ID</th><th>Type</th><th>Patch</th><th>Rationale</th><th></th></tr></thead>
+            <tbody>
+            {% for r in pending %}
+            <tr>
+                <td>{{ r.id }}</td>
+                <td>{{ r.type }}</td>
+                <td><code style="font-size:.8rem;">{{ r.patch_json|tojson }}</code></td>
+                <td>{{ r.rationale or '—' }}</td>
+                <td><button class="btn-mini btn-approve" onclick="approve({{ r.id }})">אשר</button></td>
+            </tr>
+            {% else %}
+            <tr><td colspan="5" style="text-align:center; color:#64748b; padding:24px;">אין הצעות ממתינות</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+function showTab(name, ev) {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+    ev.target.classList.add('active');
+    document.getElementById(`tab-${name}`).classList.add('active');
+}
+
+async function createAlias() {
+    const text = document.getElementById('new-alias-text').value.trim();
+    const pid = parseInt(document.getElementById('new-alias-pid').value);
+    if (!text || !pid) { alert('alias_text + project_id required'); return; }
+    const r = await fetch('/dashboard/learning/rules/aliases', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({alias_text: text, project_id: pid}),
+    });
+    if (r.ok) location.reload();
+    else alert('שגיאה: ' + r.status);
+}
+
+async function del(table, id) {
+    if (!confirm('למחוק?')) return;
+    const r = await fetch(`/dashboard/learning/rules/${table}/${id}`, {method: 'DELETE'});
+    if (r.ok) location.reload();
+    else alert('שגיאה: ' + r.status);
+}
+
+async function approve(id) {
+    if (!confirm('לאשר את ההצעה?')) return;
+    const r = await fetch(`/dashboard/learning/rules/pending/${id}/approve`, {method: 'POST'});
+    if (r.ok) location.reload();
+    else { const e = await r.json(); alert('שגיאה: ' + (e.detail || r.status)); }
+}
+</script>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

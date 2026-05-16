@@ -22,6 +22,7 @@ from app.routers import logs as logs_router  # noqa: E402
 from app.routers import projects as projects_router  # noqa: E402
 from app.routers import llm_config as llm_config_router  # noqa: E402
 from app.routers import eval_loop as eval_loop_router  # noqa: E402
+from app.routers import learning_rules as learning_rules_router  # noqa: E402
 from app.services.telegram_polling import telegram_bot  # noqa: E402
 from app.services.feedback_service import run_feedback_scheduler  # noqa: E402
 
@@ -47,6 +48,7 @@ app.include_router(logs_router.router)
 app.include_router(projects_router.router)
 app.include_router(llm_config_router.router)
 app.include_router(eval_loop_router.router)
+app.include_router(learning_rules_router.router)
 app.include_router(profile_router)
 
 @app.on_event("startup")
