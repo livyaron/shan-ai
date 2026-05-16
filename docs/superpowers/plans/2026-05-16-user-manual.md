@@ -1,0 +1,1296 @@
+# Shan-AI User Manual (Hebrew, Beautiful, PDF) Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** Produce a beautiful, self-contained Hebrew RTL PDF user manual that covers the full Shan-AI system — what it does, how each surface (web/Telegram) works, the learning loop, decision flow, RACI, and admin tools. Inline SVG infographics, Heebo font, print-ready.
+
+**Architecture:** Author one self-contained `docs/manual/index.html` with embedded CSS (print + screen) and inline SVG diagrams. Hebrew RTL via `dir="rtl"`. Google Fonts (`Heebo`) embedded via `@import` in `<style>` for both screen and print. Render to PDF two ways: (1) browser print (Ctrl+P → Save as PDF) — best fidelity, no extra deps; (2) `weasyprint` one-shot via `pip install` in the api container for headless PDF generation. NotebookLM source: a Markdown twin (`docs/manual/sources/`) with the same content split into chapter files, ready for upload to a NotebookLM notebook.
+
+**Tech Stack:** HTML5 + CSS3 (print media queries, CSS variables, flexbox, grid) + inline SVG. Optional: Python `weasyprint>=60` for headless render. NotebookLM (optional external) for AI audio walkthrough generated from the Markdown sources.
+
+**Audience:** Domain users (project managers, division managers, RACI assignees) — NOT developers. Tone: practical, screenshot-rich, Hebrew-first. Tells them what to click, what to expect, what each emoji/badge means.
+
+---
+
+## File Structure
+
+### New files
+
+| Path | Responsibility |
+|---|---|
+| `docs/manual/index.html` | Single self-contained Hebrew RTL manual. Inline CSS, inline SVG infographics, Heebo Google Font. Browser-renderable; print-ready. |
+| `docs/manual/sources/00_intro.md` | Markdown twin — intro + benefits, for NotebookLM. |
+| `docs/manual/sources/01_login_dashboard.md` | Quick start: login + dashboard tour. |
+| `docs/manual/sources/02_ask.md` | `/ask` page: questions + decision flow + RACI. |
+| `docs/manual/sources/03_telegram.md` | Telegram bot reference. |
+| `docs/manual/sources/04_decisions.md` | Decisions list page + approval flow. |
+| `docs/manual/sources/05_learning_loop.md` | Thumbs feedback, corrections, gold answers, eval-curate, admin rules. |
+| `docs/manual/sources/06_admin.md` | Admin-only features (users, files, rules, learning effectiveness). |
+| `docs/manual/sources/README.md` | Cover sheet + index for the Markdown sources, with NotebookLM upload instructions. |
+| `docs/manual/render_pdf.sh` | One-shot bash script: install weasyprint in api container if needed, render `index.html` → `manual.pdf`. |
+| `docs/manual/manual.pdf` | Output PDF (built by `render_pdf.sh`, also generatable via browser-print). |
+
+### Untouched
+
+All app code. This is documentation-only.
+
+---
+
+## Task 1: Page skeleton + print CSS + Heebo font
+
+**Files:**
+- Create: `docs/manual/index.html`
+
+The skeleton renders an empty manual that's ready for content sections. It locks in: Hebrew RTL, Heebo font (Google Fonts), CSS variables for the brand palette (matches the app: navy `#0e1020`, purple `#8b9cf4`, cyan `#00d4ff`, green `#36e273`, red `#ff6b7a`), page-break rules for print, A4 page size, a cover page, a TOC, and a footer with page numbers.
+
+- [ ] **Step 1: Create the file with skeleton**
+
+Use the Write tool to create `docs/manual/index.html` with the following content (replace ENTIRE file):
+
+```html
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<title>Shan-AI — מדריך משתמש</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500;600;700;800&display=swap');
+
+:root {
+    --bg: #ffffff;
+    --ink: #0e1020;
+    --muted: #64748b;
+    --brand-navy: #0e1020;
+    --brand-purple: #8b9cf4;
+    --brand-cyan: #00d4ff;
+    --brand-green: #36e273;
+    --brand-amber: #ffd700;
+    --brand-red: #ff6b7a;
+    --brand-line: #1a1e38;
+    --accent-bg: #f8fafc;
+}
+
+* { box-sizing: border-box; }
+
+@page {
+    size: A4;
+    margin: 18mm 16mm;
+    @bottom-center {
+        content: counter(page) " / " counter(pages);
+        font-family: 'Heebo', sans-serif;
+        font-size: 9pt;
+        color: #94a3b8;
+    }
+}
+
+html, body { background: var(--bg); color: var(--ink);
+    font-family: 'Heebo', sans-serif; font-size: 11pt; line-height: 1.55;
+    margin: 0; padding: 0; }
+
+.page { padding: 0; }
+.page-break { page-break-after: always; }
+.avoid-break { page-break-inside: avoid; }
+
+h1 { font-size: 28pt; font-weight: 800; color: var(--brand-navy);
+    margin: 0 0 .5em 0; letter-spacing: -.01em; }
+h2 { font-size: 18pt; font-weight: 700; color: var(--brand-navy);
+    margin: 1.4em 0 .4em 0; border-bottom: 2px solid var(--brand-purple);
+    padding-bottom: 4px; }
+h3 { font-size: 13pt; font-weight: 600; color: var(--brand-navy);
+    margin: 1.1em 0 .3em 0; }
+p { margin: .5em 0; }
+ul, ol { margin: .4em 0; padding-right: 1.4em; }
+li { margin: .2em 0; }
+strong { color: var(--brand-navy); font-weight: 700; }
+code { font-family: 'Heebo', monospace; background: var(--accent-bg);
+    padding: 1px 5px; border-radius: 4px; font-size: .95em; }
+
+.cover {
+    display: flex; flex-direction: column; justify-content: center;
+    align-items: center; min-height: 250mm; text-align: center;
+    background: linear-gradient(135deg, #0e1020 0%, #1a2240 100%);
+    color: #fff; padding: 40mm 20mm; page-break-after: always;
+}
+.cover .logo { font-size: 60pt; margin-bottom: 12mm; }
+.cover h1 { color: #fff; font-size: 36pt; font-weight: 800; margin: 0 0 6mm 0; }
+.cover .tagline { font-size: 14pt; color: #cbd5e1; margin: 0; }
+.cover .meta { margin-top: 30mm; font-size: 10pt; color: #94a3b8; }
+.cover .glyph { color: var(--brand-cyan); }
+
+.toc { padding: 10mm 0; }
+.toc h2 { border: none; margin-top: 0; }
+.toc ol { list-style: none; padding-right: 0; counter-reset: tocitem; }
+.toc li { counter-increment: tocitem; display: flex; align-items: baseline;
+    gap: 10px; padding: 6px 0; border-bottom: 1px dotted #cbd5e1; }
+.toc li::before { content: counter(tocitem, decimal-leading-zero);
+    color: var(--brand-purple); font-weight: 700; min-width: 28px; }
+.toc .page-num { color: var(--muted); font-variant-numeric: tabular-nums;
+    margin-right: auto; }
+
+.callout { background: var(--accent-bg); border-right: 4px solid var(--brand-purple);
+    padding: 12px 16px; margin: 1em 0; border-radius: 6px; }
+.callout.tip { border-color: var(--brand-green); }
+.callout.warn { border-color: var(--brand-amber); }
+.callout.danger { border-color: var(--brand-red); }
+.callout-title { font-weight: 700; margin-bottom: 4px; color: var(--brand-navy); }
+
+.kbd { background: #1f2937; color: #fff; padding: 2px 8px; border-radius: 4px;
+    font-family: 'Heebo', monospace; font-size: .85em; }
+
+.badge { display: inline-block; padding: 2px 10px; border-radius: 14px;
+    font-size: .85em; font-weight: 600; }
+.badge-info     { background: #0e3d47; color: #17d8f5; }
+.badge-normal   { background: #0d3320; color: var(--brand-green); }
+.badge-critical { background: #3d1018; color: var(--brand-red); }
+.badge-uncertain{ background: #3a2e00; color: var(--brand-amber); }
+.badge-purple   { background: #1f2342; color: var(--brand-purple); }
+
+.grid { display: grid; gap: 12px; }
+.grid-2 { grid-template-columns: 1fr 1fr; }
+.grid-3 { grid-template-columns: repeat(3, 1fr); }
+.grid-4 { grid-template-columns: repeat(4, 1fr); }
+
+.card { background: var(--accent-bg); border: 1px solid #e2e8f0;
+    border-radius: 10px; padding: 14px 16px; }
+.card-num { font-size: 22pt; font-weight: 800; color: var(--brand-purple); line-height: 1; }
+.card-label { color: var(--muted); font-size: .9em; margin-top: 4px; }
+
+table { width: 100%; border-collapse: collapse; margin: .8em 0; font-size: .95em; }
+th, td { padding: 8px 10px; text-align: right; border-bottom: 1px solid #e2e8f0; }
+th { background: var(--accent-bg); color: var(--brand-navy); font-weight: 700; }
+
+figure { margin: 1em 0; }
+figure svg { max-width: 100%; height: auto; display: block; }
+figcaption { font-size: .85em; color: var(--muted); margin-top: 6px; text-align: center; }
+
+.step-list { counter-reset: step; padding-right: 0; list-style: none; }
+.step-list li { counter-increment: step; position: relative; padding-right: 38px;
+    margin-bottom: 10px; }
+.step-list li::before { content: counter(step); position: absolute; right: 0;
+    top: 0; width: 28px; height: 28px; background: var(--brand-purple); color: #fff;
+    border-radius: 50%; display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 11pt; }
+
+.glossary dt { font-weight: 700; color: var(--brand-purple); margin-top: 10px; }
+.glossary dd { margin: 4px 0 0 0; padding-right: 14px; color: #334155; }
+</style>
+</head>
+<body>
+
+<!-- Cover -->
+<section class="cover">
+    <div class="logo">🛰️</div>
+    <h1>Shan-AI</h1>
+    <div class="tagline">מערכת בינה תפעולית לתחנות משנה — מדריך המשתמש</div>
+    <div class="meta">גרסה 1.0 · אגף הקמה · החברה לחשמל</div>
+</section>
+
+<!-- TOC -->
+<section class="toc page-break">
+    <h2>תוכן עניינים</h2>
+    <ol>
+        <li>ברוכים הבאים — מה Shan-AI ומה היא נותנת לך<span class="page-num">3</span></li>
+        <li>התחברות וסיור בדשבורד<span class="page-num">6</span></li>
+        <li>שאלות ותשובות בעמוד "שאל"<span class="page-num">9</span></li>
+        <li>תיעוד החלטה — הזרימה המלאה כולל RACI<span class="page-num">12</span></li>
+        <li>בוט הטלגרם — שימוש בשטח<span class="page-num">16</span></li>
+        <li>לולאת הלמידה — איך המערכת נעשית חכמה יותר<span class="page-num">19</span></li>
+        <li>ניהול כללים (מנהלים בלבד)<span class="page-num">23</span></li>
+        <li>שאלות נפוצות ומונחים<span class="page-num">26</span></li>
+    </ol>
+</section>
+
+<!-- Content sections go here (Tasks 3-9) -->
+
+</body>
+</html>
+```
+
+- [ ] **Step 2: Open in browser to verify cover + TOC render**
+
+Open `docs/manual/index.html` in any browser. Expect: dark cover page with 🛰️ logo, "Shan-AI" title, Hebrew tagline. TOC page with 8 numbered chapters in RTL layout, page numbers right-aligned.
+
+- [ ] **Step 3: Verify print preview**
+
+In the browser: `Ctrl+P` → Destination: "Save as PDF". Preview should show A4 portrait, page numbers at the bottom, Hebrew text right-to-left, cover + TOC on separate pages.
+
+Don't save yet — final PDF generation is Task 10.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add docs/manual/index.html
+git commit -m "docs(manual): skeleton with cover + TOC + print CSS"
+```
+
+---
+
+## Task 2: Inline SVG infographic library
+
+**Files:**
+- Modify: `docs/manual/index.html` — append a hidden `<defs>` block for reusable SVG symbols + 5 standalone infographic SVGs that will be referenced from later chapters
+
+Adding the SVGs in one task means later content tasks can simply `<use href="#diagram-X">` or embed the SVG inline.
+
+- [ ] **Step 1: Build the 5 core infographics**
+
+Inside the body, immediately after the TOC `</section>` and before the closing `</body>`, append:
+
+```html
+<!-- Hidden SVG symbol library used across chapters -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+<defs>
+
+<!-- Decision-type quadrant -->
+<symbol id="diag-decision-types" viewBox="0 0 600 360">
+    <rect x="0" y="0" width="600" height="360" fill="#f8fafc" rx="14"/>
+    <line x1="300" y1="20" x2="300" y2="340" stroke="#cbd5e1" stroke-width="2" stroke-dasharray="6 4"/>
+    <line x1="20" y1="180" x2="580" y2="180" stroke="#cbd5e1" stroke-width="2" stroke-dasharray="6 4"/>
+
+    <g><circle cx="155" cy="95" r="46" fill="#17d8f5" opacity=".15"/>
+       <text x="155" y="92" text-anchor="middle" font-family="Heebo" font-size="18" font-weight="700" fill="#0e6a7a">INFO 🔵</text>
+       <text x="155" y="120" text-anchor="middle" font-family="Heebo" font-size="11" fill="#475569">לוג בלבד</text></g>
+
+    <g><circle cx="445" cy="95" r="46" fill="#36e273" opacity=".15"/>
+       <text x="445" y="92" text-anchor="middle" font-family="Heebo" font-size="18" font-weight="700" fill="#145c26">NORMAL 🟢</text>
+       <text x="445" y="120" text-anchor="middle" font-family="Heebo" font-size="11" fill="#475569">לוג + ביצוע</text></g>
+
+    <g><circle cx="155" cy="265" r="46" fill="#ff6b7a" opacity=".15"/>
+       <text x="155" y="262" text-anchor="middle" font-family="Heebo" font-size="18" font-weight="700" fill="#8b0f1b">CRITICAL 🔴</text>
+       <text x="155" y="290" text-anchor="middle" font-family="Heebo" font-size="11" fill="#475569">דרוש אישור</text></g>
+
+    <g><circle cx="445" cy="265" r="46" fill="#ffd700" opacity=".25"/>
+       <text x="445" y="262" text-anchor="middle" font-family="Heebo" font-size="18" font-weight="700" fill="#9a7200">UNCERTAIN 🟡</text>
+       <text x="445" y="290" text-anchor="middle" font-family="Heebo" font-size="11" fill="#475569">בירור ידני</text></g>
+
+    <text x="300" y="14" text-anchor="middle" font-family="Heebo" font-size="11" fill="#94a3b8">↑ סיווג ברור</text>
+    <text x="300" y="354" text-anchor="middle" font-family="Heebo" font-size="11" fill="#94a3b8">↓ דורש מעורבות אנושית</text>
+    <text x="590" y="184" text-anchor="end" font-family="Heebo" font-size="11" fill="#94a3b8">השפעה נמוכה →</text>
+    <text x="10" y="184" font-family="Heebo" font-size="11" fill="#94a3b8">← השפעה גבוהה</text>
+</symbol>
+
+<!-- RACI matrix -->
+<symbol id="diag-raci" viewBox="0 0 600 260">
+    <rect x="0" y="0" width="600" height="260" fill="#f8fafc" rx="14"/>
+    <g font-family="Heebo">
+        <rect x="40"  y="50" width="120" height="80" rx="10" fill="#8b9cf4"/>
+        <text x="100" y="80"  text-anchor="middle" font-size="22" font-weight="800" fill="#fff">R</text>
+        <text x="100" y="105" text-anchor="middle" font-size="11" fill="#fff">Responsible</text>
+        <text x="100" y="120" text-anchor="middle" font-size="10" fill="#e2e8f0">מבצע</text>
+
+        <rect x="180" y="50" width="120" height="80" rx="10" fill="#ff6b7a"/>
+        <text x="240" y="80"  text-anchor="middle" font-size="22" font-weight="800" fill="#fff">A</text>
+        <text x="240" y="105" text-anchor="middle" font-size="11" fill="#fff">Accountable</text>
+        <text x="240" y="120" text-anchor="middle" font-size="10" fill="#fff">בעל סמכות</text>
+
+        <rect x="320" y="50" width="120" height="80" rx="10" fill="#ffd700"/>
+        <text x="380" y="80"  text-anchor="middle" font-size="22" font-weight="800" fill="#0e1020">C</text>
+        <text x="380" y="105" text-anchor="middle" font-size="11" fill="#0e1020">Consulted</text>
+        <text x="380" y="120" text-anchor="middle" font-size="10" fill="#1f2937">יועץ</text>
+
+        <rect x="460" y="50" width="120" height="80" rx="10" fill="#17d8f5"/>
+        <text x="520" y="80"  text-anchor="middle" font-size="22" font-weight="800" fill="#fff">I</text>
+        <text x="520" y="105" text-anchor="middle" font-size="11" fill="#fff">Informed</text>
+        <text x="520" y="120" text-anchor="middle" font-size="10" fill="#fff">לידיעה</text>
+
+        <text x="300" y="20" text-anchor="middle" font-size="14" font-weight="700" fill="#0e1020">תפקידים בכל החלטה</text>
+        <text x="300" y="170" text-anchor="middle" font-size="11" fill="#475569">חייב להיות בעל סמכות אחד בלבד (A) — אחרת ההחלטה לא תישמר</text>
+        <text x="300" y="195" text-anchor="middle" font-size="11" fill="#475569">המבצעים (R) מבצעים את הפעולה; היועצים (C) נשאלים; הנמענים (I) רק יודעים</text>
+    </g>
+</symbol>
+
+<!-- Routing layers (Q&A vs Decision priority) -->
+<symbol id="diag-routing" viewBox="0 0 600 480">
+    <rect x="0" y="0" width="600" height="480" fill="#f8fafc" rx="14"/>
+    <g font-family="Heebo">
+        <text x="300" y="28" text-anchor="middle" font-size="14" font-weight="700" fill="#0e1020">סדר הטיפול בכל הודעה</text>
+
+        <rect x="60" y="60"  width="480" height="50" rx="10" fill="#0e1020"/>
+        <text x="300" y="92" text-anchor="middle" font-size="13" font-weight="700" fill="#fff">1. זיהוי החלטה — האם המשתמש מבקש לתעד החלטה?</text>
+
+        <text x="300" y="125" text-anchor="middle" font-size="14" fill="#cbd5e1">▼</text>
+
+        <rect x="60" y="140" width="480" height="50" rx="10" fill="#5865f2"/>
+        <text x="300" y="172" text-anchor="middle" font-size="13" font-weight="700" fill="#fff">2. פין תיקון — תשובה מאושרת שמופעלת מיידית</text>
+
+        <text x="300" y="205" text-anchor="middle" font-size="14" fill="#cbd5e1">▼</text>
+
+        <rect x="60" y="220" width="480" height="50" rx="10" fill="#8b9cf4"/>
+        <text x="300" y="252" text-anchor="middle" font-size="13" font-weight="700" fill="#fff">3. כינוי פרויקט / Intent Override</text>
+
+        <text x="300" y="285" text-anchor="middle" font-size="14" fill="#cbd5e1">▼</text>
+
+        <rect x="60" y="300" width="480" height="50" rx="10" fill="#36e273"/>
+        <text x="300" y="332" text-anchor="middle" font-size="13" font-weight="700" fill="#fff">4. שאלת מסד החלטות / פרויקטים</text>
+
+        <text x="300" y="365" text-anchor="middle" font-size="14" fill="#cbd5e1">▼</text>
+
+        <rect x="60" y="380" width="480" height="50" rx="10" fill="#64748b"/>
+        <text x="300" y="412" text-anchor="middle" font-size="13" font-weight="700" fill="#fff">5. חיפוש כללי בקבצים (RAG)</text>
+
+        <text x="300" y="460" text-anchor="middle" font-size="10" fill="#94a3b8">המערכת עוצרת ברגע שמצאה תשובה — לא יורדת לשכבה הבאה</text>
+    </g>
+</symbol>
+
+<!-- Learning loop -->
+<symbol id="diag-learning" viewBox="0 0 600 360">
+    <rect x="0" y="0" width="600" height="360" fill="#f8fafc" rx="14"/>
+    <g font-family="Heebo">
+        <text x="300" y="28" text-anchor="middle" font-size="14" font-weight="700" fill="#0e1020">לולאת הלמידה</text>
+
+        <circle cx="120" cy="180" r="60" fill="#8b9cf4"/>
+        <text x="120" y="178" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">משתמש שואל</text>
+        <text x="120" y="195" text-anchor="middle" font-size="11" fill="#fff">/ ask</text>
+
+        <path d="M180 180 L240 180" stroke="#8b9cf4" stroke-width="3" fill="none" marker-end="url(#arrow)"/>
+
+        <circle cx="300" cy="180" r="60" fill="#ffd700"/>
+        <text x="300" y="178" text-anchor="middle" font-size="12" font-weight="700" fill="#0e1020">המערכת עונה</text>
+        <text x="300" y="195" text-anchor="middle" font-size="11" fill="#1f2937">👍 / 👎</text>
+
+        <path d="M360 180 L420 180" stroke="#ffd700" stroke-width="3" fill="none" marker-end="url(#arrow)"/>
+
+        <circle cx="480" cy="180" r="60" fill="#36e273"/>
+        <text x="480" y="178" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">תיקון נשמר</text>
+        <text x="480" y="195" text-anchor="middle" font-size="11" fill="#fff">לולאת תיקון</text>
+
+        <path d="M460 240 Q 300 320 140 240" stroke="#36e273" stroke-width="3" fill="none" stroke-dasharray="6 4" marker-end="url(#arrow)"/>
+        <text x="300" y="335" text-anchor="middle" font-size="11" fill="#475569">המערכת לומדת — אותה שאלה תקבל תשובה נכונה בפעם הבאה</text>
+    </g>
+    <defs>
+        <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+            <polygon points="0 0, 10 3, 0 6" fill="#475569"/>
+        </marker>
+    </defs>
+</symbol>
+
+<!-- Five-phase roadmap -->
+<symbol id="diag-roadmap" viewBox="0 0 600 200">
+    <rect x="0" y="0" width="600" height="200" fill="#f8fafc" rx="14"/>
+    <g font-family="Heebo">
+        <text x="300" y="28" text-anchor="middle" font-size="14" font-weight="700" fill="#0e1020">השכבות שבנו</text>
+        <line x1="50" y1="100" x2="550" y2="100" stroke="#cbd5e1" stroke-width="3"/>
+        <g transform="translate(80,100)"><circle r="22" fill="#8b9cf4"/><text y="6" text-anchor="middle" font-size="13" font-weight="700" fill="#fff">0</text><text y="55" text-anchor="middle" font-size="10" fill="#475569">ניתוב</text></g>
+        <g transform="translate(190,100)"><circle r="22" fill="#5865f2"/><text y="6" text-anchor="middle" font-size="13" font-weight="700" fill="#fff">1</text><text y="55" text-anchor="middle" font-size="10" fill="#475569">כינויים</text></g>
+        <g transform="translate(300,100)"><circle r="22" fill="#36e273"/><text y="6" text-anchor="middle" font-size="13" font-weight="700" fill="#fff">2</text><text y="55" text-anchor="middle" font-size="10" fill="#475569">תיקונים</text></g>
+        <g transform="translate(410,100)"><circle r="22" fill="#ffd700"/><text y="6" text-anchor="middle" font-size="13" font-weight="700" fill="#0e1020">3</text><text y="55" text-anchor="middle" font-size="10" fill="#475569">ניהול כללים</text></g>
+        <g transform="translate(520,100)"><circle r="22" fill="#17d8f5"/><text y="6" text-anchor="middle" font-size="13" font-weight="700" fill="#fff">4</text><text y="55" text-anchor="middle" font-size="10" fill="#475569">מדידה</text></g>
+    </g>
+</symbol>
+
+</defs>
+</svg>
+```
+
+- [ ] **Step 2: Reload browser and verify**
+
+Open `docs/manual/index.html` in browser. The defs block is `position:absolute width=0 height=0` — invisible. Use Devtools "Search in elements" for `diag-decision-types` to confirm it's present.
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add docs/manual/index.html
+git commit -m "docs(manual): inline SVG infographic library (5 diagrams)"
+```
+
+---
+
+## Task 3: Chapter 1 — Welcome + system benefits
+
+**Files:**
+- Modify: `docs/manual/index.html` — replace the `<!-- Content sections go here -->` marker with chapter 1
+- Create: `docs/manual/sources/00_intro.md` (Markdown twin for NotebookLM)
+
+- [ ] **Step 1: Insert chapter 1 into the HTML**
+
+Replace `<!-- Content sections go here (Tasks 3-9) -->` with:
+
+```html
+<section class="page-break">
+    <h1>1. ברוכים הבאים</h1>
+    <p class="lead" style="font-size:13pt;color:#475569;">
+        Shan-AI היא מערכת הבינה התפעולית של אגף ההקמה. היא עונה על שאלות, מתעדת החלטות,
+        ולומדת מהתיקונים שלך — כך שכל שאלה דומה בעתיד תקבל תשובה טובה יותר.
+    </p>
+
+    <h2>למה זה טוב לך</h2>
+    <div class="grid grid-3 avoid-break">
+        <div class="card"><div class="card-num">⚡</div>
+            <div style="font-weight:700;margin-top:6px;">תשובות מיידיות</div>
+            <div class="card-label">שאלות על פרויקטים, מנהלים, סטטוסים — בעברית, בלי לרדוף אחרי קבצים.</div></div>
+        <div class="card"><div class="card-num">🎯</div>
+            <div style="font-weight:700;margin-top:6px;">תיעוד החלטות חכם</div>
+            <div class="card-label">המערכת מסווגת, מציעה RACI, ושומרת בצורה אחידה לכל הצוות.</div></div>
+        <div class="card"><div class="card-num">📈</div>
+            <div style="font-weight:700;margin-top:6px;">משתפרת עם הזמן</div>
+            <div class="card-label">כל תיקון נשמר ומלמד את המערכת. שגיאה היום = תשובה נכונה מחר.</div></div>
+    </div>
+
+    <h2>מה בתוך המערכת</h2>
+    <figure><svg width="100%" viewBox="0 0 600 200"><use href="#diag-roadmap"/></svg>
+        <figcaption>חמש שכבות הליבה שמפעילות את Shan-AI</figcaption></figure>
+
+    <h2>איפה משתמשים</h2>
+    <div class="grid grid-2 avoid-break">
+        <div class="card"><div style="font-weight:700;color:var(--brand-purple);">💻 דשבורד אינטרנט</div>
+            <p style="margin:6px 0 0 0;">עמוד "שאל" לשאלות והחלטות, רשימת החלטות, ניהול פרויקטים, ניהול קבצים, ניהול משתמשים.</p></div>
+        <div class="card"><div style="font-weight:700;color:var(--brand-purple);">📱 בוט טלגרם</div>
+            <p style="margin:6px 0 0 0;">שאלות מהירות והחלטות תוך-כדי שטח. אותה לוגיקה כמו באתר — בלי מסך מחשב.</p></div>
+    </div>
+
+    <div class="callout tip"><div class="callout-title">💡 טיפ</div>
+        עברית טבעית עובדת. אין צורך בפורמט מיוחד — שאל כאילו את/ה מדבר עם עמית.
+    </div>
+</section>
+```
+
+- [ ] **Step 2: Create Markdown twin**
+
+Create `docs/manual/sources/00_intro.md` with:
+
+```markdown
+# 1. ברוכים הבאים
+
+Shan-AI היא מערכת הבינה התפעולית של אגף ההקמה. היא עונה על שאלות, מתעדת החלטות,
+ולומדת מהתיקונים שלך — כך שכל שאלה דומה בעתיד תקבל תשובה טובה יותר.
+
+## למה זה טוב לך
+
+- **⚡ תשובות מיידיות** — שאלות על פרויקטים, מנהלים, סטטוסים — בעברית, בלי לרדוף אחרי קבצים.
+- **🎯 תיעוד החלטות חכם** — המערכת מסווגת, מציעה RACI, ושומרת בצורה אחידה לכל הצוות.
+- **📈 משתפרת עם הזמן** — כל תיקון נשמר ומלמד את המערכת. שגיאה היום = תשובה נכונה מחר.
+
+## איפה משתמשים
+
+- **💻 דשבורד אינטרנט** — עמוד "שאל" לשאלות והחלטות, רשימת החלטות, ניהול פרויקטים, ניהול קבצים, ניהול משתמשים.
+- **📱 בוט טלגרם** — שאלות מהירות והחלטות תוך-כדי שטח. אותה לוגיקה כמו באתר — בלי מסך מחשב.
+
+> **💡 טיפ:** עברית טבעית עובדת. אין צורך בפורמט מיוחד — שאל כאילו את/ה מדבר עם עמית.
+```
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add docs/manual/index.html docs/manual/sources/00_intro.md
+git commit -m "docs(manual): chapter 1 — welcome + benefits + roadmap diagram"
+```
+
+---
+
+## Task 4: Chapter 2 — Login + dashboard tour
+
+**Files:**
+- Modify: `docs/manual/index.html` — append chapter 2 after chapter 1's closing `</section>`
+- Create: `docs/manual/sources/01_login_dashboard.md`
+
+- [ ] **Step 1: Insert chapter 2 in HTML**
+
+Append (before the next chapter or end of body content):
+
+```html
+<section class="page-break">
+    <h1>2. התחברות וסיור</h1>
+
+    <h2>כניסה למערכת</h2>
+    <ol class="step-list">
+        <li>היכנס/י לכתובת <code>easygoing-endurance-production-df54.up.railway.app</code> או לקישור שקיבלת.</li>
+        <li>בחר/י את שמך מהרשימה.</li>
+        <li>הקלד/י סיסמה. אם לא הגדרת — ברירת המחדל היא <code>1234</code> (החלף מיד דרך "עריכת משתמש").</li>
+        <li>לחיצה על <span class="badge badge-purple">כניסה</span> תעביר אותך לדשבורד.</li>
+    </ol>
+
+    <h2>תפריט עליון</h2>
+    <table>
+        <thead><tr><th>קישור</th><th>למה זה משמש</th><th>למי</th></tr></thead>
+        <tbody>
+        <tr><td><span class="badge badge-purple">📊 דשבורד</span></td><td>סקירה — כמה החלטות פתוחות, מי המאשרים, גרפים</td><td>כולם</td></tr>
+        <tr><td><span class="badge badge-purple">📋 החלטות</span></td><td>רשימת ההחלטות, סטטוסים, אישורים</td><td>כולם</td></tr>
+        <tr><td><span class="badge badge-purple">💬 שאל</span></td><td>שאלות חופשיות + תיעוד החלטה חדשה</td><td>כולם</td></tr>
+        <tr><td><span class="badge badge-purple">📁 קבצים</span></td><td>העלאת קבצים שהמערכת תלמד מהם</td><td>כולם</td></tr>
+        <tr><td><span class="badge badge-purple">📂 פרויקטים</span></td><td>תצוגת נתוני פרויקטים</td><td>כולם</td></tr>
+        <tr><td><span class="badge badge-purple">🎓 למידה</span></td><td>סטטיסטיקות + לקחים נצברים</td><td>כולם</td></tr>
+        <tr><td><span class="badge badge-purple">⚙️ כללי למידה</span></td><td>ניהול כינויים, פינים, ואישורים</td><td>מנהלים</td></tr>
+        <tr><td><span class="badge badge-purple">👥 משתמשים</span></td><td>הוספה / עריכת משתמשים</td><td>מנהלים</td></tr>
+        </tbody>
+    </table>
+
+    <div class="callout warn"><div class="callout-title">⚠ שים/י לב</div>
+        אם רואה את הקישור <strong>כללי למידה</strong> — את/ה מנהל/ת. לפעולות בעמוד הזה יש השפעה על איך המערכת עונה לכל המשתמשים.
+    </div>
+</section>
+```
+
+- [ ] **Step 2: Create Markdown twin**
+
+Create `docs/manual/sources/01_login_dashboard.md`:
+
+```markdown
+# 2. התחברות וסיור
+
+## כניסה למערכת
+
+1. היכנס/י לכתובת המערכת.
+2. בחר/י את שמך מהרשימה.
+3. הקלד/י סיסמה. אם לא הגדרת — ברירת המחדל היא `1234` (החלף מיד).
+4. לחיצה על "כניסה" תעביר אותך לדשבורד.
+
+## תפריט עליון
+
+| קישור | למה זה משמש | למי |
+|---|---|---|
+| 📊 דשבורד | סקירה כללית | כולם |
+| 📋 החלטות | רשימת ההחלטות, סטטוסים | כולם |
+| 💬 שאל | שאלות חופשיות + החלטות | כולם |
+| 📁 קבצים | קבצים שהמערכת לומדת מהם | כולם |
+| 📂 פרויקטים | תצוגת נתוני פרויקטים | כולם |
+| 🎓 למידה | סטטיסטיקות + לקחים | כולם |
+| ⚙️ כללי למידה | ניהול כינויים, פינים, אישורים | מנהלים |
+| 👥 משתמשים | הוספה / עריכת משתמשים | מנהלים |
+
+> **⚠ שים/י לב:** "כללי למידה" מופיע רק למנהלים. פעולות שם משפיעות על כל המשתמשים.
+```
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add docs/manual/index.html docs/manual/sources/01_login_dashboard.md
+git commit -m "docs(manual): chapter 2 — login + nav tour"
+```
+
+---
+
+## Task 5: Chapter 3 — Ask page + decision flow + RACI
+
+**Files:**
+- Modify: `docs/manual/index.html` — append chapter 3
+- Create: `docs/manual/sources/02_ask.md`
+
+- [ ] **Step 1: Insert chapter 3 in HTML**
+
+```html
+<section class="page-break">
+    <h1>3. עמוד "שאל"</h1>
+    <p>הצ׳אט הוא נקודת המוצא לכמעט הכל: שאלה על פרויקט, חיפוש קובץ, או תיעוד החלטה.
+       המערכת מזהה אוטומטית מה הקלדת ומפנה לזרימה הנכונה.</p>
+
+    <h2>איך השאלה מסתיימת בתשובה</h2>
+    <figure><svg width="100%" viewBox="0 0 600 480"><use href="#diag-routing"/></svg>
+        <figcaption>סדר הטיפול — המערכת בודקת כל שכבה ועוצרת ברגע שמצאה תשובה</figcaption></figure>
+
+    <h2>שאלה רגילה</h2>
+    <ol class="step-list">
+        <li>הקלד/י שאלה בעברית. למשל: <em>"מי המנהל של פרויקט בת ים?"</em>.</li>
+        <li>לחיצה על <span class="badge badge-purple">שלח</span> — תשובה תוך 1–4 שניות.</li>
+        <li>למטה תופיע התשובה + ציון מקור (📁 קבצים, 📂 פרויקטים, 📋 החלטות).</li>
+        <li>אם התשובה נכונה — לחיצה על 👍.</li>
+        <li>אם שגויה — לחיצה על 👎, הקלד/י את התשובה הנכונה — המערכת לומדת מיידית.</li>
+    </ol>
+
+    <div class="callout tip"><div class="callout-title">💡 דוגמאות לשאלות שעובדות מצוין</div>
+        <ul>
+            <li>"כמה פרויקטי הקמה פעילים?"</li>
+            <li>"באיזה שלב נמצא פרויקט בית הגדי?"</li>
+            <li>"מי המנהל של פרויקט נתניה?"</li>
+            <li>"איזה פרויקטים בעיכוב?"</li>
+            <li>"מה ההחלטות האחרונות שלי?"</li>
+        </ul>
+    </div>
+
+    <h2>תיעוד החלטה</h2>
+    <p>אם הקלדת משפט שנשמע כמו <strong>החלטה</strong> (לדוגמה: <em>"אני מחליט לעצור את העבודות בבת ים"</em>),
+       המערכת תזהה את זה אוטומטית ותפתח לך טופס אישור עם:</p>
+    <ul>
+        <li><strong>סוג ההחלטה</strong> (INFO / NORMAL / CRITICAL / UNCERTAIN — ראה איור 3.2)</li>
+        <li><strong>סיכום</strong> + <strong>פעולה מומלצת</strong></li>
+        <li><strong>סיכונים</strong> + <strong>הנחות</strong></li>
+        <li><strong>מדידות</strong> (האם ניתן למדוד את ההצלחה?)</li>
+        <li><strong>טבלת RACI</strong> — שיבוץ מבצע, בעל סמכות, יועצים, נמענים</li>
+    </ul>
+    <p>אחרי שאישרת — לחיצה על <span class="badge badge-normal">✓ אשר ושלח</span> שולחת את ההחלטה לאישור (אם קריטית) או ישירות לתיעוד.</p>
+
+    <figure><svg width="100%" viewBox="0 0 600 360"><use href="#diag-decision-types"/></svg>
+        <figcaption>4 סוגי החלטה — בחירה חכמה משפיעה על מי מקבל הודעה</figcaption></figure>
+</section>
+
+<section class="page-break">
+    <h1>4. RACI — מי עושה מה</h1>
+    <p>כל החלטה מקבלת שיבוץ של 4 תפקידים. המערכת מציעה — את/ה מאשר/ת או משנה לפני שליחה.</p>
+
+    <figure><svg width="100%" viewBox="0 0 600 260"><use href="#diag-raci"/></svg></figure>
+
+    <h2>כללים חשובים</h2>
+    <ul>
+        <li><strong>חייב להיות בדיוק בעל סמכות אחד (A)</strong> — אחרת ההחלטה לא תישמר.</li>
+        <li>מבצעים (R) יכולים להיות כמה — צוות שמבצע את הפעולה.</li>
+        <li>יועצים (C) נשאלים <em>לפני</em> שהפעולה נעשית.</li>
+        <li>נמענים (I) מקבלים הודעה <em>אחרי</em> שהפעולה בוצעה.</li>
+    </ul>
+
+    <div class="callout danger"><div class="callout-title">🚨 החלטה קריטית?</div>
+        אם המערכת זיהתה את ההחלטה כ-<span class="badge badge-critical">CRITICAL</span>, היא דורשת אישור בעל הסמכות (A) דרך טלגרם או דשבורד <strong>לפני</strong> שתבוצע.
+    </div>
+</section>
+```
+
+- [ ] **Step 2: Create Markdown twin**
+
+Create `docs/manual/sources/02_ask.md`:
+
+```markdown
+# 3. עמוד "שאל" + 4. RACI
+
+הצ׳אט הוא נקודת המוצא לכמעט הכל: שאלה על פרויקט, חיפוש קובץ, או תיעוד החלטה.
+המערכת מזהה אוטומטית מה הקלדת ומפנה לזרימה הנכונה.
+
+## איך השאלה מסתיימת בתשובה
+
+1. **זיהוי החלטה** — האם המשתמש מבקש לתעד החלטה?
+2. **פין תיקון** — תשובה מאושרת שמופעלת מיידית.
+3. **כינוי פרויקט / Intent Override**
+4. **שאלת מסד החלטות / פרויקטים**
+5. **חיפוש כללי בקבצים (RAG)**
+
+המערכת עוצרת ברגע שמצאה תשובה — לא יורדת לשכבה הבאה.
+
+## שאלה רגילה
+
+1. הקלד/י שאלה בעברית. למשל: "מי המנהל של פרויקט בת ים?".
+2. שלח. תשובה תוך 1–4 שניות.
+3. ציון מקור: 📁 קבצים, 📂 פרויקטים, 📋 החלטות.
+4. תשובה נכונה → 👍
+5. תשובה שגויה → 👎, הקלד/י את התשובה הנכונה — המערכת לומדת.
+
+### דוגמאות לשאלות שעובדות מצוין
+
+- "כמה פרויקטי הקמה פעילים?"
+- "באיזה שלב נמצא פרויקט בית הגדי?"
+- "מי המנהל של פרויקט נתניה?"
+- "איזה פרויקטים בעיכוב?"
+- "מה ההחלטות האחרונות שלי?"
+
+## תיעוד החלטה
+
+אם הקלדת משפט שנשמע כמו החלטה ("אני מחליט לעצור את העבודות בבת ים"),
+המערכת תזהה את זה אוטומטית ותפתח טופס אישור עם:
+
+- **סוג**: INFO / NORMAL / CRITICAL / UNCERTAIN
+- **סיכום** + **פעולה מומלצת**
+- **סיכונים** + **הנחות**
+- **מדידות** — האם ניתן למדוד הצלחה?
+- **טבלת RACI** — מבצע, בעל סמכות, יועצים, נמענים
+
+לחיצה על "✓ אשר ושלח" שולחת להחלטה לאישור (אם קריטית) או ישירות לתיעוד.
+
+## RACI — מי עושה מה
+
+- **R — Responsible (מבצע)** — מי מבצע את הפעולה. יכולים להיות כמה.
+- **A — Accountable (בעל סמכות)** — בדיוק אחד. אחראי על התוצאה.
+- **C — Consulted (יועץ)** — נשאלים *לפני* שהפעולה נעשית.
+- **I — Informed (לידיעה)** — מקבלים הודעה *אחרי* שהפעולה בוצעה.
+
+> **🚨 החלטה קריטית?** המערכת דורשת אישור בעל הסמכות (A) דרך טלגרם או דשבורד **לפני** שתבוצע.
+```
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add docs/manual/index.html docs/manual/sources/02_ask.md
+git commit -m "docs(manual): chapters 3+4 — ask page + decisions + RACI"
+```
+
+---
+
+## Task 6: Chapter 5 — Telegram bot
+
+**Files:**
+- Modify: `docs/manual/index.html` — append chapter 5
+- Create: `docs/manual/sources/03_telegram.md`
+
+- [ ] **Step 1: Insert chapter 5 in HTML**
+
+```html
+<section class="page-break">
+    <h1>5. בוט הטלגרם</h1>
+    <p>אותה לוגיקה כמו באתר — אבל בלי מחשב. רושם החלטות תוך-כדי שטח, מקבל אישורים בלחיצה.</p>
+
+    <h2>רישום ראשוני</h2>
+    <ol class="step-list">
+        <li>חפש/י את הבוט בטלגרם לפי שם (קבל את הקישור מהמנהל/ת).</li>
+        <li>שלח/י <code>/start</code>.</li>
+        <li>הבוט יבקש מספר טלפון לאימות.</li>
+        <li>לאחר אישור מנהל — קבל/י הודעה שהכניסה אושרה.</li>
+    </ol>
+
+    <h2>שימוש יומיומי</h2>
+    <table>
+        <thead><tr><th>מה הקלדת</th><th>מה יקרה</th></tr></thead>
+        <tbody>
+        <tr><td>שאלה (למשל "כמה פרויקטים פעילים?")</td><td>תשובה ישירה + מקור</td></tr>
+        <tr><td>החלטה ("אני מחליט לעצור...")</td><td>הבוט שואל "האם זו החלטה לתיעוד?" — לחיצה על ✅</td></tr>
+        <tr><td>בקשת אישור</td><td>הבוט שולח לבעל הסמכות עם כפתורי "אשר / דחה"</td></tr>
+        <tr><td>אישור החלטה</td><td>לחיצה על ✅ — ההחלטה עוברת לסטטוס "מאושר"</td></tr>
+        </tbody>
+    </table>
+
+    <div class="callout tip"><div class="callout-title">💡 פקודות מועילות</div>
+        <ul>
+            <li><code>/start</code> — תפריט ראשי</li>
+            <li><code>/decisions</code> — ההחלטות שלך</li>
+            <li><code>/help</code> — עזרה</li>
+        </ul>
+    </div>
+
+    <h2>איך המערכת מזהה החלטה</h2>
+    <p>היא רואה את ההודעה, מקצה כיוון (שאלה / החלטה / שאלה כללית) דרך מודל שפה, ואז:</p>
+    <ul>
+        <li>אם זוהתה כשאלה — עונה ישר.</li>
+        <li>אם זוהתה כהחלטה — שואלת אישור: "האם זוהי החלטה לתיעוד?"</li>
+        <li>אם לא בטוחה — שואלת שאלת הבהרה ("האם מדובר בפרויקט X או Y?")</li>
+    </ul>
+</section>
+```
+
+- [ ] **Step 2: Create Markdown twin**
+
+Create `docs/manual/sources/03_telegram.md`:
+
+```markdown
+# 5. בוט הטלגרם
+
+אותה לוגיקה כמו באתר — אבל בלי מחשב. רושם החלטות תוך-כדי שטח, מקבל אישורים בלחיצה.
+
+## רישום ראשוני
+
+1. חפש/י את הבוט בטלגרם לפי שם (קישור מהמנהל/ת).
+2. שלח `/start`.
+3. הבוט יבקש מספר טלפון לאימות.
+4. אחרי אישור מנהל — קבל/י הודעה שהכניסה אושרה.
+
+## שימוש יומיומי
+
+| מה הקלדת | מה יקרה |
+|---|---|
+| שאלה ("כמה פרויקטים פעילים?") | תשובה ישירה + מקור |
+| החלטה ("אני מחליט לעצור...") | הבוט שואל "האם זו החלטה לתיעוד?" — לחיצה על ✅ |
+| בקשת אישור | הבוט שולח לבעל הסמכות עם כפתורי "אשר / דחה" |
+| אישור החלטה | לחיצה על ✅ — סטטוס "מאושר" |
+
+## פקודות מועילות
+
+- `/start` — תפריט ראשי
+- `/decisions` — ההחלטות שלך
+- `/help` — עזרה
+
+## איך המערכת מזהה החלטה
+
+המערכת רואה את ההודעה, מקצה כיוון (שאלה / החלטה / שאלה כללית) דרך מודל שפה:
+
+- **שאלה** — עונה ישר.
+- **החלטה** — שואלת אישור: "האם זוהי החלטה לתיעוד?"
+- **לא בטוחה** — שואלת שאלת הבהרה ("האם מדובר בפרויקט X או Y?")
+```
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add docs/manual/index.html docs/manual/sources/03_telegram.md
+git commit -m "docs(manual): chapter 5 — Telegram bot"
+```
+
+---
+
+## Task 7: Chapter 6 — Decisions list + approval flow
+
+**Files:**
+- Modify: `docs/manual/index.html` — append chapter 6
+- Create: `docs/manual/sources/04_decisions.md`
+
+- [ ] **Step 1: Insert chapter 6 in HTML**
+
+```html
+<section class="page-break">
+    <h1>6. רשימת ההחלטות</h1>
+    <p>בעמוד <span class="badge badge-purple">📋 החלטות</span> רואה/ה את כל ההחלטות —
+       שלך, של הצוות, ואלה שמחכות לאישור שלך.</p>
+
+    <h2>הצבעים והאיקונים</h2>
+    <table>
+        <thead><tr><th>תווית</th><th>משמעות</th></tr></thead>
+        <tbody>
+        <tr><td><span class="badge badge-info">מידע</span></td><td>החלטה מסוג INFO — לוג בלבד, אין צורך בפעולה</td></tr>
+        <tr><td><span class="badge badge-normal">רגיל</span></td><td>NORMAL — לוג + הודעות + ביצוע</td></tr>
+        <tr><td><span class="badge badge-critical">קריטי</span></td><td>CRITICAL — דורש אישור בעל סמכות לפני ביצוע</td></tr>
+        <tr><td><span class="badge badge-uncertain">לא ודאי</span></td><td>UNCERTAIN — דורש בירור ידני</td></tr>
+        <tr><td>⏳ ממתין</td><td>החלטה שעדיין לא אושרה</td></tr>
+        <tr><td>✅ מאושר</td><td>בעל הסמכות אישר — תבוצע</td></tr>
+        <tr><td>❌ נדחה</td><td>בעל הסמכות דחה — לא תבוצע</td></tr>
+        <tr><td>⚡ בוצע</td><td>הפעולה בוצעה בפועל</td></tr>
+        </tbody>
+    </table>
+
+    <h2>פעולות נפוצות</h2>
+    <ol class="step-list">
+        <li><strong>אישור / דחיית החלטה</strong> — אם את/ה הבעל סמכות (A), כפתורי "✅ אשר" ו"❌ דחה" יופיעו ישירות על הכרטיס.</li>
+        <li><strong>הוספת פידבק</strong> — אחרי שההחלטה הסתיימה, ניתן להוסיף ציון 1-5 + הערה. הציון נכנס ל-RAG ומשפיע על המלצות עתידיות.</li>
+        <li><strong>צפייה בפרטים</strong> — לחיצה על הסיכום פותחת חלון עם כל הנתונים, RACI, ופידבק.</li>
+        <li><strong>סינון</strong> — לפי סוג / סטטוס / פרויקט בעזרת התפריט העליון.</li>
+    </ol>
+
+    <div class="callout tip"><div class="callout-title">💡 איך לאשר בטלגרם</div>
+        כשמגיעה הודעת אישור — לחיצה על ✅ או ❌. אם דוחה — תקבל/י שדה הזנה לסיבת הדחייה.
+    </div>
+</section>
+```
+
+- [ ] **Step 2: Create Markdown twin**
+
+Create `docs/manual/sources/04_decisions.md`:
+
+```markdown
+# 6. רשימת ההחלטות
+
+בעמוד "📋 החלטות" רואה/ה את כל ההחלטות — שלך, של הצוות, ואלה שמחכות לאישור שלך.
+
+## הצבעים והאיקונים
+
+| תווית | משמעות |
+|---|---|
+| 🔵 מידע (INFO) | לוג בלבד, אין צורך בפעולה |
+| 🟢 רגיל (NORMAL) | לוג + הודעות + ביצוע |
+| 🔴 קריטי (CRITICAL) | דורש אישור בעל סמכות לפני ביצוע |
+| 🟡 לא ודאי (UNCERTAIN) | דורש בירור ידני |
+| ⏳ ממתין | עדיין לא אושרה |
+| ✅ מאושר | בעל הסמכות אישר — תבוצע |
+| ❌ נדחה | לא תבוצע |
+| ⚡ בוצע | הפעולה בוצעה בפועל |
+
+## פעולות נפוצות
+
+1. **אישור / דחיית החלטה** — בעל סמכות רואה כפתורי "✅ אשר" ו"❌ דחה".
+2. **הוספת פידבק** — ציון 1-5 + הערה אחרי סיום ההחלטה. הציון משפיע על המלצות עתידיות.
+3. **צפייה בפרטים** — לחיצה על הסיכום פותחת חלון עם RACI ופידבק.
+4. **סינון** — לפי סוג / סטטוס / פרויקט.
+
+> **💡 איך לאשר בטלגרם:** לחיצה על ✅ או ❌. דחייה → שדה לסיבה.
+```
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add docs/manual/index.html docs/manual/sources/04_decisions.md
+git commit -m "docs(manual): chapter 6 — decisions list + approval flow"
+```
+
+---
+
+## Task 8: Chapter 7 — Learning loop (thumbs, corrections, eval-curate)
+
+**Files:**
+- Modify: `docs/manual/index.html` — append chapter 7
+- Create: `docs/manual/sources/05_learning_loop.md`
+
+- [ ] **Step 1: Insert chapter 7 in HTML**
+
+```html
+<section class="page-break">
+    <h1>7. איך המערכת לומדת</h1>
+    <p>כל לחיצה על 👍 או 👎 משפיעה. המערכת שומרת תיקונים, מציעה תיקון אוטומטי,
+       ומעדכנת את התשובות העתידיות. את/ה לא צריך/ה לעשות שום דבר טכני — רק
+       להגיב.</p>
+
+    <figure><svg width="100%" viewBox="0 0 600 360"><use href="#diag-learning"/></svg></figure>
+
+    <h2>איך לעבוד עם המערכת</h2>
+    <ol class="step-list">
+        <li>שאל/י שאלה ב-<span class="badge badge-purple">💬 שאל</span>.</li>
+        <li>אם התשובה נכונה — לחיצה על 👍. (זה שומר את התשובה כמודל ל-future).</li>
+        <li>אם התשובה שגויה — לחיצה על 👎. ייפתח חלון "מה היית מצפה לשמוע?"</li>
+        <li>הקלד/י את התשובה הנכונה — לחיצה על "שמור ולמד".</li>
+        <li>תוך 30-90 שניות המערכת תנסה לתקן את עצמה. ההודעה תעדכן: "🔄 לומד מהתיקון".</li>
+        <li>בפעם הבאה שמישהו ישאל את אותה שאלה — תקבל את התשובה הנכונה.</li>
+    </ol>
+
+    <h2>איפה רואים את הפעילות</h2>
+    <p>בעמוד <span class="badge badge-purple">🎓 למידה</span>, כרטיס בראש הדף מציג:</p>
+    <div class="grid grid-3 avoid-break">
+        <div class="card"><div class="card-num" style="color:var(--brand-green);">87%</div>
+            <div class="card-label">pass-rate — אחוז השאלות שהמערכת ענתה נכון השבוע</div></div>
+        <div class="card"><div class="card-num" style="color:var(--brand-cyan);">12</div>
+            <div class="card-label">rules-applied — כללים שהמערכת למדה השבוע</div></div>
+        <div class="card"><div class="card-num" style="color:var(--brand-amber);">5</div>
+            <div class="card-label">corrections-in — תיקונים שקיבלה השבוע</div></div>
+    </div>
+
+    <h2>אישורי תשובות זהב</h2>
+    <p>בעמוד <span class="badge badge-purple">🎯 אימות תשובות זהב</span> (קישור מהדף "למידה"):</p>
+    <ul>
+        <li>רואה/ה את כל ה<strong>תשובות הנכונות</strong> שהמערכת שמרה (gold answers).</li>
+        <li>יכול/ה לאשר/לערוך/למחוק לפני שהמערכת תשתמש בהן.</li>
+        <li>"הפעל מחזור" — הרצת בדיקה מלאה: כל השאלות נשאלות שוב, וכל אחת מקבלת ציון.</li>
+    </ul>
+
+    <div class="callout warn"><div class="callout-title">⚠ הבדל קריטי</div>
+        <ul>
+            <li><strong>👍 / 👎</strong> — לכולם. השפעה מיידית.</li>
+            <li><strong>אימות תשובות זהב</strong> — לפני הרצת מחזור הבדיקה. כאן מאשרים את ה-gold answers שייקבעו את ציון המערכת.</li>
+            <li><strong>הפעלת מחזור</strong> — אחרי האישור. המערכת בודקת את עצמה ומציעה תיקונים.</li>
+        </ul>
+    </div>
+</section>
+```
+
+- [ ] **Step 2: Create Markdown twin**
+
+Create `docs/manual/sources/05_learning_loop.md`:
+
+```markdown
+# 7. איך המערכת לומדת
+
+כל לחיצה על 👍 או 👎 משפיעה. המערכת שומרת תיקונים, מציעה תיקון אוטומטי,
+ומעדכנת את התשובות העתידיות.
+
+## איך לעבוד עם המערכת
+
+1. שאל/י שאלה ב-💬 שאל.
+2. תשובה נכונה → 👍 (שומרת את התשובה כמודל לעתיד).
+3. תשובה שגויה → 👎. ייפתח חלון "מה היית מצפה לשמוע?".
+4. הקלד/י את התשובה הנכונה — "שמור ולמד".
+5. תוך 30-90 שניות המערכת תנסה לתקן עצמה. הודעה: "🔄 לומד מהתיקון".
+6. בפעם הבאה שמישהו ישאל — תשובה נכונה.
+
+## כרטיס "לולאת למידה — 7 ימים אחרונים"
+
+בעמוד 🎓 למידה, בראש הדף:
+
+- **pass-rate** — אחוז השאלות שהמערכת ענתה נכון השבוע
+- **rules-applied** — כללים שהמערכת למדה השבוע
+- **corrections-in** — תיקונים שקיבלה השבוע
+
+## אישורי תשובות זהב
+
+בעמוד 🎯 אימות תשובות זהב:
+
+- רואה/ה את כל התשובות הנכונות שהמערכת שמרה (gold answers)
+- אישור/עריכה/מחיקה לפני שהמערכת תשתמש בהן
+- "הפעל מחזור" — הרצת בדיקה מלאה: כל שאלה נשאלת שוב, ומקבלת ציון
+
+## הבדלים חשובים
+
+- **👍 / 👎** — לכולם. השפעה מיידית.
+- **אימות תשובות זהב** — לפני הרצת מחזור הבדיקה. אישור gold answers.
+- **הפעלת מחזור** — אחרי האישור. המערכת בודקת ומציעה תיקונים.
+```
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add docs/manual/index.html docs/manual/sources/05_learning_loop.md
+git commit -m "docs(manual): chapter 7 — learning loop"
+```
+
+---
+
+## Task 9: Chapter 8 — Admin rules + FAQ + glossary
+
+**Files:**
+- Modify: `docs/manual/index.html` — append chapter 8 + appendix
+- Create: `docs/manual/sources/06_admin.md`
+- Create: `docs/manual/sources/README.md`
+
+- [ ] **Step 1: Insert chapter 8 + FAQ + glossary in HTML**
+
+```html
+<section class="page-break">
+    <h1>8. ניהול כללים (מנהלים בלבד)</h1>
+    <p>בעמוד <span class="badge badge-purple">⚙️ כללי למידה</span> את/ה רואה את כל הכללים שמשפיעים על תשובות המערכת. 5 לשוניות:</p>
+
+    <h2>הלשוניות</h2>
+    <table>
+        <thead><tr><th>לשונית</th><th>מה זה</th><th>מתי משתמשים</th></tr></thead>
+        <tbody>
+        <tr><td><strong>אליאסים</strong></td><td>"בית הגדי" → פרויקט #357</td><td>כשהמערכת לא מזהה שם של פרויקט</td></tr>
+        <tr><td><strong>אינטנט אוברייד</strong></td><td>שאלה ספציפית → סוג חיפוש מוגדר</td><td>כשהמערכת בוחרת פעם שגויה איך לחפש</td></tr>
+        <tr><td><strong>פינים</strong></td><td>תשובה מאושרת שמופעלת מיידית, ללא LLM</td><td>שאלה שאסור שתשתנה לעולם</td></tr>
+        <tr><td><strong>סינונימים</strong></td><td>"מנה"פ" = "מנהל פרויקט"</td><td>קיצורים, מילים נרדפות</td></tr>
+        <tr><td><strong>ממתינים לאישור</strong></td><td>פינים שהמערכת הציעה — דורשים אישור</td><td>סקירת הצעות גבוהות-סיכון</td></tr>
+        </tbody>
+    </table>
+
+    <h2>הוספת אליאס</h2>
+    <ol class="step-list">
+        <li>לשונית "אליאסים" → טופס בראש העמוד.</li>
+        <li>בשדה <code>alias_text</code> — הקלד/י את השם שהמשתמש מקליד (לדוגמה <em>"בת ים"</em>).</li>
+        <li>בשדה <code>project_id</code> — הקלד/י את ה-ID של הפרויקט מהמערכת (לדוגמה <em>357</em>).</li>
+        <li>"הוסף אליאס" — שמירה מיידית.</li>
+    </ol>
+
+    <div class="callout warn"><div class="callout-title">⚠ הסבר על "פינים"</div>
+        פין הוא תשובה מאושרת ידנית שלא נסמכת על AI. השאלה תקבל את התשובה הזו בלי הפעלת מודל שפה. שימושי לחוקים, מספרי טלפון, תשובות סטטוטוריות — כל דבר שחייב להישאר זהה.
+    </div>
+</section>
+
+<section class="page-break">
+    <h1>9. שאלות נפוצות</h1>
+    <h3>למה התשובה לקחה הרבה זמן?</h3>
+    <p>המערכת משתמשת במודל שפה שלפעמים תופס תור. תוך 4-8 שניות תשובה נורמלית. מעל 15 שניות — בדוק/י את הסטטוס דרך המנהל/ת.</p>
+
+    <h3>שמתי תיקון אבל המערכת עדיין נותנת תשובה ישנה</h3>
+    <p>תיקונים נכנסים לתוקף תוך כדקה. אם אחרי כמה דקות התשובה עדיין שגויה — דבר/י עם המנהל/ת. אולי יש כלל אחר שדורס את התיקון.</p>
+
+    <h3>מה ההבדל בין שאלה לבין החלטה?</h3>
+    <p>שאלה — מבקש/ת מידע ("כמה פרויקטים?"). החלטה — מבקש/ת לתעד פעולה ("אני מחליט לעצור..."). המערכת מזהה את ההבדל לבד, אבל מציעה אישור לפני התיעוד.</p>
+
+    <h3>אני לא מקבל/ת הודעות אישור בטלגרם</h3>
+    <p>1. בדוק/י שאת/ה רשום/ה בבוט (לחיצה על /start). 2. בדוק/י שהבוט לא חסום. 3. דבר/י עם המנהל/ת.</p>
+
+    <h3>אני רוצה להוריד דוח של ההחלטות שלי</h3>
+    <p>בעמוד "החלטות" → סינון לפי "המגיש שלי" → ייצוא לאקסל (כפתור למעלה).</p>
+
+    <h2>מונחים</h2>
+    <dl class="glossary">
+        <dt>RAG</dt><dd>Retrieval-Augmented Generation — איך המערכת מוצאת מידע בקבצים שהעלית.</dd>
+        <dt>RACI</dt><dd>Responsible/Accountable/Consulted/Informed — תפקידים בכל החלטה.</dd>
+        <dt>Gold Answer</dt><dd>תשובה מאושרת ידנית שהמערכת משתמשת בה כדי להעריך את עצמה.</dd>
+        <dt>Pin (פין)</dt><dd>תשובה מאושרת מנהלית שמופעלת מיידית. אין שינוי דרך מודל שפה.</dd>
+        <dt>Alias (כינוי)</dt><dd>שם חופשי שמופה לפרויקט קונקרטי. דוגמה: "בת ים" → פרויקט #357.</dd>
+        <dt>Intent Override</dt><dd>שאלה ספציפית שמופנית לסוג חיפוש מוגדר מראש, בלי בחירה אוטומטית.</dd>
+        <dt>Verdict</dt><dd>סיווג ההחלטה — INFO / NORMAL / CRITICAL / UNCERTAIN.</dd>
+        <dt>pass-rate</dt><dd>אחוז שאלות שקיבלו תשובה נכונה במחזור בדיקה. גבוה יותר = מערכת מדויקת יותר.</dd>
+    </dl>
+
+    <h2>קבלת עזרה</h2>
+    <ul>
+        <li>שאלה כללית — דרך הצ׳אט: <em>"איך עושים X?"</em></li>
+        <li>תקלה טכנית — דבר/י עם המנהל/ת או צוות התמיכה.</li>
+        <li>הצעה לשיפור — שלח/י לבעל המוצר.</li>
+    </ul>
+
+    <p style="margin-top:30px;text-align:center;color:var(--muted);font-size:.9em;">
+        ⓒ שעל — אגף הקמה · החברה לחשמל · גרסה 1.0
+    </p>
+</section>
+```
+
+- [ ] **Step 2: Create `docs/manual/sources/06_admin.md`**
+
+```markdown
+# 8. ניהול כללים (מנהלים בלבד)
+
+בעמוד "⚙️ כללי למידה" המנהל/ת רואה את כל הכללים שמשפיעים על תשובות המערכת.
+
+## הלשוניות
+
+| לשונית | מה זה | מתי משתמשים |
+|---|---|---|
+| **אליאסים** | "בית הגדי" → פרויקט #357 | המערכת לא מזהה שם של פרויקט |
+| **אינטנט אוברייד** | שאלה → סוג חיפוש מוגדר | המערכת בוחרת פעם שגויה איך לחפש |
+| **פינים** | תשובה מאושרת מיידית | שאלה שאסור שתשתנה לעולם |
+| **סינונימים** | "מנה"פ" = "מנהל פרויקט" | קיצורים, מילים נרדפות |
+| **ממתינים לאישור** | פינים שהמערכת הציעה | סקירת הצעות גבוהות-סיכון |
+
+## הוספת אליאס
+
+1. לשונית "אליאסים" → טופס בראש העמוד.
+2. `alias_text` — השם שהמשתמש מקליד ("בת ים").
+3. `project_id` — ה-ID של הפרויקט (357).
+4. "הוסף אליאס" — שמירה מיידית.
+
+## פין
+
+פין הוא תשובה מאושרת ידנית שלא נסמכת על AI. השאלה תקבל את התשובה הזו בלי הפעלת מודל שפה.
+
+שימושי ל: חוקים, מספרי טלפון, תשובות סטטוטוריות — כל דבר שחייב להישאר זהה.
+
+# 9. שאלות נפוצות
+
+**למה התשובה לקחה הרבה זמן?**
+המערכת משתמשת במודל שפה שלפעמים תופס תור. 4-8 שניות תקין. מעל 15 שניות → דבר/י עם המנהל/ת.
+
+**שמתי תיקון אבל המערכת עדיין נותנת תשובה ישנה**
+תיקונים בתוקף תוך דקה. אם אחרי כמה דקות עדיין שגוי — אולי יש כלל אחר שדורס. דבר/י עם המנהל/ת.
+
+**מה ההבדל בין שאלה לבין החלטה?**
+שאלה — מבקש מידע. החלטה — מבקש לתעד פעולה. המערכת מזהה אוטומטית.
+
+**אני לא מקבל הודעות אישור בטלגרם**
+1. בדוק שאתה רשום (`/start`). 2. בדוק שלא חסום. 3. דבר עם המנהל.
+
+## מונחים
+
+- **RAG** — Retrieval-Augmented Generation. איך המערכת מוצאת מידע בקבצים.
+- **RACI** — Responsible/Accountable/Consulted/Informed. תפקידים בהחלטה.
+- **Gold Answer** — תשובה מאושרת ידנית. המערכת משתמשת בה להעריך את עצמה.
+- **Pin** — תשובה מאושרת מנהלית, ללא מודל שפה.
+- **Alias** — שם חופשי → פרויקט קונקרטי.
+- **Intent Override** — שאלה → סוג חיפוש קבוע.
+- **Verdict** — INFO / NORMAL / CRITICAL / UNCERTAIN.
+- **pass-rate** — אחוז שאלות נכונות במחזור בדיקה.
+```
+
+- [ ] **Step 3: Create `docs/manual/sources/README.md` with NotebookLM upload instructions**
+
+```markdown
+# Shan-AI User Manual — Source Files
+
+This folder contains the Markdown source files for the user manual, split per chapter.
+
+## Files
+
+- `00_intro.md` — Chapter 1: Welcome + benefits
+- `01_login_dashboard.md` — Chapter 2: Login + navigation
+- `02_ask.md` — Chapters 3+4: Ask page + decisions + RACI
+- `03_telegram.md` — Chapter 5: Telegram bot
+- `04_decisions.md` — Chapter 6: Decisions list
+- `05_learning_loop.md` — Chapter 7: Learning loop
+- `06_admin.md` — Chapters 8+9: Admin rules + FAQ + glossary
+
+## Using with NotebookLM (optional, for AI audio walkthrough)
+
+1. Go to https://notebooklm.google.com and sign in with your Google account.
+2. Create a new notebook.
+3. Click "Add source" → "Upload files".
+4. Select all `.md` files from this folder.
+5. Wait ~1 minute for indexing.
+6. In the "Studio" panel on the right, click "Generate Audio Overview".
+   NotebookLM will produce a 5-12 minute Hebrew audio walkthrough you can share.
+7. Optional: ask the notebook chat questions like "סכם איך עובד עמוד שאל" or
+   "מה ההבדל בין INFO ל-CRITICAL" for grounded answers.
+
+## Generating the PDF
+
+- **Browser print (recommended):** Open `../index.html` in Chrome → Ctrl+P →
+  Destination: "Save as PDF" → A4 portrait → Save.
+- **Headless (one-shot):** Run `../render_pdf.sh` (requires weasyprint).
+```
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add docs/manual/index.html docs/manual/sources/06_admin.md docs/manual/sources/README.md
+git commit -m "docs(manual): chapter 8+9 — admin rules + FAQ + glossary + NotebookLM guide"
+```
+
+---
+
+## Task 10: PDF render script + final verification
+
+**Files:**
+- Create: `docs/manual/render_pdf.sh`
+
+- [ ] **Step 1: Create the render script**
+
+```bash
+#!/usr/bin/env bash
+# Render the user manual to PDF using weasyprint inside the shan-ai-api container.
+# Usage: ./docs/manual/render_pdf.sh
+# Output: docs/manual/manual.pdf
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+HTML_HOST="$SCRIPT_DIR/index.html"
+PDF_HOST="$SCRIPT_DIR/manual.pdf"
+HTML_CONTAINER="/app/docs/manual/index.html"
+PDF_CONTAINER="/app/docs/manual/manual.pdf"
+
+if ! docker ps --format '{{.Names}}' | grep -q '^shan-ai-api$'; then
+    echo "shan-ai-api container is not running. Start it with:"
+    echo "  docker-compose up -d"
+    exit 1
+fi
+
+echo "Ensuring weasyprint is installed in the container..."
+docker exec shan-ai-api pip install --quiet 'weasyprint>=60' 2>&1 | tail -3
+
+echo "Rendering $HTML_CONTAINER → $PDF_CONTAINER ..."
+docker exec shan-ai-api python -c "
+from weasyprint import HTML
+HTML('$HTML_CONTAINER').write_pdf('$PDF_CONTAINER')
+print('OK')
+"
+
+if [ -f "$PDF_HOST" ]; then
+    SIZE=$(stat -c%s "$PDF_HOST" 2>/dev/null || stat -f%z "$PDF_HOST")
+    echo "✅ Generated $PDF_HOST ($SIZE bytes)"
+else
+    echo "❌ Output PDF not found at $PDF_HOST"
+    exit 1
+fi
+```
+
+Make it executable:
+```bash
+chmod +x docs/manual/render_pdf.sh
+```
+
+- [ ] **Step 2: Verify HTML is well-formed**
+
+```bash
+docker run --rm -v "$(pwd)/docs/manual:/m" -w /m alpine:3 sh -c "apk add --no-cache libxml2-utils >/dev/null && xmllint --html --noout index.html 2>&1 | head -10"
+```
+
+Expected: zero output OR only "HTML namespace warning" (harmless).
+
+- [ ] **Step 3: Render PDF**
+
+```bash
+./docs/manual/render_pdf.sh
+```
+
+Expected: `✅ Generated docs/manual/manual.pdf (NNNNN bytes)`.
+
+If weasyprint fails on Hebrew RTL or SVG, fall back to browser print:
+
+1. Open `docs/manual/index.html` in Chrome.
+2. Ctrl+P → "Save as PDF" → A4 portrait → "More settings" → Margins: Default → Background graphics: ON → Save as `docs/manual/manual.pdf`.
+
+- [ ] **Step 4: Visual review the PDF**
+
+Open `docs/manual/manual.pdf`. Verify:
+
+- [ ] Cover page renders with dark navy background + 🛰️ logo + "Shan-AI" title
+- [ ] TOC lists 8 chapters with page numbers, RTL aligned
+- [ ] All 5 SVG infographics visible (decision-types, RACI, routing, learning, roadmap)
+- [ ] Hebrew text right-to-left throughout
+- [ ] Heebo font (not a fallback)
+- [ ] Tables render with alternating row backgrounds + right alignment
+- [ ] Callouts (tip/warn/danger) have correct colored borders
+- [ ] Page numbers in footer "N / total"
+
+Fix any issues by editing the HTML and re-rendering.
+
+- [ ] **Step 5: Commit + tag**
+
+```bash
+git add docs/manual/render_pdf.sh docs/manual/manual.pdf
+git commit -m "docs(manual): render script + final PDF artifact"
+git tag user-manual-v1.0
+```
+
+---
+
+## Self-Review
+
+**1. Spec coverage:**
+- "PDF manual" — Task 10 generates `manual.pdf`. ✅
+- "Benefits, way of use, everything any user can use" — Chapters 1 (benefits), 2-7 (way of use), 8 (admin), 9 (FAQ + glossary). ✅
+- "Using infographics" — Task 2 defines 5 inline SVG infographics, embedded in chapters 1/3/4/7. ✅
+- "Make it beautiful" — Heebo font, brand-color palette, callouts, badges, cards, grid layouts, cover page, TOC, page numbers. ✅
+- "Try and use notebooklm" — Task 9 produces a Markdown twin in `docs/manual/sources/` + README with NotebookLM upload instructions for audio walkthrough. NotebookLM doesn't generate PDFs (out of its capability), but the sources are NotebookLM-ready. ✅
+
+**2. Placeholder scan:** Searched for "TBD", "TODO", "fill in", "implement later". None.
+
+**3. Type/path consistency:** All SVG `<use href="#diag-X">` references in chapters point to symbol IDs defined in Task 2's `<defs>`. File paths (`docs/manual/*`) consistent throughout. The render script paths assume the api container working directory is `/app` (matches the Dockerfile pattern used by other migrations).
+
+No issues found.
+
+---
+
+## Execution Handoff
+
+Plan complete and saved to `docs/superpowers/plans/2026-05-16-user-manual.md`. Two execution options:
+
+**1. Subagent-Driven (recommended)** — fresh subagent per chapter, fast iteration
+
+**2. Inline Execution** — execute tasks in this session via executing-plans
+
+Which approach?
