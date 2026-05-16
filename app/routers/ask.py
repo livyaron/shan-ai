@@ -35,9 +35,23 @@ async def ask_query(
     session: AsyncSession = Depends(get_db_session),
     current_user: User = Depends(get_current_user),
 ):
+    # Decision-submission gate runs BEFORE Q&A routing.
+    # Mirrors Telegram: _ai_route_message → if route="decision" → ClaudeService.classify
+    # → if verdict="DECISION" → return decision payload (analysis + RACI + users),
+    # client opens decision-confirm UI. Otherwise fall through to ask_router Q&A.
+    from app.services.telegram_routing import _ai_route_message
+    routing = await _ai_route_message(body.question)
+    if routing.get("route") == "decision":
+        decision_payload = await _try_classify_as_decision(
+            body.question, session, current_user,
+        )
+        if decision_payload is not None:
+            return JSONResponse(decision_payload)
+
     from app.services.ask_router import route
     result = await route(body.question, session, current_user.id)
     return JSONResponse({
+        "is_decision":   False,
         "answer":        result.answer,
         "sources_text":  result.sources_text,
         "has_files":     result.has_files,
@@ -45,6 +59,58 @@ async def ask_query(
         "file_names":    result.file_names,
         "log_id":        result.log_id,
     })
+
+
+async def _try_classify_as_decision(
+    question: str,
+    session: AsyncSession,
+    current_user: User,
+) -> dict | None:
+    """Run Claude classify + (if DECISION) full analyze + RACI suggestions.
+    Returns the decision payload on DECISION verdict, None otherwise.
+    Errors are swallowed — the caller falls through to Q&A."""
+    import logging as _logging
+    log = _logging.getLogger(__name__)
+    try:
+        from app.services.claude_service import ClaudeService
+        from app.services import embedding_service
+        from app.services.raci_service import get_ai_raci_suggestions_from_text
+        from sqlalchemy import select as _select
+        claude = ClaudeService()
+        classify_result = await claude.classify(question)
+        verdict = classify_result.get("verdict", "DECISION")
+        if verdict != "DECISION":
+            return None
+
+        role_str = current_user.role.value if current_user.role else "unknown"
+        similar = await embedding_service.get_similar_decisions(session, question)
+        past_context = embedding_service.format_past_context(similar)
+        analysis = await claude.analyze(question, role_str, past_context)
+
+        raci_suggestions = await get_ai_raci_suggestions_from_text(question)
+        raci_dict = {str(s["user_id"]): s["role"] for s in raci_suggestions}
+
+        all_users = (await session.execute(
+            _select(User).order_by(User.username)
+        )).scalars().all()
+        users_list = [
+            {"id": u.id, "username": u.username,
+             "job_title": u.job_title or "",
+             "role": u.role.value if u.role else ""}
+            for u in all_users
+        ]
+
+        return {
+            "is_decision":     True,
+            "verdict":         "DECISION",
+            "problem":         question,
+            "analysis":        analysis,
+            "raci_suggestions": raci_dict,
+            "users":           users_list,
+        }
+    except Exception as e:
+        log.warning(f"_try_classify_as_decision failed: {e}", exc_info=True)
+        return None
 
 
 class CorrectionRequest(BaseModel):
