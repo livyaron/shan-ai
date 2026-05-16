@@ -363,7 +363,70 @@ figcaption { font-size: .85em; color: var(--muted); margin-top: 6px; text-align:
     </div>
 </section>
 
-<!-- Content sections go here (Tasks 5-9) -->
+<section class="page-break">
+    <h1>3. עמוד "שאל"</h1>
+    <p>הצ׳אט הוא נקודת המוצא לכמעט הכל: שאלה על פרויקט, חיפוש קובץ, או תיעוד החלטה.
+       המערכת מזהה אוטומטית מה הקלדת ומפנה לזרימה הנכונה.</p>
+
+    <h2>איך השאלה מסתיימת בתשובה</h2>
+    <figure><svg width="100%" viewBox="0 0 600 480"><use href="#diag-routing"/></svg>
+        <figcaption>סדר הטיפול — המערכת בודקת כל שכבה ועוצרת ברגע שמצאה תשובה</figcaption></figure>
+
+    <h2>שאלה רגילה</h2>
+    <ol class="step-list">
+        <li>הקלד/י שאלה בעברית. למשל: <em>"מי המנהל של פרויקט בת ים?"</em>.</li>
+        <li>לחיצה על <span class="badge badge-purple">שלח</span> — תשובה תוך 1–4 שניות.</li>
+        <li>למטה תופיע התשובה + ציון מקור (📁 קבצים, 📂 פרויקטים, 📋 החלטות).</li>
+        <li>אם התשובה נכונה — לחיצה על 👍.</li>
+        <li>אם שגויה — לחיצה על 👎, הקלד/י את התשובה הנכונה — המערכת לומדת מיידית.</li>
+    </ol>
+
+    <div class="callout tip"><div class="callout-title">💡 דוגמאות לשאלות שעובדות מצוין</div>
+        <ul>
+            <li>"כמה פרויקטי הקמה פעילים?"</li>
+            <li>"באיזה שלב נמצא פרויקט בית הגדי?"</li>
+            <li>"מי המנהל של פרויקט נתניה?"</li>
+            <li>"איזה פרויקטים בעיכוב?"</li>
+            <li>"מה ההחלטות האחרונות שלי?"</li>
+        </ul>
+    </div>
+
+    <h2>תיעוד החלטה</h2>
+    <p>אם הקלדת משפט שנשמע כמו <strong>החלטה</strong> (לדוגמה: <em>"אני מחליט לעצור את העבודות בבת ים"</em>),
+       המערכת תזהה את זה אוטומטית ותפתח לך טופס אישור עם:</p>
+    <ul>
+        <li><strong>סוג ההחלטה</strong> (INFO / NORMAL / CRITICAL / UNCERTAIN — ראה איור 3.2)</li>
+        <li><strong>סיכום</strong> + <strong>פעולה מומלצת</strong></li>
+        <li><strong>סיכונים</strong> + <strong>הנחות</strong></li>
+        <li><strong>מדידות</strong> (האם ניתן למדוד את ההצלחה?)</li>
+        <li><strong>טבלת RACI</strong> — שיבוץ מבצע, בעל סמכות, יועצים, נמענים</li>
+    </ul>
+    <p>אחרי שאישרת — לחיצה על <span class="badge badge-normal">✓ אשר ושלח</span> שולחת את ההחלטה לאישור (אם קריטית) או ישירות לתיעוד.</p>
+
+    <figure><svg width="100%" viewBox="0 0 600 360"><use href="#diag-decision-types"/></svg>
+        <figcaption>4 סוגי החלטה — בחירה חכמה משפיעה על מי מקבל הודעה</figcaption></figure>
+</section>
+
+<section class="page-break">
+    <h1>4. RACI — מי עושה מה</h1>
+    <p>כל החלטה מקבלת שיבוץ של 4 תפקידים. המערכת מציעה — את/ה מאשר/ת או משנה לפני שליחה.</p>
+
+    <figure><svg width="100%" viewBox="0 0 600 260"><use href="#diag-raci"/></svg></figure>
+
+    <h2>כללים חשובים</h2>
+    <ul>
+        <li><strong>חייב להיות בדיוק בעל סמכות אחד (A)</strong> — אחרת ההחלטה לא תישמר.</li>
+        <li>מבצעים (R) יכולים להיות כמה — צוות שמבצע את הפעולה.</li>
+        <li>יועצים (C) נשאלים <em>לפני</em> שהפעולה נעשית.</li>
+        <li>נמענים (I) מקבלים הודעה <em>אחרי</em> שהפעולה בוצעה.</li>
+    </ul>
+
+    <div class="callout danger"><div class="callout-title">🚨 החלטה קריטית?</div>
+        אם המערכת זיהתה את ההחלטה כ-<span class="badge badge-critical">CRITICAL</span>, היא דורשת אישור בעל הסמכות (A) דרך טלגרם או דשבורד <strong>לפני</strong> שתבוצע.
+    </div>
+</section>
+
+<!-- Content sections go here (Tasks 6-9) -->
 
 </body>
 </html>
