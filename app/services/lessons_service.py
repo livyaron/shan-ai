@@ -238,7 +238,7 @@ async def get_risk_patterns(decision_type: str, session: AsyncSession) -> str:
         if not top_risks:
             return ""
 
-        lines = [f"סיכונים נפוצים בהחלטות {decision_type} מהעבר:"]
+        lines = [f"סיכונים שנצפו בעבר בהחלטות מסוג {decision_type} — בדוק האם רלוונטיים לבעיה הנוכחית, אל תעתיק אוטומטית:"]
         for risk, cnt in top_risks:
             lines.append(f"  • {risk} ({cnt}×)")
         return "\n".join(lines)
