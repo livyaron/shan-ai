@@ -33,3 +33,11 @@ _awaiting_decision_preview: dict[int, dict] = {}
 # { telegram_id (int): filter state dict }  — active custom-filter session
 # value: { "owner": str, "type": str|None, "status": str|None, "date_days": int, "page": int }
 _decisions_menu_state: dict[int, dict] = {}
+
+# { telegram_id (int): filter state dict }  — active projects custom-filter session
+# value: { "stage": str|None, "type": str|None, "mgr": str|None, "th": str|None, "date": str|None }
+_projects_menu_state: dict[int, dict] = {}
+
+# { telegram_id (int): (shortcut_key, page) }  — origin for back-nav from detail card
+# shortcut_key is one of: "late"|"handle"|"quarter"|"all"|"active"|"cf"
+_projects_detail_origin: dict[int, tuple[str, int]] = {}
