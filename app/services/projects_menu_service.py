@@ -176,13 +176,10 @@ def format_results_message(title: str, projects: list, total: int, page: int) ->
         return f"‏<b>{_html.escape(title)}</b>\n\nלא נמצאו פרוייקטים."
     from_n = page * 10 + 1
     to_n   = page * 10 + len(projects)
-    lines  = [
-        f"‏<b>{_html.escape(title)}</b> ({total})",
-        f"<i>מציג {from_n}–{to_n} מתוך {total}</i>",
-        "──────────────────",
-    ]
-    lines.extend(format_project_line(p) for p in projects)
-    return "\n".join(lines)
+    return (
+        f"‏<b>{_html.escape(title)}</b> ({total})\n"
+        f"<i>מציג {from_n}–{to_n} מתוך {total}</i>"
+    )
 
 
 def build_project_card(p: Project) -> str:

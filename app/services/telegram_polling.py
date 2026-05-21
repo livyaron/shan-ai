@@ -104,6 +104,7 @@ class TelegramPollingBot:
         self.application.add_handler(CommandHandler("status", self.handle_status))
         self.application.add_handler(CommandHandler("decisions", self.handle_decisions))
         self.application.add_handler(CommandHandler("projects", self.handle_projects))
+        self.application.add_handler(CommandHandler("menu", self.handle_menu))
         self.application.add_handler(CommandHandler("ask", self.handle_ask))
         self.application.add_handler(CallbackQueryHandler(self.handle_callback))
         self.application.add_handler(
@@ -297,6 +298,20 @@ class TelegramPollingBot:
             get_menu_text(total),
             parse_mode="HTML",
             reply_markup=get_menu_keyboard(),
+        )
+
+
+    async def handle_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """/menu — re-send the persistent reply keyboard."""
+        telegram_id = update.effective_user.id
+        async with async_session_maker() as session:
+            user = await session.scalar(select(User).where(User.telegram_id == telegram_id))
+        if not user or not user.role:
+            await update.message.reply_text("‏⏳ יש להירשם תחילה. השתמש ב-/register")
+            return
+        await update.message.reply_text(
+            "‏📋 בחר תפריט:",
+            reply_markup=_main_reply_keyboard(),
         )
 
     # ------------------------------------------------------------------
@@ -506,7 +521,7 @@ class TelegramPollingBot:
                     )
                 return
 
-            if "פרוייקטים" in text.strip():
+            if "פרוייקטים" in text.strip() or "פרויקטים" in text.strip():
                 if user.role:
                     from app.services.projects_menu_service import (
                         get_menu_keyboard as pm_get_menu_keyboard,
@@ -1394,9 +1409,9 @@ class TelegramPollingBot:
                     page=page,
                 )
             item_rows = []
-            for p in projects:
+            for i, p in enumerate(projects):
                 line = format_project_line(p)
-                label = re.sub(r"<[^>]+>", "", line)[:60]
+                label = f"{page * 10 + i + 1}. " + re.sub(r"<[^>]+>", "", line)[:55]
                 item_rows.append([InlineKeyboardButton(label, callback_data=f"pm:d:{p.id}:{shortcut}:{page}")])
             kb = build_results_keyboard(shortcut, page, total)
             full_kb = InlineKeyboardMarkup(item_rows + list(kb.inline_keyboard))
@@ -1516,9 +1531,9 @@ class TelegramPollingBot:
                     )
                 _projects_detail_origin[telegram_id] = ("cf", 0)
                 item_rows = []
-                for p in projects:
+                for i, p in enumerate(projects):
                     line = format_project_line(p)
-                    label = re.sub(r"<[^>]+>", "", line)[:60]
+                    label = f"{page * 10 + i + 1}. " + re.sub(r"<[^>]+>", "", line)[:55]
                     item_rows.append([InlineKeyboardButton(label, callback_data=f"pm:d:{p.id}:cf:0")])
                 cf_kb = build_custom_results_keyboard(0, total)
                 full_kb = InlineKeyboardMarkup(item_rows + list(cf_kb.inline_keyboard))
@@ -1551,9 +1566,9 @@ class TelegramPollingBot:
                         page=page,
                     )
                 item_rows = []
-                for p in projects:
+                for i, p in enumerate(projects):
                     line = format_project_line(p)
-                    label = re.sub(r"<[^>]+>", "", line)[:60]
+                    label = f"{page * 10 + i + 1}. " + re.sub(r"<[^>]+>", "", line)[:55]
                     item_rows.append([InlineKeyboardButton(label, callback_data=f"pm:d:{p.id}:cf:{page}")])
                 cf_kb = build_custom_results_keyboard(page, total)
                 full_kb = InlineKeyboardMarkup(item_rows + list(cf_kb.inline_keyboard))
