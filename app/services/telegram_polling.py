@@ -1168,7 +1168,10 @@ class TelegramPollingBot:
         if data.startswith("dm:"):
             parts = data.split(":")
             shortcut = parts[1] if len(parts) > 1 else ""
-            page = int(parts[2]) if len(parts) > 2 else 0
+            try:
+                page = int(parts[2]) if len(parts) > 2 else 0
+            except ValueError:
+                page = 0
             preset = SHORTCUT_PRESETS.get(shortcut)
             if not preset:
                 return
@@ -1191,14 +1194,14 @@ class TelegramPollingBot:
             sub = parts[1]
             state = _decisions_menu_state.get(telegram_id)
 
-            if sub == "o" and state is not None:
+            if sub == "o" and state is not None and len(parts) > 2:
                 state["owner"] = parts[2]
                 await query.edit_message_reply_markup(
                     reply_markup=build_custom_filter_keyboard(state)
                 )
                 return
 
-            if sub == "t" and state is not None:
+            if sub == "t" and state is not None and len(parts) > 2:
                 val = parts[2]
                 state["type"] = None if val == "all" else val
                 await query.edit_message_reply_markup(
@@ -1206,7 +1209,7 @@ class TelegramPollingBot:
                 )
                 return
 
-            if sub == "s" and state is not None:
+            if sub == "s" and state is not None and len(parts) > 2:
                 val = parts[2]
                 state["status"] = None if val == "all" else val
                 await query.edit_message_reply_markup(
@@ -1214,8 +1217,11 @@ class TelegramPollingBot:
                 )
                 return
 
-            if sub == "d" and state is not None:
-                state["date_days"] = int(parts[2])
+            if sub == "d" and state is not None and len(parts) > 2:
+                try:
+                    state["date_days"] = int(parts[2])
+                except ValueError:
+                    return
                 await query.edit_message_reply_markup(
                     reply_markup=build_custom_filter_keyboard(state)
                 )
@@ -1243,7 +1249,10 @@ class TelegramPollingBot:
                 return
 
             if sub == "pg":
-                page = int(parts[2]) if len(parts) > 2 else 0
+                try:
+                    page = int(parts[2]) if len(parts) > 2 else 0
+                except ValueError:
+                    page = 0
                 if state is None:
                     await query.edit_message_text(
                         "‏⚠️ סשן הסינון פג.",
