@@ -167,8 +167,32 @@ def build_custom_filter_message() -> str:
     )
 
 
-def get_menu_text() -> str:
+def get_menu_text(counts: dict | None = None) -> str:
+    if counts:
+        stats = f"הגשתי: {counts['my']} · קיבלתי: {counts['recv']} · ממתינות: {counts['pending']}"
+        return f"‏📋 <b>ההחלטות שלי</b>\n<i>{stats}</i>\n\nבחר תצוגה מהירה או סינון מותאם:"
     return _MENU_TEXT
+
+
+async def get_menu_counts(session: AsyncSession, user_id: int) -> dict:
+    recv_subq = (
+        select(DecisionDistribution.decision_id)
+        .where(DecisionDistribution.user_id == user_id)
+        .scalar_subquery()
+    )
+    my_count = await session.scalar(
+        select(func.count(Decision.id)).where(Decision.submitter_id == user_id)
+    ) or 0
+    recv_count = await session.scalar(
+        select(func.count(Decision.id)).where(Decision.id.in_(recv_subq))
+    ) or 0
+    pending_count = await session.scalar(
+        select(func.count(Decision.id)).where(
+            or_(Decision.submitter_id == user_id, Decision.id.in_(recv_subq)),
+            Decision.status == DecisionStatusEnum.PENDING,
+        )
+    ) or 0
+    return {"my": my_count, "recv": recv_count, "pending": pending_count}
 
 
 # ── DB Query ───────────────────────────────────────────────────────────────

@@ -257,15 +257,16 @@ class TelegramPollingBot:
 
     async def handle_decisions(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """/decisions — open the decisions menu."""
-        from app.services.decisions_menu_service import get_menu_keyboard, get_menu_text
+        from app.services.decisions_menu_service import get_menu_keyboard, get_menu_text, get_menu_counts
         telegram_id = update.effective_user.id
         async with async_session_maker() as session:
             user = await session.scalar(select(User).where(User.telegram_id == telegram_id))
-        if not user or not user.role:
-            await update.message.reply_text("‏⏳ יש להירשם תחילה. השתמש ב-/register")
-            return
+            if not user or not user.role:
+                await update.message.reply_text("‏⏳ יש להירשם תחילה. השתמש ב-/register")
+                return
+            counts = await get_menu_counts(session, user.id)
         await update.message.reply_text(
-            get_menu_text(),
+            get_menu_text(counts),
             parse_mode="HTML",
             reply_markup=get_menu_keyboard(),
         )
@@ -467,9 +468,11 @@ class TelegramPollingBot:
             # Decisions menu keyword shortcut
             if text.strip() == "החלטות":
                 if user.role:
-                    from app.services.decisions_menu_service import get_menu_keyboard, get_menu_text
+                    from app.services.decisions_menu_service import get_menu_keyboard, get_menu_text, get_menu_counts
+                    async with async_session_maker() as _cnt_s:
+                        counts = await get_menu_counts(_cnt_s, user.id)
                     await update.message.reply_text(
-                        get_menu_text(),
+                        get_menu_text(counts),
                         parse_mode="HTML",
                         reply_markup=get_menu_keyboard(),
                     )
@@ -1138,7 +1141,7 @@ class TelegramPollingBot:
     ) -> None:
         """Handle all dm:* and dm_cf:* callback actions."""
         from app.services.decisions_menu_service import (
-            get_menu_keyboard, get_menu_text,
+            get_menu_keyboard, get_menu_text, get_menu_counts,
             build_custom_filter_keyboard, build_custom_filter_message,
             build_results_keyboard, build_custom_results_keyboard,
             format_results_message, query_decisions, SHORTCUT_PRESETS,
@@ -1152,8 +1155,10 @@ class TelegramPollingBot:
         # ── dm:menu — return to main menu ────────────────────────────────────
         if data == "dm:menu":
             _decisions_menu_state.pop(telegram_id, None)
+            async with async_session_maker() as _cnt_s:
+                counts = await get_menu_counts(_cnt_s, user.id)
             await query.edit_message_text(
-                get_menu_text(),
+                get_menu_text(counts),
                 parse_mode="HTML",
                 reply_markup=get_menu_keyboard(),
             )
