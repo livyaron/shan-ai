@@ -2,6 +2,7 @@
 
 import html as _html
 import logging
+import re
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 
@@ -497,13 +498,17 @@ class TelegramPollingBot:
 
             if text.strip() == "פרוייקטים":
                 if user.role:
-                    from app.services.projects_menu_service import get_menu_keyboard as _pm_kb, get_menu_text as _pm_txt, get_total_active
+                    from app.services.projects_menu_service import (
+                        get_menu_keyboard as pm_get_menu_keyboard,
+                        get_menu_text as pm_get_menu_text,
+                        get_total_active,
+                    )
                     async with async_session_maker() as _pm_s:
                         _pm_total = await get_total_active(_pm_s)
                     await update.message.reply_text(
-                        _pm_txt(_pm_total),
+                        pm_get_menu_text(_pm_total),
                         parse_mode="HTML",
-                        reply_markup=_pm_kb(),
+                        reply_markup=pm_get_menu_keyboard(),
                     )
                 return
 
@@ -1330,7 +1335,6 @@ class TelegramPollingBot:
         user,
     ) -> None:
         """Handle all pm:* and pm_cf:* callback actions."""
-        import re
         from app.services.projects_menu_service import (
             get_menu_keyboard, get_menu_text, get_total_active,
             build_results_keyboard, build_custom_results_keyboard,
