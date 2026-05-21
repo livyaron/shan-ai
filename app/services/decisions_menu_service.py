@@ -3,10 +3,11 @@
 import html as _html
 from datetime import datetime, timedelta
 
+from sqlalchemy import select, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
-from app.models import Decision, DecisionTypeEnum, DecisionStatusEnum
+from app.models import Decision, DecisionDistribution, DecisionTypeEnum, DecisionStatusEnum
 
 # ── Constants ──────────────────────────────────────────────────────────────
 
@@ -168,3 +169,46 @@ def build_custom_filter_message() -> str:
 
 def get_menu_text() -> str:
     return _MENU_TEXT
+
+
+# ── DB Query ───────────────────────────────────────────────────────────────
+
+async def query_decisions(
+    session: AsyncSession,
+    user_id: int,
+    owner: str,         # "my" | "recv" | "all"
+    type_: str | None,  # "critical" | "normal" | "info" | "uncertain" | None
+    status: str | None, # "pending" | "approved" | "rejected" | "executed" | None
+    date_days: int,     # 0 = all time
+    page: int,
+) -> tuple[list[Decision], int]:
+    recv_subq = (
+        select(DecisionDistribution.decision_id)
+        .where(DecisionDistribution.user_id == user_id)
+        .scalar_subquery()
+    )
+
+    if owner == "my":
+        base = select(Decision).where(Decision.submitter_id == user_id)
+    elif owner == "recv":
+        base = select(Decision).where(Decision.id.in_(recv_subq))
+    else:  # "all" — no duplicates via OR
+        base = select(Decision).where(
+            or_(Decision.submitter_id == user_id, Decision.id.in_(recv_subq))
+        )
+
+    if type_:
+        base = base.where(Decision.type == DecisionTypeEnum(type_))
+    if status:
+        base = base.where(Decision.status == DecisionStatusEnum(status))
+    if date_days:
+        cutoff = datetime.utcnow() - timedelta(days=date_days)
+        base = base.where(Decision.created_at >= cutoff)
+
+    count_q = select(func.count()).select_from(base.subquery())
+    total: int = await session.scalar(count_q) or 0
+
+    rows_q = base.order_by(Decision.created_at.desc()).offset(page * 10).limit(10)
+    decisions = list((await session.scalars(rows_q)).all())
+
+    return decisions, total

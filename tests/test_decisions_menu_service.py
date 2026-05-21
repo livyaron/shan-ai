@@ -99,3 +99,119 @@ def test_format_result_line_escapes_html():
     line = format_result_line(d)
     assert "<b>attack</b>" not in line
     assert "&lt;" in line or "&amp;" in line
+
+
+import pytest
+import pytest_asyncio
+from app.models import (
+    User, Decision, DecisionDistribution,
+    DecisionTypeEnum, DecisionStatusEnum, RoleEnum, DistributionTypeEnum,
+)
+from app.services.decisions_menu_service import query_decisions
+
+
+@pytest.mark.asyncio
+async def test_query_decisions_my_only(db_session):
+    u1 = User(telegram_id=9001, username="qd_u1", role=RoleEnum.PROJECT_MANAGER, password_hash="x")
+    u2 = User(telegram_id=9002, username="qd_u2", role=RoleEnum.PROJECT_MANAGER, password_hash="x")
+    db_session.add_all([u1, u2])
+    await db_session.flush()
+
+    d1 = Decision(submitter_id=u1.id, type=DecisionTypeEnum.NORMAL,
+                  status=DecisionStatusEnum.APPROVED, summary="mine")
+    d2 = Decision(submitter_id=u2.id, type=DecisionTypeEnum.CRITICAL,
+                  status=DecisionStatusEnum.PENDING, summary="theirs")
+    db_session.add_all([d1, d2])
+    await db_session.flush()
+
+    results, total = await query_decisions(db_session, u1.id, "my", None, None, 0, 0)
+    assert total == 1
+    assert results[0].summary == "mine"
+
+
+@pytest.mark.asyncio
+async def test_query_decisions_recv(db_session):
+    u1 = User(telegram_id=9003, username="qd_u3", role=RoleEnum.PROJECT_MANAGER, password_hash="x")
+    u2 = User(telegram_id=9004, username="qd_u4", role=RoleEnum.PROJECT_MANAGER, password_hash="x")
+    db_session.add_all([u1, u2])
+    await db_session.flush()
+
+    d1 = Decision(submitter_id=u1.id, type=DecisionTypeEnum.NORMAL,
+                  status=DecisionStatusEnum.PENDING, summary="recv_test")
+    db_session.add(d1)
+    await db_session.flush()
+
+    dist = DecisionDistribution(
+        decision_id=d1.id, user_id=u2.id,
+        distribution_type=DistributionTypeEnum.INFO,
+    )
+    db_session.add(dist)
+    await db_session.flush()
+
+    results, total = await query_decisions(db_session, u2.id, "recv", None, None, 0, 0)
+    assert total == 1
+    assert results[0].summary == "recv_test"
+
+
+@pytest.mark.asyncio
+async def test_query_decisions_all_no_duplicates(db_session):
+    """Decision submitted by user AND distributed to same user must appear once."""
+    u1 = User(telegram_id=9005, username="qd_u5", role=RoleEnum.PROJECT_MANAGER, password_hash="x")
+    db_session.add(u1)
+    await db_session.flush()
+
+    d1 = Decision(submitter_id=u1.id, type=DecisionTypeEnum.NORMAL,
+                  status=DecisionStatusEnum.PENDING, summary="no_dup")
+    db_session.add(d1)
+    await db_session.flush()
+
+    dist = DecisionDistribution(
+        decision_id=d1.id, user_id=u1.id,
+        distribution_type=DistributionTypeEnum.INFO,
+    )
+    db_session.add(dist)
+    await db_session.flush()
+
+    results, total = await query_decisions(db_session, u1.id, "all", None, None, 0, 0)
+    assert total == 1
+
+
+@pytest.mark.asyncio
+async def test_query_decisions_type_filter(db_session):
+    u1 = User(telegram_id=9006, username="qd_u6", role=RoleEnum.PROJECT_MANAGER, password_hash="x")
+    db_session.add(u1)
+    await db_session.flush()
+
+    d_crit = Decision(submitter_id=u1.id, type=DecisionTypeEnum.CRITICAL,
+                      status=DecisionStatusEnum.PENDING, summary="crit")
+    d_norm = Decision(submitter_id=u1.id, type=DecisionTypeEnum.NORMAL,
+                      status=DecisionStatusEnum.PENDING, summary="norm")
+    db_session.add_all([d_crit, d_norm])
+    await db_session.flush()
+
+    results, total = await query_decisions(db_session, u1.id, "my", "critical", None, 0, 0)
+    assert total == 1
+    assert results[0].summary == "crit"
+
+
+@pytest.mark.asyncio
+async def test_query_decisions_pagination(db_session):
+    u1 = User(telegram_id=9007, username="qd_u7", role=RoleEnum.PROJECT_MANAGER, password_hash="x")
+    db_session.add(u1)
+    await db_session.flush()
+
+    for i in range(12):
+        db_session.add(Decision(
+            submitter_id=u1.id,
+            type=DecisionTypeEnum.NORMAL,
+            status=DecisionStatusEnum.PENDING,
+            summary=f"page_test_{i}",
+        ))
+    await db_session.flush()
+
+    results_p0, total = await query_decisions(db_session, u1.id, "my", None, None, 0, 0)
+    results_p1, _ = await query_decisions(db_session, u1.id, "my", None, None, 0, 1)
+
+    assert total == 12
+    assert len(results_p0) == 10
+    assert len(results_p1) == 2
