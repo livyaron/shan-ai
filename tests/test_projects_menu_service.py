@@ -1,5 +1,5 @@
 import pytest
-from datetime import date
+from datetime import date, timedelta
 from sqlalchemy.orm import configure_mappers, class_mapper
 from app.models import Project
 
@@ -154,9 +154,6 @@ def test_shortcut_presets_keys():
         assert "title" in SHORTCUT_PRESETS[key]
 
 
-import pytest
-from datetime import date, timedelta
-from app.models import Project
 from app.services.projects_menu_service import (
     get_filter_options, get_total_active, query_projects,
 )
