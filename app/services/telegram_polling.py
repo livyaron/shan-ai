@@ -1372,7 +1372,7 @@ class TelegramPollingBot:
             rows = []
             for i, p in enumerate(projects):
                 line = format_project_line(p)
-                label = f"{page * 10 + i + 1}. " + re.sub(r"<[^>]+>", "", line)[:55]
+                label = f"{page * 10 + i + 1}. " + _html.unescape(re.sub(r"<[^>]+>", "", line))[:55]
                 rows.append([InlineKeyboardButton(label, callback_data=f"pm:d:{p.id}:{shortcut}:{page}")])
             return rows
 
