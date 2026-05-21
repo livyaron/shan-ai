@@ -58,9 +58,10 @@ def get_menu_keyboard() -> InlineKeyboardMarkup:
 
 
 def get_menu_shortcut_keyboard() -> InlineKeyboardMarkup:
-    """Single-button keyboard appended to process() confirmation messages."""
+    """Two-button keyboard appended to process() confirmation messages."""
     return InlineKeyboardMarkup([[
         InlineKeyboardButton("📋 ההחלטות שלי", callback_data="dm:my:0"),
+        InlineKeyboardButton("📁 פרוייקטים",   callback_data="pm:menu"),
     ]])
 
 

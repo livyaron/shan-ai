@@ -231,3 +231,11 @@ async def test_query_decisions_status_filter(db_session):
     results, total = await query_decisions(db_session, u1.id, "my", None, "pending", 0, 0)
     assert total == 1
     assert results[0].summary == "pending_one"
+
+
+def test_get_menu_shortcut_keyboard_has_projects_button():
+    from app.services.decisions_menu_service import get_menu_shortcut_keyboard
+    kb = get_menu_shortcut_keyboard()
+    all_btns = [btn for row in kb.inline_keyboard for btn in row]
+    assert any("פרוייקטים" in b.text for b in all_btns)
+    assert any("pm:menu" == b.callback_data for b in all_btns)
