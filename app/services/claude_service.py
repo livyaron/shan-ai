@@ -49,7 +49,11 @@ SYSTEM_PROMPT = """אתה מנוע בינה מלאכותית לניהול החל
     "I": [],
     "reason": "תיאור קצר של הנמקת ההקצאות"
   }
-}"""
+}
+
+כלל חובה: כל שדות הפלט (summary, recommended_action, risks, assumptions) חייבים לנבוע מהבעיה הנוכחית בלבד.
+אל תעתיק ואל תשאל מהקשר העבר — הקשר העבר משמש אך ורק לכיול רמת הסיכון והסיווג.
+אם הקשר העבר אינו רלוונטי לחלוטין לבעיה הנוכחית — התעלם ממנו לחלוטין."""
 
 
 CLASSIFY_PROMPT = """אתה שומר סף למערכת ניהול החלטות בארגון תשתיות חשמל.
@@ -105,10 +109,21 @@ class ClaudeService:
         """Send problem to configured LLM and return parsed decision JSON."""
         # Replace straight quotes with Hebrew geresh to avoid breaking JSON
         clean_problem = problem.replace('"', '״').replace("'", "׳")
-        user_message = f"תפקיד המגיש: {user_role}\n\n"
+        parts = [f"תפקיד המגיש: {user_role}"]
         if past_context:
-            user_message += f"החלטות עבר רלוונטיות:\n{past_context}\n\n"
-        user_message += f"בעיה/החלטה:\n{clean_problem}"
+            parts.append(
+                "<CONTEXT_FOR_CALIBRATION_ONLY>\n"
+                f"{past_context}\n"
+                "</CONTEXT_FOR_CALIBRATION_ONLY>\n"
+                "(הקשר זה מיועד לכיול בלבד. אל תעתיק ממנו recommended_action, risks, או assumptions.)"
+            )
+        parts.append(
+            "<CURRENT_PROBLEM>\n"
+            f"{clean_problem}\n"
+            "</CURRENT_PROBLEM>\n"
+            "נתח את הבעיה הנוכחית הנ״ל בלבד. כל שדות ה-JSON חייבים להתייחס לבעיה זו."
+        )
+        user_message = "\n\n".join(parts)
 
         logger.info(f"שולח ל-LLM: {problem[:80]}...")
 
