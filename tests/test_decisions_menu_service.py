@@ -58,7 +58,7 @@ def test_format_results_message_empty():
 
 
 def test_format_results_message_header_counts():
-    decisions = [_make_decision(id=i) for i in range(3)]
+    decisions = [_make_decision(id=i + 1) for i in range(3)]
     msg = format_results_message("📋 תוצאות", decisions, 3, 0)
     assert "3" in msg
     assert "1–3" in msg
@@ -92,3 +92,10 @@ def test_shortcut_presets_all_keys_present():
         p = SHORTCUT_PRESETS[key]
         assert "owner" in p and "type" in p and "status" in p
         assert "date_days" in p and "title" in p
+
+
+def test_format_result_line_escapes_html():
+    d = _make_decision(summary='<b>attack</b> & "test"')
+    line = format_result_line(d)
+    assert "<b>attack</b>" not in line
+    assert "&lt;" in line or "&amp;" in line

@@ -3,11 +3,10 @@
 import html as _html
 from datetime import datetime, timedelta
 
-from sqlalchemy import select, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
-from app.models import Decision, DecisionDistribution, DecisionTypeEnum, DecisionStatusEnum
+from app.models import Decision, DecisionTypeEnum, DecisionStatusEnum
 
 # ── Constants ──────────────────────────────────────────────────────────────
 
@@ -94,12 +93,14 @@ def build_custom_filter_keyboard(state: dict) -> InlineKeyboardMarkup:
             _btn("🚨 קריטי",  "dm_cf:t:critical",  state["type"] == "critical"),
             _btn("✅ רגיל",   "dm_cf:t:normal",    state["type"] == "normal"),
             _btn("ℹ️ מידע",  "dm_cf:t:info",      state["type"] == "info"),
+            _btn("❓ לא ודאי", "dm_cf:t:uncertain", state["type"] == "uncertain"),
         ],
         [
             _btn("הכל",      "dm_cf:s:all",      state["status"] is None),
             _btn("⏳ ממתין", "dm_cf:s:pending",  state["status"] == "pending"),
             _btn("✔️ אושר",  "dm_cf:s:approved", state["status"] == "approved"),
             _btn("❌ נדחה",  "dm_cf:s:rejected", state["status"] == "rejected"),
+            _btn("⚙️ בוצע",  "dm_cf:s:executed", state["status"] == "executed"),
         ],
         [
             _btn("7 ימים", "dm_cf:d:7",  state["date_days"] == 7),
@@ -138,7 +139,8 @@ def format_result_line(d: Decision) -> str:
     if len(summary) > 40:
         summary = summary[:40] + "…"
     date_str = d.created_at.strftime("%d/%m") if d.created_at else ""
-    return f"{t_emoji} <b>#{d.id}</b> — {_html.escape(summary)}  {s_emoji} {s_label} · {date_str}"
+    date_part = f" · {date_str}" if date_str else ""
+    return f"{t_emoji} <b>#{d.id}</b> — {_html.escape(summary)}  {s_emoji} {s_label}{date_part}"
 
 
 def format_results_message(title: str, decisions: list, total: int, page: int) -> str:
