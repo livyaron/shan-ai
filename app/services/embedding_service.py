@@ -59,13 +59,13 @@ async def get_similar_decisions(session: AsyncSession, query_text: str, limit: i
 
 
 def format_past_context(decisions: list[Decision]) -> str:
-    """Format similar past decisions as context string for Groq."""
+    """Format similar past decisions for calibration only — no recommended_action to avoid template copying."""
     if not decisions:
         return ""
-    lines = ["החלטות עבר דומות (למידת ניסיון):"]
+    lines = ["החלטות עבר דומות — לכיול סיווג בלבד, אל תעתיק מהן:"]
     for d in decisions:
-        score = f" | ציון פידבק: {d.feedback_score}/5" if d.feedback_score else ""
-        lines.append(f"• [{d.type.value.upper()}] {d.summary} → {d.recommended_action}{score}")
+        score = f" | פידבק: {d.feedback_score}/5" if d.feedback_score else ""
+        lines.append(f"• [{d.type.value.upper()}] {d.summary}{score}")
         if d.feedback_notes:
-            lines.append(f"  לקח: {d.feedback_notes}")
+            lines.append(f"  לקח מהניסיון: {d.feedback_notes}")
     return "\n".join(lines)
