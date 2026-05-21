@@ -3,7 +3,7 @@
 import html as _html
 import logging
 import re
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 
 from app.config import settings
@@ -26,6 +26,13 @@ from sqlalchemy import select
 from app.services.decisions_menu_service import get_menu_shortcut_keyboard
 
 logger = logging.getLogger(__name__)
+
+def _main_reply_keyboard() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        [["📁 פרוייקטים", "📋 החלטות"]],
+        resize_keyboard=True,
+        is_persistent=True,
+    )
 
 def _mgr_approval_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([[
@@ -128,6 +135,7 @@ class TelegramPollingBot:
             user = await service._get_or_create_user(
                 telegram_id, update.effective_user.to_dict()
             )
+            kb = _main_reply_keyboard() if user.role else None
             await update.message.reply_text(
                 f"\u200F👋 ברוך הבא ל-<b>Shan-AI</b>, {_html.escape(user.username)}!\n\n"
                 f"אני מנתח החלטות טכניות בפרויקטי תשתיות חשמל, טרנספורמטורים ותחנות משנה.\n\n"
@@ -136,6 +144,7 @@ class TelegramPollingBot:
                 f"/status — בדיקת סטטוס ותפקיד\n\n"
                 f"לאחר קבלת תפקיד, שלח לי תיאור של הבעיה או ההחלטה ואנתח אותה בעזרת AI.",
                 parse_mode="HTML",
+                reply_markup=kb,
             )
 
     async def _do_register(self, update: Update, telegram_id: int, code: str) -> None:
@@ -212,6 +221,7 @@ class TelegramPollingBot:
                 f"כעת תוכל לשלוח החלטות לניתוח."
                 f"{profile_line}",
                 parse_mode="HTML",
+                reply_markup=_main_reply_keyboard(),
             )
 
     async def handle_register(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -484,7 +494,7 @@ class TelegramPollingBot:
             )
 
             # Decisions menu keyword shortcut
-            if text.strip() == "החלטות":
+            if "החלטות" in text.strip():
                 if user.role:
                     from app.services.decisions_menu_service import get_menu_keyboard, get_menu_text, get_menu_counts
                     async with async_session_maker() as _cnt_s:
@@ -496,7 +506,7 @@ class TelegramPollingBot:
                     )
                 return
 
-            if text.strip() == "פרוייקטים":
+            if "פרוייקטים" in text.strip():
                 if user.role:
                     from app.services.projects_menu_service import (
                         get_menu_keyboard as pm_get_menu_keyboard,
