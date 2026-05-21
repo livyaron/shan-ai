@@ -227,3 +227,99 @@ def build_custom_filter_message() -> str:
         "──────────────────\n"
         "🏗️ <b>שלב</b> · 🏷️ <b>סוג</b> · 🧑‍💼 <b>מנהל</b> · 📌 <b>לטיפול</b> · 📅 <b>תאריך</b>"
     )
+
+
+# ── DB Queries ─────────────────────────────────────────────────────────────
+
+async def get_total_active(session: AsyncSession) -> int:
+    result = await session.scalar(
+        select(func.count(Project.id)).where(Project.is_active.is_(True))
+    )
+    return result or 0
+
+
+async def get_filter_options(session: AsyncSession) -> dict:
+    """Return distinct non-null values for each filter dimension."""
+    async def _distinct(col):
+        rows = await session.scalars(
+            select(distinct(col)).where(col.isnot(None)).order_by(col)
+        )
+        return list(rows.all())
+
+    return {
+        "stage": await _distinct(Project.stage),
+        "type":  await _distinct(Project.project_type),
+        "mgr":   await _distinct(Project.manager),
+        "th":    await _distinct(Project.to_handle),
+    }
+
+
+async def query_projects(
+    session: AsyncSession,
+    stages: list[str] | None,
+    type_: str | None,
+    mgr: str | None,
+    th: str | None,
+    date_filter: str | None,
+    page: int,
+) -> tuple[list[Project], int]:
+    """Query active projects with optional filters. Returns (rows, total)."""
+    base = select(Project).where(Project.is_active.is_(True))
+
+    if stages is not None:
+        base = base.where(Project.stage.in_(stages))
+    if type_ is not None:
+        base = base.where(Project.project_type == type_)
+    if mgr is not None:
+        base = base.where(Project.manager == mgr)
+    if th == "__any__":
+        base = base.where(Project.to_handle.isnot(None), Project.to_handle != "")
+    elif th is not None:
+        base = base.where(Project.to_handle == th)
+
+    if date_filter == "late":
+        base = base.where(Project.estimated_finish_date < datetime.date.today())
+    elif date_filter == "q_cur":
+        today = datetime.date.today()
+        q_start = datetime.date(today.year, ((today.month - 1) // 3) * 3 + 1, 1)
+        q_month_end = ((today.month - 1) // 3) * 3 + 3
+        q_end = datetime.date(today.year, q_month_end, 1) + datetime.timedelta(days=31)
+        q_end = q_end.replace(day=1) - datetime.timedelta(days=1)
+        base = base.where(
+            Project.estimated_finish_date >= q_start,
+            Project.estimated_finish_date <= q_end,
+        )
+    elif date_filter == "q_next":
+        today = datetime.date.today()
+        cur_q = (today.month - 1) // 3
+        next_q = cur_q + 1
+        if next_q > 3:
+            next_q = 0
+            year = today.year + 1
+        else:
+            year = today.year
+        nq_start = datetime.date(year, next_q * 3 + 1, 1)
+        nq_month_end = next_q * 3 + 3
+        if nq_month_end > 12:
+            nq_end = datetime.date(year + 1, 1, 1) - datetime.timedelta(days=1)
+        else:
+            nq_end = datetime.date(year, nq_month_end, 1) + datetime.timedelta(days=31)
+            nq_end = nq_end.replace(day=1) - datetime.timedelta(days=1)
+        base = base.where(
+            Project.estimated_finish_date >= nq_start,
+            Project.estimated_finish_date <= nq_end,
+        )
+    elif date_filter in ("2026", "2027"):
+        yr = int(date_filter)
+        base = base.where(
+            Project.estimated_finish_date >= datetime.date(yr, 1, 1),
+            Project.estimated_finish_date <= datetime.date(yr, 12, 31),
+        )
+
+    count_q = select(func.count()).select_from(base.subquery())
+    total: int = await session.scalar(count_q) or 0
+
+    rows_q = base.order_by(Project.id.desc()).offset(page * 10).limit(10)
+    projects = list((await session.scalars(rows_q)).all())
+
+    return projects, total

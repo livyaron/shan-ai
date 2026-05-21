@@ -152,3 +152,112 @@ def test_shortcut_presets_keys():
     for key in ("late", "handle", "quarter", "all", "active"):
         assert key in SHORTCUT_PRESETS
         assert "title" in SHORTCUT_PRESETS[key]
+
+
+import pytest
+from datetime import date, timedelta
+from app.models import Project
+from app.services.projects_menu_service import (
+    get_filter_options, get_total_active, query_projects,
+)
+
+
+def _db_project(db_session, **kwargs):
+    defaults = dict(
+        project_identifier=f"TEST-{abs(hash(str(kwargs))) % 100000}",
+        name="פרוייקט",
+        project_type="הקמה",
+        stage="תכנון",
+        manager="מנהל",
+        is_active=True,
+        estimated_finish_date=None,
+        to_handle=None,
+    )
+    defaults.update(kwargs)
+    p = Project(**defaults)
+    db_session.add(p)
+    return p
+
+
+@pytest.mark.asyncio
+async def test_get_total_active(db_session):
+    _db_project(db_session, project_identifier="ACT-1", is_active=True)
+    _db_project(db_session, project_identifier="ACT-2", is_active=True)
+    _db_project(db_session, project_identifier="INACT-1", is_active=False)
+    await db_session.flush()
+    total = await get_total_active(db_session)
+    assert total >= 2
+
+
+@pytest.mark.asyncio
+async def test_get_filter_options_returns_distinct(db_session):
+    _db_project(db_session, project_identifier="FO-1", stage="תכנון", project_type="הקמה", manager="א", to_handle="חסם לטיפול מנהל אגף")
+    _db_project(db_session, project_identifier="FO-2", stage="תכנון", project_type="הרחבה", manager="ב", to_handle=None)
+    _db_project(db_session, project_identifier="FO-3", stage="בדיקות", project_type="הקמה", manager="א", to_handle="חסם לטיפול מנהל אגף")
+    await db_session.flush()
+    opts = await get_filter_options(db_session)
+    assert "תכנון" in opts["stage"]
+    assert "בדיקות" in opts["stage"]
+    assert len([s for s in opts["stage"] if s == "תכנון"]) == 1
+    assert "הקמה" in opts["type"]
+    assert "הרחבה" in opts["type"]
+    assert "א" in opts["mgr"]
+    assert "ב" in opts["mgr"]
+    assert "חסם לטיפול מנהל אגף" in opts["th"]
+    assert len([t for t in opts["th"] if t == "חסם לטיפול מנהל אגף"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_query_projects_all(db_session):
+    _db_project(db_session, project_identifier="QP-1")
+    _db_project(db_session, project_identifier="QP-2")
+    await db_session.flush()
+    results, total = await query_projects(db_session, stages=None, type_=None, mgr=None, th=None, date_filter=None, page=0)
+    assert total >= 2
+
+
+@pytest.mark.asyncio
+async def test_query_projects_late_filter(db_session):
+    yesterday = date.today() - timedelta(days=1)
+    future = date.today() + timedelta(days=30)
+    _db_project(db_session, project_identifier="LATE-1", estimated_finish_date=yesterday)
+    _db_project(db_session, project_identifier="FUTURE-1", estimated_finish_date=future)
+    await db_session.flush()
+    results, total = await query_projects(db_session, stages=None, type_=None, mgr=None, th=None, date_filter="late", page=0)
+    ids = [p.project_identifier for p in results]
+    assert "LATE-1" in ids
+    assert "FUTURE-1" not in ids
+
+
+@pytest.mark.asyncio
+async def test_query_projects_stage_filter(db_session):
+    _db_project(db_session, project_identifier="STG-1", stage="הרכבה חשמלית")
+    _db_project(db_session, project_identifier="STG-2", stage="תכנון")
+    await db_session.flush()
+    results, total = await query_projects(db_session, stages=["הרכבה חשמלית"], type_=None, mgr=None, th=None, date_filter=None, page=0)
+    ids = [p.project_identifier for p in results]
+    assert "STG-1" in ids
+    assert "STG-2" not in ids
+
+
+@pytest.mark.asyncio
+async def test_query_projects_handle_any(db_session):
+    _db_project(db_session, project_identifier="TH-1", to_handle="חסם לטיפול מנהל אגף")
+    _db_project(db_session, project_identifier="TH-2", to_handle=None)
+    await db_session.flush()
+    results, total = await query_projects(db_session, stages=None, type_=None, mgr=None, th="__any__", date_filter=None, page=0)
+    ids = [p.project_identifier for p in results]
+    assert "TH-1" in ids
+    assert "TH-2" not in ids
+
+
+@pytest.mark.asyncio
+async def test_query_projects_pagination(db_session):
+    for i in range(12):
+        _db_project(db_session, project_identifier=f"PAG-{i}", stage="תכנון-פג")
+    await db_session.flush()
+    results_p0, total = await query_projects(db_session, stages=["תכנון-פג"], type_=None, mgr=None, th=None, date_filter=None, page=0)
+    results_p1, _ = await query_projects(db_session, stages=["תכנון-פג"], type_=None, mgr=None, th=None, date_filter=None, page=1)
+    assert total >= 12
+    assert len(results_p0) == 10
+    assert len(results_p1) >= 2
