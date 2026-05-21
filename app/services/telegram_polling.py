@@ -634,6 +634,14 @@ class TelegramPollingBot:
         data = query.data  # "approve:{id}" or "reject:{id}"
         telegram_id = update.effective_user.id
 
+        # Decisions menu — handle before int-based action parsing
+        if data.startswith("dm:") or data.startswith("dm_cf:"):
+            async with async_session_maker() as _dm_session:
+                _dm_user = await _dm_session.scalar(select(User).where(User.telegram_id == telegram_id))
+            if _dm_user:
+                await self._handle_decisions_menu(query, context, data, telegram_id, _dm_user)
+            return
+
         try:
             parts = data.split(":")
             action = parts[0]
@@ -1112,6 +1120,148 @@ class TelegramPollingBot:
                     f"אנא שלח את סיבת הדחייה בהודעה הבאה.",
                     parse_mode="HTML",
                 )
+
+    async def _handle_decisions_menu(
+        self,
+        query,
+        context: ContextTypes.DEFAULT_TYPE,
+        data: str,
+        telegram_id: int,
+        user,
+    ) -> None:
+        """Handle all dm:* and dm_cf:* callback actions."""
+        from app.services.decisions_menu_service import (
+            get_menu_keyboard, get_menu_text,
+            build_custom_filter_keyboard, build_custom_filter_message,
+            build_results_keyboard, build_custom_results_keyboard,
+            format_results_message, query_decisions, SHORTCUT_PRESETS,
+        )
+        from app.services.telegram_state import _decisions_menu_state
+
+        # ── dm:noop — page indicator button, do nothing ──────────────────────
+        if data == "dm:noop":
+            return
+
+        # ── dm:menu — return to main menu ────────────────────────────────────
+        if data == "dm:menu":
+            _decisions_menu_state.pop(telegram_id, None)
+            await query.edit_message_text(
+                get_menu_text(),
+                parse_mode="HTML",
+                reply_markup=get_menu_keyboard(),
+            )
+            return
+
+        # ── dm:custom — open stateful custom filter panel ────────────────────
+        if data == "dm:custom":
+            _decisions_menu_state[telegram_id] = {
+                "owner": "all", "type": None, "status": None, "date_days": 30, "page": 0,
+            }
+            await query.edit_message_text(
+                build_custom_filter_message(),
+                parse_mode="HTML",
+                reply_markup=build_custom_filter_keyboard(_decisions_menu_state[telegram_id]),
+            )
+            return
+
+        # ── dm:{shortcut}:{page} — stateless shortcut results ────────────────
+        if data.startswith("dm:"):
+            parts = data.split(":")
+            shortcut = parts[1] if len(parts) > 1 else ""
+            page = int(parts[2]) if len(parts) > 2 else 0
+            preset = SHORTCUT_PRESETS.get(shortcut)
+            if not preset:
+                return
+            async with async_session_maker() as session:
+                decisions, total = await query_decisions(
+                    session, user.id,
+                    preset["owner"], preset["type"], preset["status"], preset["date_days"],
+                    page,
+                )
+            await query.edit_message_text(
+                format_results_message(preset["title"], decisions, total, page),
+                parse_mode="HTML",
+                reply_markup=build_results_keyboard(shortcut, page, total),
+            )
+            return
+
+        # ── dm_cf:* — custom filter session callbacks ─────────────────────────
+        if data.startswith("dm_cf:"):
+            parts = data.split(":")
+            sub = parts[1]
+            state = _decisions_menu_state.get(telegram_id)
+
+            if sub == "o" and state is not None:
+                state["owner"] = parts[2]
+                await query.edit_message_reply_markup(
+                    reply_markup=build_custom_filter_keyboard(state)
+                )
+                return
+
+            if sub == "t" and state is not None:
+                val = parts[2]
+                state["type"] = None if val == "all" else val
+                await query.edit_message_reply_markup(
+                    reply_markup=build_custom_filter_keyboard(state)
+                )
+                return
+
+            if sub == "s" and state is not None:
+                val = parts[2]
+                state["status"] = None if val == "all" else val
+                await query.edit_message_reply_markup(
+                    reply_markup=build_custom_filter_keyboard(state)
+                )
+                return
+
+            if sub == "d" and state is not None:
+                state["date_days"] = int(parts[2])
+                await query.edit_message_reply_markup(
+                    reply_markup=build_custom_filter_keyboard(state)
+                )
+                return
+
+            if sub == "show":
+                if state is None:
+                    await query.edit_message_text(
+                        "‏⚠️ סשן הסינון פג. פתח את תפריט ההחלטות מחדש.",
+                        reply_markup=get_menu_keyboard(),
+                    )
+                    return
+                async with async_session_maker() as session:
+                    decisions, total = await query_decisions(
+                        session, user.id,
+                        state["owner"], state["type"], state["status"], state["date_days"],
+                        0,
+                    )
+                # Keep state for pagination — cleared only on dm:menu
+                await query.edit_message_text(
+                    format_results_message("🔍 תוצאות סינון מותאם", decisions, total, 0),
+                    parse_mode="HTML",
+                    reply_markup=build_custom_results_keyboard(0, total),
+                )
+                return
+
+            if sub == "pg":
+                page = int(parts[2]) if len(parts) > 2 else 0
+                if state is None:
+                    await query.edit_message_text(
+                        "‏⚠️ סשן הסינון פג.",
+                        reply_markup=get_menu_keyboard(),
+                    )
+                    return
+                async with async_session_maker() as session:
+                    decisions, total = await query_decisions(
+                        session, user.id,
+                        state["owner"], state["type"], state["status"], state["date_days"],
+                        page,
+                    )
+                await query.edit_message_text(
+                    format_results_message("🔍 תוצאות סינון מותאם", decisions, total, page),
+                    parse_mode="HTML",
+                    reply_markup=build_custom_results_keyboard(page, total),
+                )
+                return
 
     # ------------------------------------------------------------------
     # Webhook lifecycle
