@@ -25,3 +25,11 @@ _awaiting_mgr_approval_confirm: dict[int, str] = {}
 # { telegram_id (int): edit state dict }  — in-progress RACI inline edit session
 # value: { decision_id, items: [{user_id, role, name}], all_users: [{id, name}], is_critical, parsed }
 _raci_edit_state: dict[int, dict] = {}
+
+# { telegram_id (int): {"text": str, "result": dict, "user_has_manager": bool} }
+# Pending decision preview — user must approve or dismiss before commit
+_awaiting_decision_preview: dict[int, dict] = {}
+
+# { telegram_id (int): filter state dict }  — active custom-filter session
+# value: { "owner": str, "type": str|None, "status": str|None, "date_days": int, "page": int }
+_decisions_menu_state: dict[int, dict] = {}
