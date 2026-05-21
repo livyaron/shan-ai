@@ -154,6 +154,14 @@ def test_shortcut_presets_keys():
         assert "title" in SHORTCUT_PRESETS[key]
 
 
+def test_build_detail_back_keyboard_cf_routes_to_pg():
+    from app.services.projects_menu_service import build_detail_back_keyboard
+    kb = build_detail_back_keyboard("cf", 3)
+    all_btns = [b for row in kb.inline_keyboard for b in row]
+    back_btn = next(b for b in all_btns if "חזרה" in b.text)
+    assert back_btn.callback_data == "pm_cf:pg:3"
+
+
 from app.services.projects_menu_service import (
     get_filter_options, get_total_active, query_projects,
 )

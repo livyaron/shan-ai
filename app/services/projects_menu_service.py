@@ -89,7 +89,7 @@ def build_custom_results_keyboard(page: int, total: int) -> InlineKeyboardMarkup
 
 def build_detail_back_keyboard(shortcut: str, page: int) -> InlineKeyboardMarkup:
     if shortcut == "cf":
-        back_cd = "pm_cf:open"
+        back_cd = f"pm_cf:pg:{page}"
     else:
         back_cd = f"pm:{shortcut}:{page}"
     return InlineKeyboardMarkup([
