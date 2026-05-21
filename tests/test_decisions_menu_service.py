@@ -101,8 +101,6 @@ def test_format_result_line_escapes_html():
     assert "&lt;" in line or "&amp;" in line
 
 
-import pytest
-import pytest_asyncio
 from app.models import (
     User, Decision, DecisionDistribution,
     DecisionTypeEnum, DecisionStatusEnum, RoleEnum, DistributionTypeEnum,
@@ -215,3 +213,21 @@ async def test_query_decisions_pagination(db_session):
     assert total == 12
     assert len(results_p0) == 10
     assert len(results_p1) == 2
+
+
+@pytest.mark.asyncio
+async def test_query_decisions_status_filter(db_session):
+    u1 = User(telegram_id=9008, username="qd_u8", role=RoleEnum.PROJECT_MANAGER, password_hash="x")
+    db_session.add(u1)
+    await db_session.flush()
+
+    d_pending = Decision(submitter_id=u1.id, type=DecisionTypeEnum.NORMAL,
+                         status=DecisionStatusEnum.PENDING, summary="pending_one")
+    d_approved = Decision(submitter_id=u1.id, type=DecisionTypeEnum.NORMAL,
+                          status=DecisionStatusEnum.APPROVED, summary="approved_one")
+    db_session.add_all([d_pending, d_approved])
+    await db_session.flush()
+
+    results, total = await query_decisions(db_session, u1.id, "my", None, "pending", 0, 0)
+    assert total == 1
+    assert results[0].summary == "pending_one"
