@@ -10,7 +10,7 @@ from app.database import async_session_maker
 from app.services.telegram_service import TelegramService
 from app.services.decision_service import DecisionService
 from app.services import feedback_service
-from app.models import User
+from app.models import User, Project
 from app.services.telegram_state import (
     _awaiting_rejection_note, _awaiting_dist_rejection,
     _awaiting_clarification, _awaiting_master_confirm,
@@ -95,6 +95,7 @@ class TelegramPollingBot:
         self.application.add_handler(CommandHandler("register", self.handle_register))
         self.application.add_handler(CommandHandler("status", self.handle_status))
         self.application.add_handler(CommandHandler("decisions", self.handle_decisions))
+        self.application.add_handler(CommandHandler("projects", self.handle_projects))
         self.application.add_handler(CommandHandler("ask", self.handle_ask))
         self.application.add_handler(CallbackQueryHandler(self.handle_callback))
         self.application.add_handler(
@@ -267,6 +268,22 @@ class TelegramPollingBot:
             counts = await get_menu_counts(session, user.id)
         await update.message.reply_text(
             get_menu_text(counts),
+            parse_mode="HTML",
+            reply_markup=get_menu_keyboard(),
+        )
+
+    async def handle_projects(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """/projects — open the projects menu."""
+        from app.services.projects_menu_service import get_menu_keyboard, get_menu_text, get_total_active
+        telegram_id = update.effective_user.id
+        async with async_session_maker() as session:
+            user = await session.scalar(select(User).where(User.telegram_id == telegram_id))
+            if not user or not user.role:
+                await update.message.reply_text("‏⏳ יש להירשם תחילה. השתמש ב-/register")
+                return
+            total = await get_total_active(session)
+        await update.message.reply_text(
+            get_menu_text(total),
             parse_mode="HTML",
             reply_markup=get_menu_keyboard(),
         )
@@ -478,6 +495,18 @@ class TelegramPollingBot:
                     )
                 return
 
+            if text.strip() == "פרוייקטים":
+                if user.role:
+                    from app.services.projects_menu_service import get_menu_keyboard as _pm_kb, get_menu_text as _pm_txt, get_total_active
+                    async with async_session_maker() as _pm_s:
+                        _pm_total = await get_total_active(_pm_s)
+                    await update.message.reply_text(
+                        _pm_txt(_pm_total),
+                        parse_mode="HTML",
+                        reply_markup=_pm_kb(),
+                    )
+                return
+
             # Hard bypass: single-word or clearly non-work messages skip LLM routing entirely
             _NON_WORK_WORDS = {"בדיחה", "בדיחות", "שלום", "היי", "הי", "תודה", "להתראות", "ביי", "בוקר טוב", "ערב טוב", "לילה טוב"}
             if text.strip() in _NON_WORK_WORDS:
@@ -647,6 +676,14 @@ class TelegramPollingBot:
                 _dm_user = await _dm_session.scalar(select(User).where(User.telegram_id == telegram_id))
             if _dm_user:
                 await self._handle_decisions_menu(query, context, data, telegram_id, _dm_user)
+            return
+
+        # Projects menu
+        if data.startswith("pm:") or data.startswith("pm_cf:"):
+            async with async_session_maker() as _pm_session:
+                _pm_user = await _pm_session.scalar(select(User).where(User.telegram_id == telegram_id))
+            if _pm_user:
+                await self._handle_projects_menu(query, context, data, telegram_id, _pm_user)
             return
 
         try:
@@ -1281,6 +1318,235 @@ class TelegramPollingBot:
                     format_results_message("🔍 תוצאות סינון מותאם", decisions, total, page),
                     parse_mode="HTML",
                     reply_markup=build_custom_results_keyboard(page, total),
+                )
+                return
+
+    async def _handle_projects_menu(
+        self,
+        query,
+        context: ContextTypes.DEFAULT_TYPE,
+        data: str,
+        telegram_id: int,
+        user,
+    ) -> None:
+        """Handle all pm:* and pm_cf:* callback actions."""
+        import re
+        from app.services.projects_menu_service import (
+            get_menu_keyboard, get_menu_text, get_total_active,
+            build_results_keyboard, build_custom_results_keyboard,
+            build_custom_filter_keyboard, build_custom_filter_message,
+            build_detail_back_keyboard, build_project_card,
+            format_results_message, format_project_line,
+            query_projects, get_filter_options, SHORTCUT_PRESETS,
+        )
+        from app.services.telegram_state import _projects_menu_state, _projects_detail_origin
+
+        # ── pm:noop ────────────────────────────────────────────────────────
+        if data == "pm:noop":
+            return
+
+        # ── pm:menu ────────────────────────────────────────────────────────
+        if data == "pm:menu":
+            _projects_menu_state.pop(telegram_id, None)
+            _projects_detail_origin.pop(telegram_id, None)
+            async with async_session_maker() as session:
+                total = await get_total_active(session)
+            await query.edit_message_text(
+                get_menu_text(total),
+                parse_mode="HTML",
+                reply_markup=get_menu_keyboard(),
+            )
+            return
+
+        # ── pm:{shortcut}:{page} ───────────────────────────────────────────
+        if data.startswith("pm:") and not data.startswith("pm:d:"):
+            parts = data.split(":")
+            shortcut = parts[1] if len(parts) > 1 else ""
+            try:
+                page = int(parts[2]) if len(parts) > 2 else 0
+            except ValueError:
+                page = 0
+            preset = SHORTCUT_PRESETS.get(shortcut)
+            if not preset:
+                return
+            async with async_session_maker() as session:
+                projects, total = await query_projects(
+                    session,
+                    stages=preset["stages"],
+                    type_=preset["type_"],
+                    mgr=preset["mgr"],
+                    th=preset["th"],
+                    date_filter=preset["date_filter"],
+                    page=page,
+                )
+            item_rows = []
+            for p in projects:
+                line = format_project_line(p)
+                label = re.sub(r"<[^>]+>", "", line)[:60]
+                item_rows.append([InlineKeyboardButton(label, callback_data=f"pm:d:{p.id}:{shortcut}:{page}")])
+            kb = build_results_keyboard(shortcut, page, total)
+            full_kb = InlineKeyboardMarkup(item_rows + list(kb.inline_keyboard))
+            _projects_detail_origin[telegram_id] = (shortcut, page)
+            await query.edit_message_text(
+                format_results_message(preset["title"], projects, total, page),
+                parse_mode="HTML",
+                reply_markup=full_kb,
+            )
+            return
+
+        # ── pm:d:{id}:{shortcut}:{page} — project detail card ─────────────
+        if data.startswith("pm:d:"):
+            parts = data.split(":")
+            try:
+                project_id = int(parts[2])
+            except (ValueError, IndexError):
+                return
+            shortcut = parts[3] if len(parts) > 3 else "all"
+            try:
+                page = int(parts[4]) if len(parts) > 4 else 0
+            except ValueError:
+                page = 0
+            async with async_session_maker() as session:
+                p = await session.get(Project, project_id)
+            if not p:
+                await query.edit_message_text("‏⚠️ פרוייקט לא נמצא.", reply_markup=get_menu_keyboard())
+                return
+            _projects_detail_origin[telegram_id] = (shortcut, page)
+            await query.edit_message_text(
+                build_project_card(p),
+                parse_mode="HTML",
+                reply_markup=build_detail_back_keyboard(shortcut, page),
+            )
+            return
+
+        # ── pm_cf:open ─────────────────────────────────────────────────────
+        if data == "pm_cf:open":
+            _projects_menu_state[telegram_id] = {
+                "stage": None, "type": None, "mgr": None, "th": None, "date": None,
+            }
+            async with async_session_maker() as session:
+                filter_options = await get_filter_options(session)
+            await query.edit_message_text(
+                build_custom_filter_message(),
+                parse_mode="HTML",
+                reply_markup=build_custom_filter_keyboard(_projects_menu_state[telegram_id], filter_options),
+            )
+            return
+
+        # ── pm_cf:back ─────────────────────────────────────────────────────
+        if data == "pm_cf:back":
+            _projects_menu_state.pop(telegram_id, None)
+            _projects_detail_origin.pop(telegram_id, None)
+            async with async_session_maker() as session:
+                total = await get_total_active(session)
+            await query.edit_message_text(
+                get_menu_text(total),
+                parse_mode="HTML",
+                reply_markup=get_menu_keyboard(),
+            )
+            return
+
+        # ── pm_cf:* toggle callbacks ───────────────────────────────────────
+        if data.startswith("pm_cf:"):
+            parts = data.split(":")
+            sub = parts[1] if len(parts) > 1 else ""
+            state = _projects_menu_state.get(telegram_id)
+
+            async def _rerender_filter():
+                async with async_session_maker() as _s:
+                    _opts = await get_filter_options(_s)
+                await query.edit_message_reply_markup(
+                    reply_markup=build_custom_filter_keyboard(state, _opts)
+                )
+
+            if sub in ("stage", "type", "mgr", "th") and state is not None and len(parts) > 2:
+                val_raw = parts[2]
+                if val_raw == "all":
+                    state[sub] = None
+                else:
+                    try:
+                        idx = int(val_raw)
+                    except ValueError:
+                        return
+                    async with async_session_maker() as _s:
+                        opts = await get_filter_options(_s)
+                    opt_list = opts.get(sub, [])
+                    if idx >= len(opt_list):
+                        return
+                    state[sub] = opt_list[idx]
+                await _rerender_filter()
+                return
+
+            if sub == "date" and state is not None and len(parts) > 2:
+                val = parts[2]
+                state["date"] = None if val == "all" else val
+                await _rerender_filter()
+                return
+
+            if sub == "show":
+                if state is None:
+                    await query.edit_message_text(
+                        "‏⚠️ סשן הסינון פג. פתח את תפריט הפרוייקטים מחדש.",
+                        reply_markup=get_menu_keyboard(),
+                    )
+                    return
+                async with async_session_maker() as session:
+                    projects, total = await query_projects(
+                        session,
+                        stages=[state["stage"]] if state["stage"] else None,
+                        type_=state["type"],
+                        mgr=state["mgr"],
+                        th=state["th"],
+                        date_filter=state["date"],
+                        page=0,
+                    )
+                _projects_detail_origin[telegram_id] = ("cf", 0)
+                item_rows = []
+                for p in projects:
+                    line = format_project_line(p)
+                    label = re.sub(r"<[^>]+>", "", line)[:60]
+                    item_rows.append([InlineKeyboardButton(label, callback_data=f"pm:d:{p.id}:cf:0")])
+                cf_kb = build_custom_results_keyboard(0, total)
+                full_kb = InlineKeyboardMarkup(item_rows + list(cf_kb.inline_keyboard))
+                await query.edit_message_text(
+                    format_results_message("🔍 תוצאות סינון מותאם", projects, total, 0),
+                    parse_mode="HTML",
+                    reply_markup=full_kb,
+                )
+                return
+
+            if sub == "pg":
+                try:
+                    page = int(parts[2]) if len(parts) > 2 else 0
+                except ValueError:
+                    page = 0
+                if state is None:
+                    await query.edit_message_text(
+                        "‏⚠️ סשן הסינון פג.",
+                        reply_markup=get_menu_keyboard(),
+                    )
+                    return
+                async with async_session_maker() as session:
+                    projects, total = await query_projects(
+                        session,
+                        stages=[state["stage"]] if state["stage"] else None,
+                        type_=state["type"],
+                        mgr=state["mgr"],
+                        th=state["th"],
+                        date_filter=state["date"],
+                        page=page,
+                    )
+                item_rows = []
+                for p in projects:
+                    line = format_project_line(p)
+                    label = re.sub(r"<[^>]+>", "", line)[:60]
+                    item_rows.append([InlineKeyboardButton(label, callback_data=f"pm:d:{p.id}:cf:{page}")])
+                cf_kb = build_custom_results_keyboard(page, total)
+                full_kb = InlineKeyboardMarkup(item_rows + list(cf_kb.inline_keyboard))
+                await query.edit_message_text(
+                    format_results_message("🔍 תוצאות סינון מותאם", projects, total, page),
+                    parse_mode="HTML",
+                    reply_markup=full_kb,
                 )
                 return
 
