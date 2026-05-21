@@ -12,6 +12,7 @@ from app.services.decisions_menu_service import (
     format_results_message,
     build_custom_filter_keyboard,
     get_menu_keyboard,
+    get_menu_shortcut_keyboard,
     SHORTCUT_PRESETS,
 )
 
@@ -234,8 +235,8 @@ async def test_query_decisions_status_filter(db_session):
 
 
 def test_get_menu_shortcut_keyboard_has_projects_button():
-    from app.services.decisions_menu_service import get_menu_shortcut_keyboard
     kb = get_menu_shortcut_keyboard()
     all_btns = [btn for row in kb.inline_keyboard for btn in row]
+    assert len(all_btns) == 2
     assert any("פרוייקטים" in b.text for b in all_btns)
     assert any("pm:menu" == b.callback_data for b in all_btns)
