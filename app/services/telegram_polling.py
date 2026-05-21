@@ -1352,45 +1352,84 @@ class TelegramPollingBot:
                 return
 
     async def _handle_projects_menu(
-        self,
-        query,
-        context: ContextTypes.DEFAULT_TYPE,
-        data: str,
-        telegram_id: int,
-        user,
+        self, query, context, data: str, telegram_id: int, user,
     ) -> None:
-        """Handle all pm:* and pm_cf:* callback actions."""
         from app.services.projects_menu_service import (
             get_menu_keyboard, get_menu_text, get_total_active,
-            build_results_keyboard, build_custom_results_keyboard,
-            build_custom_filter_keyboard, build_custom_filter_message,
-            build_detail_back_keyboard, build_project_card,
-            format_results_message, format_project_line,
+            get_th_sub_text, get_filter_field_text, get_filter_value_text,
+            build_results_keyboard, build_th_sub_keyboard, build_th_results_keyboard,
+            build_custom_results_keyboard, build_detail_back_keyboard,
+            build_filter_field_keyboard, build_filter_value_keyboard, build_filter_date_keyboard,
+            build_project_card, format_results_message, format_project_line,
             query_projects, get_filter_options, SHORTCUT_PRESETS,
         )
         from app.services.telegram_state import _projects_menu_state, _projects_detail_origin
 
-        # ── pm:noop ────────────────────────────────────────────────────────
-        if data == "pm:noop":
+        def _fresh_state():
+            return {'stage': [], 'type': [], 'mgr': [], 'th': [], 'date': []}
+
+        def _item_rows(projects, shortcut, page):
+            rows = []
+            for i, p in enumerate(projects):
+                line = format_project_line(p)
+                label = f"{page * 10 + i + 1}. " + re.sub(r"<[^>]+>", "", line)[:55]
+                rows.append([InlineKeyboardButton(label, callback_data=f"pm:d:{p.id}:{shortcut}:{page}")])
+            return rows
+
+        if data == 'pm:noop':
             return
 
-        # ── pm:menu ────────────────────────────────────────────────────────
-        if data == "pm:menu":
+        if data == 'pm:menu':
             _projects_menu_state.pop(telegram_id, None)
             _projects_detail_origin.pop(telegram_id, None)
             async with async_session_maker() as session:
                 total = await get_total_active(session)
             await query.edit_message_text(
-                get_menu_text(total),
-                parse_mode="HTML",
-                reply_markup=get_menu_keyboard(),
+                get_menu_text(total), parse_mode='HTML', reply_markup=get_menu_keyboard(),
             )
             return
 
-        # ── pm:{shortcut}:{page} ───────────────────────────────────────────
-        if data.startswith("pm:") and not data.startswith("pm:d:"):
-            parts = data.split(":")
-            shortcut = parts[1] if len(parts) > 1 else ""
+        if data == 'pm:th_menu':
+            async with async_session_maker() as session:
+                opts = await get_filter_options(session)
+            await query.edit_message_text(
+                get_th_sub_text(), parse_mode='HTML',
+                reply_markup=build_th_sub_keyboard(opts.get('th', [])),
+            )
+            return
+
+        if data.startswith('pm:th:'):
+            parts = data.split(':')
+            try:
+                idx = int(parts[2]) if len(parts) > 2 else 0
+                page = int(parts[3]) if len(parts) > 3 else 0
+            except ValueError:
+                return
+            async with async_session_maker() as session:
+                opts = await get_filter_options(session)
+                th_options = opts.get('th', [])
+                if idx >= len(th_options):
+                    return
+                th_val = th_options[idx]
+                projects, total = await query_projects(
+                    session, stages=None, types=None, mgrs=None,
+                    ths=[th_val], dates=None, page=page,
+                )
+            shortcut_key = f'th{idx}'
+            rows = _item_rows(projects, shortcut_key, page)
+            kb = build_th_results_keyboard(idx, page, total)
+            full_kb = InlineKeyboardMarkup(rows + list(kb.inline_keyboard))
+            _projects_detail_origin[telegram_id] = (shortcut_key, page)
+            label_th = th_val.replace('חסם לטיפול ', '')
+            await query.edit_message_text(
+                format_results_message(f"‏📌 {label_th}", projects, total, page),
+                parse_mode="HTML", reply_markup=full_kb,
+            )
+            return
+
+        if data.startswith('pm:') and not data.startswith('pm:d:'):
+            parts = data.split(':')
+            shortcut = parts[1] if len(parts) > 1 else ''
             try:
                 page = int(parts[2]) if len(parts) > 2 else 0
             except ValueError:
@@ -1401,36 +1440,27 @@ class TelegramPollingBot:
             async with async_session_maker() as session:
                 projects, total = await query_projects(
                     session,
-                    stages=preset["stages"],
-                    type_=preset["type_"],
-                    mgr=preset["mgr"],
-                    th=preset["th"],
-                    date_filter=preset["date_filter"],
-                    page=page,
+                    stages=preset['stages'], types=preset['types'],
+                    mgrs=preset['mgrs'], ths=preset['ths'],
+                    dates=preset['dates'], page=page,
                 )
-            item_rows = []
-            for i, p in enumerate(projects):
-                line = format_project_line(p)
-                label = f"{page * 10 + i + 1}. " + re.sub(r"<[^>]+>", "", line)[:55]
-                item_rows.append([InlineKeyboardButton(label, callback_data=f"pm:d:{p.id}:{shortcut}:{page}")])
+            rows = _item_rows(projects, shortcut, page)
             kb = build_results_keyboard(shortcut, page, total)
-            full_kb = InlineKeyboardMarkup(item_rows + list(kb.inline_keyboard))
+            full_kb = InlineKeyboardMarkup(rows + list(kb.inline_keyboard))
             _projects_detail_origin[telegram_id] = (shortcut, page)
             await query.edit_message_text(
-                format_results_message(preset["title"], projects, total, page),
-                parse_mode="HTML",
-                reply_markup=full_kb,
+                format_results_message(preset['title'], projects, total, page),
+                parse_mode='HTML', reply_markup=full_kb,
             )
             return
 
-        # ── pm:d:{id}:{shortcut}:{page} — project detail card ─────────────
-        if data.startswith("pm:d:"):
-            parts = data.split(":")
+        if data.startswith('pm:d:'):
+            parts = data.split(':')
             try:
                 project_id = int(parts[2])
             except (ValueError, IndexError):
                 return
-            shortcut = parts[3] if len(parts) > 3 else "all"
+            shortcut = parts[3] if len(parts) > 3 else 'late'
             try:
                 page = int(parts[4]) if len(parts) > 4 else 0
             except ValueError:
@@ -1438,146 +1468,161 @@ class TelegramPollingBot:
             async with async_session_maker() as session:
                 p = await session.get(Project, project_id)
             if not p:
-                await query.edit_message_text("‏⚠️ פרוייקט לא נמצא.", reply_markup=get_menu_keyboard())
+                await query.edit_message_text('‏⚠️ פרוייקט לא נמצא.', reply_markup=get_menu_keyboard())
                 return
             _projects_detail_origin[telegram_id] = (shortcut, page)
             await query.edit_message_text(
-                build_project_card(p),
-                parse_mode="HTML",
+                build_project_card(p), parse_mode='HTML',
                 reply_markup=build_detail_back_keyboard(shortcut, page),
             )
             return
 
-        # ── pm_cf:open ─────────────────────────────────────────────────────
-        if data == "pm_cf:open":
-            _projects_menu_state[telegram_id] = {
-                "stage": None, "type": None, "mgr": None, "th": None, "date": None,
-            }
-            async with async_session_maker() as session:
-                filter_options = await get_filter_options(session)
+        if not data.startswith('pm_cf:'):
+            return
+
+        parts = data.split(':')
+        sub = parts[1] if len(parts) > 1 else ''
+
+        if sub == 'open':
+            if telegram_id not in _projects_menu_state:
+                _projects_menu_state[telegram_id] = _fresh_state()
+            state = _projects_menu_state[telegram_id]
             await query.edit_message_text(
-                build_custom_filter_message(),
-                parse_mode="HTML",
-                reply_markup=build_custom_filter_keyboard(_projects_menu_state[telegram_id], filter_options),
+                get_filter_field_text(state), parse_mode='HTML',
+                reply_markup=build_filter_field_keyboard(state),
             )
             return
 
-        # ── pm_cf:back ─────────────────────────────────────────────────────
-        if data == "pm_cf:back":
+        if sub == 'back':
             _projects_menu_state.pop(telegram_id, None)
             _projects_detail_origin.pop(telegram_id, None)
             async with async_session_maker() as session:
                 total = await get_total_active(session)
             await query.edit_message_text(
-                get_menu_text(total),
-                parse_mode="HTML",
-                reply_markup=get_menu_keyboard(),
+                get_menu_text(total), parse_mode='HTML', reply_markup=get_menu_keyboard(),
             )
             return
 
-        # ── pm_cf:* toggle callbacks ───────────────────────────────────────
-        if data.startswith("pm_cf:"):
-            parts = data.split(":")
-            sub = parts[1] if len(parts) > 1 else ""
-            state = _projects_menu_state.get(telegram_id)
+        if sub == 'clr':
+            _projects_menu_state[telegram_id] = _fresh_state()
+            state = _projects_menu_state[telegram_id]
+            await query.edit_message_text(
+                get_filter_field_text(state), parse_mode='HTML',
+                reply_markup=build_filter_field_keyboard(state),
+            )
+            return
 
-            async def _rerender_filter():
-                async with async_session_maker() as _s:
-                    _opts = await get_filter_options(_s)
-                await query.edit_message_reply_markup(
-                    reply_markup=build_custom_filter_keyboard(state, _opts)
+        if sub == 'fd':
+            state = _projects_menu_state.get(telegram_id, _fresh_state())
+            await query.edit_message_text(
+                get_filter_field_text(state), parse_mode='HTML',
+                reply_markup=build_filter_field_keyboard(state),
+            )
+            return
+
+        if sub == 'f' and len(parts) > 2:
+            dim = parts[2]
+            if telegram_id not in _projects_menu_state:
+                _projects_menu_state[telegram_id] = _fresh_state()
+            state = _projects_menu_state[telegram_id]
+            selected = state.get(dim, [])
+            if dim == 'date':
+                await query.edit_message_text(
+                    get_filter_value_text(dim), parse_mode='HTML',
+                    reply_markup=build_filter_date_keyboard(selected),
                 )
+            else:
+                async with async_session_maker() as session:
+                    opts = await get_filter_options(session)
+                await query.edit_message_text(
+                    get_filter_value_text(dim), parse_mode='HTML',
+                    reply_markup=build_filter_value_keyboard(dim, opts.get(dim, []), selected),
+                )
+            return
 
-            if sub in ("stage", "type", "mgr", "th") and state is not None and len(parts) > 2:
-                val_raw = parts[2]
-                if val_raw == "all":
-                    state[sub] = None
+        if sub == 't' and len(parts) > 3:
+            dim = parts[2]
+            raw = parts[3]
+            if telegram_id not in _projects_menu_state:
+                _projects_menu_state[telegram_id] = _fresh_state()
+            state = _projects_menu_state[telegram_id]
+            selected = state.setdefault(dim, [])
+            if dim == 'date':
+                if raw in selected:
+                    selected.remove(raw)
                 else:
-                    try:
-                        idx = int(val_raw)
-                    except ValueError:
-                        return
-                    async with async_session_maker() as _s:
-                        opts = await get_filter_options(_s)
-                    opt_list = opts.get(sub, [])
-                    if idx >= len(opt_list):
-                        return
-                    state[sub] = opt_list[idx]
-                await _rerender_filter()
-                return
-
-            if sub == "date" and state is not None and len(parts) > 2:
-                val = parts[2]
-                state["date"] = None if val == "all" else val
-                await _rerender_filter()
-                return
-
-            if sub == "show":
-                if state is None:
-                    await query.edit_message_text(
-                        "‏⚠️ סשן הסינון פג. פתח את תפריט הפרוייקטים מחדש.",
-                        reply_markup=get_menu_keyboard(),
-                    )
-                    return
-                async with async_session_maker() as session:
-                    projects, total = await query_projects(
-                        session,
-                        stages=[state["stage"]] if state["stage"] else None,
-                        type_=state["type"],
-                        mgr=state["mgr"],
-                        th=state["th"],
-                        date_filter=state["date"],
-                        page=0,
-                    )
-                _projects_detail_origin[telegram_id] = ("cf", 0)
-                item_rows = []
-                for i, p in enumerate(projects):
-                    line = format_project_line(p)
-                    label = f"{page * 10 + i + 1}. " + re.sub(r"<[^>]+>", "", line)[:55]
-                    item_rows.append([InlineKeyboardButton(label, callback_data=f"pm:d:{p.id}:cf:0")])
-                cf_kb = build_custom_results_keyboard(0, total)
-                full_kb = InlineKeyboardMarkup(item_rows + list(cf_kb.inline_keyboard))
-                await query.edit_message_text(
-                    format_results_message("🔍 תוצאות סינון מותאם", projects, total, 0),
-                    parse_mode="HTML",
-                    reply_markup=full_kb,
-                )
-                return
-
-            if sub == "pg":
+                    selected.append(raw)
+                await query.edit_message_reply_markup(reply_markup=build_filter_date_keyboard(selected))
+            else:
                 try:
-                    page = int(parts[2]) if len(parts) > 2 else 0
+                    idx = int(raw)
                 except ValueError:
-                    page = 0
-                if state is None:
-                    await query.edit_message_text(
-                        "‏⚠️ סשן הסינון פג.",
-                        reply_markup=get_menu_keyboard(),
-                    )
                     return
                 async with async_session_maker() as session:
-                    projects, total = await query_projects(
-                        session,
-                        stages=[state["stage"]] if state["stage"] else None,
-                        type_=state["type"],
-                        mgr=state["mgr"],
-                        th=state["th"],
-                        date_filter=state["date"],
-                        page=page,
-                    )
-                item_rows = []
-                for i, p in enumerate(projects):
-                    line = format_project_line(p)
-                    label = f"{page * 10 + i + 1}. " + re.sub(r"<[^>]+>", "", line)[:55]
-                    item_rows.append([InlineKeyboardButton(label, callback_data=f"pm:d:{p.id}:cf:{page}")])
-                cf_kb = build_custom_results_keyboard(page, total)
-                full_kb = InlineKeyboardMarkup(item_rows + list(cf_kb.inline_keyboard))
+                    opts = await get_filter_options(session)
+                opt_list = opts.get(dim, [])
+                if idx >= len(opt_list):
+                    return
+                val = opt_list[idx]
+                if val in selected:
+                    selected.remove(val)
+                else:
+                    selected.append(val)
+                await query.edit_message_reply_markup(
+                    reply_markup=build_filter_value_keyboard(dim, opt_list, selected)
+                )
+            return
+
+        if sub == 'show':
+            state = _projects_menu_state.get(telegram_id)
+            if state is None:
                 await query.edit_message_text(
-                    format_results_message("🔍 תוצאות סינון מותאם", projects, total, page),
-                    parse_mode="HTML",
-                    reply_markup=full_kb,
+                    '‏⚠️ סשן הסינון פג. פתח את תפריט הפרוייקטים מחדש.',
+                    reply_markup=get_menu_keyboard(),
                 )
                 return
+            async with async_session_maker() as session:
+                projects, total = await query_projects(
+                    session,
+                    stages=state['stage'] or None, types=state['type'] or None,
+                    mgrs=state['mgr'] or None, ths=state['th'] or None,
+                    dates=state['date'] or None, page=0,
+                )
+            _projects_detail_origin[telegram_id] = ('cf', 0)
+            rows = _item_rows(projects, 'cf', 0)
+            cf_kb = build_custom_results_keyboard(0, total)
+            full_kb = InlineKeyboardMarkup(rows + list(cf_kb.inline_keyboard))
+            await query.edit_message_text(
+                format_results_message('🔍 תוצאות סינון מותאם', projects, total, 0),
+                parse_mode='HTML', reply_markup=full_kb,
+            )
+            return
+
+        if sub == 'pg':
+            try:
+                page = int(parts[2]) if len(parts) > 2 else 0
+            except ValueError:
+                page = 0
+            state = _projects_menu_state.get(telegram_id)
+            if state is None:
+                await query.edit_message_text('‏⚠️ סשן הסינון פג.', reply_markup=get_menu_keyboard())
+                return
+            async with async_session_maker() as session:
+                projects, total = await query_projects(
+                    session,
+                    stages=state['stage'] or None, types=state['type'] or None,
+                    mgrs=state['mgr'] or None, ths=state['th'] or None,
+                    dates=state['date'] or None, page=page,
+                )
+            rows = _item_rows(projects, 'cf', page)
+            cf_kb = build_custom_results_keyboard(page, total)
+            full_kb = InlineKeyboardMarkup(rows + list(cf_kb.inline_keyboard))
+            await query.edit_message_text(
+                format_results_message('🔍 תוצאות סינון מותאם', projects, total, page),
+                parse_mode='HTML', reply_markup=full_kb,
+            )
+            return
+
 
     # ------------------------------------------------------------------
     # Webhook lifecycle

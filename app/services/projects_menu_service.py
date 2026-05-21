@@ -3,20 +3,13 @@
 import html as _html
 import datetime
 
-from sqlalchemy import select, func, distinct
+from sqlalchemy import select, func, distinct, or_, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 from app.models import Project
 
 # ── Constants ──────────────────────────────────────────────────────────────
-
-ACTIVE_STAGES = [
-    "עבודה אזרחית",
-    "הרכבה חשמלית",
-    "הרכבה חשמלית ובדיקות",
-    "בדיקות",
-]
 
 DATE_OPTIONS = [
     ("late",   "🔴 באיחור"),
@@ -26,12 +19,20 @@ DATE_OPTIONS = [
     ("2027",   "2027"),
 ]
 
+_DATE_KEY_TO_LABEL = dict(DATE_OPTIONS)
+
+FILTER_FIELDS = [
+    ("stage", "🏗️ שלב"),
+    ("type",  "🏷️ סוג"),
+    ("mgr",   "🧑‍💼 מנהל"),
+    ("th",    "📌 לטיפול"),
+    ("date",  "📅 תאריך"),
+]
+
+# Shortcuts still used by main menu buttons
 SHORTCUT_PRESETS: dict[str, dict] = {
-    "late":    {"title": "🔴 פרוייקטים באיחור",  "stages": None, "type_": None, "mgr": None, "th": None, "date_filter": "late"},
-    "handle":  {"title": "📌 לטיפול",             "stages": None, "type_": None, "mgr": None, "th": "__any__", "date_filter": None},
-    "quarter": {"title": "📅 פרוייקטי הרבעון",    "stages": None, "type_": None, "mgr": None, "th": None, "date_filter": "q_cur"},
-    "all":     {"title": "📋 כל הפרוייקטים",      "stages": None, "type_": None, "mgr": None, "th": None, "date_filter": None},
-    "active":  {"title": "🏗️ פרוייקטים בביצוע",  "stages": ACTIVE_STAGES, "type_": None, "mgr": None, "th": None, "date_filter": None},
+    "late":    {"title": "🔴 פרוייקטים באיחור", "stages": None, "types": None, "mgrs": None, "ths": None, "dates": ["late"]},
+    "quarter": {"title": "📅 פרוייקטי הרבעון",  "stages": None, "types": None, "mgrs": None, "ths": None, "dates": ["q_cur"]},
 }
 
 
@@ -46,12 +47,10 @@ def get_menu_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton("🔴 באיחור",  callback_data="pm:late:0"),
-            InlineKeyboardButton("📌 לטיפול",  callback_data="pm:handle:0"),
-            InlineKeyboardButton("📅 הרבעון",  callback_data="pm:quarter:0"),
+            InlineKeyboardButton("📌 לטיפול",  callback_data="pm:th_menu"),
         ],
         [
-            InlineKeyboardButton("📋 הכל",     callback_data="pm:all:0"),
-            InlineKeyboardButton("🏗️ בביצוע", callback_data="pm:active:0"),
+            InlineKeyboardButton("📅 הרבעון",  callback_data="pm:quarter:0"),
             InlineKeyboardButton("🔍 סינון",   callback_data="pm_cf:open"),
         ],
     ])
@@ -69,6 +68,35 @@ def build_results_keyboard(shortcut: str, page: int, total: int) -> InlineKeyboa
             nav.append(InlineKeyboardButton("הבא ▶", callback_data=f"pm:{shortcut}:{page + 1}"))
         rows.append(nav)
     rows.append([InlineKeyboardButton("🔙 תפריט", callback_data="pm:menu")])
+    return InlineKeyboardMarkup(rows)
+
+
+def build_th_sub_keyboard(th_options: list[str]) -> InlineKeyboardMarkup:
+    """לטיפול chooser — one button per distinct to_handle value."""
+    rows = []
+    for idx, val in enumerate(th_options):
+        label = val.replace("חסם לטיפול ", "")
+        rows.append([InlineKeyboardButton(label, callback_data=f"pm:th:{idx}:0")])
+    rows.append([InlineKeyboardButton("🔙 תפריט", callback_data="pm:menu")])
+    return InlineKeyboardMarkup(rows)
+
+
+def build_th_results_keyboard(idx: int, page: int, total: int) -> InlineKeyboardMarkup:
+    """Nav keyboard for לטיפול specific-value results."""
+    total_pages = max(1, (total + 9) // 10)
+    rows = []
+    if total_pages > 1:
+        nav = []
+        if page > 0:
+            nav.append(InlineKeyboardButton("◀ הקודם", callback_data=f"pm:th:{idx}:{page - 1}"))
+        nav.append(InlineKeyboardButton(f"עמוד {page + 1}/{total_pages}", callback_data="pm:noop"))
+        if page < total_pages - 1:
+            nav.append(InlineKeyboardButton("הבא ▶", callback_data=f"pm:th:{idx}:{page + 1}"))
+        rows.append(nav)
+    rows.append([
+        InlineKeyboardButton("🔙 לטיפול", callback_data="pm:th_menu"),
+        InlineKeyboardButton("🏠 תפריט",  callback_data="pm:menu"),
+    ])
     return InlineKeyboardMarkup(rows)
 
 
@@ -90,6 +118,8 @@ def build_custom_results_keyboard(page: int, total: int) -> InlineKeyboardMarkup
 def build_detail_back_keyboard(shortcut: str, page: int) -> InlineKeyboardMarkup:
     if shortcut == "cf":
         back_cd = f"pm_cf:pg:{page}"
+    elif shortcut.startswith("th") and shortcut[2:].isdigit():
+        back_cd = f"pm:th:{shortcut[2:]}:{page}"
     else:
         back_cd = f"pm:{shortcut}:{page}"
     return InlineKeyboardMarkup([
@@ -100,53 +130,43 @@ def build_detail_back_keyboard(shortcut: str, page: int) -> InlineKeyboardMarkup
     ])
 
 
-def build_custom_filter_keyboard(state: dict, filter_options: dict) -> InlineKeyboardMarkup:
-    def _btn(label: str, cd: str, active: bool) -> InlineKeyboardButton:
-        return InlineKeyboardButton(f"{label} ✓" if active else label, callback_data=cd)
+# ── Filter keyboards (two-level multi-choice) ──────────────────────────────
 
+def build_filter_field_keyboard(state: dict) -> InlineKeyboardMarkup:
+    """Level 1 — choose which field to filter on."""
     rows = []
+    for dim, label in FILTER_FIELDS:
+        count = len(state.get(dim, []))
+        suffix = f" ✓{count}" if count else ""
+        rows.append([InlineKeyboardButton(f"{label}{suffix}", callback_data=f"pm_cf:f:{dim}")])
+    has_any = any(state.get(d) for d in ("stage", "type", "mgr", "th", "date"))
+    footer = []
+    if has_any:
+        footer.append(InlineKeyboardButton("🗑 נקה הכל", callback_data="pm_cf:clr"))
+    footer.append(InlineKeyboardButton("🔍 הצג", callback_data="pm_cf:show"))
+    footer.append(InlineKeyboardButton("🔙 תפריט", callback_data="pm_cf:back"))
+    rows.append(footer)
+    return InlineKeyboardMarkup(rows)
 
-    # Stage — wrap at 3 per row
-    stage_btns = [_btn("הכל", "pm_cf:stage:all", state["stage"] is None)]
-    for idx, val in enumerate(filter_options.get("stage", [])):
-        stage_btns.append(_btn(val, f"pm_cf:stage:{idx}", state["stage"] == val))
-    for chunk in _chunk(stage_btns, 3):
-        rows.append(chunk)
 
-    # Type — wrap at 4 per row
-    type_btns = [_btn("הכל", "pm_cf:type:all", state["type"] is None)]
-    for idx, val in enumerate(filter_options.get("type", [])):
-        type_btns.append(_btn(val, f"pm_cf:type:{idx}", state["type"] == val))
-    for chunk in _chunk(type_btns, 4):
-        rows.append(chunk)
+def build_filter_value_keyboard(dim: str, options: list[str], selected: list[str]) -> InlineKeyboardMarkup:
+    """Level 2 — multi-select values for a DB-backed field (stage/type/mgr/th)."""
+    rows = []
+    for idx, val in enumerate(options):
+        label = val.replace("חסם לטיפול ", "") if dim == "th" else val
+        tick = "✓ " if val in selected else ""
+        rows.append([InlineKeyboardButton(f"{tick}{label}", callback_data=f"pm_cf:t:{dim}:{idx}")])
+    rows.append([InlineKeyboardButton("✅ אישור", callback_data="pm_cf:fd")])
+    return InlineKeyboardMarkup(rows)
 
-    # Manager — "הכל" alone, then 2 per row
-    rows.append([_btn("הכל", "pm_cf:mgr:all", state["mgr"] is None)])
-    mgr_btns = []
-    for idx, val in enumerate(filter_options.get("mgr", [])):
-        mgr_btns.append(_btn(val, f"pm_cf:mgr:{idx}", state["mgr"] == val))
-    for chunk in _chunk(mgr_btns, 2):
-        rows.append(chunk)
 
-    # to_handle — strip "חסם לטיפול " prefix for display, wrap at 2 per row
-    th_btns = [_btn("הכל", "pm_cf:th:all", state["th"] is None)]
-    for idx, val in enumerate(filter_options.get("th", [])):
-        label = val.replace("חסם לטיפול ", "")
-        th_btns.append(_btn(label, f"pm_cf:th:{idx}", state["th"] == val))
-    for chunk in _chunk(th_btns, 2):
-        rows.append(chunk)
-
-    # Date — wrap at 3
-    date_btns = [_btn("הכל", "pm_cf:date:all", state["date"] is None)]
+def build_filter_date_keyboard(selected: list[str]) -> InlineKeyboardMarkup:
+    """Level 2 — multi-select date options (fixed values)."""
+    rows = []
     for key, label in DATE_OPTIONS:
-        date_btns.append(_btn(label, f"pm_cf:date:{key}", state["date"] == key))
-    for chunk in _chunk(date_btns, 3):
-        rows.append(chunk)
-
-    rows.append([
-        InlineKeyboardButton("🔍 הצג תוצאות", callback_data="pm_cf:show"),
-        InlineKeyboardButton("🔙 תפריט",       callback_data="pm_cf:back"),
-    ])
+        tick = "✓ " if key in selected else ""
+        rows.append([InlineKeyboardButton(f"{tick}{label}", callback_data=f"pm_cf:t:date:{key}")])
+    rows.append([InlineKeyboardButton("✅ אישור", callback_data="pm_cf:fd")])
     return InlineKeyboardMarkup(rows)
 
 
@@ -159,13 +179,36 @@ def get_menu_text(total: int | None = None) -> str:
     return header + "\n\nבחר תצוגה מהירה:"
 
 
+def get_th_sub_text() -> str:
+    return "‏📌 <b>לטיפול</b>\n\nבחר סוג חסם:"
+
+
+def get_filter_field_text(state: dict) -> str:
+    parts = []
+    for dim, label in FILTER_FIELDS:
+        vals = state.get(dim, [])
+        if vals:
+            if dim == "date":
+                display = ", ".join(_DATE_KEY_TO_LABEL.get(v, v) for v in vals)
+            elif dim == "th":
+                display = ", ".join(v.replace("חסם לטיפול ", "") for v in vals)
+            else:
+                display = ", ".join(vals)
+            parts.append(f"{label}: <i>{_html.escape(display)}</i>")
+    active_line = "\n".join(parts) if parts else "<i>אין פילטרים פעילים</i>"
+    return f"‏🔍 <b>סינון פרוייקטים</b>\n\n{active_line}\n\nבחר שדה לעריכה:"
+
+
+def get_filter_value_text(dim: str) -> str:
+    labels = dict(FILTER_FIELDS)
+    return f"‏{labels.get(dim, dim)} — בחר ערכים (ניתן לבחור מספר):"
+
+
 def format_project_line(p: Project) -> str:
     name = p.name or ""
     if len(name) > 35:
         name = name[:35] + "…"
-    date_str = ""
-    if p.estimated_finish_date:
-        date_str = p.estimated_finish_date.strftime("%m/%y")
+    date_str = p.estimated_finish_date.strftime("%m/%y") if p.estimated_finish_date else ""
     stage_part = p.stage or ""
     tail = f"  |  {stage_part} · {date_str}" if date_str else f"  |  {stage_part}"
     return f"📁 <b>#{p.id}</b> · {_html.escape(name)}{tail}"
@@ -193,10 +236,7 @@ def build_project_card(p: Project) -> str:
     dev_str = p.dev_plan_date.strftime("%m/%Y") if p.dev_plan_date else "—"
     to_handle = p.to_handle or "—"
     summary = p.weekly_report_brief or "אין"
-
-    date_line = finish_str
-    if overdue:
-        date_line += " 🔴 באיחור"
+    date_line = (finish_str + " 🔴 באיחור") if overdue else finish_str
 
     return (
         f"‏📁 <b>פרוייקט #{p.id}</b>\n"
@@ -214,15 +254,6 @@ def build_project_card(p: Project) -> str:
         "──────────────────\n"
         f"📋 <b>סיכום שבועי:</b>\n"
         f"<i>{_html.escape(summary)}</i>"
-    )
-
-
-def build_custom_filter_message() -> str:
-    return (
-        "‏🔍 <b>סינון פרוייקטים</b>\n\n"
-        "בחר פילטרים ולחץ הצג:\n"
-        "──────────────────\n"
-        "🏗️ <b>שלב</b> · 🏷️ <b>סוג</b> · 🧑‍💼 <b>מנהל</b> · 📌 <b>לטיפול</b> · 📅 <b>תאריך</b>"
     )
 
 
@@ -251,67 +282,64 @@ async def get_filter_options(session: AsyncSession) -> dict:
     }
 
 
+def _date_clause(key: str):
+    """Return a SQLAlchemy WHERE clause for one date key."""
+    today = datetime.date.today()
+    if key == "late":
+        return Project.estimated_finish_date < today
+    if key == "q_cur":
+        q_start = datetime.date(today.year, ((today.month - 1) // 3) * 3 + 1, 1)
+        q_m_end = ((today.month - 1) // 3) * 3 + 3
+        q_end = (datetime.date(today.year, q_m_end, 1) + datetime.timedelta(days=31)).replace(day=1) - datetime.timedelta(days=1)
+        return and_(Project.estimated_finish_date >= q_start, Project.estimated_finish_date <= q_end)
+    if key == "q_next":
+        cur_q = (today.month - 1) // 3
+        next_q = cur_q + 1
+        year = today.year
+        if next_q > 3:
+            next_q, year = 0, year + 1
+        nq_start = datetime.date(year, next_q * 3 + 1, 1)
+        nq_m_end = next_q * 3 + 3
+        nq_end = (datetime.date(year, nq_m_end, 1) + datetime.timedelta(days=31)).replace(day=1) - datetime.timedelta(days=1)
+        return and_(Project.estimated_finish_date >= nq_start, Project.estimated_finish_date <= nq_end)
+    if key in ("2026", "2027"):
+        yr = int(key)
+        return and_(Project.estimated_finish_date >= datetime.date(yr, 1, 1),
+                    Project.estimated_finish_date <= datetime.date(yr, 12, 31))
+    return None
+
+
 async def query_projects(
     session: AsyncSession,
     stages: list[str] | None,
-    type_: str | None,
-    mgr: str | None,
-    th: str | None,
-    date_filter: str | None,
+    types: list[str] | None,
+    mgrs: list[str] | None,
+    ths: list[str] | None,
+    dates: list[str] | None,
     page: int,
 ) -> tuple[list[Project], int]:
-    """Query active projects with optional filters. Returns (rows, total)."""
+    """Query active projects with optional multi-value filters. Returns (rows, total).
+
+    Each list param: None or [] = no filter; non-empty = filter (AND across dims, OR within).
+    ths special value: ["__any__"] = any project with a non-empty to_handle.
+    """
     base = select(Project).where(Project.is_active.is_(True))
 
-    if stages is not None:
+    if stages:
         base = base.where(Project.stage.in_(stages))
-    if type_ is not None:
-        base = base.where(Project.project_type == type_)
-    if mgr is not None:
-        base = base.where(Project.manager == mgr)
-    if th == "__any__":
+    if types:
+        base = base.where(Project.project_type.in_(types))
+    if mgrs:
+        base = base.where(Project.manager.in_(mgrs))
+    if ths == ["__any__"]:
         base = base.where(Project.to_handle.isnot(None), Project.to_handle != "")
-    elif th is not None:
-        base = base.where(Project.to_handle == th)
+    elif ths:
+        base = base.where(Project.to_handle.in_(ths))
 
-    if date_filter == "late":
-        base = base.where(Project.estimated_finish_date < datetime.date.today())
-    elif date_filter == "q_cur":
-        today = datetime.date.today()
-        q_start = datetime.date(today.year, ((today.month - 1) // 3) * 3 + 1, 1)
-        q_month_end = ((today.month - 1) // 3) * 3 + 3
-        q_end = datetime.date(today.year, q_month_end, 1) + datetime.timedelta(days=31)
-        q_end = q_end.replace(day=1) - datetime.timedelta(days=1)
-        base = base.where(
-            Project.estimated_finish_date >= q_start,
-            Project.estimated_finish_date <= q_end,
-        )
-    elif date_filter == "q_next":
-        today = datetime.date.today()
-        cur_q = (today.month - 1) // 3
-        next_q = cur_q + 1
-        if next_q > 3:
-            next_q = 0
-            year = today.year + 1
-        else:
-            year = today.year
-        nq_start = datetime.date(year, next_q * 3 + 1, 1)
-        nq_month_end = next_q * 3 + 3
-        if nq_month_end > 12:
-            nq_end = datetime.date(year + 1, 1, 1) - datetime.timedelta(days=1)
-        else:
-            nq_end = datetime.date(year, nq_month_end, 1) + datetime.timedelta(days=31)
-            nq_end = nq_end.replace(day=1) - datetime.timedelta(days=1)
-        base = base.where(
-            Project.estimated_finish_date >= nq_start,
-            Project.estimated_finish_date <= nq_end,
-        )
-    elif date_filter in ("2026", "2027"):
-        yr = int(date_filter)
-        base = base.where(
-            Project.estimated_finish_date >= datetime.date(yr, 1, 1),
-            Project.estimated_finish_date <= datetime.date(yr, 12, 31),
-        )
+    if dates:
+        clauses = [c for d in dates if (c := _date_clause(d)) is not None]
+        if clauses:
+            base = base.where(or_(*clauses))
 
     count_q = select(func.count()).select_from(base.subquery())
     total: int = await session.scalar(count_q) or 0

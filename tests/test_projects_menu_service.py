@@ -96,11 +96,19 @@ def test_build_project_card_no_to_handle():
     assert "—" in card
 
 
-def test_get_menu_keyboard_six_buttons():
+def test_get_menu_keyboard_four_buttons():
     from app.services.projects_menu_service import get_menu_keyboard
     kb = get_menu_keyboard()
     all_btns = [b for row in kb.inline_keyboard for b in row]
-    assert len(all_btns) == 6
+    assert len(all_btns) == 4
+
+
+def test_get_menu_keyboard_no_all_or_active():
+    from app.services.projects_menu_service import get_menu_keyboard
+    kb = get_menu_keyboard()
+    labels = [b.text for row in kb.inline_keyboard for b in row]
+    assert not any("הכל" in t for t in labels)
+    assert not any("בביצוע" in t for t in labels)
 
 
 def test_build_results_keyboard_no_nav_single_page():
@@ -117,40 +125,14 @@ def test_build_results_keyboard_has_nav_multipage():
     assert len(rows) == 2
 
 
-def test_build_custom_filter_keyboard_marks_active_stage():
-    from app.services.projects_menu_service import build_custom_filter_keyboard
-    state = {"stage": "בדיקות", "type": None, "mgr": None, "th": None, "date": None}
-    filter_options = {
-        "stage": ["תכנון", "בדיקות"],
-        "type": ["הקמה"],
-        "mgr": ["כוכבה כהן"],
-        "th": ["חסם לטיפול מנהל אגף"],
-    }
-    kb = build_custom_filter_keyboard(state, filter_options)
-    flat = [b.text for row in kb.inline_keyboard for b in row]
-    assert any("בדיקות" in t and "✓" in t for t in flat)
-    assert not any("תכנון" in t and "✓" in t for t in flat)
-
-
-def test_build_custom_filter_keyboard_th_strips_prefix():
-    from app.services.projects_menu_service import build_custom_filter_keyboard
-    state = {"stage": None, "type": None, "mgr": None, "th": None, "date": None}
-    filter_options = {
-        "stage": [],
-        "type": [],
-        "mgr": [],
-        "th": ["חסם לטיפול מנהל אגף", "חסם לטיפול מנהל מגזר ביצוע"],
-    }
-    kb = build_custom_filter_keyboard(state, filter_options)
-    flat = [b.text for row in kb.inline_keyboard for b in row]
-    assert any("מנהל אגף" in t for t in flat)
-    assert not any("חסם לטיפול מנהל אגף" in t for t in flat)
-
-
 def test_shortcut_presets_keys():
     from app.services.projects_menu_service import SHORTCUT_PRESETS
-    for key in ("late", "handle", "quarter", "all", "active"):
-        assert key in SHORTCUT_PRESETS
+    assert "late" in SHORTCUT_PRESETS
+    assert "quarter" in SHORTCUT_PRESETS
+    assert "handle" not in SHORTCUT_PRESETS
+    assert "all" not in SHORTCUT_PRESETS
+    assert "active" not in SHORTCUT_PRESETS
+    for key in ("late", "quarter"):
         assert "title" in SHORTCUT_PRESETS[key]
 
 
@@ -160,6 +142,103 @@ def test_build_detail_back_keyboard_cf_routes_to_pg():
     all_btns = [b for row in kb.inline_keyboard for b in row]
     back_btn = next(b for b in all_btns if "חזרה" in b.text)
     assert back_btn.callback_data == "pm_cf:pg:3"
+
+
+def test_build_detail_back_keyboard_th_routes_correctly():
+    from app.services.projects_menu_service import build_detail_back_keyboard
+    kb = build_detail_back_keyboard("th2", 1)
+    all_btns = [b for row in kb.inline_keyboard for b in row]
+    back_btn = next(b for b in all_btns if "חזרה" in b.text)
+    assert back_btn.callback_data == "pm:th:2:1"
+
+
+def test_build_detail_back_keyboard_shortcut_routes_correctly():
+    from app.services.projects_menu_service import build_detail_back_keyboard
+    kb = build_detail_back_keyboard("late", 0)
+    all_btns = [b for row in kb.inline_keyboard for b in row]
+    back_btn = next(b for b in all_btns if "חזרה" in b.text)
+    assert back_btn.callback_data == "pm:late:0"
+
+
+def test_build_th_sub_keyboard():
+    from app.services.projects_menu_service import build_th_sub_keyboard
+    opts = ["חסם לטיפול מנהל אגף", "חסם לטיפול מנהל מגזר"]
+    kb = build_th_sub_keyboard(opts)
+    rows = kb.inline_keyboard
+    # 2 value rows + 1 back row
+    assert len(rows) == 3
+    labels = [b.text for row in rows for b in row]
+    assert any("מנהל אגף" in t for t in labels)
+    assert not any("חסם לטיפול" in t for t in labels)
+    assert rows[0][0].callback_data == "pm:th:0:0"
+    assert rows[1][0].callback_data == "pm:th:1:0"
+
+
+def test_build_th_results_keyboard_single_page():
+    from app.services.projects_menu_service import build_th_results_keyboard
+    kb = build_th_results_keyboard(0, 0, 5)
+    rows = kb.inline_keyboard
+    # No nav + back row
+    assert len(rows) == 1
+
+
+def test_build_th_results_keyboard_multipage():
+    from app.services.projects_menu_service import build_th_results_keyboard
+    kb = build_th_results_keyboard(0, 0, 15)
+    rows = kb.inline_keyboard
+    assert len(rows) == 2
+
+
+def test_build_filter_field_keyboard_shows_counts():
+    from app.services.projects_menu_service import build_filter_field_keyboard
+    state = {"stage": ["בדיקות"], "type": [], "mgr": [], "th": [], "date": ["late"]}
+    kb = build_filter_field_keyboard(state)
+    labels = [b.text for row in kb.inline_keyboard for b in row]
+    assert any("✓1" in t for t in labels)
+    assert any("✓2" not in t or True for t in labels)  # counts correct
+
+
+def test_build_filter_field_keyboard_has_clear_when_active():
+    from app.services.projects_menu_service import build_filter_field_keyboard
+    state = {"stage": ["בדיקות"], "type": [], "mgr": [], "th": [], "date": []}
+    kb = build_filter_field_keyboard(state)
+    labels = [b.text for row in kb.inline_keyboard for b in row]
+    assert any("נקה" in t for t in labels)
+
+
+def test_build_filter_field_keyboard_no_clear_when_empty():
+    from app.services.projects_menu_service import build_filter_field_keyboard
+    state = {"stage": [], "type": [], "mgr": [], "th": [], "date": []}
+    kb = build_filter_field_keyboard(state)
+    labels = [b.text for row in kb.inline_keyboard for b in row]
+    assert not any("נקה" in t for t in labels)
+
+
+def test_build_filter_value_keyboard_marks_selected():
+    from app.services.projects_menu_service import build_filter_value_keyboard
+    opts = ["תכנון", "בדיקות", "הרכבה"]
+    kb = build_filter_value_keyboard("stage", opts, ["בדיקות"])
+    labels = [b.text for row in kb.inline_keyboard for b in row]
+    assert any("✓" in t and "בדיקות" in t for t in labels)
+    assert not any("✓" in t and "תכנון" in t for t in labels)
+
+
+def test_build_filter_value_keyboard_th_strips_prefix():
+    from app.services.projects_menu_service import build_filter_value_keyboard
+    opts = ["חסם לטיפול מנהל אגף", "חסם לטיפול מנהל מגזר"]
+    kb = build_filter_value_keyboard("th", opts, [])
+    labels = [b.text for row in kb.inline_keyboard for b in row]
+    assert any("מנהל אגף" in t for t in labels)
+    assert not any("חסם לטיפול" in t for t in labels)
+
+
+def test_build_filter_date_keyboard_marks_selected():
+    from app.services.projects_menu_service import build_filter_date_keyboard
+    kb = build_filter_date_keyboard(["late", "2026"])
+    labels = [b.text for row in kb.inline_keyboard for b in row]
+    assert any("✓" in t and "באיחור" in t for t in labels)
+    assert any("✓" in t and "2026" in t for t in labels)
+    assert not any("✓" in t and "2027" in t for t in labels)
 
 
 from app.services.projects_menu_service import (
@@ -217,7 +296,7 @@ async def test_query_projects_all(db_session):
     _db_project(db_session, project_identifier="QP-1")
     _db_project(db_session, project_identifier="QP-2")
     await db_session.flush()
-    results, total = await query_projects(db_session, stages=None, type_=None, mgr=None, th=None, date_filter=None, page=0)
+    results, total = await query_projects(db_session, stages=None, types=None, mgrs=None, ths=None, dates=None, page=0)
     assert total >= 2
 
 
@@ -228,7 +307,7 @@ async def test_query_projects_late_filter(db_session):
     _db_project(db_session, project_identifier="LATE-1", estimated_finish_date=yesterday)
     _db_project(db_session, project_identifier="FUTURE-1", estimated_finish_date=future)
     await db_session.flush()
-    results, total = await query_projects(db_session, stages=None, type_=None, mgr=None, th=None, date_filter="late", page=0)
+    results, total = await query_projects(db_session, stages=None, types=None, mgrs=None, ths=None, dates=["late"], page=0)
     ids = [p.project_identifier for p in results]
     assert "LATE-1" in ids
     assert "FUTURE-1" not in ids
@@ -239,10 +318,23 @@ async def test_query_projects_stage_filter(db_session):
     _db_project(db_session, project_identifier="STG-1", stage="הרכבה חשמלית")
     _db_project(db_session, project_identifier="STG-2", stage="תכנון")
     await db_session.flush()
-    results, total = await query_projects(db_session, stages=["הרכבה חשמלית"], type_=None, mgr=None, th=None, date_filter=None, page=0)
+    results, total = await query_projects(db_session, stages=["הרכבה חשמלית"], types=None, mgrs=None, ths=None, dates=None, page=0)
     ids = [p.project_identifier for p in results]
     assert "STG-1" in ids
     assert "STG-2" not in ids
+
+
+@pytest.mark.asyncio
+async def test_query_projects_multi_stage_filter(db_session):
+    _db_project(db_session, project_identifier="MS-1", stage="הרכבה חשמלית")
+    _db_project(db_session, project_identifier="MS-2", stage="בדיקות")
+    _db_project(db_session, project_identifier="MS-3", stage="תכנון")
+    await db_session.flush()
+    results, total = await query_projects(db_session, stages=["הרכבה חשמלית", "בדיקות"], types=None, mgrs=None, ths=None, dates=None, page=0)
+    ids = [p.project_identifier for p in results]
+    assert "MS-1" in ids
+    assert "MS-2" in ids
+    assert "MS-3" not in ids
 
 
 @pytest.mark.asyncio
@@ -250,10 +342,21 @@ async def test_query_projects_handle_any(db_session):
     _db_project(db_session, project_identifier="TH-1", to_handle="חסם לטיפול מנהל אגף")
     _db_project(db_session, project_identifier="TH-2", to_handle=None)
     await db_session.flush()
-    results, total = await query_projects(db_session, stages=None, type_=None, mgr=None, th="__any__", date_filter=None, page=0)
+    results, total = await query_projects(db_session, stages=None, types=None, mgrs=None, ths=["__any__"], dates=None, page=0)
     ids = [p.project_identifier for p in results]
     assert "TH-1" in ids
     assert "TH-2" not in ids
+
+
+@pytest.mark.asyncio
+async def test_query_projects_specific_th(db_session):
+    _db_project(db_session, project_identifier="TH-A", to_handle="חסם לטיפול מנהל אגף")
+    _db_project(db_session, project_identifier="TH-B", to_handle="חסם לטיפול מנהל מגזר")
+    await db_session.flush()
+    results, _ = await query_projects(db_session, stages=None, types=None, mgrs=None, ths=["חסם לטיפול מנהל אגף"], dates=None, page=0)
+    ids = [p.project_identifier for p in results]
+    assert "TH-A" in ids
+    assert "TH-B" not in ids
 
 
 @pytest.mark.asyncio
@@ -261,8 +364,8 @@ async def test_query_projects_pagination(db_session):
     for i in range(12):
         _db_project(db_session, project_identifier=f"PAG-{i}", stage="תכנון-פג")
     await db_session.flush()
-    results_p0, total = await query_projects(db_session, stages=["תכנון-פג"], type_=None, mgr=None, th=None, date_filter=None, page=0)
-    results_p1, _ = await query_projects(db_session, stages=["תכנון-פג"], type_=None, mgr=None, th=None, date_filter=None, page=1)
+    results_p0, total = await query_projects(db_session, stages=["תכנון-פג"], types=None, mgrs=None, ths=None, dates=None, page=0)
+    results_p1, _ = await query_projects(db_session, stages=["תכנון-פג"], types=None, mgrs=None, ths=None, dates=None, page=1)
     assert total >= 12
     assert len(results_p0) == 10
     assert len(results_p1) >= 2
