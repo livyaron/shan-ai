@@ -22,6 +22,7 @@ from app.services.telegram_routing import (
     _ai_route_message, _TG_MAX, _DECISION_HISTORY_KEYWORDS,
 )
 from sqlalchemy import select
+from app.services.decisions_menu_service import get_menu_shortcut_keyboard
 
 logger = logging.getLogger(__name__)
 
@@ -540,7 +541,10 @@ class TelegramPollingBot:
                     else:
                         decision_svc = DecisionService(session, self.application)
                         reply = await decision_svc.process(user, combined_text)
-                        await update.message.reply_text(reply, parse_mode="HTML")
+                        await update.message.reply_text(
+                            reply, parse_mode="HTML",
+                            reply_markup=get_menu_shortcut_keyboard(),
+                        )
                 return
 
             # --- LLM classify for everything else ---
@@ -885,7 +889,8 @@ class TelegramPollingBot:
                         decision_svc = DecisionService(session, self.application)
                         reply = await decision_svc.process(approver, original_text)
                         await context.bot.send_message(
-                            chat_id=update.effective_chat.id, text=reply, parse_mode="HTML"
+                            chat_id=update.effective_chat.id, text=reply, parse_mode="HTML",
+                            reply_markup=get_menu_shortcut_keyboard(),
                         )
                 return
 
@@ -909,7 +914,8 @@ class TelegramPollingBot:
                     decision_svc = DecisionService(session, self.application)
                     reply = await decision_svc.process(approver, original_text, pre_result=pre_result)
                     await context.bot.send_message(
-                        chat_id=update.effective_chat.id, text=reply, parse_mode="HTML"
+                        chat_id=update.effective_chat.id, text=reply, parse_mode="HTML",
+                        reply_markup=get_menu_shortcut_keyboard(),
                     )
                 return
 
@@ -936,6 +942,7 @@ class TelegramPollingBot:
                     chat_id=update.effective_chat.id,
                     text=reply,
                     parse_mode="HTML",
+                    reply_markup=get_menu_shortcut_keyboard(),
                 )
                 return
 
