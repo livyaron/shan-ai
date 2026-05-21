@@ -15,7 +15,7 @@ from app.services.telegram_state import (
     _awaiting_rejection_note, _awaiting_dist_rejection,
     _awaiting_clarification, _awaiting_master_confirm,
     _awaiting_decision_confirm, _awaiting_mgr_approval_confirm,
-    _raci_edit_state,
+    _raci_edit_state, _awaiting_decision_preview,
 )
 from app.services.telegram_routing import (
     _is_data_question, _is_project_query, _maybe_summarize,
@@ -30,6 +30,34 @@ def _mgr_approval_keyboard() -> InlineKeyboardMarkup:
         InlineKeyboardButton("✅ כן, נדרש אישור", callback_data="mgr_yes:0"),
         InlineKeyboardButton("❌ לא, בצע ישירות", callback_data="mgr_no:0"),
     ]])
+
+
+def _decision_preview_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton("✅ אשר ותעד", callback_data="dec_prev_y:0"),
+        InlineKeyboardButton("❌ בטל", callback_data="dec_prev_n:0"),
+    ]])
+
+
+def _build_preview_text(result: dict) -> str:
+    type_map = {
+        "INFO": "ℹ️ מידע",
+        "NORMAL": "✅ רגיל",
+        "CRITICAL": "\U0001f6a8 קריטי",
+        "UNCERTAIN": "❓ לא ודאי",
+    }
+    e = _html.escape
+    t = (result.get("type") or "").upper()
+    type_label = type_map.get(t, t or "—")
+    approval = "כן" if result.get("requires_approval") else "לא"
+    return (
+        f"‏\U0001f50d <b>ניתוח ראשוני — לפני תיעוד</b>\n\n"
+        f"<b>סוג:</b> {type_label}\n"
+        f"<b>סיכום:</b> {e(result.get('summary') or '—')}\n"
+        f"<b>פעולה מומלצת:</b> {e(result.get('recommended_action') or '—')}\n"
+        f"<b>דורש אישור:</b> {approval}\n\n"
+        f"האם לתעד ולעבד החלטה זו?"
+    )
 
 
 def _user_has_manager(user) -> bool:
@@ -65,6 +93,7 @@ class TelegramPollingBot:
         self.application.add_handler(CommandHandler("start", self.handle_start))
         self.application.add_handler(CommandHandler("register", self.handle_register))
         self.application.add_handler(CommandHandler("status", self.handle_status))
+        self.application.add_handler(CommandHandler("decisions", self.handle_decisions))
         self.application.add_handler(CommandHandler("ask", self.handle_ask))
         self.application.add_handler(CallbackQueryHandler(self.handle_callback))
         self.application.add_handler(
@@ -224,6 +253,21 @@ class TelegramPollingBot:
                 f"מזהה: {user.id}",
                 parse_mode="HTML",
             )
+
+    async def handle_decisions(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """/decisions — open the decisions menu."""
+        from app.services.decisions_menu_service import get_menu_keyboard, get_menu_text
+        telegram_id = update.effective_user.id
+        async with async_session_maker() as session:
+            user = await session.scalar(select(User).where(User.telegram_id == telegram_id))
+        if not user or not user.role:
+            await update.message.reply_text("‏⏳ יש להירשם תחילה. השתמש ב-/register")
+            return
+        await update.message.reply_text(
+            get_menu_text(),
+            parse_mode="HTML",
+            reply_markup=get_menu_keyboard(),
+        )
 
     # ------------------------------------------------------------------
     # /ask command — knowledge base Q&A
@@ -419,6 +463,17 @@ class TelegramPollingBot:
                 chat_id=update.effective_chat.id, action="typing"
             )
 
+            # Decisions menu keyword shortcut
+            if text.strip() == "החלטות":
+                if user.role:
+                    from app.services.decisions_menu_service import get_menu_keyboard, get_menu_text
+                    await update.message.reply_text(
+                        get_menu_text(),
+                        parse_mode="HTML",
+                        reply_markup=get_menu_keyboard(),
+                    )
+                return
+
             # Hard bypass: single-word or clearly non-work messages skip LLM routing entirely
             _NON_WORK_WORDS = {"בדיחה", "בדיחות", "שלום", "היי", "הי", "תודה", "להתראות", "ביי", "בוקר טוב", "ערב טוב", "לילה טוב"}
             if text.strip() in _NON_WORK_WORDS:
@@ -546,19 +601,26 @@ class TelegramPollingBot:
                 await update.message.reply_text(msg, parse_mode="HTML", reply_markup=_dec_confirm_kb)
                 return
 
-            # DECISION — ask manager approval question first (if user has a manager)
-            if _user_has_manager(user):
-                _awaiting_mgr_approval_confirm[telegram_id] = text
+            # DECISION — show AI preview; user must approve before commit
+            decision_svc = DecisionService(session, self.application)
+            try:
+                pre_result = await decision_svc.analyze_only(user, text)
+            except Exception as _err:
+                logger.error(f"analyze_only failed: {_err}", exc_info=True)
                 await update.message.reply_text(
-                    "\u200F👔 <b>האם החלטה זו דורשת אישור מנהל?</b>",
-                    parse_mode="HTML",
-                    reply_markup=_mgr_approval_keyboard(),
+                    "‏⚠️ שגיאה בניתוח. נסה שוב.", parse_mode="HTML"
                 )
                 return
-            decision_svc = DecisionService(session, self.application)
-            reply = await decision_svc.process(user, text)
-
-        await update.message.reply_text(reply, parse_mode="HTML")
+            _awaiting_decision_preview[telegram_id] = {
+                "text": text,
+                "result": pre_result,
+                "user_has_manager": _user_has_manager(user),
+            }
+            await update.message.reply_text(
+                _build_preview_text(pre_result),
+                parse_mode="HTML",
+                reply_markup=_decision_preview_keyboard(),
+            )
 
     # ------------------------------------------------------------------
     # Callback handler — approve / reject inline keyboard buttons
@@ -783,38 +845,84 @@ class TelegramPollingBot:
             if action in ("dec_conf_y", "dec_conf_n"):
                 original_text = _awaiting_decision_confirm.pop(telegram_id, None)
                 if action == "dec_conf_n" or not original_text:
-                    await query.edit_message_text("\u200Fבסדר, ממשיכים.")
+                    await query.edit_message_text("‏בסדר, ממשיכים.")
                     return
-                # Ask manager approval question before processing (if user has a manager)
-                if _user_has_manager(approver):
-                    _awaiting_mgr_approval_confirm[telegram_id] = original_text
+                # Show preview before committing
+                await query.edit_message_text("‏⏳ <b>מנתח...</b>", parse_mode="HTML")
+                try:
+                    _dsvc_tmp = DecisionService(session, self.application)
+                    pre_result = await _dsvc_tmp.analyze_only(approver, original_text)
+                    _awaiting_decision_preview[telegram_id] = {
+                        "text": original_text,
+                        "result": pre_result,
+                        "user_has_manager": _user_has_manager(approver),
+                    }
+                    await context.bot.send_message(
+                        chat_id=update.effective_chat.id,
+                        text=_build_preview_text(pre_result),
+                        parse_mode="HTML",
+                        reply_markup=_decision_preview_keyboard(),
+                    )
+                except Exception as _err:
+                    logger.error(f"analyze_only (dec_conf_y) failed: {_err}", exc_info=True)
+                    if _user_has_manager(approver):
+                        _awaiting_mgr_approval_confirm[telegram_id] = original_text
+                        await context.bot.send_message(
+                            chat_id=update.effective_chat.id,
+                            text="‏👔 <b>האם החלטה זו דורשת אישור מנהל?</b>",
+                            parse_mode="HTML",
+                            reply_markup=_mgr_approval_keyboard(),
+                        )
+                    else:
+                        decision_svc = DecisionService(session, self.application)
+                        reply = await decision_svc.process(approver, original_text)
+                        await context.bot.send_message(
+                            chat_id=update.effective_chat.id, text=reply, parse_mode="HTML"
+                        )
+                return
+
+            # --- Decision preview approve/dismiss ---
+            if action in ("dec_prev_y", "dec_prev_n"):
+                preview_data = _awaiting_decision_preview.pop(telegram_id, None)
+                if action == "dec_prev_n" or not preview_data:
+                    await query.edit_message_text("‏❌ בוטל — ההחלטה לא תועדה.")
+                    return
+                original_text = preview_data["text"]
+                pre_result = preview_data["result"]
+                if preview_data.get("user_has_manager"):
+                    _awaiting_mgr_approval_confirm[telegram_id] = {"text": original_text, "result": pre_result}
                     await query.edit_message_text(
-                        "\u200F👔 <b>האם החלטה זו דורשת אישור מנהל?</b>",
+                        "‏👔 <b>האם החלטה זו דורשת אישור מנהל?</b>",
                         parse_mode="HTML",
                         reply_markup=_mgr_approval_keyboard(),
                     )
-                    return
-                # No manager — process directly
-                await query.edit_message_text("\u200F⏳ <b>מעבד את ההחלטה...</b>", parse_mode="HTML")
-                decision_svc = DecisionService(session, self.application)
-                reply = await decision_svc.process(approver, original_text)
-                await context.bot.send_message(
-                    chat_id=update.effective_chat.id,
-                    text=reply,
-                    parse_mode="HTML",
-                )
+                else:
+                    await query.edit_message_text("‏⏳ <b>מעבד את ההחלטה...</b>", parse_mode="HTML")
+                    decision_svc = DecisionService(session, self.application)
+                    reply = await decision_svc.process(approver, original_text, pre_result=pre_result)
+                    await context.bot.send_message(
+                        chat_id=update.effective_chat.id, text=reply, parse_mode="HTML"
+                    )
                 return
 
             # --- Manager approval answer ---
             if action in ("mgr_yes", "mgr_no"):
-                original_text = _awaiting_mgr_approval_confirm.pop(telegram_id, None)
-                if not original_text:
-                    await query.edit_message_text("\u200F⚠️ פג תוקף הבקשה. שלח את ההחלטה מחדש.")
+                entry = _awaiting_mgr_approval_confirm.pop(telegram_id, None)
+                if not entry:
+                    await query.edit_message_text("‏⚠️ פג תוקף הבקשה. שלח את ההחלטה מחדש.")
                     return
-                await query.edit_message_text("\u200F⏳ <b>מעבד את ההחלטה...</b>", parse_mode="HTML")
+                if isinstance(entry, dict):
+                    original_text = entry["text"]
+                    pre_result = entry.get("result")
+                else:
+                    original_text = entry
+                    pre_result = None
+                await query.edit_message_text("‏⏳ <b>מעבד את ההחלטה...</b>", parse_mode="HTML")
                 decision_svc = DecisionService(session, self.application)
                 reply = await decision_svc.process(
-                    approver, original_text, force_approval=(action == "mgr_yes")
+                    approver, original_text,
+                    force_approval=(action == "mgr_yes"),
+                    pre_result=pre_result,
                 )
                 await context.bot.send_message(
                     chat_id=update.effective_chat.id,
