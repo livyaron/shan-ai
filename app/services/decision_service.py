@@ -12,6 +12,7 @@ from telegram.ext import Application
 from app.models import User, Decision, DecisionTypeEnum, DecisionStatusEnum, RoleEnum
 from app.services.claude_service import ClaudeService
 from app.services import embedding_service
+from app.services.decisions_menu_service import get_menu_shortcut_keyboard
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +27,7 @@ SUPERIOR_ROLE = {
 TYPE_EMOJI = {
     "INFO": "ℹ️",
     "NORMAL": "✅",
-    "CRITICAL": "🚨",
+    "CRITICAL": "\U0001f6a8",
     "UNCERTAIN": "❓",
 }
 
@@ -37,21 +38,12 @@ class DecisionService:
         self.application = application
         self.claude = ClaudeService()
 
-    async def process(self, user: User, text: str, force_approval: bool = False) -> str:
-        """
-        Full pipeline: Claude → store → route.
-        force_approval=True: escalate to CRITICAL regardless of AI classification.
-        Returns the reply message to send back to the submitter.
-        """
+    async def analyze_only(self, user: User, text: str) -> dict:
+        """Run RAG + Groq analysis WITHOUT storing to DB. Returns result dict."""
         role_str = user.role.value if user.role else "unknown"
-
-        # --- 1. Fetch similar past decisions + lessons for context (RAG) ---
         similar = await embedding_service.get_similar_decisions(self.session, text)
         past_context = embedding_service.format_past_context(similar)
-        if past_context:
-            logger.info(f"נמצאו {len(similar)} החלטות דומות מהעבר")
-
-        lessons_context = ""
+        lessons_context = risk_context = calib_context = ""
         try:
             from app.services.lessons_service import (
                 get_relevant_lessons, format_lessons_context,
@@ -59,43 +51,83 @@ class DecisionService:
             )
             lessons = await get_relevant_lessons(text, self.session, limit=3)
             lessons_context = format_lessons_context(lessons)
-            if lessons_context:
-                logger.info(f"נמצאו {len(lessons)} לקחים רלוונטיים")
-
-            # Infer probable decision type from similar past decisions
             probable_type = None
             if similar:
                 from collections import Counter
                 type_counts = Counter(d.type.value for d in similar)
                 probable_type = type_counts.most_common(1)[0][0]
-
-            risk_context = ""
-            calib_context = ""
             if probable_type:
-                risk_context  = await get_risk_patterns(probable_type, self.session)
+                risk_context = await get_risk_patterns(probable_type, self.session)
                 calib_context = await get_calibration_hint(probable_type, self.session)
-
         except Exception as e:
-            logger.warning(f"Lessons/patterns context fetch failed: {e}")
-            risk_context = calib_context = ""
-
+            logger.warning(f"Lessons/patterns context fetch failed (analyze_only): {e}")
         combined_context = "\n\n".join(filter(None, [
             past_context, lessons_context, risk_context, calib_context
         ]))
+        return await self.claude.analyze(text, role_str, combined_context)
 
-        # --- 2. Analyze with Groq (with injected context) ---
-        try:
-            result = await self.claude.analyze(text, role_str, combined_context)
-        except Exception as e:
-            logger.error(f"Claude analysis failed: {e}")
-            return "\u200F⚠️ מנוע ההחלטות אינו זמין כרגע. אנא נסה שוב."
+    async def process(self, user: User, text: str, force_approval: bool = False, pre_result: dict | None = None) -> str:
+        """
+        Full pipeline: Claude -> store -> route.
+        force_approval=True: escalate to CRITICAL regardless of AI classification.
+        pre_result: skip re-analysis if already computed by analyze_only().
+        Returns the reply message to send back to the submitter.
+        """
+        role_str = user.role.value if user.role else "unknown"
+
+        if pre_result is not None:
+            result = pre_result
+        else:
+            # --- 1. Fetch similar past decisions + lessons for context (RAG) ---
+            similar = await embedding_service.get_similar_decisions(self.session, text)
+            past_context = embedding_service.format_past_context(similar)
+            if past_context:
+                logger.info(f"Found {len(similar)} similar past decisions")
+
+            lessons_context = ""
+            try:
+                from app.services.lessons_service import (
+                    get_relevant_lessons, format_lessons_context,
+                    get_risk_patterns, get_calibration_hint,
+                )
+                lessons = await get_relevant_lessons(text, self.session, limit=3)
+                lessons_context = format_lessons_context(lessons)
+                if lessons_context:
+                    logger.info(f"Found {len(lessons)} relevant lessons")
+
+                probable_type = None
+                if similar:
+                    from collections import Counter
+                    type_counts = Counter(d.type.value for d in similar)
+                    probable_type = type_counts.most_common(1)[0][0]
+
+                risk_context = ""
+                calib_context = ""
+                if probable_type:
+                    risk_context  = await get_risk_patterns(probable_type, self.session)
+                    calib_context = await get_calibration_hint(probable_type, self.session)
+
+            except Exception as e:
+                logger.warning(f"Lessons/patterns context fetch failed: {e}")
+                risk_context = calib_context = ""
+
+            combined_context = "\n\n".join(filter(None, [
+                past_context, lessons_context, risk_context, calib_context
+            ]))
+
+            # --- 2. Analyze with Groq (with injected context) ---
+            try:
+                result = await self.claude.analyze(text, role_str, combined_context)
+            except Exception as e:
+                logger.error(f"Claude analysis failed: {e}")
+                return "‏⚠️ מנוע ההחלטות אינו זמין כרגע. אנא נסה שוב."
 
         # Apply force_approval escalation before storing
         if force_approval and result["type"] in ("INFO", "NORMAL", "UNCERTAIN"):
             result["type"] = "CRITICAL"
             result["requires_approval"] = True
 
-        # --- 2. Store Decision in DB ---
+        # --- Store Decision in DB ---
         decision = Decision(
             submitter_id=user.id,
             type=DecisionTypeEnum(result["type"].lower()),
@@ -114,7 +146,7 @@ class DecisionService:
 
         logger.info(f"Decision #{decision.id} stored: type={result['type']}")
 
-        # --- 4. Generate and store embedding ---
+        # --- Generate and store embedding ---
         try:
             embed_text = f"{text} {result['summary']} {result['recommended_action']}"
             decision.embedding = await embedding_service.embed(embed_text)
@@ -122,7 +154,7 @@ class DecisionService:
         except Exception as e:
             logger.warning(f"Embedding generation failed for decision #{decision.id}: {e}")
 
-        # --- 5. Propose RACI to submitter for approval (background) ---
+        # --- Propose RACI to submitter for approval (background) ---
         if result["type"] != "CRITICAL":
             try:
                 import asyncio
@@ -133,7 +165,7 @@ class DecisionService:
             except Exception as e:
                 logger.warning(f"RACI proposal task could not be scheduled for decision #{decision.id}: {e}")
 
-        # --- 3. Route ---
+        # --- Route ---
         dtype = result["type"]
 
         if dtype == "INFO":
@@ -170,22 +202,22 @@ class DecisionService:
     def _format_info_reply(self, decision: Decision, result: dict) -> str:
         e = self._e
         return (
-            f"\u200Fℹ️ <b>החלטה #{decision.id} — מידע בלבד</b>\n\n"
-            f"📋 <b>סיכום:</b> {e(result['summary'])}\n"
-            f"🎯 <b>פעולה מומלצת:</b> {e(result['recommended_action'])}\n"
-            f"📏 <b>מדידות:</b> {e(result['measurability'])}\n\n"
+            f"‏ℹ️ <b>החלטה #{decision.id} — מידע בלבד</b>\n\n"
+            f"\U0001f4cb <b>סיכום:</b> {e(result['summary'])}\n"
+            f"\U0001f3af <b>פעולה מומלצת:</b> {e(result['recommended_action'])}\n"
+            f"\U0001f4cf <b>מדידות:</b> {e(result['measurability'])}\n\n"
             f"<i>נרשם במערכת. אין צורך בפעולה נוספת.</i>"
         )
 
     def _format_normal_reply(self, decision: Decision, result: dict) -> str:
         e = self._e
         risks = result["self_critique"].get("risks", [])
-        risk_text = "\n".join(f"\u200F  • {e(r)}" for r in risks) if risks else "  לא זוהו סיכונים"
+        risk_text = "\n".join(f"‏  • {e(r)}" for r in risks) if risks else "  לא זוהו סיכונים"
         return (
-            f"\u200F✅ <b>החלטה #{decision.id} — רגיל</b>\n\n"
-            f"📋 <b>סיכום:</b> {e(result['summary'])}\n"
-            f"🎯 <b>פעולה מומלצת:</b> {e(result['recommended_action'])}\n"
-            f"📏 <b>מדידות:</b> {e(result['measurability'])}\n\n"
+            f"‏✅ <b>החלטה #{decision.id} — רגיל</b>\n\n"
+            f"\U0001f4cb <b>סיכום:</b> {e(result['summary'])}\n"
+            f"\U0001f3af <b>פעולה מומלצת:</b> {e(result['recommended_action'])}\n"
+            f"\U0001f4cf <b>מדידות:</b> {e(result['measurability'])}\n\n"
             f"⚠️ <b>סיכונים:</b>\n{risk_text}\n\n"
             f"<i>ההחלטה נרשמה ובוצעה.</i>"
         )
@@ -193,9 +225,9 @@ class DecisionService:
     def _format_critical_pending(self, decision: Decision, result: dict) -> str:
         e = self._e
         return (
-            f"\u200F🚨 <b>החלטה #{decision.id} — קריטי</b>\n\n"
-            f"📋 <b>סיכום:</b> {e(result['summary'])}\n"
-            f"🎯 <b>פעולה מומלצת:</b> {e(result['recommended_action'])}\n\n"
+            f"‏\U0001f6a8 <b>החלטה #{decision.id} — קריטי</b>\n\n"
+            f"\U0001f4cb <b>סיכום:</b> {e(result['summary'])}\n"
+            f"\U0001f3af <b>פעולה מומלצת:</b> {e(result['recommended_action'])}\n\n"
             f"⏳ <b>ממתין לאישור מנהל בכיר.</b>\n"
             f"תקבל הודעה ברגע שתתקבל החלטה."
         )
@@ -203,8 +235,8 @@ class DecisionService:
     def _format_uncertain_pending(self, decision: Decision, result: dict) -> str:
         e = self._e
         return (
-            f"\u200F❓ <b>החלטה #{decision.id} — לא ודאי</b>\n\n"
-            f"📋 <b>סיכום:</b> {e(result['summary'])}\n\n"
+            f"‏❓ <b>החלטה #{decision.id} — לא ודאי</b>\n\n"
+            f"\U0001f4cb <b>סיכום:</b> {e(result['summary'])}\n\n"
             f"הבינה המלאכותית לא הצליחה לסווג את ההחלטה בביטחון מספיק.\n"
             f"המנהל הבכיר קיבל הודעה ויסווג את ההחלטה באופן ידני.\n\n"
             f"⏳ <b>ממתין לסיווג ידני.</b>"
@@ -230,9 +262,9 @@ class DecisionService:
                 propose_raci_to_submitter(decision.id, submitter.telegram_id, is_critical=False)
             )
             return (
-                f"\u200F🚨 <b>החלטה #{decision.id} — קריטי</b>\n\n"
-                f"📋 <b>סיכום:</b> {e(result['summary'])}\n"
-                f"🎯 <b>פעולה מומלצת:</b> {e(result['recommended_action'])}\n\n"
+                f"‏\U0001f6a8 <b>החלטה #{decision.id} — קריטי</b>\n\n"
+                f"\U0001f4cb <b>סיכום:</b> {e(result['summary'])}\n"
+                f"\U0001f3af <b>פעולה מומלצת:</b> {e(result['recommended_action'])}\n\n"
                 f"<i>אתה בראש ההיררכיה. ההחלטה אושרה אוטומטית.</i>"
             )
 
@@ -241,9 +273,9 @@ class DecisionService:
             propose_raci_to_submitter(decision.id, submitter.telegram_id, is_critical=True)
         )
         return (
-            f"\u200F🚨 <b>החלטה #{decision.id} — קריטי</b>\n\n"
-            f"📋 <b>סיכום:</b> {e(result['summary'])}\n"
-            f"🎯 <b>פעולה מומלצת:</b> {e(result['recommended_action'])}\n\n"
+            f"‏\U0001f6a8 <b>החלטה #{decision.id} — קריטי</b>\n\n"
+            f"\U0001f4cb <b>סיכום:</b> {e(result['summary'])}\n"
+            f"\U0001f3af <b>פעולה מומלצת:</b> {e(result['recommended_action'])}\n\n"
             f"⏳ <b>הצעת RACI נשלחה אליך לאישור.</b>\n"
             f"לאחר האישור, ההחלטה תועבר לבעל הסמכות לאישור סופי."
         )
@@ -255,11 +287,11 @@ class DecisionService:
 
         e = self._e
         superior_msg = (
-            f"\u200F❓ <b>החלטה לא ודאית — נדרש סיווג ידני</b>\n\n"
+            f"‏❓ <b>החלטה לא ודאית — נדרש סיווג ידני</b>\n\n"
             f"<b>הוגש על ידי:</b> {e(submitter.username)} ({e(submitter.role.value)})\n"
             f"<b>החלטה #{decision.id}</b>\n\n"
-            f"📋 <b>סיכום:</b> {e(result['summary'])}\n"
-            f"🎯 <b>הצעת הבינה המלאכותית:</b> {e(result['recommended_action'])}\n\n"
+            f"\U0001f4cb <b>סיכום:</b> {e(result['summary'])}\n"
+            f"\U0001f3af <b>הצעת הבינה המלאכותית:</b> {e(result['recommended_action'])}\n\n"
             f"<i>הבינה המלאכותית לא הצליחה לסווג החלטה זו. אנא בדוק וסווג באופן ידני.</i>"
         )
 
@@ -295,7 +327,6 @@ class DecisionService:
             if accountable_user and accountable_user.telegram_id:
                 name = html.escape(accountable_user.username)
                 return False, f"⛔ רק {name} (Accountable) יכול לאשר החלטה זו."
-            # Accountable has no telegram_id — fall through to existing logic
 
         decision.status = DecisionStatusEnum.APPROVED
         decision.completed_at = datetime.utcnow()
@@ -308,13 +339,14 @@ class DecisionService:
                 await self.application.bot.send_message(
                     chat_id=submitter.telegram_id,
                     text=(
-                        f"\u200F✅ <b>החלטה #{decision.id} אושרה</b>\n\n"
-                        f"📋 <b>סיכום:</b> {html.escape(decision.summary or '')}\n"
-                        f"🎯 <b>פעולה לביצוע:</b> {html.escape(decision.recommended_action or '')}\n\n"
+                        f"‏✅ <b>החלטה #{decision.id} אושרה</b>\n\n"
+                        f"\U0001f4cb <b>סיכום:</b> {html.escape(decision.summary or '')}\n"
+                        f"\U0001f3af <b>פעולה לביצוע:</b> {html.escape(decision.recommended_action or '')}\n\n"
                         f"אושר על ידי: {html.escape(approver.username)}\n"
                         f"<i>אנא המשך לביצוע הפעולה המומלצת.</i>"
                     ),
                     parse_mode="HTML",
+                    reply_markup=get_menu_shortcut_keyboard(),
                 )
             except Exception as e:
                 logger.error(f"Failed to notify submitter: {e}")
@@ -351,13 +383,14 @@ class DecisionService:
                 await self.application.bot.send_message(
                     chat_id=submitter.telegram_id,
                     text=(
-                        f"\u200F❌ <b>החלטה #{decision.id} נדחתה</b>\n\n"
-                        f"📋 <b>סיכום:</b> {html.escape(decision.summary or '')}\n\n"
+                        f"‏❌ <b>החלטה #{decision.id} נדחתה</b>\n\n"
+                        f"\U0001f4cb <b>סיכום:</b> {html.escape(decision.summary or '')}\n\n"
                         f"<b>סיבת הדחייה:</b>\n{html.escape(notes or '')}\n\n"
                         f"נדחה על ידי: {html.escape(approver.username)}\n"
                         f"<i>אנא בדוק ושלח מחדש במידת הצורך.</i>"
                     ),
                     parse_mode="HTML",
+                    reply_markup=get_menu_shortcut_keyboard(),
                 )
             except Exception as e:
                 logger.error(f"Failed to notify submitter: {e}")
