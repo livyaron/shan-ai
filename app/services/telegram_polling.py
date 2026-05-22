@@ -527,16 +527,16 @@ class TelegramPollingBot:
                 )
                 return
 
+            # Show typing indicator for all role-bearing users (including VIEWER)
+            await context.bot.send_chat_action(
+                chat_id=update.effective_chat.id, action="typing"
+            )
+
             # Viewer: separate read-only pipeline
             from app.models import RoleEnum as _RE
             if user.role == _RE.VIEWER:
                 await self._handle_viewer_message(update, context, user, text.strip())
                 return
-
-            # Show typing indicator
-            await context.bot.send_chat_action(
-                chat_id=update.effective_chat.id, action="typing"
-            )
 
             # Decisions menu keyword shortcut
             if "החלטות" in text.strip():
