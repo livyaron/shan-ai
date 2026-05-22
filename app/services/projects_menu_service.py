@@ -3,7 +3,7 @@
 import html as _html
 import datetime
 
-from sqlalchemy import select, func, distinct, or_, and_
+from sqlalchemy import select, func, distinct, or_, and_, case
 from sqlalchemy.ext.asyncio import AsyncSession
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
@@ -30,6 +30,8 @@ FILTER_FIELDS = [
 ]
 
 # Shortcuts still used by main menu buttons
+TYPE_ORDER = ["הקמה", "הרחבה", "שוש וניידות"]
+
 SHORTCUT_PRESETS: dict[str, dict] = {
     "late":    {"title": "🔴 פרוייקטים באיחור", "stages": None, "types": None, "mgrs": None, "ths": None, "dates": ["late"]},
     "quarter": {"title": "📅 פרוייקטי הרבעון",  "stages": None, "types": None, "mgrs": None, "ths": None, "dates": ["q_cur"]},
@@ -56,16 +58,36 @@ def get_menu_keyboard() -> InlineKeyboardMarkup:
     ])
 
 
-def build_results_keyboard(shortcut: str, page: int, total: int) -> InlineKeyboardMarkup:
+def _type_filter_row(base_cd: str, page: int, type_key: int | None, all_cd: str) -> list:
+    """One row of type filter buttons. base_cd is prefix for type-filtered callbacks."""
+    btns = []
+    for i, label in enumerate(TYPE_ORDER):
+        txt = f"✓{label}" if type_key == i else label
+        btns.append(InlineKeyboardButton(txt, callback_data=f"{base_cd}:{i}"))
+    all_label = "✓הכל" if type_key is None else "הכל"
+    btns.append(InlineKeyboardButton(all_label, callback_data=all_cd))
+    return btns
+
+
+def build_results_keyboard(shortcut: str, page: int, total: int, type_key: int | None = None) -> InlineKeyboardMarkup:
     total_pages = max(1, (total + 9) // 10)
     rows = []
+    if total > 20:
+        type_suffix = f":{type_key}" if type_key is not None else ""
+        rows.append(_type_filter_row(
+            base_cd=f"pm:{shortcut}:{page}",
+            page=page,
+            type_key=type_key,
+            all_cd=f"pm:{shortcut}:{page}",
+        ))
     if total_pages > 1:
+        type_suffix = f":{type_key}" if type_key is not None else ""
         nav = []
         if page > 0:
-            nav.append(InlineKeyboardButton("◀ הקודם", callback_data=f"pm:{shortcut}:{page - 1}"))
+            nav.append(InlineKeyboardButton("◀ הקודם", callback_data=f"pm:{shortcut}:{page - 1}{type_suffix}"))
         nav.append(InlineKeyboardButton(f"עמוד {page + 1}/{total_pages}", callback_data="pm:noop"))
         if page < total_pages - 1:
-            nav.append(InlineKeyboardButton("הבא ▶", callback_data=f"pm:{shortcut}:{page + 1}"))
+            nav.append(InlineKeyboardButton("הבא ▶", callback_data=f"pm:{shortcut}:{page + 1}{type_suffix}"))
         rows.append(nav)
     rows.append([InlineKeyboardButton("🔙 תפריט", callback_data="pm:menu")])
     return InlineKeyboardMarkup(rows)
@@ -81,17 +103,25 @@ def build_th_sub_keyboard(th_options: list[str]) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(rows)
 
 
-def build_th_results_keyboard(idx: int, page: int, total: int) -> InlineKeyboardMarkup:
+def build_th_results_keyboard(idx: int, page: int, total: int, type_key: int | None = None) -> InlineKeyboardMarkup:
     """Nav keyboard for לטיפול specific-value results."""
     total_pages = max(1, (total + 9) // 10)
     rows = []
+    if total > 20:
+        rows.append(_type_filter_row(
+            base_cd=f"pm:th:{idx}:{page}",
+            page=page,
+            type_key=type_key,
+            all_cd=f"pm:th:{idx}:{page}",
+        ))
     if total_pages > 1:
+        type_suffix = f":{type_key}" if type_key is not None else ""
         nav = []
         if page > 0:
-            nav.append(InlineKeyboardButton("◀ הקודם", callback_data=f"pm:th:{idx}:{page - 1}"))
+            nav.append(InlineKeyboardButton("◀ הקודם", callback_data=f"pm:th:{idx}:{page - 1}{type_suffix}"))
         nav.append(InlineKeyboardButton(f"עמוד {page + 1}/{total_pages}", callback_data="pm:noop"))
         if page < total_pages - 1:
-            nav.append(InlineKeyboardButton("הבא ▶", callback_data=f"pm:th:{idx}:{page + 1}"))
+            nav.append(InlineKeyboardButton("הבא ▶", callback_data=f"pm:th:{idx}:{page + 1}{type_suffix}"))
         rows.append(nav)
     rows.append([
         InlineKeyboardButton("🔙 לטיפול", callback_data="pm:th_menu"),
@@ -115,13 +145,14 @@ def build_custom_results_keyboard(page: int, total: int) -> InlineKeyboardMarkup
     return InlineKeyboardMarkup(rows)
 
 
-def build_detail_back_keyboard(shortcut: str, page: int) -> InlineKeyboardMarkup:
+def build_detail_back_keyboard(shortcut: str, page: int, type_key: int | None = None) -> InlineKeyboardMarkup:
+    type_suffix = f":{type_key}" if type_key is not None else ""
     if shortcut == "cf":
         back_cd = f"pm_cf:pg:{page}"
     elif shortcut.startswith("th") and shortcut[2:].isdigit():
-        back_cd = f"pm:th:{shortcut[2:]}:{page}"
+        back_cd = f"pm:th:{shortcut[2:]}:{page}{type_suffix}"
     else:
-        back_cd = f"pm:{shortcut}:{page}"
+        back_cd = f"pm:{shortcut}:{page}{type_suffix}"
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton("🔙 חזרה לרשימה", callback_data=back_cd),
@@ -317,6 +348,7 @@ async def query_projects(
     ths: list[str] | None,
     dates: list[str] | None,
     page: int,
+    type_key: int | None = None,
 ) -> tuple[list[Project], int]:
     """Query active projects with optional multi-value filters. Returns (rows, total).
 
@@ -325,10 +357,12 @@ async def query_projects(
     """
     base = select(Project).where(Project.is_active.is_(True))
 
+    if type_key is not None and 0 <= type_key < len(TYPE_ORDER):
+        base = base.where(Project.project_type == TYPE_ORDER[type_key])
+    elif types:
+        base = base.where(Project.project_type.in_(types))
     if stages:
         base = base.where(Project.stage.in_(stages))
-    if types:
-        base = base.where(Project.project_type.in_(types))
     if mgrs:
         base = base.where(Project.manager.in_(mgrs))
     if ths == ["__any__"]:
@@ -344,7 +378,11 @@ async def query_projects(
     count_q = select(func.count()).select_from(base.subquery())
     total: int = await session.scalar(count_q) or 0
 
-    rows_q = base.order_by(Project.id.desc()).offset(page * 10).limit(10)
+    type_order = case(
+        *[(Project.project_type == t, i) for i, t in enumerate(TYPE_ORDER)],
+        else_=len(TYPE_ORDER),
+    )
+    rows_q = base.order_by(type_order, Project.id.desc()).offset(page * 10).limit(10)
     projects = list((await session.scalars(rows_q)).all())
 
     return projects, total

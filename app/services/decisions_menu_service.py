@@ -7,7 +7,7 @@ from sqlalchemy import select, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
-from app.models import Decision, DecisionDistribution, DecisionTypeEnum, DecisionStatusEnum
+from app.models import Decision, DecisionDistribution, DecisionTypeEnum, DecisionStatusEnum, DecisionRaciRole
 
 # ── Constants ──────────────────────────────────────────────────────────────
 
@@ -39,6 +39,8 @@ SHORTCUT_PRESETS: dict[str, dict] = {
 }
 
 _MENU_TEXT = "‏📋 <b>ההחלטות שלי</b>\n\nבחר תצוגה מהירה או סינון מותאם:"
+
+RACI_BADGE = {"R": "R", "A": "A", "C": "C", "I": "I"}
 
 # ── Keyboards ──────────────────────────────────────────────────────────────
 
@@ -84,6 +86,7 @@ def build_custom_filter_keyboard(state: dict) -> InlineKeyboardMarkup:
     def _btn(label: str, cd: str, active: bool) -> InlineKeyboardButton:
         return InlineKeyboardButton(f"{label} ✓" if active else label, callback_data=cd)
 
+    raci = state.get("raci")
     return InlineKeyboardMarkup([
         [
             _btn("הכל",      "dm_cf:o:all",  state["owner"] == "all"),
@@ -110,6 +113,13 @@ def build_custom_filter_keyboard(state: dict) -> InlineKeyboardMarkup:
             _btn("הכל",    "dm_cf:d:0",  state["date_days"] == 0),
         ],
         [
+            _btn("RACI: הכל", "dm_cf:r:all", raci is None),
+            _btn("R",          "dm_cf:r:R",   raci == "R"),
+            _btn("A",          "dm_cf:r:A",   raci == "A"),
+            _btn("C",          "dm_cf:r:C",   raci == "C"),
+            _btn("I",          "dm_cf:r:I",   raci == "I"),
+        ],
+        [
             InlineKeyboardButton("🔍 הצג תוצאות", callback_data="dm_cf:show"),
             InlineKeyboardButton("🔙 תפריט",       callback_data="dm:menu"),
         ],
@@ -133,7 +143,7 @@ def build_custom_results_keyboard(page: int, total: int) -> InlineKeyboardMarkup
 
 # ── Formatters ─────────────────────────────────────────────────────────────
 
-def format_result_line(d: Decision) -> str:
+def format_result_line(d: Decision, raci_badge: str = "") -> str:
     t_emoji  = TYPE_EMOJI.get(d.type, "❓")
     s_emoji  = STATUS_EMOJI.get(d.status, "")
     s_label  = STATUS_LABEL.get(d.status, "")
@@ -142,10 +152,11 @@ def format_result_line(d: Decision) -> str:
         summary = summary[:40] + "…"
     date_str = d.created_at.strftime("%d/%m") if d.created_at else ""
     date_part = f" · {date_str}" if date_str else ""
-    return f"{t_emoji} <b>#{d.id}</b> — {_html.escape(summary)}  {s_emoji} {s_label}{date_part}"
+    raci_part = f"  <b>[{raci_badge}]</b>" if raci_badge else ""
+    return f"{t_emoji} <b>#{d.id}</b> — {_html.escape(summary)}  {s_emoji} {s_label}{date_part}{raci_part}"
 
 
-def format_results_message(title: str, decisions: list, total: int, page: int) -> str:
+def format_results_message(title: str, decisions: list, total: int, page: int, raci_map: dict | None = None) -> str:
     if not decisions:
         return f"‏<b>{_html.escape(title)}</b>\n\nלא נמצאו החלטות."
     from_n = page * 10 + 1
@@ -155,7 +166,7 @@ def format_results_message(title: str, decisions: list, total: int, page: int) -
         f"<i>מציג {from_n}–{to_n} מתוך {total}</i>",
         "──────────────────",
     ]
-    lines.extend(format_result_line(d) for d in decisions)
+    lines.extend(format_result_line(d, (raci_map or {}).get(d.id, "")) for d in decisions)
     return "\n".join(lines)
 
 
@@ -198,6 +209,20 @@ async def get_menu_counts(session: AsyncSession, user_id: int) -> dict:
 
 # ── DB Query ───────────────────────────────────────────────────────────────
 
+async def get_user_raci_roles(
+    session: AsyncSession, decision_ids: list[int], user_id: int
+) -> dict[int, str]:
+    """Return {decision_id: role_letter} for decisions where user has a RACI role."""
+    if not decision_ids:
+        return {}
+    rows = await session.execute(
+        select(DecisionRaciRole.decision_id, DecisionRaciRole.role)
+        .where(DecisionRaciRole.user_id == user_id)
+        .where(DecisionRaciRole.decision_id.in_(decision_ids))
+    )
+    return {row.decision_id: row.role for row in rows}
+
+
 async def query_decisions(
     session: AsyncSession,
     user_id: int,
@@ -206,6 +231,7 @@ async def query_decisions(
     status: str | None, # "pending" | "approved" | "rejected" | "executed" | None
     date_days: int,     # 0 = all time
     page: int,
+    raci: str | None = None,  # "R" | "A" | "C" | "I" | None
 ) -> tuple[list[Decision], int]:
     recv_subq = (
         select(DecisionDistribution.decision_id)
@@ -229,6 +255,13 @@ async def query_decisions(
     if date_days:
         cutoff = datetime.utcnow() - timedelta(days=date_days)
         base = base.where(Decision.created_at >= cutoff)
+    if raci:
+        base = (
+            base
+            .join(DecisionRaciRole, DecisionRaciRole.decision_id == Decision.id)
+            .where(DecisionRaciRole.user_id == user_id)
+            .where(DecisionRaciRole.role == raci)
+        )
 
     count_q = select(func.count()).select_from(base.subquery())
     total: int = await session.scalar(count_q) or 0

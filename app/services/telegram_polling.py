@@ -1211,7 +1211,7 @@ class TelegramPollingBot:
             get_menu_keyboard, get_menu_text, get_menu_counts,
             build_custom_filter_keyboard, build_custom_filter_message,
             build_results_keyboard, build_custom_results_keyboard,
-            format_results_message, query_decisions, SHORTCUT_PRESETS,
+            format_results_message, query_decisions, get_user_raci_roles, SHORTCUT_PRESETS,
         )
         from app.services.telegram_state import _decisions_menu_state
 
@@ -1234,7 +1234,7 @@ class TelegramPollingBot:
         # ── dm:custom — open stateful custom filter panel ────────────────────
         if data == "dm:custom":
             _decisions_menu_state[telegram_id] = {
-                "owner": "all", "type": None, "status": None, "date_days": 30, "page": 0,
+                "owner": "all", "type": None, "status": None, "date_days": 30, "page": 0, "raci": None,
             }
             await query.edit_message_text(
                 build_custom_filter_message(),
@@ -1260,8 +1260,9 @@ class TelegramPollingBot:
                     preset["owner"], preset["type"], preset["status"], preset["date_days"],
                     page,
                 )
+                raci_map = await get_user_raci_roles(session, [d.id for d in decisions], user.id)
             await query.edit_message_text(
-                format_results_message(preset["title"], decisions, total, page),
+                format_results_message(preset["title"], decisions, total, page, raci_map),
                 parse_mode="HTML",
                 reply_markup=build_results_keyboard(shortcut, page, total),
             )
@@ -1306,6 +1307,14 @@ class TelegramPollingBot:
                 )
                 return
 
+            if sub == "r" and state is not None and len(parts) > 2:
+                val = parts[2]
+                state["raci"] = None if val == "all" else val
+                await query.edit_message_reply_markup(
+                    reply_markup=build_custom_filter_keyboard(state)
+                )
+                return
+
             if sub == "show":
                 if state is None:
                     await query.edit_message_text(
@@ -1317,11 +1326,12 @@ class TelegramPollingBot:
                     decisions, total = await query_decisions(
                         session, user.id,
                         state["owner"], state["type"], state["status"], state["date_days"],
-                        0,
+                        0, raci=state.get("raci"),
                     )
+                    raci_map = await get_user_raci_roles(session, [d.id for d in decisions], user.id)
                 # Keep state for pagination — cleared only on dm:menu
                 await query.edit_message_text(
-                    format_results_message("🔍 תוצאות סינון מותאם", decisions, total, 0),
+                    format_results_message("🔍 תוצאות סינון מותאם", decisions, total, 0, raci_map),
                     parse_mode="HTML",
                     reply_markup=build_custom_results_keyboard(0, total),
                 )
@@ -1342,10 +1352,11 @@ class TelegramPollingBot:
                     decisions, total = await query_decisions(
                         session, user.id,
                         state["owner"], state["type"], state["status"], state["date_days"],
-                        page,
+                        page, raci=state.get("raci"),
                     )
+                    raci_map = await get_user_raci_roles(session, [d.id for d in decisions], user.id)
                 await query.edit_message_text(
-                    format_results_message("🔍 תוצאות סינון מותאם", decisions, total, page),
+                    format_results_message("🔍 תוצאות סינון מותאם", decisions, total, page, raci_map),
                     parse_mode="HTML",
                     reply_markup=build_custom_results_keyboard(page, total),
                 )
@@ -1361,7 +1372,7 @@ class TelegramPollingBot:
             build_custom_results_keyboard, build_detail_back_keyboard,
             build_filter_field_keyboard, build_filter_value_keyboard, build_filter_date_keyboard,
             build_project_card, format_results_message, format_project_line,
-            query_projects, get_filter_options, SHORTCUT_PRESETS,
+            query_projects, get_filter_options, SHORTCUT_PRESETS, TYPE_ORDER,
         )
         from app.services.telegram_state import _projects_menu_state, _projects_detail_origin
 
@@ -1405,6 +1416,13 @@ class TelegramPollingBot:
                 page = int(parts[3]) if len(parts) > 3 else 0
             except ValueError:
                 return
+            type_key = None
+            if len(parts) > 4:
+                try:
+                    type_key = int(parts[4])
+                except ValueError:
+                    pass
+            th_types = [TYPE_ORDER[type_key]] if type_key is not None and type_key < len(TYPE_ORDER) else None
             async with async_session_maker() as session:
                 opts = await get_filter_options(session)
                 th_options = opts.get('th', [])
@@ -1412,14 +1430,14 @@ class TelegramPollingBot:
                     return
                 th_val = th_options[idx]
                 projects, total = await query_projects(
-                    session, stages=None, types=None, mgrs=None,
+                    session, stages=None, types=th_types, mgrs=None,
                     ths=[th_val], dates=None, page=page,
                 )
             shortcut_key = f'th{idx}'
             rows = _item_rows(projects, shortcut_key, page)
-            kb = build_th_results_keyboard(idx, page, total)
+            kb = build_th_results_keyboard(idx, page, total, type_key=type_key)
             full_kb = InlineKeyboardMarkup(rows + list(kb.inline_keyboard))
-            _projects_detail_origin[telegram_id] = (shortcut_key, page)
+            _projects_detail_origin[telegram_id] = (shortcut_key, page, type_key)
             label_th = th_val.replace('חסם לטיפול ', '')
             await query.edit_message_text(
                 format_results_message(f"‏📌 {label_th}", projects, total, page),
@@ -1434,6 +1452,12 @@ class TelegramPollingBot:
                 page = int(parts[2]) if len(parts) > 2 else 0
             except ValueError:
                 page = 0
+            type_key = None
+            if len(parts) > 3:
+                try:
+                    type_key = int(parts[3])
+                except ValueError:
+                    pass
             preset = SHORTCUT_PRESETS.get(shortcut)
             if not preset:
                 return
@@ -1442,12 +1466,12 @@ class TelegramPollingBot:
                     session,
                     stages=preset['stages'], types=preset['types'],
                     mgrs=preset['mgrs'], ths=preset['ths'],
-                    dates=preset['dates'], page=page,
+                    dates=preset['dates'], page=page, type_key=type_key,
                 )
             rows = _item_rows(projects, shortcut, page)
-            kb = build_results_keyboard(shortcut, page, total)
+            kb = build_results_keyboard(shortcut, page, total, type_key=type_key)
             full_kb = InlineKeyboardMarkup(rows + list(kb.inline_keyboard))
-            _projects_detail_origin[telegram_id] = (shortcut, page)
+            _projects_detail_origin[telegram_id] = (shortcut, page, type_key)
             await query.edit_message_text(
                 format_results_message(preset['title'], projects, total, page),
                 parse_mode='HTML', reply_markup=full_kb,
@@ -1465,15 +1489,20 @@ class TelegramPollingBot:
                 page = int(parts[4]) if len(parts) > 4 else 0
             except ValueError:
                 page = 0
+            origin = _projects_detail_origin.get(telegram_id)
+            if origin and len(origin) == 3:
+                _, _, type_key = origin
+            else:
+                type_key = None
             async with async_session_maker() as session:
                 p = await session.get(Project, project_id)
             if not p:
                 await query.edit_message_text('‏⚠️ פרוייקט לא נמצא.', reply_markup=get_menu_keyboard())
                 return
-            _projects_detail_origin[telegram_id] = (shortcut, page)
+            _projects_detail_origin[telegram_id] = (shortcut, page, type_key)
             await query.edit_message_text(
                 build_project_card(p), parse_mode='HTML',
-                reply_markup=build_detail_back_keyboard(shortcut, page),
+                reply_markup=build_detail_back_keyboard(shortcut, page, type_key),
             )
             return
 
