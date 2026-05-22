@@ -42,5 +42,5 @@ _projects_menu_state: dict[int, dict] = {}
 # shortcut_key is one of: "late"|"handle"|"quarter"|"all"|"active"|"cf"
 _projects_detail_origin: dict[int, tuple[str, int]] = {}
 
-# { telegram_id (int): original_question (str) }  — waiting for user to pick one project
-_awaiting_disambiguation: dict[int, str] = {}
+# { telegram_id (int): [candidate_identifier, ...] }  — waiting for user to pick one project
+_awaiting_disambiguation: dict[int, list] = {}

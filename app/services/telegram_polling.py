@@ -587,11 +587,12 @@ class TelegramPollingBot:
 
                     if result.path == "disambiguation":
                         candidates = _json.loads(result.answer)
-                        _awaiting_disambiguation[telegram_id] = text
+                        # Store list (not original text) — callback resolves by index to avoid 64-byte limit
+                        _awaiting_disambiguation[telegram_id] = candidates
                         buttons = []
                         row = []
-                        for c in candidates:
-                            row.append(InlineKeyboardButton(f"📁 {c}", callback_data=f"disambig:{c}"))
+                        for i, c in enumerate(candidates):
+                            row.append(InlineKeyboardButton(f"📁 {c}", callback_data=f"disambig:{i}"))
                             if len(row) == 2:
                                 buttons.append(row)
                                 row = []
@@ -599,7 +600,7 @@ class TelegramPollingBot:
                             buttons.append(row)
                         buttons.append([InlineKeyboardButton("❌ ביטול", callback_data="disambig:__cancel__")])
                         await update.message.reply_text(
-                            "‏🔍 מצאתי מספר פרוייקטים תואמים — על איזה מהם התכוונת?",
+                            "‏🔍 מצאתי מספר פרויקטים תואמים — על איזה מהם התכוונת?",
                             reply_markup=InlineKeyboardMarkup(buttons),
                         )
                         return
@@ -773,12 +774,18 @@ class TelegramPollingBot:
         if data.startswith("disambig:"):
             from app.services.telegram_state import _awaiting_disambiguation
             from app.services import project_tools as _pt
-            identifier = data[len("disambig:"):]
-            if identifier == "__cancel__":
+            token = data[len("disambig:"):]
+            if token == "__cancel__":
                 _awaiting_disambiguation.pop(telegram_id, None)
                 await query.edit_message_text("‏❌ הבקשה בוטלה.")
                 return
-            _awaiting_disambiguation.pop(telegram_id, None)
+            # Resolve integer index → identifier (avoids 64-byte callback_data limit)
+            candidates = _awaiting_disambiguation.pop(telegram_id, [])
+            try:
+                identifier = candidates[int(token)]
+            except (IndexError, ValueError):
+                await query.answer("שגיאה — נסה שוב")
+                return
             async with async_session_maker() as _dis_session:
                 _dis_user = await _dis_session.scalar(
                     select(User).where(User.telegram_id == telegram_id)
