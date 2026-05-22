@@ -37,3 +37,36 @@ def test_keyboard_for_operational_has_two_buttons():
     kb = _keyboard_for_user(user)
     buttons = [b for row in kb.keyboard for b in row]
     assert len(buttons) == 2
+
+
+import pytest
+from unittest.mock import AsyncMock, MagicMock, patch
+
+
+@pytest.mark.asyncio
+async def test_handle_decisions_blocks_viewer():
+    from app.services.telegram_polling import TelegramPollingBot, _VIEWER_DECISIONS_BLOCKED
+    from app.models import RoleEnum
+
+    bot = TelegramPollingBot()
+
+    viewer = MagicMock()
+    viewer.role = RoleEnum.VIEWER
+    viewer.id = 1
+
+    update = MagicMock()
+    update.effective_user.id = 999
+    update.message = AsyncMock()
+
+    context = MagicMock()
+
+    with patch("app.services.telegram_polling.async_session_maker") as mock_sm:
+        mock_session = AsyncMock()
+        mock_session.scalar = AsyncMock(return_value=viewer)
+        mock_sm.return_value.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_sm.return_value.__aexit__ = AsyncMock(return_value=False)
+        await bot.handle_decisions(update, context)
+
+    update.message.reply_text.assert_called_once()
+    call_text = update.message.reply_text.call_args[0][0]
+    assert "🔒" in call_text

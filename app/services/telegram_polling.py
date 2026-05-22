@@ -49,6 +49,8 @@ def _keyboard_for_user(user) -> ReplyKeyboardMarkup:
         return _viewer_reply_keyboard()
     return _main_reply_keyboard()
 
+_VIEWER_DECISIONS_BLOCKED = "‏🔒 גישה לתפריט ההחלטות אינה זמינה למשתמשי צפייה."
+
 def _mgr_approval_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([[
         InlineKeyboardButton("✅ כן, נדרש אישור", callback_data="mgr_yes:0"),
@@ -286,11 +288,18 @@ class TelegramPollingBot:
     async def handle_decisions(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """/decisions — open the decisions menu."""
         from app.services.decisions_menu_service import get_menu_keyboard, get_menu_text, get_menu_counts
+        from app.models import RoleEnum
         telegram_id = update.effective_user.id
         async with async_session_maker() as session:
             user = await session.scalar(select(User).where(User.telegram_id == telegram_id))
             if not user or not user.role:
                 await update.message.reply_text("‏⏳ יש להירשם תחילה. השתמש ב-/register")
+                return
+            if user.role == RoleEnum.VIEWER:
+                await update.message.reply_text(
+                    _VIEWER_DECISIONS_BLOCKED,
+                    reply_markup=_viewer_reply_keyboard(),
+                )
                 return
             counts = await get_menu_counts(session, user.id)
         await update.message.reply_text(
@@ -525,6 +534,13 @@ class TelegramPollingBot:
 
             # Decisions menu keyword shortcut
             if "החלטות" in text.strip():
+                from app.models import RoleEnum as _RE2
+                if user.role == _RE2.VIEWER:
+                    await update.message.reply_text(
+                        _VIEWER_DECISIONS_BLOCKED,
+                        reply_markup=_viewer_reply_keyboard(),
+                    )
+                    return
                 if user.role:
                     from app.services.decisions_menu_service import get_menu_keyboard, get_menu_text, get_menu_counts
                     async with async_session_maker() as _cnt_s:
