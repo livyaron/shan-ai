@@ -580,8 +580,30 @@ class TelegramPollingBot:
             if ai_route in ("project", "knowledge", None):
                 kb = None
                 try:
+                    import json as _json
                     from app.services.ask_router import route as _ask_route
+                    from app.services.telegram_state import _awaiting_disambiguation
                     result = await _ask_route(text, session, user.id, log_to_db=True)
+
+                    if result.path == "disambiguation":
+                        candidates = _json.loads(result.answer)
+                        _awaiting_disambiguation[telegram_id] = text
+                        buttons = []
+                        row = []
+                        for c in candidates:
+                            row.append(InlineKeyboardButton(f"📁 {c}", callback_data=f"disambig:{c}"))
+                            if len(row) == 2:
+                                buttons.append(row)
+                                row = []
+                        if row:
+                            buttons.append(row)
+                        buttons.append([InlineKeyboardButton("❌ ביטול", callback_data="disambig:__cancel__")])
+                        await update.message.reply_text(
+                            "‏🔍 מצאתי מספר פרוייקטים תואמים — על איזה מהם התכוונת?",
+                            reply_markup=InlineKeyboardMarkup(buttons),
+                        )
+                        return
+
                     answer = result.answer
                     if result.path == "decision":
                         # Decision-DB plain reply — matches OLD pre-route handler.
@@ -599,10 +621,11 @@ class TelegramPollingBot:
                 except Exception:
                     logger.warning("ask_router.route failed", exc_info=True)
                     reply = "‏לא הצלחתי למצוא תשובה. נסה לנסח אחרת."
+                    await update.message.reply_text(reply, parse_mode="HTML", reply_markup=kb)
+                    return
                 reply = await _maybe_summarize(reply)
                 await update.message.reply_text(reply, parse_mode="HTML", reply_markup=kb)
                 return
-
             # --- Check if this is a clarification response ---
             if telegram_id in _awaiting_clarification:
                 original_text = _awaiting_clarification.pop(telegram_id)
@@ -744,6 +767,36 @@ class TelegramPollingBot:
                 _pm_user = await _pm_session.scalar(select(User).where(User.telegram_id == telegram_id))
             if _pm_user:
                 await self._handle_projects_menu(query, context, data, telegram_id, _pm_user)
+            return
+
+        # Disambiguation — user selected a project from the ambiguous-match keyboard
+        if data.startswith("disambig:"):
+            from app.services.telegram_state import _awaiting_disambiguation
+            from app.services import project_tools as _pt
+            identifier = data[len("disambig:"):]
+            if identifier == "__cancel__":
+                _awaiting_disambiguation.pop(telegram_id, None)
+                await query.edit_message_text("‏❌ הבקשה בוטלה.")
+                return
+            _awaiting_disambiguation.pop(telegram_id, None)
+            async with async_session_maker() as _dis_session:
+                _dis_user = await _dis_session.scalar(
+                    select(User).where(User.telegram_id == telegram_id)
+                )
+                if not _dis_user or not _dis_user.role:
+                    await query.answer("לא מורשה")
+                    return
+                answer, log_id = await _pt.answer_project_query(
+                    identifier, _dis_session, {},
+                    user_id=_dis_user.id,
+                    precomputed_intent="by_identifier",
+                    precomputed_param=identifier,
+                )
+            await query.edit_message_text(
+                f"‏{answer}",
+                parse_mode="HTML",
+                reply_markup=_feedback_keyboard(log_id) if log_id else None,
+            )
             return
 
         try:

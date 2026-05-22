@@ -176,9 +176,24 @@ async def route(
     # 2. Project queries
     if _is_project_query(question):
         try:
+            import json as _json
             answer, log_id = await project_tools.answer_project_query(
                 question, session, {}, user_id=user_id,
             )
+            if isinstance(answer, str) and answer.startswith("__DISAMBIG__:"):
+                candidates = _json.loads(answer[len("__DISAMBIG__:"):])
+                return await _finish(AnswerResult(
+                    answer=_json.dumps(candidates, ensure_ascii=False),
+                    sources_used=[{"source": "disambiguation", "candidates": candidates}],
+                    log_id=None,
+                    path="disambiguation",
+                    intent="by_identifier",
+                    param=None,
+                    has_files=False,
+                    has_decisions=False,
+                    file_names=[],
+                    sources_text="",
+                ), [])
             return await _finish(AnswerResult(
                 answer=answer,
                 sources_used=[{"source": "projects_db"}],

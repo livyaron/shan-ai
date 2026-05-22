@@ -555,6 +555,11 @@ async def answer_project_query(
                 current_project_id = data["project_identifier"]
                 context_str = json.dumps(data, ensure_ascii=False, indent=2)
             else:
+                # 2–4 ambiguous matches → signal disambiguation to the caller
+                if 2 <= len(matches) <= 4:
+                    identifiers = [p["project_identifier"] for p in matches]
+                    return f"__DISAMBIG__:{json.dumps(identifiers, ensure_ascii=False)}", None
+                # 5+ matches — show all cards (original behaviour)
                 user_data.pop("last_project", None)
                 current_project_id = None
                 overflow_note = "\n\n⚠️ מוצגים 10 ראשונים בלבד — יש עוד תוצאות." if len(matches) == 10 else ""
