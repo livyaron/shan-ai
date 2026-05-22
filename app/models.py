@@ -12,6 +12,7 @@ class RoleEnum(str, enum.Enum):
     DEPARTMENT_MANAGER = "department_manager"
     DEPUTY_DIVISION_MANAGER = "deputy_division_manager"
     DIVISION_MANAGER = "division_manager"
+    VIEWER = "viewer"
 
 class DecisionTypeEnum(str, enum.Enum):
     INFO = "info"
