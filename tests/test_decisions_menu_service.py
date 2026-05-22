@@ -81,10 +81,10 @@ def test_build_custom_filter_keyboard_marks_active_status():
     assert any("7" in b and "✓" in b for b in flat)
 
 
-def test_get_menu_keyboard_has_six_buttons():
+def test_get_menu_keyboard_has_seven_buttons():
     kb = get_menu_keyboard()
     all_buttons = [btn for row in kb.inline_keyboard for btn in row]
-    assert len(all_buttons) == 6
+    assert len(all_buttons) == 7
 
 
 def test_shortcut_presets_all_keys_present():

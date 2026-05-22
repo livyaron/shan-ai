@@ -308,7 +308,7 @@ class TelegramPollingBot:
         await update.message.reply_text(
             get_menu_text(counts),
             parse_mode="HTML",
-            reply_markup=get_menu_keyboard(),
+            reply_markup=get_menu_keyboard(counts["feedback"]),
         )
 
     async def handle_projects(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -508,6 +508,25 @@ class TelegramPollingBot:
             user = await service._get_or_create_user(
                 telegram_id, update.effective_user.to_dict()
             )
+
+            # Check if user is providing notes text after rating from the feedback menu
+            from app.services.telegram_state import _awaiting_fb_menu_text
+            from app.services.feedback_service import save_telegram_feedback_text
+            from app.services.decisions_menu_service import query_pending_feedback, build_feedback_results_keyboard, format_results_message
+            if telegram_id in _awaiting_fb_menu_text:
+                fb_dec_id, fb_back_pg = _awaiting_fb_menu_text.pop(telegram_id)
+                notes_text = "" if text.strip() == "/skip" else text.strip()
+                async with async_session_maker() as fb_s:
+                    await save_telegram_feedback_text(fb_s, user.id, fb_dec_id, notes_text)
+                await update.message.reply_text("‏✅ הפידבק שלך נשמר.", parse_mode="HTML")
+                async with async_session_maker() as fb_s:
+                    fb_decs, fb_tot = await query_pending_feedback(fb_s, user.id, fb_back_pg)
+                await update.message.reply_text(
+                    format_results_message("⭐ ממתין למשוב שלך", fb_decs, fb_tot, fb_back_pg),
+                    parse_mode="HTML",
+                    reply_markup=build_feedback_results_keyboard(fb_decs, fb_back_pg, fb_tot),
+                )
+                return
 
             # Check if user is providing feedback text (post-mortem) after a score
             awaiting_fb = feedback_service.get_awaiting_feedback()
@@ -1432,8 +1451,11 @@ class TelegramPollingBot:
             build_custom_filter_keyboard, build_custom_filter_message,
             build_results_keyboard, build_custom_results_keyboard,
             format_results_message, query_decisions, get_user_raci_roles, SHORTCUT_PRESETS,
+            query_pending_feedback, build_feedback_results_keyboard,
         )
-        from app.services.telegram_state import _decisions_menu_state
+        from app.services.telegram_state import _decisions_menu_state, _awaiting_fb_menu_text
+        from app.services.feedback_service import save_telegram_feedback_score
+        import html as _html
 
         # ── dm:noop — page indicator button, do nothing ──────────────────────
         if data == "dm:noop":
@@ -1447,7 +1469,7 @@ class TelegramPollingBot:
             await query.edit_message_text(
                 get_menu_text(counts),
                 parse_mode="HTML",
-                reply_markup=get_menu_keyboard(),
+                reply_markup=get_menu_keyboard(counts["feedback"]),
             )
             return
 
@@ -1461,6 +1483,82 @@ class TelegramPollingBot:
                 parse_mode="HTML",
                 reply_markup=build_custom_filter_keyboard(_decisions_menu_state[telegram_id]),
             )
+            return
+
+        # ── dm:feedback:{page} — pending-feedback list ───────────────────────
+        if data.startswith("dm:feedback:"):
+            try:
+                fb_page = int(data.split(":")[2])
+            except (IndexError, ValueError):
+                fb_page = 0
+            async with async_session_maker() as session:
+                fb_decisions, fb_total = await query_pending_feedback(session, user.id, fb_page)
+            if not fb_decisions:
+                await query.edit_message_text(
+                    "‏⭐ <b>ממתין למשוב שלך</b>\n\nכל ההחלטות קיבלו משוב. כל הכבוד!",
+                    parse_mode="HTML",
+                    reply_markup=InlineKeyboardMarkup([[
+                        InlineKeyboardButton("🔙 תפריט", callback_data="dm:menu"),
+                    ]]),
+                )
+                return
+            await query.edit_message_text(
+                format_results_message("⭐ ממתין למשוב שלך", fb_decisions, fb_total, fb_page),
+                parse_mode="HTML",
+                reply_markup=build_feedback_results_keyboard(fb_decisions, fb_page, fb_total),
+            )
+            return
+
+        # ── dm:fbsel:{decision_id}:{page} — show score buttons ───────────────
+        if data.startswith("dm:fbsel:"):
+            parts = data.split(":")
+            try:
+                sel_dec_id, sel_page = int(parts[2]), int(parts[3])
+            except (IndexError, ValueError):
+                return
+            async with async_session_maker() as session:
+                from app.models import Decision as _Decision
+                sel_dec = await session.get(_Decision, sel_dec_id)
+            if not sel_dec:
+                return
+            score_labels = {1: "1️⃣ כישלון", 2: "2️⃣ לא טוב", 3: "3️⃣ בסדר", 4: "4️⃣ טוב", 5: "5️⃣ מצוין"}
+            score_kb = InlineKeyboardMarkup([
+                [InlineKeyboardButton(lbl, callback_data=f"dm:fbsc:{s}:{sel_dec_id}:{sel_page}")
+                 for s, lbl in score_labels.items()],
+                [InlineKeyboardButton("🔙 חזרה לרשימה", callback_data=f"dm:feedback:{sel_page}")],
+            ])
+            summary_short = (sel_dec.summary or "")[:50]
+            await query.edit_message_text(
+                f"‏⭐ <b>משוב — #{sel_dec_id}</b> — {_html.escape(summary_short)}\n\n"
+                f"📋 <b>סיכום:</b> {_html.escape(sel_dec.summary or '')}\n"
+                f"🎯 <b>פעולה:</b> {_html.escape(sel_dec.recommended_action or '')}\n\n"
+                f"כיצד הסתיים הביצוע? בחר ציון:",
+                parse_mode="HTML",
+                reply_markup=score_kb,
+            )
+            return
+
+        # ── dm:fbsc:{score}:{decision_id}:{page} — save score ────────────────
+        if data.startswith("dm:fbsc:"):
+            parts = data.split(":")
+            try:
+                fb_score, fb_dec_id, fb_back = int(parts[2]), int(parts[3]), int(parts[4])
+            except (IndexError, ValueError):
+                return
+            async with async_session_maker() as session:
+                ok = await save_telegram_feedback_score(session, user.id, fb_dec_id, fb_score)
+            if ok:
+                score_names = {1: "כישלון", 2: "לא טוב", 3: "בסדר", 4: "טוב", 5: "מצוין"}
+                _awaiting_fb_menu_text[telegram_id] = (fb_dec_id, fb_back)
+                await query.answer()
+                await context.bot.send_message(
+                    chat_id=telegram_id,
+                    text=(
+                        f"‏✅ ציון {fb_score} — {score_names.get(fb_score, '')} נשמר.\n"
+                        f"רוצה להוסיף הערה? שלח טקסט, או /skip לדילוג."
+                    ),
+                    parse_mode="HTML",
+                )
             return
 
         # ── dm:{shortcut}:{page} — stateless shortcut results ────────────────

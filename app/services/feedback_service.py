@@ -3,11 +3,11 @@
 import asyncio
 import logging
 from datetime import datetime, timedelta
-from sqlalchemy import select
+from sqlalchemy import select, func
 from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup
 
 from app.database import async_session_maker
-from app.models import Decision, User, DecisionStatusEnum
+from app.models import Decision, User, DecisionStatusEnum, DecisionFeedback
 
 logger = logging.getLogger(__name__)
 
@@ -137,6 +137,61 @@ async def save_feedback_text(session, decision_id: int, notes: str):
     except Exception as e:
         logger.warning(f"Lesson extraction task could not be scheduled for decision #{decision_id}: {e}")
 
+    return True
+
+
+async def save_telegram_feedback_score(
+    session, user_id: int, decision_id: int, score: int
+) -> bool:
+    """Upsert a DecisionFeedback row for the on-demand menu flow and recalculate avg."""
+    decision = await session.get(Decision, decision_id)
+    if not decision:
+        return False
+
+    existing = await session.scalar(
+        select(DecisionFeedback).where(
+            DecisionFeedback.decision_id == decision_id,
+            DecisionFeedback.user_id == user_id,
+        )
+    )
+    if existing:
+        existing.score = score
+    else:
+        session.add(DecisionFeedback(decision_id=decision_id, user_id=user_id, score=score))
+
+    await session.flush()
+
+    avg = await session.scalar(
+        select(func.avg(DecisionFeedback.score))
+        .where(DecisionFeedback.decision_id == decision_id)
+    )
+    if avg is not None:
+        decision.feedback_score = round(float(avg))
+
+    await session.commit()
+    return True
+
+
+async def save_telegram_feedback_text(
+    session, user_id: int, decision_id: int, notes: str
+) -> bool:
+    """Save optional text notes to the DecisionFeedback row for the on-demand menu flow."""
+    row = await session.scalar(
+        select(DecisionFeedback).where(
+            DecisionFeedback.decision_id == decision_id,
+            DecisionFeedback.user_id == user_id,
+        )
+    )
+    if not row:
+        return False
+
+    row.notes = notes if notes else None
+
+    decision = await session.get(Decision, decision_id)
+    if decision and notes and decision.submitter_id == user_id:
+        decision.feedback_notes = notes
+
+    await session.commit()
     return True
 
 

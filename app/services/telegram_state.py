@@ -45,6 +45,9 @@ _projects_detail_origin: dict[int, tuple[str, int]] = {}
 # { telegram_id (int): [candidate_identifier, ...] }  — waiting for user to pick one project
 _awaiting_disambiguation: dict[int, list] = {}
 
+# { telegram_id (int): (decision_id, back_page) }  — rated via feedback menu, awaiting text note
+_awaiting_fb_menu_text: dict[int, tuple[int, int]] = {}
+
 
 from collections import deque
 import time as _time

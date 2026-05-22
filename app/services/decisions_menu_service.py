@@ -7,7 +7,7 @@ from sqlalchemy import select, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
-from app.models import Decision, DecisionDistribution, DecisionTypeEnum, DecisionStatusEnum, DecisionRaciRole
+from app.models import Decision, DecisionDistribution, DecisionTypeEnum, DecisionStatusEnum, DecisionRaciRole, DecisionFeedback
 
 # ── Constants ──────────────────────────────────────────────────────────────
 
@@ -44,7 +44,8 @@ RACI_BADGE = {"R": "R", "A": "A", "C": "C", "I": "I"}
 
 # ── Keyboards ──────────────────────────────────────────────────────────────
 
-def get_menu_keyboard() -> InlineKeyboardMarkup:
+def get_menu_keyboard(feedback_count: int = 0) -> InlineKeyboardMarkup:
+    feedback_label = f"⭐ ממתין למשוב ({feedback_count})" if feedback_count else "⭐ ממתין למשוב"
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton("🕐 אחרונות",  callback_data="dm:recent:0"),
@@ -55,6 +56,9 @@ def get_menu_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton("📥 שקיבלתי", callback_data="dm:recv:0"),
             InlineKeyboardButton("📤 שהגשתי",  callback_data="dm:my:0"),
             InlineKeyboardButton("🔍 סינון",    callback_data="dm:custom"),
+        ],
+        [
+            InlineKeyboardButton(feedback_label, callback_data="dm:feedback:0"),
         ],
     ])
 
@@ -192,6 +196,11 @@ async def get_menu_counts(session: AsyncSession, user_id: int) -> dict:
         .where(DecisionDistribution.user_id == user_id)
         .scalar_subquery()
     )
+    raci_subq = (
+        select(DecisionRaciRole.decision_id)
+        .where(DecisionRaciRole.user_id == user_id)
+        .scalar_subquery()
+    )
     my_count = await session.scalar(
         select(func.count(Decision.id)).where(Decision.submitter_id == user_id)
     ) or 0
@@ -204,7 +213,23 @@ async def get_menu_counts(session: AsyncSession, user_id: int) -> dict:
             Decision.status == DecisionStatusEnum.PENDING,
         )
     ) or 0
-    return {"my": my_count, "recv": recv_count, "pending": pending_count}
+    rated_subq = (
+        select(DecisionFeedback.decision_id)
+        .where(DecisionFeedback.user_id == user_id)
+        .scalar_subquery()
+    )
+    feedback_count = await session.scalar(
+        select(func.count(func.distinct(Decision.id))).where(
+            Decision.status.in_([DecisionStatusEnum.EXECUTED, DecisionStatusEnum.APPROVED]),
+            Decision.id.notin_(rated_subq),
+            or_(
+                Decision.submitter_id == user_id,
+                Decision.id.in_(recv_subq),
+                Decision.id.in_(raci_subq),
+            ),
+        )
+    ) or 0
+    return {"my": my_count, "recv": recv_count, "pending": pending_count, "feedback": feedback_count}
 
 
 # ── DB Query ───────────────────────────────────────────────────────────────
@@ -221,6 +246,69 @@ async def get_user_raci_roles(
         .where(DecisionRaciRole.decision_id.in_(decision_ids))
     )
     return {row.decision_id: row.role for row in rows}
+
+
+async def query_pending_feedback(
+    session: AsyncSession, user_id: int, page: int
+) -> tuple[list[Decision], int]:
+    """Completed decisions the user is involved in but has not yet rated."""
+    recv_subq = (
+        select(DecisionDistribution.decision_id)
+        .where(DecisionDistribution.user_id == user_id)
+        .scalar_subquery()
+    )
+    raci_subq = (
+        select(DecisionRaciRole.decision_id)
+        .where(DecisionRaciRole.user_id == user_id)
+        .scalar_subquery()
+    )
+    rated_subq = (
+        select(DecisionFeedback.decision_id)
+        .where(DecisionFeedback.user_id == user_id)
+        .scalar_subquery()
+    )
+    base_filter = [
+        Decision.status.in_([DecisionStatusEnum.EXECUTED, DecisionStatusEnum.APPROVED]),
+        Decision.id.notin_(rated_subq),
+        or_(
+            Decision.submitter_id == user_id,
+            Decision.id.in_(recv_subq),
+            Decision.id.in_(raci_subq),
+        ),
+    ]
+    total = await session.scalar(
+        select(func.count(func.distinct(Decision.id))).where(*base_filter)
+    ) or 0
+    rows = await session.execute(
+        select(Decision).where(*base_filter)
+        .order_by(Decision.created_at.desc())
+        .limit(10).offset(page * 10)
+    )
+    return list(rows.scalars().all()), total
+
+
+def build_feedback_results_keyboard(
+    decisions: list, page: int, total: int
+) -> InlineKeyboardMarkup:
+    total_pages = max(1, (total + 9) // 10)
+    rows = []
+    for d in decisions:
+        t_emoji = TYPE_EMOJI.get(d.type, "❓")
+        summary = (d.summary or "")[:35]
+        rows.append([InlineKeyboardButton(
+            f"{t_emoji} #{d.id} — {summary}",
+            callback_data=f"dm:fbsel:{d.id}:{page}",
+        )])
+    if total_pages > 1:
+        nav = []
+        if page > 0:
+            nav.append(InlineKeyboardButton("◀ הקודם", callback_data=f"dm:feedback:{page - 1}"))
+        nav.append(InlineKeyboardButton(f"עמוד {page + 1}/{total_pages}", callback_data="dm:noop"))
+        if page < total_pages - 1:
+            nav.append(InlineKeyboardButton("הבא ▶", callback_data=f"dm:feedback:{page + 1}"))
+        rows.append(nav)
+    rows.append([InlineKeyboardButton("🔙 תפריט", callback_data="dm:menu")])
+    return InlineKeyboardMarkup(rows)
 
 
 async def query_decisions(
