@@ -238,6 +238,7 @@ ROLE_LABELS = {
     "department_manager": "מנהל מחלקה",
     "deputy_division_manager": "סגן מנהל אגף",
     "division_manager": "מנהל אגף",
+    "viewer": "צופה",
 }
 
 
@@ -538,6 +539,7 @@ async def get_avatar_prompt(
         "department_manager": "מנהל מחלקה",
         "deputy_division_manager": "סגן מנהל אגף",
         "division_manager": "מנהל אגף",
+        "viewer": "צופה",
     }
     role_he = role_labels.get(user.role.value, user.role.value) if user.role else "לא מוגדר"
 
@@ -765,6 +767,7 @@ async def dashboard_ai_analysis(
         "department_manager": "מנהל מחלקה",
         "deputy_division_manager": "סגן מנהל אגף",
         "division_manager": "מנהל אגף",
+        "viewer": "צופה",
     }
     role_he = role_labels.get(current_user.role.value, current_user.role.value) if current_user.role else "לא מוגדר"
 
@@ -881,6 +884,7 @@ async def user_ai_analysis(
         "department_manager": "מנהל מחלקה",
         "deputy_division_manager": "סגן מנהל אגף",
         "division_manager": "מנהל אגף",
+        "viewer": "צופה",
     }
     role_he = role_labels.get(user.role.value, user.role.value) if user.role else "לא מוגדר"
 
