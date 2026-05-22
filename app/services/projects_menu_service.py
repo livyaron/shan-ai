@@ -30,7 +30,7 @@ FILTER_FIELDS = [
 ]
 
 # Shortcuts still used by main menu buttons
-TYPE_ORDER = ["הקמה", "הרחבה", "שוש וניידות"]
+TYPE_ORDER = ["הקמה", "הרחבה", "שוש", "ניידות"]
 
 SHORTCUT_PRESETS: dict[str, dict] = {
     "late":    {"title": "🔴 פרוייקטים באיחור", "stages": None, "types": None, "mgrs": None, "ths": None, "dates": ["late"]},
