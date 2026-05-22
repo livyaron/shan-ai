@@ -104,34 +104,36 @@ from app.services.decisions_menu_service import query_pending_feedback
 
 
 @pytest.mark.asyncio
-async def test_query_pending_feedback_returns_completed_without_rating(db_session):
-    u = User(telegram_id=88001, username="pfb_u1", role=RoleEnum.PROJECT_MANAGER, password_hash="x")
-    db_session.add(u)
+async def test_query_pending_feedback_returns_received_without_rating(db_session):
+    submitter = User(telegram_id=88001, username="pfb_sub1", role=RoleEnum.PROJECT_MANAGER, password_hash="x")
+    recipient = User(telegram_id=88001 + 100, username="pfb_rec1", role=RoleEnum.PROJECT_MANAGER, password_hash="x")
+    db_session.add_all([submitter, recipient])
     await db_session.flush()
 
-    d = Decision(submitter_id=u.id, type=DecisionTypeEnum.NORMAL,
+    d = Decision(submitter_id=submitter.id, type=DecisionTypeEnum.NORMAL,
                  status=DecisionStatusEnum.EXECUTED, summary="pending_fb")
     db_session.add(d)
     await db_session.flush()
 
-    results, total = await query_pending_feedback(db_session, u.id, 0)
+    dist = DecisionDistribution(decision_id=d.id, user_id=recipient.id,
+                                distribution_type=DistributionTypeEnum.INFO)
+    db_session.add(dist)
+    await db_session.flush()
+
+    results, total = await query_pending_feedback(db_session, recipient.id, 0)
     assert total == 1
     assert results[0].summary == "pending_fb"
 
 
 @pytest.mark.asyncio
-async def test_query_pending_feedback_excludes_already_rated(db_session):
-    u = User(telegram_id=88002, username="pfb_u2", role=RoleEnum.PROJECT_MANAGER, password_hash="x")
+async def test_query_pending_feedback_excludes_submitted_decisions(db_session):
+    u = User(telegram_id=88002, username="pfb_u2x", role=RoleEnum.PROJECT_MANAGER, password_hash="x")
     db_session.add(u)
     await db_session.flush()
 
     d = Decision(submitter_id=u.id, type=DecisionTypeEnum.NORMAL,
-                 status=DecisionStatusEnum.EXECUTED, summary="rated_fb")
+                 status=DecisionStatusEnum.EXECUTED, summary="own_decision")
     db_session.add(d)
-    await db_session.flush()
-
-    fb = DecisionFeedback(decision_id=d.id, user_id=u.id, score=4)
-    db_session.add(fb)
     await db_session.flush()
 
     results, total = await query_pending_feedback(db_session, u.id, 0)
@@ -139,17 +141,48 @@ async def test_query_pending_feedback_excludes_already_rated(db_session):
 
 
 @pytest.mark.asyncio
-async def test_query_pending_feedback_excludes_pending_decisions(db_session):
-    u = User(telegram_id=88003, username="pfb_u3", role=RoleEnum.PROJECT_MANAGER, password_hash="x")
-    db_session.add(u)
+async def test_query_pending_feedback_excludes_already_rated(db_session):
+    submitter = User(telegram_id=88002 + 200, username="pfb_sub2", role=RoleEnum.PROJECT_MANAGER, password_hash="x")
+    recipient = User(telegram_id=88002 + 201, username="pfb_rec2", role=RoleEnum.PROJECT_MANAGER, password_hash="x")
+    db_session.add_all([submitter, recipient])
     await db_session.flush()
 
-    d = Decision(submitter_id=u.id, type=DecisionTypeEnum.CRITICAL,
+    d = Decision(submitter_id=submitter.id, type=DecisionTypeEnum.NORMAL,
+                 status=DecisionStatusEnum.EXECUTED, summary="rated_fb")
+    db_session.add(d)
+    await db_session.flush()
+
+    dist = DecisionDistribution(decision_id=d.id, user_id=recipient.id,
+                                distribution_type=DistributionTypeEnum.INFO)
+    db_session.add(dist)
+    await db_session.flush()
+
+    fb = DecisionFeedback(decision_id=d.id, user_id=recipient.id, score=4)
+    db_session.add(fb)
+    await db_session.flush()
+
+    results, total = await query_pending_feedback(db_session, recipient.id, 0)
+    assert total == 0
+
+
+@pytest.mark.asyncio
+async def test_query_pending_feedback_excludes_pending_decisions(db_session):
+    submitter = User(telegram_id=88003 + 300, username="pfb_sub3", role=RoleEnum.PROJECT_MANAGER, password_hash="x")
+    recipient = User(telegram_id=88003 + 301, username="pfb_rec3", role=RoleEnum.PROJECT_MANAGER, password_hash="x")
+    db_session.add_all([submitter, recipient])
+    await db_session.flush()
+
+    d = Decision(submitter_id=submitter.id, type=DecisionTypeEnum.CRITICAL,
                  status=DecisionStatusEnum.PENDING, summary="still_pending")
     db_session.add(d)
     await db_session.flush()
 
-    results, total = await query_pending_feedback(db_session, u.id, 0)
+    dist = DecisionDistribution(decision_id=d.id, user_id=recipient.id,
+                                distribution_type=DistributionTypeEnum.INFO)
+    db_session.add(dist)
+    await db_session.flush()
+
+    results, total = await query_pending_feedback(db_session, recipient.id, 0)
     assert total == 0
 
 
@@ -198,19 +231,21 @@ async def test_query_pending_feedback_includes_raci_decisions(db_session):
 
 @pytest.mark.asyncio
 async def test_query_pending_feedback_no_duplicates(db_session):
-    """User submitted AND received same decision — must appear once."""
-    u = User(telegram_id=88008, username="pfb_nodup", role=RoleEnum.PROJECT_MANAGER, password_hash="x")
-    db_session.add(u)
+    """User in both distribution AND RACI for same decision — must appear once."""
+    submitter = User(telegram_id=88008, username="pfb_nodup_sub", role=RoleEnum.PROJECT_MANAGER, password_hash="x")
+    u = User(telegram_id=88009, username="pfb_nodup", role=RoleEnum.PROJECT_MANAGER, password_hash="x")
+    db_session.add_all([submitter, u])
     await db_session.flush()
 
-    d = Decision(submitter_id=u.id, type=DecisionTypeEnum.NORMAL,
+    d = Decision(submitter_id=submitter.id, type=DecisionTypeEnum.NORMAL,
                  status=DecisionStatusEnum.EXECUTED, summary="nodup_fb")
     db_session.add(d)
     await db_session.flush()
 
     dist = DecisionDistribution(decision_id=d.id, user_id=u.id,
                                 distribution_type=DistributionTypeEnum.INFO)
-    db_session.add(dist)
+    raci = DecisionRaciRole(decision_id=d.id, user_id=u.id, role=RaciRoleEnum.ACCOUNTABLE)
+    db_session.add_all([dist, raci])
     await db_session.flush()
 
     results, total = await query_pending_feedback(db_session, u.id, 0)
@@ -367,13 +402,19 @@ async def test_get_menu_counts_feedback_key_present(db_session):
 
 @pytest.mark.asyncio
 async def test_get_menu_counts_feedback_reflects_pending(db_session):
-    u = User(telegram_id=88031, username="gmc_u2", role=RoleEnum.PROJECT_MANAGER, password_hash="x")
-    db_session.add(u)
+    sub = User(telegram_id=88031, username="gmc_sub2", role=RoleEnum.PROJECT_MANAGER, password_hash="x")
+    u = User(telegram_id=88031 + 50, username="gmc_u2", role=RoleEnum.PROJECT_MANAGER, password_hash="x")
+    db_session.add_all([sub, u])
     await db_session.flush()
 
-    d = Decision(submitter_id=u.id, type=DecisionTypeEnum.NORMAL,
+    d = Decision(submitter_id=sub.id, type=DecisionTypeEnum.NORMAL,
                  status=DecisionStatusEnum.EXECUTED, summary="counts_fb_test")
     db_session.add(d)
+    await db_session.flush()
+
+    dist = DecisionDistribution(decision_id=d.id, user_id=u.id,
+                                distribution_type=DistributionTypeEnum.INFO)
+    db_session.add(dist)
     await db_session.flush()
 
     counts = await get_menu_counts(db_session, u.id)
@@ -382,13 +423,19 @@ async def test_get_menu_counts_feedback_reflects_pending(db_session):
 
 @pytest.mark.asyncio
 async def test_get_menu_counts_feedback_zero_after_rating(db_session):
-    u = User(telegram_id=88032, username="gmc_u3", role=RoleEnum.PROJECT_MANAGER, password_hash="x")
-    db_session.add(u)
+    sub = User(telegram_id=88032, username="gmc_sub3", role=RoleEnum.PROJECT_MANAGER, password_hash="x")
+    u = User(telegram_id=88032 + 50, username="gmc_u3", role=RoleEnum.PROJECT_MANAGER, password_hash="x")
+    db_session.add_all([sub, u])
     await db_session.flush()
 
-    d = Decision(submitter_id=u.id, type=DecisionTypeEnum.NORMAL,
+    d = Decision(submitter_id=sub.id, type=DecisionTypeEnum.NORMAL,
                  status=DecisionStatusEnum.EXECUTED, summary="counts_rated_test")
     db_session.add(d)
+    await db_session.flush()
+
+    dist = DecisionDistribution(decision_id=d.id, user_id=u.id,
+                                distribution_type=DistributionTypeEnum.INFO)
+    db_session.add(dist)
     await db_session.flush()
 
     fb = DecisionFeedback(decision_id=d.id, user_id=u.id, score=5)

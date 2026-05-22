@@ -221,9 +221,9 @@ async def get_menu_counts(session: AsyncSession, user_id: int) -> dict:
     feedback_count = await session.scalar(
         select(func.count(func.distinct(Decision.id))).where(
             Decision.status.in_([DecisionStatusEnum.EXECUTED, DecisionStatusEnum.APPROVED]),
+            Decision.submitter_id != user_id,
             Decision.id.notin_(rated_subq),
             or_(
-                Decision.submitter_id == user_id,
                 Decision.id.in_(recv_subq),
                 Decision.id.in_(raci_subq),
             ),
@@ -269,9 +269,9 @@ async def query_pending_feedback(
     )
     base_filter = [
         Decision.status.in_([DecisionStatusEnum.EXECUTED, DecisionStatusEnum.APPROVED]),
+        Decision.submitter_id != user_id,
         Decision.id.notin_(rated_subq),
         or_(
-            Decision.submitter_id == user_id,
             Decision.id.in_(recv_subq),
             Decision.id.in_(raci_subq),
         ),
