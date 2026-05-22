@@ -16,7 +16,9 @@
         button { background: var(--card); color: var(--text); border: 1px solid var(--border); padding: 0.5rem 1rem; border-radius: 4px; cursor: pointer; font-family: inherit; }
         button:hover { border-color: var(--cyan); color: var(--cyan); }
         button.primary { background: var(--cyan); color: var(--bg); border-color: var(--cyan); }
+        button.primary[disabled] { background: var(--card); color: var(--text-2); border-color: var(--border); cursor: not-allowed; }
         button.danger { color: var(--red); border-color: var(--red); }
+        button.danger.hidden { display: none; }
         a.nav { color: var(--cyan); text-decoration: none; margin-inline-end: 1rem; }
         .stats { color: var(--text-2); font-family: 'IBM Plex Mono', monospace; font-size: 0.9rem; }
         .stats b { color: var(--green); }
@@ -54,7 +56,7 @@
         </div>
         <div>
             <button id="run" class="primary">▶ הפעל מחזור</button>
-            <button id="abort" class="danger">⏹ עצור</button>
+            <button id="abort" class="danger hidden">⏹ עצור</button>
         </div>
     </div>
 
@@ -63,6 +65,13 @@
 <script>
 const feedEl = document.getElementById("feed");
 const statsEl = document.getElementById("stats");
+const runBtn = document.getElementById("run");
+const abortBtn = document.getElementById("abort");
+
+function setRunning(running) {
+    runBtn.disabled = running;
+    abortBtn.classList.toggle("hidden", !running);
+}
 
 const cards = new Map();   // question_hash -> {root, attemptsBox, repairsBox, statusEl}
 let counts = {passed_first_try: 0, fixed: 0, unfixable: 0, error: 0, aborted: 0};
@@ -100,12 +109,15 @@ function refreshStats() {
 }
 
 function applyEvent(ev) {
-    if (ev.type === "cycle_start") {
+    if (ev.type === "cycle_triggered") {
+        setRunning(true);
+    } else if (ev.type === "cycle_start") {
         feedEl.innerHTML = "";
         cards.clear();
         counts = {passed_first_try: 0, fixed: 0, unfixable: 0, error: 0, aborted: 0};
         total = ev.total;
         refreshStats();
+        setRunning(true);
     } else if (ev.type === "question_start") {
         ensureCard(ev.question_hash, ev.question, ev.gold);
     } else if (ev.type === "attempt") {
@@ -144,22 +156,26 @@ function applyEvent(ev) {
         counts[r.status] = (counts[r.status] || 0) + 1;
         refreshStats();
     } else if (ev.type === "cycle_done") {
-        const div = document.createElement("div");
-        div.className = "summary";
-        const passed = (ev.counts.passed_first_try || 0) + (ev.counts.fixed || 0);
-        div.innerHTML = `
-            <h2>סיכום מחזור #${ev.eval_run_id}</h2>
-            <div>עברו: <b>${passed}/${ev.total}</b> (${(ev.pass_rate*100).toFixed(0)}%)</div>
-            <div>עברו ישר: ${ev.counts.passed_first_try||0} · תוקנו: ${ev.counts.fixed||0} · בלתי-פתירים: ${ev.counts.unfixable||0}</div>
-            <div>תיקונים שהוחלו: ${ev.applied_fix_ids.length}</div>
-        `;
-        feedEl.appendChild(div);
+        if (ev.counts) {
+            const div = document.createElement("div");
+            div.className = "summary";
+            const passed = (ev.counts.passed_first_try || 0) + (ev.counts.fixed || 0);
+            div.innerHTML = `
+                <h2>סיכום מחזור #${ev.eval_run_id}</h2>
+                <div>עברו: <b>${passed}/${ev.total}</b> (${(ev.pass_rate*100).toFixed(0)}%)</div>
+                <div>עברו ישר: ${ev.counts.passed_first_try||0} · תוקנו: ${ev.counts.fixed||0} · בלתי-פתירים: ${ev.counts.unfixable||0}</div>
+                <div>תיקונים שהוחלו: ${ev.applied_fix_ids.length}</div>
+            `;
+            feedEl.appendChild(div);
+        }
+        setRunning(false);
     } else if (ev.type === "cycle_error") {
         const div = document.createElement("div");
         div.className = "summary";
         div.style.borderColor = "var(--red)";
         div.innerHTML = `<h2 style="color: var(--red)">המחזור נכשל</h2><pre>${escapeHtml(ev.error || "")}</pre>`;
         feedEl.appendChild(div);
+        setRunning(false);
     }
 }
 
@@ -173,15 +189,27 @@ es.onmessage = (msg) => {
     }
 };
 
-document.getElementById("run").onclick = async () => {
-    const r = await fetch("/dashboard/eval/run", {method: "POST"});
-    if (!r.ok) {
-        const t = await r.text();
-        alert("שגיאה: " + t);
+runBtn.onclick = async () => {
+    setRunning(true);
+    try {
+        const r = await fetch("/dashboard/eval/run", {method: "POST"});
+        if (!r.ok) {
+            const t = await r.text();
+            alert("שגיאה: " + t);
+            setRunning(false);
+        }
+    } catch (e) {
+        alert("שגיאה: " + e);
+        setRunning(false);
     }
 };
-document.getElementById("abort").onclick = async () => {
-    await fetch("/dashboard/eval/abort", {method: "POST"});
+abortBtn.onclick = async () => {
+    abortBtn.disabled = true;
+    try {
+        await fetch("/dashboard/eval/abort", {method: "POST"});
+    } finally {
+        abortBtn.disabled = false;
+    }
 };
 </script>
 </body>
