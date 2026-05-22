@@ -1870,15 +1870,15 @@ async def answer_with_full_context(
     """
     from app.models import QueryLog
 
+    # Save the original question for database logging BEFORE context prepend
+    original_question = question
+
     if conversation_context:
         ctx_lines = "\n".join(
             f"{'User' if e['role'] == 'user' else 'Bot'}: {e['content']}"
             for e in conversation_context
         )
         question = f"הקשר שיחה:\n{ctx_lines}\n\nשאלה נוכחית: {question}"
-
-    # Save the original question for database logging (no expansion, no synonyms)
-    original_question = question
 
     # Refresh eval-loop config caches (abbreviations, stop-word drops, prompt overrides)
     # before any sync helpers consume them.
