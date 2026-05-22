@@ -133,7 +133,7 @@ async def _risky_projects_for_role(user: User, session: AsyncSession) -> list[di
     if user.role == RoleEnum.PROJECT_MANAGER and user.username:
         stmt = stmt.where(Project.manager.ilike(f"%{user.username}%"))
 
-    rows = (await session.execute(stmt)).scalars().all()
+    rows = (await session.execute(stmt.limit(20))).scalars().all()
     return [{"identifier": p.project_identifier, "name": p.name or "", "risks": (p.risks or "")[:120]}
             for p in rows]
 
@@ -147,7 +147,7 @@ async def _handle_projects_for_role(user: User, session: AsyncSession) -> list[d
     if user.role == RoleEnum.PROJECT_MANAGER and user.username:
         stmt = stmt.where(Project.manager.ilike(f"%{user.username}%"))
 
-    rows = (await session.execute(stmt)).scalars().all()
+    rows = (await session.execute(stmt.limit(20))).scalars().all()
     return [{"identifier": p.project_identifier, "name": p.name or "", "to_handle": (p.to_handle or "")[:120]}
             for p in rows]
 
