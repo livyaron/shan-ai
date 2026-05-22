@@ -70,3 +70,36 @@ async def test_handle_decisions_blocks_viewer():
     update.message.reply_text.assert_called_once()
     call_text = update.message.reply_text.call_args[0][0]
     assert "🔒" in call_text
+
+
+@pytest.mark.asyncio
+async def test_viewer_projects_keyword_triggers_menu():
+    """Viewer typing פרוייקטים should call reply_text (projects menu)."""
+    from app.services.telegram_polling import TelegramPollingBot
+    from app.models import RoleEnum
+
+    bot = TelegramPollingBot()
+    bot.application = MagicMock()
+
+    viewer = MagicMock()
+    viewer.role = RoleEnum.VIEWER
+    viewer.id = 1
+
+    update = MagicMock()
+    update.effective_user.id = 42
+    update.effective_chat.id = 42
+    update.message = AsyncMock()
+    update.message.text = "פרוייקטים"
+
+    context = MagicMock()
+    context.bot = AsyncMock()
+
+    with patch("app.services.telegram_polling.async_session_maker") as mock_sm:
+        mock_session = AsyncMock()
+        mock_session.scalar = AsyncMock(return_value=5)
+        mock_sm.return_value.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_sm.return_value.__aexit__ = AsyncMock(return_value=False)
+
+        await bot._handle_viewer_message(update, context, viewer, "פרוייקטים")
+
+    assert update.message.reply_text.called

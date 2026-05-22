@@ -527,6 +527,12 @@ class TelegramPollingBot:
                 )
                 return
 
+            # Viewer: separate read-only pipeline
+            from app.models import RoleEnum as _RE
+            if user.role == _RE.VIEWER:
+                await self._handle_viewer_message(update, context, user, text.strip())
+                return
+
             # Show typing indicator
             await context.bot.send_chat_action(
                 chat_id=update.effective_chat.id, action="typing"
@@ -1228,6 +1234,102 @@ class TelegramPollingBot:
                     f"אנא שלח את סיבת הדחייה בהודעה הבאה.",
                     parse_mode="HTML",
                 )
+
+    async def _handle_viewer_message(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE, user, text: str
+    ) -> None:
+        """Handle all free-text from VIEWER role users."""
+        from app.services.projects_menu_service import (
+            get_menu_keyboard as pm_kb, get_menu_text as pm_text,
+            get_total_active, build_project_card,
+        )
+        from app.models import Project
+        from sqlalchemy import select as _sel
+
+        # keyword: projects menu
+        if "פרוייקטים" in text or "פרויקטים" in text:
+            async with async_session_maker() as _s:
+                _total = await get_total_active(_s)
+            await update.message.reply_text(
+                pm_text(_total),
+                parse_mode="HTML",
+                reply_markup=pm_kb(),
+            )
+            return
+
+        # keyword: decisions blocked
+        if "החלטות" in text:
+            await update.message.reply_text(
+                _VIEWER_DECISIONS_BLOCKED,
+                reply_markup=_viewer_reply_keyboard(),
+            )
+            return
+
+        # project name search
+        async with async_session_maker() as _s:
+            rows = list((await _s.scalars(
+                _sel(Project)
+                .where(Project.is_active.is_(True))
+                .where(Project.name.ilike(f"%{text}%"))
+                .limit(6)
+            )).all())
+
+        if len(rows) == 1:
+            await update.message.reply_text(
+                build_project_card(rows[0]),
+                parse_mode="HTML",
+                reply_markup=_viewer_reply_keyboard(),
+            )
+            return
+
+        if 2 <= len(rows) <= 5:
+            from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+            import html as _h
+            btns = [
+                [InlineKeyboardButton(
+                    f"📁 {_h.escape(p.name or str(p.id))}",
+                    callback_data=f"pm:d:{p.id}:viewer:0",
+                )]
+                for p in rows
+            ]
+            await update.message.reply_text(
+                "‏נמצאו מספר פרוייקטים — בחר:",
+                reply_markup=InlineKeyboardMarkup(btns),
+            )
+            return
+
+        # fallthrough: AI analysis display-only, no Decision saved
+        await context.bot.send_chat_action(
+            chat_id=update.effective_chat.id, action="typing"
+        )
+        from app.services.decision_service import DecisionService
+        async with async_session_maker() as _s:
+            decision_svc = DecisionService(_s, self.application)
+            try:
+                pre_result = await decision_svc.analyze_only(user, text)
+            except Exception as _err:
+                logger.error(f"viewer analyze_only failed: {_err}", exc_info=True)
+                await update.message.reply_text(
+                    "‏⚠️ שגיאה בניתוח. נסה שוב.",
+                    reply_markup=_viewer_reply_keyboard(),
+                )
+                return
+
+        import html as _h2
+        type_map = {"INFO": "מידע", "NORMAL": "רגיל", "CRITICAL": "קריטי", "UNCERTAIN": "לא ודאי"}
+        t = (pre_result.get("type") or "").upper()
+        reply = (
+            "‏🔍 <b>ניתוח AI (לצפייה בלבד):</b>\n\n"
+            f"<b>סוג:</b> {type_map.get(t, t or '—')}\n"
+            f"<b>סיכום:</b> {_h2.escape(pre_result.get('summary') or '—')}\n"
+            f"<b>פעולה מומלצת:</b> {_h2.escape(pre_result.get('recommended_action') or '—')}\n"
+            f"<b>ביטחון:</b> {pre_result.get('confidence', 0):.0%}"
+        )
+        await update.message.reply_text(
+            reply,
+            parse_mode="HTML",
+            reply_markup=_viewer_reply_keyboard(),
+        )
 
     async def _handle_decisions_menu(
         self,
