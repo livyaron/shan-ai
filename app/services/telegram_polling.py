@@ -34,6 +34,21 @@ def _main_reply_keyboard() -> ReplyKeyboardMarkup:
         is_persistent=True,
     )
 
+
+def _viewer_reply_keyboard() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        [["📁 פרוייקטים"]],
+        resize_keyboard=True,
+        is_persistent=True,
+    )
+
+
+def _keyboard_for_user(user) -> ReplyKeyboardMarkup:
+    from app.models import RoleEnum
+    if user and user.role == RoleEnum.VIEWER:
+        return _viewer_reply_keyboard()
+    return _main_reply_keyboard()
+
 def _mgr_approval_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([[
         InlineKeyboardButton("✅ כן, נדרש אישור", callback_data="mgr_yes:0"),
@@ -136,7 +151,7 @@ class TelegramPollingBot:
             user = await service._get_or_create_user(
                 telegram_id, update.effective_user.to_dict()
             )
-            kb = _main_reply_keyboard() if user.role else None
+            kb = _keyboard_for_user(user) if user.role else None
             await update.message.reply_text(
                 f"\u200F👋 ברוך הבא ל-<b>Shan-AI</b>, {_html.escape(user.username)}!\n\n"
                 f"אני מנתח החלטות טכניות בפרויקטי תשתיות חשמל, טרנספורמטורים ותחנות משנה.\n\n"
@@ -222,7 +237,7 @@ class TelegramPollingBot:
                 f"כעת תוכל לשלוח החלטות לניתוח."
                 f"{profile_line}",
                 parse_mode="HTML",
-                reply_markup=_main_reply_keyboard(),
+                reply_markup=_keyboard_for_user(user),
             )
 
     async def handle_register(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -311,7 +326,7 @@ class TelegramPollingBot:
             return
         await update.message.reply_text(
             "‏📋 בחר תפריט:",
-            reply_markup=_main_reply_keyboard(),
+            reply_markup=_keyboard_for_user(user),
         )
 
     # ------------------------------------------------------------------
