@@ -17,6 +17,7 @@ from app.services.telegram_state import (
     _awaiting_clarification, _awaiting_master_confirm,
     _awaiting_decision_confirm, _awaiting_mgr_approval_confirm,
     _raci_edit_state, _awaiting_decision_preview,
+    get_context, append_context, clear_context,
 )
 from app.services.telegram_routing import (
     _is_data_question, _is_project_query, _maybe_summarize,
@@ -141,6 +142,7 @@ class TelegramPollingBot:
     async def handle_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /start command. If called with a registration code (QR deep link), auto-register."""
         telegram_id = update.effective_user.id
+        clear_context(telegram_id)
         code = context.args[0].strip().upper() if context.args else None
 
         # Deep-link registration: /start CODE (from QR scan)
@@ -328,6 +330,7 @@ class TelegramPollingBot:
     async def handle_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """/menu — re-send the persistent reply keyboard."""
         telegram_id = update.effective_user.id
+        clear_context(telegram_id)
         async with async_session_maker() as session:
             user = await session.scalar(select(User).where(User.telegram_id == telegram_id))
         if not user or not user.role:
@@ -527,6 +530,10 @@ class TelegramPollingBot:
                 )
                 return
 
+            # Load conversation context (after role check so roleless users don't accumulate context)
+            conv_ctx = get_context(telegram_id)
+            append_context(telegram_id, "user", text)
+
             # Show typing indicator for all role-bearing users (including VIEWER)
             await context.bot.send_chat_action(
                 chat_id=update.effective_chat.id, action="typing"
@@ -572,7 +579,7 @@ class TelegramPollingBot:
             if text.strip() in _NON_WORK_WORDS:
                 routing = {"route": None, "intent": None, "param": None}
             else:
-                routing = await _ai_route_message(text)
+                routing = await _ai_route_message(text, conversation_context=conv_ctx)
             ai_route = routing["route"]
 
             # All non-decision routes go through the shared ask_router.
@@ -583,7 +590,8 @@ class TelegramPollingBot:
                     import json as _json
                     from app.services.ask_router import route as _ask_route
                     from app.services.telegram_state import _awaiting_disambiguation
-                    result = await _ask_route(text, session, user.id, log_to_db=True)
+                    result = await _ask_route(text, session, user.id, log_to_db=True,
+                                              conversation_context=conv_ctx)
 
                     if result.path == "disambiguation":
                         candidates = _json.loads(result.answer)
@@ -626,6 +634,7 @@ class TelegramPollingBot:
                     return
                 reply = await _maybe_summarize(reply)
                 await update.message.reply_text(reply, parse_mode="HTML", reply_markup=kb)
+                append_context(telegram_id, "assistant", reply[:300])
                 return
             # --- Check if this is a clarification response ---
             if telegram_id in _awaiting_clarification:
@@ -724,7 +733,7 @@ class TelegramPollingBot:
             # DECISION — show AI preview; user must approve before commit
             decision_svc = DecisionService(session, self.application)
             try:
-                pre_result = await decision_svc.analyze_only(user, text)
+                pre_result = await decision_svc.analyze_only(user, text, conversation_context=conv_ctx)
             except Exception as _err:
                 logger.error(f"analyze_only failed: {_err}", exc_info=True)
                 await update.message.reply_text(
@@ -736,11 +745,13 @@ class TelegramPollingBot:
                 "result": pre_result,
                 "user_has_manager": _user_has_manager(user),
             }
+            preview_text = _build_preview_text(pre_result)
             await update.message.reply_text(
-                _build_preview_text(pre_result),
+                preview_text,
                 parse_mode="HTML",
                 reply_markup=_decision_preview_keyboard(),
             )
+            append_context(telegram_id, "assistant", preview_text[:300])
 
     # ------------------------------------------------------------------
     # Callback handler — approve / reject inline keyboard buttons

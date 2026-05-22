@@ -38,7 +38,8 @@ class DecisionService:
         self.application = application
         self.claude = ClaudeService()
 
-    async def analyze_only(self, user: User, text: str) -> dict:
+    async def analyze_only(self, user: User, text: str,
+                           conversation_context: list[dict] | None = None) -> dict:
         """Run RAG + Groq analysis WITHOUT storing to DB. Returns result dict."""
         role_str = user.role.value if user.role else "unknown"
         similar = await embedding_service.get_similar_decisions(self.session, text)
@@ -64,7 +65,8 @@ class DecisionService:
         combined_context = "\n\n".join(filter(None, [
             past_context, lessons_context, risk_context, calib_context
         ]))
-        return await self.claude.analyze(text, role_str, combined_context)
+        return await self.claude.analyze(text, role_str, combined_context,
+                                         conversation_context=conversation_context)
 
     async def process(self, user: User, text: str, force_approval: bool = False, pre_result: dict | None = None) -> str:
         """

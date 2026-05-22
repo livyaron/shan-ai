@@ -47,6 +47,7 @@ async def route(
     *,
     log_to_db: bool = True,
     snapshot_mode: bool = False,
+    conversation_context: list[dict] | None = None,
 ) -> AnswerResult:
     """Route a question to the right answerer and return a uniform AnswerResult.
 
@@ -212,6 +213,7 @@ async def route(
     # 3. Default RAG
     result = await ks.answer_with_full_context(
         question, session, user_id, log_to_db=log_to_db,
+        conversation_context=conversation_context,
     )
     return await _finish(AnswerResult(
         answer=result.get("answer", ""),

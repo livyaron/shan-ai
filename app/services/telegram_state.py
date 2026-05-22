@@ -44,3 +44,43 @@ _projects_detail_origin: dict[int, tuple[str, int]] = {}
 
 # { telegram_id (int): [candidate_identifier, ...] }  — waiting for user to pick one project
 _awaiting_disambiguation: dict[int, list] = {}
+
+
+from collections import deque
+import time as _time
+
+_CONTEXT_MAXLEN = 5
+_CONTEXT_TTL = 1800.0   # 30 minutes
+_CONTEXT_INJECT = 3     # how many entries to inject into prompts
+
+# { telegram_id (int): deque of {"role": str, "content": str, "ts": float} }
+_conversation_context: dict[int, deque] = {}
+
+
+def get_context(telegram_id: int) -> list[dict]:
+    """Return last _CONTEXT_INJECT entries; clear and return [] if TTL expired."""
+    if telegram_id not in _conversation_context:
+        return []
+    dq = _conversation_context[telegram_id]
+    if not dq:
+        return []
+    if _time.time() - dq[-1]["ts"] > _CONTEXT_TTL:
+        del _conversation_context[telegram_id]
+        return []
+    return list(dq)[-_CONTEXT_INJECT:]
+
+
+def append_context(telegram_id: int, role: str, content: str) -> None:
+    """Append one exchange entry; creates the deque on first call."""
+    if telegram_id not in _conversation_context:
+        _conversation_context[telegram_id] = deque(maxlen=_CONTEXT_MAXLEN)
+    _conversation_context[telegram_id].append({
+        "role": role,
+        "content": content[:500],
+        "ts": _time.time(),
+    })
+
+
+def clear_context(telegram_id: int) -> None:
+    """Remove all context for this user."""
+    _conversation_context.pop(telegram_id, None)

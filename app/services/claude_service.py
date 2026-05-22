@@ -105,11 +105,23 @@ class ClaudeService:
         )
         return json.loads(raw)
 
-    async def analyze(self, problem: str, user_role: str, past_context: str = "") -> dict:
+    async def analyze(self, problem: str, user_role: str, past_context: str = "",
+                      conversation_context: list[dict] | None = None) -> dict:
         """Send problem to configured LLM and return parsed decision JSON."""
         # Replace straight quotes with Hebrew geresh to avoid breaking JSON
         clean_problem = problem.replace('"', '״').replace("'", "׳")
         parts = [f"תפקיד המגיש: {user_role}"]
+        if conversation_context:
+            ctx_lines = "\n".join(
+                f"{'משתמש' if e['role'] == 'user' else 'מערכת'}: {e['content']}"
+                for e in conversation_context
+            )
+            parts.append(
+                "<CONVERSATION_CONTEXT>\n"
+                f"{ctx_lines}\n"
+                "</CONVERSATION_CONTEXT>\n"
+                "(הקשר שיחה — לכיול הנמקה בלבד.)"
+            )
         if past_context:
             parts.append(
                 "<CONTEXT_FOR_CALIBRATION_ONLY>\n"

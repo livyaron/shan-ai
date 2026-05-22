@@ -182,7 +182,7 @@ def _parse_routing_response(response: str) -> dict:
     return {"route": None, "intent": None, "param": None}
 
 
-async def _ai_route_message(text: str) -> dict:
+async def _ai_route_message(text: str, conversation_context: list[dict] | None = None) -> dict:
     """One LLM call: classify route (project/knowledge/decision) + extract intent+param."""
     t = text.strip()
     if not t.endswith("?") and any(t.startswith(p) for p in _DECISION_PREFIXES):
@@ -190,7 +190,17 @@ async def _ai_route_message(text: str) -> dict:
         return {"route": "decision", "intent": "general", "param": None}
 
     from app.services.llm_router import llm_chat
-    prompt = _ROUTING_PROMPT.replace("{text}", text)
+
+    if conversation_context:
+        ctx_lines = "\n".join(
+            f"{'User' if e['role'] == 'user' else 'Bot'}: {e['content']}"
+            for e in conversation_context
+        )
+        effective_text = f"הקשר שיחה:\n{ctx_lines}\n\nהודעה נוכחית: {text}"
+    else:
+        effective_text = text
+
+    prompt = _ROUTING_PROMPT.replace("{text}", effective_text)
     try:
         response = await llm_chat(
             "message_routing",

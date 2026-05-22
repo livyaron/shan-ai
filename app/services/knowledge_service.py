@@ -1858,6 +1858,7 @@ async def answer_with_full_context(
     session: AsyncSession,
     user_id: int,
     log_to_db: bool = True,
+    conversation_context: list[dict] | None = None,
 ) -> dict:
     """Search knowledge base + decisions, then answer with two-step retrieval.
 
@@ -1868,6 +1869,13 @@ async def answer_with_full_context(
     Step 4: Log the query+answer to query_logs (skipped when log_to_db=False — used by eval verifier shadow runs)
     """
     from app.models import QueryLog
+
+    if conversation_context:
+        ctx_lines = "\n".join(
+            f"{'User' if e['role'] == 'user' else 'Bot'}: {e['content']}"
+            for e in conversation_context
+        )
+        question = f"הקשר שיחה:\n{ctx_lines}\n\nשאלה נוכחית: {question}"
 
     # Save the original question for database logging (no expansion, no synonyms)
     original_question = question
