@@ -245,7 +245,7 @@ async def get_user_raci_roles(
         .where(DecisionRaciRole.user_id == user_id)
         .where(DecisionRaciRole.decision_id.in_(decision_ids))
     )
-    return {row.decision_id: row.role for row in rows}
+    return {row.decision_id: row.role.value for row in rows}
 
 
 async def query_pending_feedback(
