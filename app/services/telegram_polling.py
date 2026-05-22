@@ -540,13 +540,6 @@ class TelegramPollingBot:
 
             # Decisions menu keyword shortcut
             if "החלטות" in text.strip():
-                from app.models import RoleEnum as _RE2
-                if user.role == _RE2.VIEWER:
-                    await update.message.reply_text(
-                        _VIEWER_DECISIONS_BLOCKED,
-                        reply_markup=_viewer_reply_keyboard(),
-                    )
-                    return
                 if user.role:
                     from app.services.decisions_menu_service import get_menu_keyboard, get_menu_text, get_menu_counts
                     async with async_session_maker() as _cnt_s:
