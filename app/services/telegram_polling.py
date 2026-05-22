@@ -712,6 +712,7 @@ class TelegramPollingBot:
                         reply = "\u200Fשאל שאלות עבודה או שלח החלטה לניתוח."
                     reply = await _maybe_summarize(reply)
                     await update.message.reply_text(reply, parse_mode="HTML", reply_markup=kb)
+                    append_context(telegram_id, "assistant", reply[:300])
                 # Always ask — user can correct misclassification
                 _awaiting_decision_confirm[telegram_id] = text
                 await update.message.reply_text(
