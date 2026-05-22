@@ -124,6 +124,7 @@ class TelegramPollingBot:
         self.application.add_handler(CommandHandler("projects", self.handle_projects))
         self.application.add_handler(CommandHandler("menu", self.handle_menu))
         self.application.add_handler(CommandHandler("ask", self.handle_ask))
+        self.application.add_handler(CommandHandler("report", self.handle_report))
         self.application.add_handler(CallbackQueryHandler(self.handle_callback))
         self.application.add_handler(
             MessageHandler(filters.Document.ALL, self.handle_document)
@@ -340,6 +341,27 @@ class TelegramPollingBot:
             "‏📋 בחר תפריט:",
             reply_markup=_keyboard_for_user(user),
         )
+
+    # ------------------------------------------------------------------
+    # /report command — weekly intelligence report on demand
+    # ------------------------------------------------------------------
+
+    async def handle_report(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """/report — generate and send weekly intelligence report for the requesting user."""
+        telegram_id = update.effective_user.id
+        async with async_session_maker() as session:
+            user = await session.scalar(select(User).where(User.telegram_id == telegram_id))
+            if not user or not user.role:
+                await update.message.reply_text("‏⏳ יש להירשם תחילה.")
+                return
+            from app.models import RoleEnum as _RE
+            if user.role == _RE.VIEWER:
+                await update.message.reply_text("‏🔒 דוח שבועי אינו זמין לצופים.")
+                return
+            await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+            from app.services.weekly_report_service import generate_report_for_user
+            report = await generate_report_for_user(user, session)
+        await update.message.reply_text(report, parse_mode="HTML")
 
     # ------------------------------------------------------------------
     # /ask command — knowledge base Q&A

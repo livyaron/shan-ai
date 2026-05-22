@@ -46,6 +46,7 @@ USAGE_LABELS: dict[str, str] = {
     "eval_judge":              "אבחון: שיפוט תשובות",
     "eval_repair":             "אבחון: הצעת תיקון",
     "eval_verify":             "אבחון: אימות תיקון",
+    "weekly_report":           "דוח שבועי",
 }
 
 

@@ -8,7 +8,7 @@ import logging
 import os
 import uuid
 from datetime import datetime, timedelta
-from fastapi import APIRouter, Depends, Request, Form, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, Request, Form, UploadFile, File
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -2411,6 +2411,31 @@ async def learning_summarize_type(
     from app.services.lessons_service import generate_knowledge_summary
     asyncio.get_event_loop().create_task(generate_knowledge_summary(decision_type))
     return {"status": "started", "type": decision_type}
+
+
+@router.post("/report/trigger", response_class=HTMLResponse)
+async def trigger_weekly_report(
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Admin-only: send weekly reports to all active users immediately."""
+    if not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="Admin only")
+
+    from app.services.weekly_report_service import send_weekly_reports
+    from app.services.telegram_polling import telegram_bot
+    import asyncio
+
+    if not telegram_bot.application or not telegram_bot.application.bot:
+        return HTMLResponse(
+            '<script>alert("הבוט אינו פעיל כרגע."); window.history.back();</script>'
+        )
+
+    asyncio.create_task(send_weekly_reports(telegram_bot.application.bot))
+    return HTMLResponse(
+        '<script>alert("שליחת הדוחות החלה ברקע."); window.location.href="/dashboard";</script>'
+    )
 
 
 @profile_router.post("/{token}")
