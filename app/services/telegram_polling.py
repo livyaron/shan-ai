@@ -522,7 +522,7 @@ class TelegramPollingBot:
                 async with async_session_maker() as fb_s:
                     fb_decs, fb_tot = await query_pending_feedback(fb_s, user.id, fb_back_pg)
                 await update.message.reply_text(
-                    format_results_message("⭐ ממתין למשוב שלך", fb_decs, fb_tot, fb_back_pg),
+                    f"‏⭐ <b>ממתין למשוב שלך</b> ({fb_tot})\n<i>בחר החלטה לדירוג:</i>",
                     parse_mode="HTML",
                     reply_markup=build_feedback_results_keyboard(fb_decs, fb_back_pg, fb_tot),
                 )
@@ -1503,7 +1503,7 @@ class TelegramPollingBot:
                 )
                 return
             await query.edit_message_text(
-                format_results_message("⭐ ממתין למשוב שלך", fb_decisions, fb_total, fb_page),
+                f"‏⭐ <b>ממתין למשוב שלך</b> ({fb_total})\n<i>בחר החלטה לדירוג:</i>",
                 parse_mode="HTML",
                 reply_markup=build_feedback_results_keyboard(fb_decisions, fb_page, fb_total),
             )

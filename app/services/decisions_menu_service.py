@@ -292,11 +292,12 @@ def build_feedback_results_keyboard(
 ) -> InlineKeyboardMarkup:
     total_pages = max(1, (total + 9) // 10)
     rows = []
-    for d in decisions:
+    for idx, d in enumerate(decisions):
         t_emoji = TYPE_EMOJI.get(d.type, "❓")
         summary = (d.summary or "")[:35]
+        num = page * 10 + idx + 1
         rows.append([InlineKeyboardButton(
-            f"{t_emoji} #{d.id} — {summary}",
+            f"{num}. {t_emoji} #{d.id} — {summary}",
             callback_data=f"dm:fbsel:{d.id}:{page}",
         )])
     if total_pages > 1:
