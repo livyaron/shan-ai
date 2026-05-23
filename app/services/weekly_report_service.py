@@ -186,21 +186,24 @@ async def send_report_to_user(
 
 async def send_weekly_reports_cron(bot) -> None:
     """Cron entry point — send self-report to every active non-VIEWER user."""
-    async with _app_database.async_session_maker() as session:
+    # Fetch user list with a short-lived session
+    async with _app_database.async_session_maker() as list_session:
         stmt = select(User).where(
             User.telegram_id.isnot(None),
             User.role.isnot(None),
         )
-        all_users = (await session.execute(stmt)).scalars().all()
+        all_users = (await list_session.execute(stmt)).scalars().all()
         users = [u for u in all_users if u.role != RoleEnum.VIEWER]
 
-        for user in users:
-            try:
-                sections = await generate_report_for_user(user, session, sent_via="cron")
-                await send_report_to_user(bot, user.telegram_id, sections)
-                logger.info(f"Weekly cron report sent to user {user.id} ({user.username})")
-            except Exception as exc:
-                logger.error(f"Weekly cron report failed for user {user.id}: {exc}")
+    # Each user gets its own session so one failure doesn't break others
+    for user in users:
+        try:
+            async with _app_database.async_session_maker() as user_session:
+                sections = await generate_report_for_user(user, user_session, sent_via="cron")
+            await send_report_to_user(bot, user.telegram_id, sections)
+            logger.info(f"Weekly cron report sent to user {user.id} ({user.username})")
+        except Exception as exc:
+            logger.error(f"Weekly cron report failed for user {user.id}: {exc}")
 
 
 # ── Data gathering ────────────────────────────────────────────────────────────
