@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Shan-AI — ניהול דוחות</title>
+    <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        :root {
+            --bg-deep:#070b12; --bg-surface:#0c1220; --bg-card:#0f1826;
+            --border:#1a2d47; --cyan:#00d4ff; --green:#10b981;
+            --amber:#f59e0b; --red:#ef4444; --text-1:#e2e8f0; --text-2:#64748b;
+        }
+        body { background:var(--bg-deep); color:var(--text-1); font-family:'Heebo',sans-serif; min-height:100vh; }
+        .navbar { background:var(--bg-surface); border-bottom:1px solid var(--border); padding:12px 24px; }
+        .page-title { color:var(--cyan); font-size:1.4rem; font-weight:700; }
+        .card { background:var(--bg-card); border:1px solid var(--border); border-radius:8px; }
+        .table { color:var(--text-1); }
+        .table th { color:var(--text-2); border-color:var(--border); font-size:.8rem; text-transform:uppercase; letter-spacing:.05em; }
+        .table td { border-color:var(--border); vertical-align:middle; }
+        .btn-cyan { background:var(--cyan); color:#000; font-weight:600; border:none; border-radius:6px; padding:4px 14px; font-size:.85rem; }
+        .btn-cyan:hover { opacity:.85; }
+        .btn-outline-dim { border:1px solid var(--border); color:var(--text-2); background:transparent; border-radius:6px; padding:4px 14px; font-size:.85rem; }
+        .btn-outline-dim:hover { color:var(--text-1); border-color:var(--cyan); }
+        .badge-role { font-size:.72rem; padding:2px 8px; border-radius:4px; background:rgba(0,212,255,.12); color:var(--cyan); }
+        .no-report { color:var(--text-2); font-size:.8rem; }
+    </style>
+</head>
+<body>
+<nav class="navbar d-flex justify-content-between align-items-center">
+    <span class="page-title">📊 ניהול דוחות שבועיים</span>
+    <div class="d-flex gap-2 align-items-center">
+        <span style="color:var(--text-2);font-size:.85rem;">{{ current_user.username }}</span>
+        <a href="/dashboard" class="btn-outline-dim">← לוח בקרה</a>
+        <a href="/logout" class="btn-outline-dim">יציאה</a>
+    </div>
+</nav>
+
+<div class="container-fluid px-4 py-4">
+    <div class="card p-3">
+        <table class="table table-hover mb-0">
+            <thead>
+                <tr>
+                    <th>משתמש</th>
+                    <th>תפקיד</th>
+                    <th>דוח אחרון</th>
+                    <th>פעולות</th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for u in users_data %}
+                <tr>
+                    <td><strong>{{ u.username }}</strong></td>
+                    <td><span class="badge-role">{{ u.role }}</span></td>
+                    <td>
+                        {% if u.last_report %}
+                            {{ u.last_report.strftime('%d/%m/%Y %H:%M') }}
+                        {% else %}
+                            <span class="no-report">לא נוצר עדיין</span>
+                        {% endif %}
+                    </td>
+                    <td class="d-flex gap-2">
+                        <a href="/dashboard/reports/{{ u.id }}" class="btn-outline-dim">👁 צפה</a>
+                        <form method="post" action="/dashboard/reports/{{ u.id }}/generate" style="margin:0;">
+                            <button type="submit" class="btn-outline-dim">🔄 צור חדש</button>
+                        </form>
+                        {% if u.last_report %}
+                        <form method="post" action="/dashboard/reports/{{ u.id }}/send"
+                              onsubmit="return confirm('לשלוח דוח ל-{{ u.username }} בטלגרם?');" style="margin:0;">
+                            <button type="submit" class="btn-cyan">📤 שלח</button>
+                        </form>
+                        {% endif %}
+                    </td>
+                </tr>
+            {% else %}
+                <tr><td colspan="4" class="text-center" style="color:var(--text-2);">אין משתמשים להצגה</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+</body>
+</html>

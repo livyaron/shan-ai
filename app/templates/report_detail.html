@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Shan-AI — דוח {{ target_user.username }}</title>
+    <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        :root {
+            --bg-deep:#070b12; --bg-surface:#0c1220; --bg-card:#0f1826;
+            --border:#1a2d47; --cyan:#00d4ff; --green:#10b981;
+            --text-1:#e2e8f0; --text-2:#64748b;
+        }
+        body { background:var(--bg-deep); color:var(--text-1); font-family:'Heebo',sans-serif; min-height:100vh; }
+        .navbar { background:var(--bg-surface); border-bottom:1px solid var(--border); padding:12px 24px; }
+        .page-title { color:var(--cyan); font-size:1.3rem; font-weight:700; }
+        .section-card { background:var(--bg-card); border:1px solid var(--border); border-radius:8px; margin-bottom:12px; }
+        .section-header { padding:12px 16px; cursor:pointer; display:flex; justify-content:space-between; align-items:center; font-weight:600; }
+        .section-header:hover { background:rgba(0,212,255,.05); border-radius:8px; }
+        .section-body { padding:16px; border-top:1px solid var(--border); white-space:pre-wrap; line-height:1.7; font-size:.95rem; }
+        .meta { color:var(--text-2); font-size:.82rem; }
+        .btn-cyan { background:var(--cyan); color:#000; font-weight:600; border:none; border-radius:6px; padding:6px 18px; }
+        .btn-outline-dim { border:1px solid var(--border); color:var(--text-2); background:transparent; border-radius:6px; padding:6px 18px; }
+        .btn-outline-dim:hover { color:var(--text-1); border-color:var(--cyan); }
+        select.history-sel { background:var(--bg-surface); color:var(--text-1); border:1px solid var(--border); border-radius:6px; padding:4px 10px; font-size:.85rem; }
+    </style>
+</head>
+<body>
+<nav class="navbar d-flex justify-content-between align-items-center">
+    <span class="page-title">📊 דוח שבועי — {{ target_user.username }}</span>
+    <div class="d-flex gap-2 align-items-center">
+        <span class="meta">{{ current_user.username }}</span>
+        <a href="/dashboard/reports" class="btn-outline-dim">← רשימת דוחות</a>
+        <a href="/logout" class="btn-outline-dim">יציאה</a>
+    </div>
+</nav>
+
+<div class="container-fluid px-4 py-4">
+
+    {% if latest %}
+    <div class="d-flex gap-2 mb-3 align-items-center flex-wrap">
+        <form method="post" action="/dashboard/reports/{{ target_user.id }}/generate">
+            <button type="submit" class="btn-outline-dim">🔄 צור דוח חדש</button>
+        </form>
+        <form method="post" action="/dashboard/reports/{{ target_user.id }}/send"
+              onsubmit="return confirm('לשלוח דוח ל-{{ target_user.username }} בטלגרם?');">
+            <button type="submit" class="btn-cyan">📤 שלח לטלגרם</button>
+        </form>
+        {% if history %}
+        <select class="history-sel" onchange="if(this.value) window.location='/dashboard/reports/{{ target_user.id }}/history/'+this.value;">
+            <option value="">בחר דוח קודם ▼</option>
+            {% for h in history %}
+            <option value="{{ h.id }}" {% if h.id == latest.id %}selected{% endif %}>
+                {{ h.date.strftime('%d/%m/%Y %H:%M') }} — {{ h.via or '—' }}
+            </option>
+            {% endfor %}
+        </select>
+        {% endif %}
+        <span class="meta">נוצר: {{ latest.generated_at.strftime('%d/%m/%Y %H:%M') }} | ערוץ: {{ latest.sent_via or '—' }}</span>
+    </div>
+
+    {% set section_defs = [
+        ('prologue',  '📊 פתיח'),
+        ('decisions', '📋 החלטות השבוע'),
+        ('projects',  '🏗️ מצב פרויקטים'),
+        ('summary',   '✅ סיכום ומסקנות'),
+        ('delta',     '📈 שינויים מהדוח הקודם'),
+    ] %}
+
+    {% for key, label in section_defs %}
+        {% set body = latest.sections.get(key) %}
+        {% if body %}
+        <div class="section-card">
+            <div class="section-header" onclick="toggle('{{ key }}')">
+                <span>{{ label }}</span>
+                <span id="arr-{{ key }}">▼</span>
+            </div>
+            <div class="section-body" id="sec-{{ key }}">{{ body }}</div>
+        </div>
+        {% endif %}
+    {% endfor %}
+
+    {% else %}
+    <div style="color:var(--text-2);text-align:center;padding:60px 0;">
+        <p style="font-size:1.1rem;">אין דוח שמור למשתמש זה.</p>
+        <form method="post" action="/dashboard/reports/{{ target_user.id }}/generate">
+            <button type="submit" class="btn-cyan">🔄 צור דוח ראשון</button>
+        </form>
+    </div>
+    {% endif %}
+</div>
+
+<script>
+function toggle(key) {
+    const sec = document.getElementById('sec-' + key);
+    const arr = document.getElementById('arr-' + key);
+    if (sec.style.display === 'none') {
+        sec.style.display = 'block';
+        arr.textContent = '▼';
+    } else {
+        sec.style.display = 'none';
+        arr.textContent = '▶';
+    }
+}
+</script>
+</body>
+</html>

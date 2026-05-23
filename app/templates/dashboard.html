@@ -862,14 +862,9 @@
         <button class="btn-cmd" onclick="openDashboardAI()">
             ◈ ניתוח AI
         </button>
-        {% if current_user.is_admin %}
-        <form method="post" action="/dashboard/report/trigger"
-              onsubmit="return confirm('שלוח דוח שבועי לכל המשתמשים עכשיו?');">
-          <button type="submit" class="btn btn-outline-primary btn-sm ms-2">
-            📊 שלח דוח שבועי עכשיו
-          </button>
-        </form>
-        {% endif %}
+        <a href="/dashboard/reports" class="btn btn-outline-primary btn-sm ms-2">
+            📊 ניהול דוחות →
+        </a>
     </div>
 
     <!-- ── KPIs ──────────────────────────────────────────────────────── -->
