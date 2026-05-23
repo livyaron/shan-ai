@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Form, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, or_, exists, update, delete
+from sqlalchemy import select, func, or_, exists, update, delete, desc
 
 from app.database import get_db_session
 from app.models import Decision, User, DecisionTypeEnum, DecisionStatusEnum, RoleEnum, DecisionDistribution, DistributionTypeEnum, DistributionStatusEnum, DecisionFeedback, DecisionRaciRole, RaciRoleEnum, LessonLearned, Message, KnowledgeFile, QueryLog, RACISuggestion, RACISuggestionStatusEnum, RACIRule
@@ -2413,31 +2413,6 @@ async def learning_summarize_type(
     return {"status": "started", "type": decision_type}
 
 
-@router.post("/report/trigger", response_class=HTMLResponse)
-async def trigger_weekly_report(
-    request: Request,
-    current_user: User = Depends(get_current_user),
-    session: AsyncSession = Depends(get_db_session),
-):
-    """Admin-only: send weekly reports to all active users immediately."""
-    if not current_user.is_admin:
-        raise HTTPException(status_code=403, detail="Admin only")
-
-    from app.services.weekly_report_service import send_weekly_reports
-    from app.services.telegram_polling import telegram_bot
-    import asyncio
-
-    if not telegram_bot.application or not telegram_bot.application.bot:
-        return HTMLResponse(
-            '<script>alert("הבוט אינו פעיל כרגע."); window.history.back();</script>'
-        )
-
-    asyncio.create_task(send_weekly_reports(telegram_bot.application.bot))
-    return HTMLResponse(
-        '<script>alert("שליחת הדוחות החלה ברקע."); window.location.href="/dashboard";</script>'
-    )
-
-
 @profile_router.post("/{token}")
 async def profile_save(
     token: str,
@@ -2457,3 +2432,217 @@ async def profile_save(
     user.manager_id = int(manager_id) if manager_id.strip() else None
     await session.commit()
     return RedirectResponse(f"/profile/{token}?msg=הפרופיל+עודכן+בהצלחה", status_code=303)
+
+
+# ── Reports management ────────────────────────────────────────────────────────
+
+from app.models import ReportHistory
+
+
+@router.get("/reports", response_class=HTMLResponse)
+async def reports_index(
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Reports management — list users scoped to current_user's visibility."""
+    if current_user.is_admin or current_user.role in (
+        RoleEnum.DIVISION_MANAGER, RoleEnum.DEPUTY_DIVISION_MANAGER
+    ):
+        stmt = select(User).where(User.role.isnot(None), User.role != RoleEnum.VIEWER)
+    elif current_user.role == RoleEnum.DEPARTMENT_MANAGER:
+        stmt = select(User).where(
+            User.role.isnot(None),
+            User.role != RoleEnum.VIEWER,
+            User.manager_id == current_user.id,
+        )
+    else:
+        return RedirectResponse(f"/dashboard/reports/{current_user.id}", status_code=302)
+
+    users = (await session.execute(stmt.order_by(User.role, User.username))).scalars().all()
+
+    latest_stmt = (
+        select(ReportHistory.user_id, func.max(ReportHistory.generated_at).label("last_report"))
+        .group_by(ReportHistory.user_id)
+        .subquery()
+    )
+    latest_map_rows = (await session.execute(select(latest_stmt))).all()
+    latest_map = {row[0]: row[1] for row in latest_map_rows}
+
+    users_data = [
+        {
+            "id": u.id,
+            "username": u.username,
+            "role": u.role.value if u.role else "",
+            "last_report": latest_map.get(u.id),
+        }
+        for u in users
+    ]
+
+    return templates.TemplateResponse("reports.html", {
+        "request": request,
+        "current_user": current_user,
+        "users_data": users_data,
+    })
+
+
+@router.get("/reports/{user_id}", response_class=HTMLResponse)
+async def report_view(
+    request: Request,
+    user_id: int,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+):
+    """View the latest saved report for a user. Does NOT regenerate."""
+    target = await session.scalar(select(User).where(User.id == user_id))
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if not (
+        current_user.is_admin
+        or current_user.id == user_id
+        or current_user.role in (RoleEnum.DIVISION_MANAGER, RoleEnum.DEPUTY_DIVISION_MANAGER)
+        or (current_user.role == RoleEnum.DEPARTMENT_MANAGER and target.manager_id == current_user.id)
+    ):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    latest = await session.scalar(
+        select(ReportHistory)
+        .where(ReportHistory.user_id == user_id)
+        .order_by(desc(ReportHistory.generated_at))
+        .limit(1)
+    )
+
+    history_rows = (await session.execute(
+        select(ReportHistory.id, ReportHistory.generated_at, ReportHistory.sent_via)
+        .where(ReportHistory.user_id == user_id)
+        .order_by(desc(ReportHistory.generated_at))
+        .limit(20)
+    )).all()
+
+    history = [{"id": r[0], "date": r[1], "via": r[2]} for r in history_rows]
+
+    return templates.TemplateResponse("report_detail.html", {
+        "request": request,
+        "current_user": current_user,
+        "target_user": target,
+        "latest": latest,
+        "history": history,
+    })
+
+
+@router.post("/reports/{user_id}/generate", response_class=HTMLResponse)
+async def report_generate(
+    request: Request,
+    user_id: int,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Regenerate report for user and redirect to view page."""
+    target = await session.scalar(select(User).where(User.id == user_id))
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if not (
+        current_user.is_admin
+        or current_user.id == user_id
+        or current_user.role in (RoleEnum.DIVISION_MANAGER, RoleEnum.DEPUTY_DIVISION_MANAGER)
+        or (current_user.role == RoleEnum.DEPARTMENT_MANAGER and target.manager_id == current_user.id)
+    ):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    from app.services.weekly_report_service import generate_report_for_user
+    await generate_report_for_user(
+        target, session,
+        triggered_by_id=current_user.id,
+        sent_via="dashboard",
+    )
+    return RedirectResponse(f"/dashboard/reports/{user_id}", status_code=302)
+
+
+@router.post("/reports/{user_id}/send", response_class=HTMLResponse)
+async def report_send(
+    request: Request,
+    user_id: int,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Send the latest report for a user to their Telegram."""
+    target = await session.scalar(select(User).where(User.id == user_id))
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if not (
+        current_user.is_admin
+        or current_user.id == user_id
+        or current_user.role in (RoleEnum.DIVISION_MANAGER, RoleEnum.DEPUTY_DIVISION_MANAGER)
+        or (current_user.role == RoleEnum.DEPARTMENT_MANAGER and target.manager_id == current_user.id)
+    ):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    if not target.telegram_id:
+        return HTMLResponse('<script>alert("למשתמש זה אין Telegram."); window.history.back();</script>')
+
+    latest = await session.scalar(
+        select(ReportHistory)
+        .where(ReportHistory.user_id == user_id)
+        .order_by(desc(ReportHistory.generated_at))
+        .limit(1)
+    )
+    if not latest:
+        return HTMLResponse('<script>alert("אין דוח שמור — יש לייצר תחילה."); window.history.back();</script>')
+
+    from app.services.weekly_report_service import send_report_to_user
+    from app.services.telegram_polling import telegram_bot
+    if not telegram_bot.application or not telegram_bot.application.bot:
+        return HTMLResponse('<script>alert("הבוט אינו פעיל."); window.history.back();</script>')
+
+    import asyncio
+    asyncio.create_task(send_report_to_user(
+        telegram_bot.application.bot,
+        target.telegram_id,
+        latest.sections,
+    ))
+    return HTMLResponse(
+        f'<script>alert("הדוח נשלח ל-{target.username or user_id}."); '
+        f'window.location.href="/dashboard/reports/{user_id}";</script>'
+    )
+
+
+@router.get("/reports/{user_id}/history/{report_id}", response_class=HTMLResponse)
+async def report_history_view(
+    request: Request,
+    user_id: int,
+    report_id: int,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+):
+    """View a specific historical report."""
+    target = await session.scalar(select(User).where(User.id == user_id))
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if not (
+        current_user.is_admin
+        or current_user.id == user_id
+        or current_user.role in (RoleEnum.DIVISION_MANAGER, RoleEnum.DEPUTY_DIVISION_MANAGER)
+        or (current_user.role == RoleEnum.DEPARTMENT_MANAGER and target.manager_id == current_user.id)
+    ):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    row = await session.scalar(
+        select(ReportHistory).where(
+            ReportHistory.id == report_id,
+            ReportHistory.user_id == user_id,
+        )
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Report not found")
+
+    return templates.TemplateResponse("report_detail.html", {
+        "request": request,
+        "current_user": current_user,
+        "target_user": target,
+        "latest": row,
+        "history": [],
+    })
