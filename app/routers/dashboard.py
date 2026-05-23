@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, or_, exists, update, delete, desc
 
 from app.database import get_db_session
-from app.models import Decision, User, DecisionTypeEnum, DecisionStatusEnum, RoleEnum, DecisionDistribution, DistributionTypeEnum, DistributionStatusEnum, DecisionFeedback, DecisionRaciRole, RaciRoleEnum, LessonLearned, Message, KnowledgeFile, QueryLog, RACISuggestion, RACISuggestionStatusEnum, RACIRule
+from app.models import Decision, User, DecisionTypeEnum, DecisionStatusEnum, RoleEnum, DecisionDistribution, DistributionTypeEnum, DistributionStatusEnum, DecisionFeedback, DecisionRaciRole, RaciRoleEnum, LessonLearned, Message, KnowledgeFile, QueryLog, RACISuggestion, RACISuggestionStatusEnum, RACIRule, ReportHistory
 from app.routers.login import get_current_user
 
 logger = logging.getLogger(__name__)
@@ -2436,8 +2436,6 @@ async def profile_save(
 
 # ── Reports management ────────────────────────────────────────────────────────
 
-from app.models import ReportHistory
-
 
 @router.get("/reports", response_class=HTMLResponse)
 async def reports_index(
@@ -2466,7 +2464,9 @@ async def reports_index(
         .group_by(ReportHistory.user_id)
         .subquery()
     )
-    latest_map_rows = (await session.execute(select(latest_stmt))).all()
+    latest_map_rows = (await session.execute(
+        select(latest_stmt.c.user_id, latest_stmt.c.last_report)
+    )).all()
     latest_map = {row[0]: row[1] for row in latest_map_rows}
 
     users_data = [
@@ -2598,11 +2598,15 @@ async def report_send(
         return HTMLResponse('<script>alert("הבוט אינו פעיל."); window.history.back();</script>')
 
     import asyncio
-    asyncio.create_task(send_report_to_user(
+    _task = asyncio.create_task(send_report_to_user(
         telegram_bot.application.bot,
         target.telegram_id,
         latest.sections,
     ))
+    _task.add_done_callback(
+        lambda t: logger.error("report_send background task failed: %s", t.exception())
+        if not t.cancelled() and t.exception() else None
+    )
     return HTMLResponse(
         f'<script>alert("הדוח נשלח ל-{target.username or user_id}."); '
         f'window.location.href="/dashboard/reports/{user_id}";</script>'
