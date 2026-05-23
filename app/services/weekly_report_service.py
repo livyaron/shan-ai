@@ -84,6 +84,43 @@ _FALLBACK_SECTIONS = {
 }
 
 
+def _sanitize_json_string(s: str) -> str:
+    """Escape literal control characters inside JSON string values."""
+    result = []
+    in_string = False
+    i = 0
+    while i < len(s):
+        c = s[i]
+        if c == '\\' and in_string:
+            result.append(c)
+            i += 1
+            if i < len(s):
+                result.append(s[i])
+            i += 1
+            continue
+        if c == '"':
+            in_string = not in_string
+        elif in_string:
+            if c == '\n':
+                result.append('\\n')
+                i += 1
+                continue
+            elif c == '\r':
+                result.append('\\r')
+                i += 1
+                continue
+            elif c == '\t':
+                result.append('\\t')
+                i += 1
+                continue
+            elif ord(c) < 0x20:
+                i += 1
+                continue
+        result.append(c)
+        i += 1
+    return ''.join(result)
+
+
 def _trim_decisions(d: dict) -> dict:
     """Strip sample list down to 3 items for prompt efficiency."""
     if not d:
@@ -154,6 +191,7 @@ async def generate_report_for_user(
             cleaned = parts[1] if len(parts) > 1 else cleaned
             if cleaned.startswith("json"):
                 cleaned = cleaned[4:]
+        cleaned = _sanitize_json_string(cleaned)
         parsed = json.loads(cleaned)
         sections = {
             "prologue":  str(parsed.get("prologue") or ""),
