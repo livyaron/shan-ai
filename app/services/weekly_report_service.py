@@ -62,7 +62,7 @@ decisions (80-100 מילה):
 דגל ⚠️ אם נפח חריג.
 
 projects (120-160 מילה) — ניתוח PMO מלא:
-לכל פרויקט באיחור: ציין 🔴/🟡 + כמה ימים + שלב נוכחי + סיבת שורש קצרה מה-brief.
+לכל פרויקט באיחור: השתמש בשם הפרויקט (לא ב-identifier), ציין 🔴/🟡 + כמה ימים + שלב נוכחי + סיבת שורש קצרה מה-brief.
 לסיכונים: דרג לפי חומרה, ציין בעלים אם חסר.
 "חייב לפעול השבוע" — 3 פריטים ממוספרים ספציפיים (מי/מה/מתי).
 תחזית: אם המגמה הנוכחית תמשך, מה יקרה ב-30 ימים הבאים?
@@ -311,8 +311,7 @@ async def _projects_behind_schedule(user: User, session: AsyncSession, today) ->
         days_behind = (today - p.estimated_finish_date).days
         health = "🔴 קריטי" if days_behind > 30 else "🟡 באיחור"
         result.append({
-            "identifier": p.project_identifier,
-            "name": p.name or "",
+            "project": f"{p.name or p.project_identifier} ({p.project_identifier})",
             "stage": p.stage or "",
             "finish_date": str(p.estimated_finish_date),
             "days_behind": days_behind,
@@ -334,8 +333,7 @@ async def _risky_projects(user: User, session: AsyncSession) -> list[dict]:
     rows = (await session.execute(stmt.limit(8))).scalars().all()
     return [
         {
-            "identifier": p.project_identifier,
-            "name": p.name or "",
+            "project": f"{p.name or p.project_identifier} ({p.project_identifier})",
             "stage": p.stage or "",
             "risks": (p.risks or "")[:100],
             "brief": (p.weekly_report_brief or "")[:150],
@@ -354,7 +352,7 @@ async def _handle_projects(user: User, session: AsyncSession) -> list[dict]:
         stmt = stmt.where(Project.manager.ilike(f"%{user.username}%"))
     rows = (await session.execute(stmt.limit(20))).scalars().all()
     return [
-        {"identifier": p.project_identifier, "name": p.name or "", "to_handle": (p.to_handle or "")[:120]}
+        {"project": f"{p.name or p.project_identifier} ({p.project_identifier})", "to_handle": (p.to_handle or "")[:120]}
         for p in rows
     ]
 
