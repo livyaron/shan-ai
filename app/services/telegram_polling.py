@@ -595,12 +595,11 @@ class TelegramPollingBot:
             if "דוח שלי" in text.strip():
                 await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
                 from app.services.weekly_report_service import generate_report_for_user, send_report_to_user
-                async with async_session_maker() as _rpt_session:
-                    sections = await generate_report_for_user(
-                        user, _rpt_session,
-                        triggered_by_id=user.id,
-                        sent_via="telegram",
-                    )
+                sections = await generate_report_for_user(
+                    user, session,
+                    triggered_by_id=user.id,
+                    sent_via="telegram",
+                )
                 await send_report_to_user(context.bot, update.effective_chat.id, sections)
                 return
 
