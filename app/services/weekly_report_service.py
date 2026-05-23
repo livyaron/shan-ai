@@ -42,35 +42,38 @@ _SECTION_HEADERS = [
 ]
 
 _REPORT_PROMPT = """\
-אתה מנתח BI מומחה לתשתיות חשמל. צור דוח שבועי בעברית עבור {username} (תפקיד: {role_label}).
+אתה מנהל PMO בכיר לתשתיות חשמל. צור דוח שבועי בעברית עבור {username} (תפקיד: {role_label}).
 תאריך: שבוע {date_range}
 
 --- נתוני קלט ---
-החלטות השבוע: {decisions_json}
-אישורים ממתינים לפעולתך: {pending_json}
-פרויקטים באיחור (תאריך סיום עבר): {behind_json}
+החלטות (7 ימים אחרונים): {decisions_json}
+אישורים ממתינים שלך: {pending_json}
+פרויקטים באיחור: {behind_json}
 פרויקטים בסיכון: {risks_json}
 פרויקטים לטיפול (to_handle): {handle_json}
 {delta_section}
---- הוראות לכל חלק ---
-prologue (עד 80 מילה): ברכה בשם, שבוע {date_range}, 1–2 פריטים דחופים לפעולה היום \
-(אישורים תקועים >24ש, פרויקטים באיחור), ספירות מהירות.
-decisions (עד 120 מילה): ספירה לפי סוג (INFO/NORMAL/CRITICAL/UNCERTAIN), אחוז אישורים, \
-רשימה מפורשת של אישורים ממתינים עם מזהה (#ID) ותיאור קצר, דגל אנומליה אם נפח > פי שניים מהרגיל.
-projects (עד 120 מילה): פרויקטים באיחור עם תאריך, סיכונים פתוחים ללא בעלים, \
-רשימת משימות לביצוע ממוספרת מ-to_handle.
-summary (עד 80 מילה): 2–3 הישגים מרכזיים, המלצה אחת לשבוע הבא, משפט עידוד אחרון. אופטימי תמיד.
-delta: {has_delta} — אם "true" תאר בעברית את השינויים המחושבים: החלטות ↑↓%, \
-שינויי שלב פרויקטים, סיכונים חדשים/שנסגרו, מגמות. אם "false" — החזר null.
+--- הנחיות לפלט ---
+
+prologue (50-70 מילה):
+שלום {username}, 1-2 פריטים קריטיים לטיפול היום, ספירות (החלטות/פרויקטים/אישורים).
+
+decisions (80-100 מילה):
+ספירה לפי סוג, אחוז אישורים, רשימה ממוספרת של אישורים ממתינים (#ID + תיאור קצר).
+דגל ⚠️ אם נפח חריג.
+
+projects (120-160 מילה) — ניתוח PMO מלא:
+לכל פרויקט באיחור: ציין 🔴/🟡 + כמה ימים + שלב נוכחי + סיבת שורש קצרה מה-brief.
+לסיכונים: דרג לפי חומרה, ציין בעלים אם חסר.
+"חייב לפעול השבוע" — 3 פריטים ממוספרים ספציפיים (מי/מה/מתי).
+תחזית: אם המגמה הנוכחית תמשך, מה יקרה ב-30 ימים הבאים?
+
+summary (60-80 מילה):
+הישג בולט, סיכון מרכזי, המלצה אחת לשבוע הבא. משפט עידוד. אופטימי.
+
+delta: {has_delta} — אם "true": שינויים מדודים (↑↓%), שינויי שלב, סיכונים חדשים/נסגרו, מגמה. אם "false": null.
 
 --- פורמט תשובה (JSON בלבד, ללא טקסט לפני ואחרי) ---
-{{
-  "prologue": "...",
-  "decisions": "...",
-  "projects": "...",
-  "summary": "...",
-  "delta": "..." | null
-}}"""
+{{"prologue":"...","decisions":"...","projects":"...","summary":"...","delta":"..."}}"""
 
 _FALLBACK_SECTIONS = {
     "prologue":  "‏⚠️ שגיאה בייצור הדוח. נסה שוב מאוחר יותר.",
@@ -79,6 +82,15 @@ _FALLBACK_SECTIONS = {
     "summary":   None,
     "delta":     None,
 }
+
+
+def _trim_decisions(d: dict) -> dict:
+    """Strip sample list down to 3 items for prompt efficiency."""
+    if not d:
+        return d
+    out = dict(d)
+    out["sample"] = d.get("sample", [])[:3]
+    return out
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
@@ -119,11 +131,11 @@ async def generate_report_for_user(
         role_label=role_label,
         username=user.username or role_label,
         date_range=f"{since_str}–{today_str}",
-        decisions_json=json.dumps(raw["decisions"], ensure_ascii=False),
-        pending_json=json.dumps(raw["pending_approvals"][:10], ensure_ascii=False),
-        behind_json=json.dumps(raw["projects_behind"][:5], ensure_ascii=False),
-        risks_json=json.dumps(raw["projects_at_risk"][:5], ensure_ascii=False),
-        handle_json=json.dumps(raw["handle_items"][:5], ensure_ascii=False),
+        decisions_json=json.dumps(_trim_decisions(raw["decisions"]), ensure_ascii=False),
+        pending_json=json.dumps(raw["pending_approvals"][:5], ensure_ascii=False),
+        behind_json=json.dumps(raw["projects_behind"][:4], ensure_ascii=False),
+        risks_json=json.dumps(raw["projects_at_risk"][:4], ensure_ascii=False),
+        handle_json=json.dumps(raw["handle_items"][:3], ensure_ascii=False),
         delta_section=delta_section_text,
         has_delta=has_delta,
     )
@@ -133,7 +145,7 @@ async def generate_report_for_user(
         raw_response = await llm_chat(
             "weekly_report",
             messages=[{"role": "user", "content": prompt}],
-            max_tokens=1200,
+            max_tokens=2500,
             temperature=0.3,
         )
         cleaned = raw_response.strip()
@@ -293,12 +305,22 @@ async def _projects_behind_schedule(user: User, session: AsyncSession, today) ->
     )
     if user.role == RoleEnum.PROJECT_MANAGER and user.username:
         stmt = stmt.where(Project.manager.ilike(f"%{user.username}%"))
-    rows = (await session.execute(stmt.limit(10))).scalars().all()
-    return [
-        {"identifier": p.project_identifier, "name": p.name or "",
-         "finish_date": str(p.estimated_finish_date)}
-        for p in rows
-    ]
+    rows = (await session.execute(stmt.limit(8))).scalars().all()
+    result = []
+    for p in rows:
+        days_behind = (today - p.estimated_finish_date).days
+        health = "🔴 קריטי" if days_behind > 30 else "🟡 באיחור"
+        result.append({
+            "identifier": p.project_identifier,
+            "name": p.name or "",
+            "stage": p.stage or "",
+            "finish_date": str(p.estimated_finish_date),
+            "days_behind": days_behind,
+            "health": health,
+            "brief": (p.weekly_report_brief or "")[:200],
+            "manager": p.manager or "",
+        })
+    return result
 
 
 async def _risky_projects(user: User, session: AsyncSession) -> list[dict]:
@@ -309,9 +331,15 @@ async def _risky_projects(user: User, session: AsyncSession) -> list[dict]:
     )
     if user.role == RoleEnum.PROJECT_MANAGER and user.username:
         stmt = stmt.where(Project.manager.ilike(f"%{user.username}%"))
-    rows = (await session.execute(stmt.limit(20))).scalars().all()
+    rows = (await session.execute(stmt.limit(8))).scalars().all()
     return [
-        {"identifier": p.project_identifier, "name": p.name or "", "risks": (p.risks or "")[:120]}
+        {
+            "identifier": p.project_identifier,
+            "name": p.name or "",
+            "stage": p.stage or "",
+            "risks": (p.risks or "")[:100],
+            "brief": (p.weekly_report_brief or "")[:150],
+        }
         for p in rows
     ]
 
