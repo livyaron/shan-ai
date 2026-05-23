@@ -1,12 +1,26 @@
-"""Weekly intelligence report — role-scoped AI digest sent every Thursday at 17:00 Israel time."""
+"""Weekly intelligence report v2.
+
+generate_report_for_user(user, session, triggered_by_id, sent_via) -> dict
+    Role-scoped data gather → single LLM call → JSON sections → persist ReportHistory row.
+
+send_report_to_user(bot, chat_id, sections, recipient_label) -> None
+    Sends each non-null section as a separate Telegram message (avoids 4096-char limit).
+
+send_weekly_reports_cron(bot) -> None
+    Cron entry point — sends self-report to every active non-VIEWER user.
+"""
 import json
 import logging
 from datetime import datetime, timedelta
 
-from sqlalchemy import select, or_
+from sqlalchemy import select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import User, Decision, Project, RoleEnum, DecisionStatusEnum
+from app.models import (
+    User, Decision, Project, RoleEnum, DecisionStatusEnum,
+    DecisionDistribution, DistributionTypeEnum, DistributionStatusEnum,
+    ReportHistory,
+)
 import app.database as _app_database
 from app.services.llm_router import llm_chat
 
@@ -19,112 +33,272 @@ _ROLE_LABELS = {
     RoleEnum.DIVISION_MANAGER:         "מנהל אגף",
 }
 
+_SECTION_HEADERS = [
+    ("prologue",  "📊 פתיח"),
+    ("decisions", "📋 החלטות השבוע"),
+    ("projects",  "🏗️ מצב פרויקטים"),
+    ("summary",   "✅ סיכום ומסקנות"),
+    ("delta",     "📈 שינויים מהדוח הקודם"),
+]
+
 _REPORT_PROMPT = """\
-אתה עוזר BI לצוות תשתיות חשמל. צור סיכום שבועי תמציתי בעברית (עד 300 מילה).
-תפקיד המקבל: {role}
+אתה מנתח BI מומחה לתשתיות חשמל. צור דוח שבועי בעברית עבור {username} (תפקיד: {role_label}).
+תאריך: שבוע {date_range}
 
-נתונים:
-- החלטות השבוע: {decisions_json}
-- פרויקטים עם סיכונים: {risks_json}
-- פרויקטים לטיפול: {handle_json}
+--- נתוני קלט ---
+החלטות השבוע: {decisions_json}
+אישורים ממתינים לפעולתך: {pending_json}
+פרויקטים באיחור (תאריך סיום עבר): {behind_json}
+פרויקטים בסיכון: {risks_json}
+פרויקטים לטיפול (to_handle): {handle_json}
+{delta_section}
+--- הוראות לכל חלק ---
+prologue (עד 80 מילה): ברכה בשם, שבוע {date_range}, 1–2 פריטים דחופים לפעולה היום \
+(אישורים תקועים >24ש, פרויקטים באיחור), ספירות מהירות.
+decisions (עד 120 מילה): ספירה לפי סוג (INFO/NORMAL/CRITICAL/UNCERTAIN), אחוז אישורים, \
+רשימה מפורשת של אישורים ממתינים עם מזהה (#ID) ותיאור קצר, דגל אנומליה אם נפח > פי שניים מהרגיל.
+projects (עד 120 מילה): פרויקטים באיחור עם תאריך, סיכונים פתוחים ללא בעלים, \
+רשימת משימות לביצוע ממוספרת מ-to_handle.
+summary (עד 80 מילה): 2–3 הישגים מרכזיים, המלצה אחת לשבוע הבא, משפט עידוד אחרון. אופטימי תמיד.
+delta: {has_delta} — אם "true" תאר בעברית את השינויים המחושבים: החלטות ↑↓%, \
+שינויי שלב פרויקטים, סיכונים חדשים/שנסגרו, מגמות. אם "false" — החזר null.
 
-כלול: ספירה לפי סוג, אחוז אישורים, 2–3 ממצאים בולטים, אנומליות אם קיימות.
-סיים עם משפט עידוד קצר.
-טקסט עברית בלבד — ללא JSON, ללא markdown."""
+--- פורמט תשובה (JSON בלבד, ללא טקסט לפני ואחרי) ---
+{{
+  "prologue": "...",
+  "decisions": "...",
+  "projects": "...",
+  "summary": "...",
+  "delta": "..." | null
+}}"""
+
+_FALLBACK_SECTIONS = {
+    "prologue":  "‏⚠️ שגיאה בייצור הדוח. נסה שוב מאוחר יותר.",
+    "decisions": None,
+    "projects":  None,
+    "summary":   None,
+    "delta":     None,
+}
 
 
-async def generate_report_for_user(user: User, session: AsyncSession) -> str:
-    """Build a role-scoped weekly report for one user. Returns Hebrew HTML-safe string."""
-    since = datetime.utcnow() - timedelta(days=7)
+# ── Public API ────────────────────────────────────────────────────────────────
+
+async def generate_report_for_user(
+    user: User,
+    session: AsyncSession,
+    triggered_by_id: int | None = None,
+    sent_via: str = "telegram",
+) -> dict:
+    """Generate, persist, and return sections dict for one user."""
     role_label = _ROLE_LABELS.get(user.role, user.role.value if user.role else "משתמש")
+    today_str  = datetime.utcnow().strftime("%d/%m/%Y")
+    since_str  = (datetime.utcnow() - timedelta(days=7)).strftime("%d/%m/%Y")
 
-    decisions_data = await _decisions_for_role(user, session, since)
-    risks_data = await _risky_projects_for_role(user, session)
-    handle_data = await _handle_projects_for_role(user, session)
+    raw = await _gather_raw_data(user, session)
 
-    if not decisions_data and not risks_data and not handle_data:
-        return f"‏📊 <b>דוח שבועי — {role_label}</b>\n\nלא נמצאו נתונים לסיכום השבוע."
+    # Fetch previous report for delta
+    prev_row = await session.scalar(
+        select(ReportHistory)
+        .where(ReportHistory.user_id == user.id)
+        .order_by(desc(ReportHistory.generated_at))
+        .limit(1)
+    )
+
+    delta_section_text = ""
+    has_delta = "false"
+    if prev_row and prev_row.raw_data:
+        delta_input = _compute_delta(raw, prev_row.raw_data)
+        prev_date = prev_row.generated_at.strftime("%d/%m/%Y")
+        delta_section_text = (
+            f"שינויים מהדוח הקודם ({prev_date}):\n"
+            f"{json.dumps(delta_input, ensure_ascii=False)}\n"
+        )
+        has_delta = "true"
 
     prompt = _REPORT_PROMPT.format(
-        role=role_label,
-        decisions_json=json.dumps(decisions_data, ensure_ascii=False),
-        risks_json=json.dumps(risks_data[:5], ensure_ascii=False),
-        handle_json=json.dumps(handle_data[:5], ensure_ascii=False),
+        role_label=role_label,
+        username=user.username or role_label,
+        date_range=f"{since_str}–{today_str}",
+        decisions_json=json.dumps(raw["decisions"], ensure_ascii=False),
+        pending_json=json.dumps(raw["pending_approvals"][:10], ensure_ascii=False),
+        behind_json=json.dumps(raw["projects_behind"][:5], ensure_ascii=False),
+        risks_json=json.dumps(raw["projects_at_risk"][:5], ensure_ascii=False),
+        handle_json=json.dumps(raw["handle_items"][:5], ensure_ascii=False),
+        delta_section=delta_section_text,
+        has_delta=has_delta,
     )
+
+    sections = dict(_FALLBACK_SECTIONS)
     try:
-        body = await llm_chat(
+        raw_response = await llm_chat(
             "weekly_report",
             messages=[{"role": "user", "content": prompt}],
-            max_tokens=600,
+            max_tokens=1200,
             temperature=0.3,
         )
-        return f"‏📊 <b>דוח שבועי — {role_label}</b>\n\n{body.strip()}"
+        cleaned = raw_response.strip()
+        if cleaned.startswith("```"):
+            parts = cleaned.split("```")
+            cleaned = parts[1] if len(parts) > 1 else cleaned
+            if cleaned.startswith("json"):
+                cleaned = cleaned[4:]
+        parsed = json.loads(cleaned)
+        sections = {
+            "prologue":  str(parsed.get("prologue") or ""),
+            "decisions": parsed.get("decisions") or None,
+            "projects":  parsed.get("projects") or None,
+            "summary":   parsed.get("summary") or None,
+            "delta":     parsed.get("delta") or None,
+        }
+        if not sections["prologue"]:
+            sections["prologue"] = _FALLBACK_SECTIONS["prologue"]
     except Exception as exc:
-        logger.error(f"Weekly report LLM call failed for user {user.id}: {exc}")
-        return "‏⚠️ לא הצלחתי לייצר דוח שבועי. נסה שוב מאוחר יותר."
+        logger.error(f"Weekly report LLM/parse failed for user {user.id}: {exc}")
+
+    row = ReportHistory(
+        user_id=user.id,
+        sections=sections,
+        raw_data=raw,
+        triggered_by=triggered_by_id,
+        sent_via=sent_via,
+    )
+    session.add(row)
+    await session.flush()
+
+    return sections
 
 
-async def send_weekly_reports(bot) -> None:
-    """Send weekly report to every active non-VIEWER user that has a telegram_id."""
+async def send_report_to_user(
+    bot,
+    chat_id: int,
+    sections: dict,
+    recipient_label: str = "",
+) -> None:
+    """Send sections as sequential Telegram messages. Skips null sections."""
+    for i, (key, header) in enumerate(_SECTION_HEADERS):
+        body = sections.get(key)
+        if not body:
+            continue
+        prefix = f"‏👤 דוח עבור: <b>{recipient_label}</b>\n\n" if (i == 0 and recipient_label) else ""
+        text = f"‏<b>{header}</b>\n\n{prefix}{body}"[:4000]
+        await bot.send_message(chat_id=chat_id, text=text, parse_mode="HTML")
+
+
+async def send_weekly_reports_cron(bot) -> None:
+    """Cron entry point — send self-report to every active non-VIEWER user."""
     async with _app_database.async_session_maker() as session:
         stmt = select(User).where(
             User.telegram_id.isnot(None),
             User.role.isnot(None),
         )
         all_users = (await session.execute(stmt)).scalars().all()
-        # Filter VIEWER in Python to avoid DB enum mismatch on legacy schemas
         users = [u for u in all_users if u.role != RoleEnum.VIEWER]
 
         for user in users:
             try:
-                text = await generate_report_for_user(user, session)
-                await bot.send_message(
-                    chat_id=user.telegram_id,
-                    text=text,
-                    parse_mode="HTML",
-                )
-                logger.info(f"Weekly report sent to user {user.id} ({user.username})")
+                sections = await generate_report_for_user(user, session, sent_via="cron")
+                await send_report_to_user(bot, user.telegram_id, sections)
+                logger.info(f"Weekly cron report sent to user {user.id} ({user.username})")
             except Exception as exc:
-                logger.error(f"Weekly report send failed for user {user.id}: {exc}")
+                logger.error(f"Weekly cron report failed for user {user.id}: {exc}")
 
 
-async def _decisions_for_role(user: User, session: AsyncSession, since: datetime) -> list[dict]:
+# ── Data gathering ────────────────────────────────────────────────────────────
+
+async def _gather_raw_data(user: User, session: AsyncSession) -> dict:
+    since = datetime.utcnow() - timedelta(days=7)
+    today = datetime.utcnow().date()
+
+    decisions   = await _decisions_summary(user, session, since)
+    pending     = await _pending_approvals(user, session)
+    behind      = await _projects_behind_schedule(user, session, today)
+    at_risk     = await _risky_projects(user, session)
+    handle      = await _handle_projects(user, session)
+    stage_map   = await _project_stage_map(user, session)
+
+    return {
+        "decisions":         decisions,
+        "pending_approvals": pending,
+        "projects_behind":   behind,
+        "projects_at_risk":  at_risk,
+        "handle_items":      handle,
+        "stage_map":         stage_map,
+    }
+
+
+async def _decisions_summary(user: User, session: AsyncSession, since: datetime) -> dict:
     stmt = select(Decision).where(Decision.created_at >= since)
-
     if user.role == RoleEnum.PROJECT_MANAGER:
         stmt = stmt.where(Decision.submitter_id == user.id)
     elif user.role == RoleEnum.DEPARTMENT_MANAGER:
         sub_ids = await _subordinate_ids(user, session)
-        stmt = stmt.where(or_(
-            Decision.submitter_id == user.id,
-            Decision.submitter_id.in_(sub_ids) if sub_ids else Decision.submitter_id == user.id,
-        ))
+        if sub_ids:
+            from sqlalchemy import or_
+            stmt = stmt.where(or_(
+                Decision.submitter_id == user.id,
+                Decision.submitter_id.in_(sub_ids),
+            ))
+        else:
+            stmt = stmt.where(Decision.submitter_id == user.id)
     # DEPUTY / DIVISION_MANAGER: no filter — see all
 
     rows = (await session.execute(stmt)).scalars().all()
     if not rows:
-        return []
+        return {}
 
     type_counts: dict[str, int] = {}
     approved = 0
     for d in rows:
-        t = d.type.value if d.type else "unknown"
+        t = d.type.value.upper() if d.type else "UNKNOWN"
         type_counts[t] = type_counts.get(t, 0) + 1
         if d.status == DecisionStatusEnum.APPROVED:
             approved += 1
 
-    return [{
-        "total": len(rows),
-        "by_type": type_counts,
+    return {
+        "total":             len(rows),
+        "by_type":           type_counts,
         "approval_rate_pct": round(approved / len(rows) * 100),
         "sample": [
             {"id": d.id, "type": d.type.value if d.type else "", "summary": (d.summary or "")[:80]}
             for d in rows[:8]
         ],
-    }]
+    }
 
 
-async def _risky_projects_for_role(user: User, session: AsyncSession) -> list[dict]:
+async def _pending_approvals(user: User, session: AsyncSession) -> list[dict]:
+    stmt = (
+        select(Decision)
+        .join(DecisionDistribution, DecisionDistribution.decision_id == Decision.id)
+        .where(
+            DecisionDistribution.user_id == user.id,
+            DecisionDistribution.distribution_type == DistributionTypeEnum.APPROVAL,
+            DecisionDistribution.status == DistributionStatusEnum.PENDING,
+        )
+    )
+    rows = (await session.execute(stmt)).scalars().all()
+    return [
+        {"id": d.id, "type": d.type.value if d.type else "", "summary": (d.summary or "")[:80]}
+        for d in rows
+    ]
+
+
+async def _projects_behind_schedule(user: User, session: AsyncSession, today) -> list[dict]:
+    stmt = select(Project).where(
+        Project.is_active == True,
+        Project.estimated_finish_date.isnot(None),
+        Project.estimated_finish_date <= today,
+    )
+    if user.role == RoleEnum.PROJECT_MANAGER and user.username:
+        stmt = stmt.where(Project.manager.ilike(f"%{user.username}%"))
+    rows = (await session.execute(stmt.limit(10))).scalars().all()
+    return [
+        {"identifier": p.project_identifier, "name": p.name or "",
+         "finish_date": str(p.estimated_finish_date)}
+        for p in rows
+    ]
+
+
+async def _risky_projects(user: User, session: AsyncSession) -> list[dict]:
     stmt = select(Project).where(
         Project.is_active == True,
         Project.risks.isnot(None),
@@ -132,13 +306,14 @@ async def _risky_projects_for_role(user: User, session: AsyncSession) -> list[di
     )
     if user.role == RoleEnum.PROJECT_MANAGER and user.username:
         stmt = stmt.where(Project.manager.ilike(f"%{user.username}%"))
-
     rows = (await session.execute(stmt.limit(20))).scalars().all()
-    return [{"identifier": p.project_identifier, "name": p.name or "", "risks": (p.risks or "")[:120]}
-            for p in rows]
+    return [
+        {"identifier": p.project_identifier, "name": p.name or "", "risks": (p.risks or "")[:120]}
+        for p in rows
+    ]
 
 
-async def _handle_projects_for_role(user: User, session: AsyncSession) -> list[dict]:
+async def _handle_projects(user: User, session: AsyncSession) -> list[dict]:
     stmt = select(Project).where(
         Project.is_active == True,
         Project.to_handle.isnot(None),
@@ -146,13 +321,62 @@ async def _handle_projects_for_role(user: User, session: AsyncSession) -> list[d
     )
     if user.role == RoleEnum.PROJECT_MANAGER and user.username:
         stmt = stmt.where(Project.manager.ilike(f"%{user.username}%"))
-
     rows = (await session.execute(stmt.limit(20))).scalars().all()
-    return [{"identifier": p.project_identifier, "name": p.name or "", "to_handle": (p.to_handle or "")[:120]}
-            for p in rows]
+    return [
+        {"identifier": p.project_identifier, "name": p.name or "", "to_handle": (p.to_handle or "")[:120]}
+        for p in rows
+    ]
+
+
+async def _project_stage_map(user: User, session: AsyncSession) -> dict[str, str]:
+    stmt = select(Project.project_identifier, Project.stage).where(Project.is_active == True)
+    if user.role == RoleEnum.PROJECT_MANAGER and user.username:
+        stmt = stmt.where(Project.manager.ilike(f"%{user.username}%"))
+    rows = (await session.execute(stmt.limit(200))).all()
+    return {row[0]: (row[1] or "") for row in rows if row[0]}
 
 
 async def _subordinate_ids(user: User, session: AsyncSession) -> list[int]:
-    stmt = select(User.id).where(User.manager_id == user.id)
-    rows = (await session.execute(stmt)).scalars().all()
+    rows = (await session.execute(
+        select(User.id).where(User.manager_id == user.id)
+    )).scalars().all()
     return list(rows)
+
+
+def _compute_delta(current: dict, prev: dict) -> dict:
+    """Compute structured diff between current and previous raw_data snapshots."""
+    c_dec = current.get("decisions") or {}
+    p_dec = prev.get("decisions") or {}
+
+    curr_total = c_dec.get("total", 0)
+    prev_total = p_dec.get("total", 0)
+
+    curr_stages = current.get("stage_map", {})
+    prev_stages = prev.get("stage_map", {})
+    stage_changes = [
+        {"id": k, "from": prev_stages[k], "to": curr_stages[k]}
+        for k in curr_stages
+        if k in prev_stages and curr_stages[k] != prev_stages[k]
+    ]
+
+    curr_risk_ids = {p["identifier"] for p in current.get("projects_at_risk", [])}
+    prev_risk_ids = {p["identifier"] for p in prev.get("projects_at_risk", [])}
+
+    return {
+        "decisions_change":         curr_total - prev_total,
+        "prev_decisions_total":     prev_total,
+        "curr_decisions_total":     curr_total,
+        "prev_approval_rate_pct":   p_dec.get("approval_rate_pct", 0),
+        "curr_approval_rate_pct":   c_dec.get("approval_rate_pct", 0),
+        "pending_approvals_change": (
+            len(current.get("pending_approvals", [])) -
+            len(prev.get("pending_approvals", []))
+        ),
+        "stage_changes":            stage_changes,
+        "new_risks":                list(curr_risk_ids - prev_risk_ids),
+        "resolved_risks":           list(prev_risk_ids - curr_risk_ids),
+        "behind_schedule_change":   (
+            len(current.get("projects_behind", [])) -
+            len(prev.get("projects_behind", []))
+        ),
+    }
