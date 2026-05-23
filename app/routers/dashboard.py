@@ -2682,7 +2682,7 @@ async def reports_generate_all(
             await generate_report_for_user(u, session, triggered_by_id=current_user.id, sent_via="dashboard")
         except Exception as e:
             errors += 1
-            logger.error(f"generate_all: failed for user {u.id}: {e}")
+            logger.error(f"generate_all: failed for user {u.id}: {e}", exc_info=True)
 
     msg = f"נוצרו {len(users) - errors} דוחות."
     if errors:
