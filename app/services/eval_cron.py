@@ -57,9 +57,9 @@ async def _nightly_run() -> None:
 
 async def _weekly_report_run() -> None:
     """Send weekly reports to all active users (Thursday 17:00 Israel time)."""
-    from app.services.weekly_report_service import send_weekly_reports
+    from app.services.weekly_report_service import send_weekly_reports_cron
     from app.services.telegram_polling import telegram_bot
     if telegram_bot.application and telegram_bot.application.bot:
-        await send_weekly_reports(telegram_bot.application.bot)
+        await send_weekly_reports_cron(telegram_bot.application.bot)
     else:
         logger.warning("weekly_report_run: bot not available, skipping")
