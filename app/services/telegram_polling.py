@@ -28,12 +28,15 @@ from app.services.decisions_menu_service import get_menu_shortcut_keyboard
 
 logger = logging.getLogger(__name__)
 
-def _main_reply_keyboard() -> ReplyKeyboardMarkup:
-    return ReplyKeyboardMarkup(
-        [["📁 פרוייקטים", "📋 החלטות"]],
-        resize_keyboard=True,
-        is_persistent=True,
-    )
+def _main_reply_keyboard(user=None) -> ReplyKeyboardMarkup:
+    from app.models import RoleEnum
+    manager_roles = {RoleEnum.DEPARTMENT_MANAGER, RoleEnum.DEPUTY_DIVISION_MANAGER, RoleEnum.DIVISION_MANAGER}
+    rows = [["📁 פרוייקטים", "📋 החלטות"]]
+    if user and user.role in manager_roles:
+        rows.append(["📊 דוח שלי", "👥 דוח צוות"])
+    else:
+        rows.append(["📊 דוח שלי"])
+    return ReplyKeyboardMarkup(rows, resize_keyboard=True, is_persistent=True)
 
 
 def _viewer_reply_keyboard() -> ReplyKeyboardMarkup:
@@ -48,7 +51,7 @@ def _keyboard_for_user(user) -> ReplyKeyboardMarkup:
     from app.models import RoleEnum
     if user and user.role == RoleEnum.VIEWER:
         return _viewer_reply_keyboard()
-    return _main_reply_keyboard()
+    return _main_reply_keyboard(user)
 
 _VIEWER_DECISIONS_BLOCKED = "‏🔒 גישה לתפריט ההחלטות אינה זמינה למשתמשי צפייה."
 
@@ -359,9 +362,11 @@ class TelegramPollingBot:
                 await update.message.reply_text("‏🔒 דוח שבועי אינו זמין לצופים.")
                 return
             await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
-            from app.services.weekly_report_service import generate_report_for_user
-            report = await generate_report_for_user(user, session)
-        await update.message.reply_text(report, parse_mode="HTML")
+            from app.services.weekly_report_service import generate_report_for_user, send_report_to_user
+            sections = await generate_report_for_user(
+                user, session, triggered_by_id=user.id, sent_via="telegram"
+            )
+        await send_report_to_user(context.bot, update.effective_chat.id, sections)
 
     # ------------------------------------------------------------------
     # /ask command — knowledge base Q&A
@@ -584,6 +589,19 @@ class TelegramPollingBot:
             from app.models import RoleEnum as _RE
             if user.role == _RE.VIEWER:
                 await self._handle_viewer_message(update, context, user, text.strip())
+                return
+
+            # Report shortcut — "📊 דוח שלי"
+            if "דוח שלי" in text.strip():
+                await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+                from app.services.weekly_report_service import generate_report_for_user, send_report_to_user
+                async with async_session_maker() as _rpt_session:
+                    sections = await generate_report_for_user(
+                        user, _rpt_session,
+                        triggered_by_id=user.id,
+                        sent_via="telegram",
+                    )
+                await send_report_to_user(context.bot, update.effective_chat.id, sections)
                 return
 
             # Decisions menu keyword shortcut
