@@ -2668,6 +2668,7 @@ async def reports_generate_all(
         stmt = select(User).where(
             User.role.isnot(None), User.role != RoleEnum.VIEWER,
             User.manager_id == current_user.id,
+            User.id != current_user.id,
         )
     else:
         stmt = select(User).where(User.role.isnot(None), User.role != RoleEnum.VIEWER)
@@ -2675,17 +2676,17 @@ async def reports_generate_all(
     users = (await session.execute(stmt)).scalars().all()
 
     from app.services.weekly_report_service import generate_report_for_user
-    errors = []
+    errors = 0
     for u in users:
         try:
             await generate_report_for_user(u, session, triggered_by_id=current_user.id, sent_via="dashboard")
         except Exception as e:
-            errors.append(u.username or str(u.id))
+            errors += 1
             logger.error(f"generate_all: failed for user {u.id}: {e}")
 
-    msg = f"נוצרו {len(users) - len(errors)} דוחות."
+    msg = f"נוצרו {len(users) - errors} דוחות."
     if errors:
-        msg += f" שגיאות: {', '.join(errors)}"
+        msg += f" {errors} נכשלו."
     return HTMLResponse(
         f'<script>alert("{msg}"); window.location.href="/dashboard/reports";</script>'
     )
@@ -2707,6 +2708,7 @@ async def reports_send_all(
         stmt = select(User).where(
             User.role.isnot(None), User.role != RoleEnum.VIEWER,
             User.manager_id == current_user.id,
+            User.id != current_user.id,
             User.telegram_id.isnot(None),
         )
     else:
@@ -2723,7 +2725,7 @@ async def reports_send_all(
         return HTMLResponse('<script>alert("הבוט אינו פעיל."); window.history.back();</script>')
 
     sent = 0
-    errors = []
+    errors = 0
     for u in users:
         latest = await session.scalar(
             select(ReportHistory)
@@ -2740,12 +2742,12 @@ async def reports_send_all(
             ))
             sent += 1
         except Exception as e:
-            errors.append(u.username or str(u.id))
+            errors += 1
             logger.error(f"send_all: failed for user {u.id}: {e}")
 
     msg = f"נשלחו {sent} דוחות."
     if errors:
-        msg += f" שגיאות: {', '.join(errors)}"
+        msg += f" {errors} נכשלו."
     return HTMLResponse(
         f'<script>alert("{msg}"); window.location.href="/dashboard/reports";</script>'
     )
