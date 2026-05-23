@@ -87,3 +87,7 @@ def append_context(telegram_id: int, role: str, content: str) -> None:
 def clear_context(telegram_id: int) -> None:
     """Remove all context for this user."""
     _conversation_context.pop(telegram_id, None)
+
+
+# { telegram_id (int): [user_id, ...] }  — subordinate list for team-report selection
+_awaiting_team_report: dict[int, list[int]] = {}

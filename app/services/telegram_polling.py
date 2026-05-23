@@ -604,6 +604,42 @@ class TelegramPollingBot:
                 await send_report_to_user(context.bot, update.effective_chat.id, sections)
                 return
 
+            # Team report shortcut — "👥 דוח צוות" (managers only)
+            if "דוח צוות" in text.strip():
+                from app.models import RoleEnum as _RE2
+                from app.services.telegram_state import _awaiting_team_report
+                _MANAGER_ROLES_RPT = {_RE2.DEPARTMENT_MANAGER, _RE2.DEPUTY_DIVISION_MANAGER, _RE2.DIVISION_MANAGER}
+                if user.role not in _MANAGER_ROLES_RPT:
+                    await update.message.reply_text("‏🔒 דוח צוות זמין למנהלים בלבד.")
+                    return
+                async with async_session_maker() as _sub_session:
+                    sub_rows = (await _sub_session.execute(
+                        select(User).where(User.manager_id == user.id, User.role.isnot(None))
+                    )).scalars().all()
+                if not sub_rows:
+                    await update.message.reply_text("‏📭 אין לך כפופים רשומים במערכת.")
+                    return
+                _awaiting_team_report[telegram_id] = [u.id for u in sub_rows]
+                buttons = []
+                row_buf = []
+                for i, sub in enumerate(sub_rows):
+                    label = f"👤 {sub.username or sub.id}"
+                    row_buf.append(InlineKeyboardButton(label, callback_data=f"rpt:{i}"))
+                    if len(row_buf) == 2:
+                        buttons.append(row_buf)
+                        row_buf = []
+                if row_buf:
+                    buttons.append(row_buf)
+                buttons.append([
+                    InlineKeyboardButton("👥 כולם", callback_data="rpt:all"),
+                    InlineKeyboardButton("❌ ביטול", callback_data="rpt:cancel"),
+                ])
+                await update.message.reply_text(
+                    "‏📊 לאיזה חבר צוות לייצר דוח?",
+                    reply_markup=InlineKeyboardMarkup(buttons),
+                )
+                return
+
             # Decisions menu keyword shortcut
             if "החלטות" in text.strip():
                 if user.role:
@@ -839,6 +875,91 @@ class TelegramPollingBot:
                 _pm_user = await _pm_session.scalar(select(User).where(User.telegram_id == telegram_id))
             if _pm_user:
                 await self._handle_projects_menu(query, context, data, telegram_id, _pm_user)
+            return
+
+        # Team report — manager selected a recipient
+        if data.startswith("rpt:"):
+            from app.services.telegram_state import _awaiting_team_report
+            from app.services.weekly_report_service import generate_report_for_user, send_report_to_user
+            token = data[len("rpt:"):]
+
+            if token == "cancel":
+                _awaiting_team_report.pop(telegram_id, None)
+                await query.edit_message_text("‏❌ בוטל.")
+                return
+
+            async with async_session_maker() as _rpt_cb_session:
+                requester = await _rpt_cb_session.scalar(
+                    select(User).where(User.telegram_id == telegram_id)
+                )
+                if not requester:
+                    await query.answer("שגיאה — משתמש לא נמצא")
+                    return
+
+                sub_ids = _awaiting_team_report.pop(telegram_id, [])
+
+                if token == "all":
+                    target_ids = sub_ids if sub_ids else []
+                    if not target_ids:
+                        await query.edit_message_text("‏📭 לא נמצאו כפופים.")
+                        return
+                    await query.edit_message_text("‏⏳ מייצר דוחות לכל הצוות…")
+                    errors = []
+                    for uid in target_ids:
+                        try:
+                            target = await _rpt_cb_session.scalar(
+                                select(User).where(User.id == uid)
+                            )
+                            if not target:
+                                continue
+                            sections = await generate_report_for_user(
+                                target, _rpt_cb_session,
+                                triggered_by_id=requester.id,
+                                sent_via="telegram",
+                            )
+                            await send_report_to_user(
+                                context.bot,
+                                telegram_id,
+                                sections,
+                                recipient_label=target.username or str(target.id),
+                            )
+                        except Exception as _e:
+                            errors.append(str(uid))
+                            logger.error(f"Team report failed for user {uid}: {_e}")
+                    summary = "‏✅ כל הדוחות נשלחו."
+                    if errors:
+                        summary += f" שגיאות עבור: {', '.join(errors)}"
+                    await context.bot.send_message(chat_id=telegram_id, text=summary)
+                    return
+
+                # Single user by index
+                try:
+                    target_id = sub_ids[int(token)]
+                except (IndexError, ValueError):
+                    await query.answer("שגיאה — נסה שוב")
+                    return
+
+                target = await _rpt_cb_session.scalar(
+                    select(User).where(User.id == target_id)
+                )
+                if not target:
+                    await query.edit_message_text("‏⚠️ משתמש לא נמצא.")
+                    return
+
+                await query.edit_message_text(
+                    f"‏⏳ מייצר דוח עבור {target.username or target_id}…"
+                )
+                sections = await generate_report_for_user(
+                    target, _rpt_cb_session,
+                    triggered_by_id=requester.id,
+                    sent_via="telegram",
+                )
+            await send_report_to_user(
+                context.bot,
+                telegram_id,
+                sections,
+                recipient_label=target.username or str(target_id),
+            )
             return
 
         # Disambiguation — user selected a project from the ambiguous-match keyboard
