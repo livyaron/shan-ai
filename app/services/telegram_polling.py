@@ -903,19 +903,21 @@ class TelegramPollingBot:
                         await query.edit_message_text("‏📭 לא נמצאו כפופים.")
                         return
                     await query.edit_message_text("‏⏳ מייצר דוחות לכל הצוות…")
+                    requester_id = requester.id
                     errors = []
                     for uid in target_ids:
                         try:
-                            target = await _rpt_cb_session.scalar(
-                                select(User).where(User.id == uid)
-                            )
-                            if not target:
-                                continue
-                            sections = await generate_report_for_user(
-                                target, _rpt_cb_session,
-                                triggered_by_id=requester.id,
-                                sent_via="telegram",
-                            )
+                            async with async_session_maker() as _per_user_session:
+                                target = await _per_user_session.scalar(
+                                    select(User).where(User.id == uid)
+                                )
+                                if not target:
+                                    continue
+                                sections = await generate_report_for_user(
+                                    target, _per_user_session,
+                                    triggered_by_id=requester_id,
+                                    sent_via="telegram",
+                                )
                             await send_report_to_user(
                                 context.bot,
                                 telegram_id,
