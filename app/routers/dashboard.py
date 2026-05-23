@@ -2650,3 +2650,102 @@ async def report_history_view(
         "latest": row,
         "history": [],
     })
+
+
+@router.post("/reports/generate_all", response_class=HTMLResponse)
+async def reports_generate_all(
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Generate fresh reports for all users visible to current_user."""
+    if not (current_user.is_admin or current_user.role in (
+        RoleEnum.DIVISION_MANAGER, RoleEnum.DEPUTY_DIVISION_MANAGER, RoleEnum.DEPARTMENT_MANAGER
+    )):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    if current_user.role == RoleEnum.DEPARTMENT_MANAGER:
+        stmt = select(User).where(
+            User.role.isnot(None), User.role != RoleEnum.VIEWER,
+            User.manager_id == current_user.id,
+        )
+    else:
+        stmt = select(User).where(User.role.isnot(None), User.role != RoleEnum.VIEWER)
+
+    users = (await session.execute(stmt)).scalars().all()
+
+    from app.services.weekly_report_service import generate_report_for_user
+    errors = []
+    for u in users:
+        try:
+            await generate_report_for_user(u, session, triggered_by_id=current_user.id, sent_via="dashboard")
+        except Exception as e:
+            errors.append(u.username or str(u.id))
+            logger.error(f"generate_all: failed for user {u.id}: {e}")
+
+    msg = f"נוצרו {len(users) - len(errors)} דוחות."
+    if errors:
+        msg += f" שגיאות: {', '.join(errors)}"
+    return HTMLResponse(
+        f'<script>alert("{msg}"); window.location.href="/dashboard/reports";</script>'
+    )
+
+
+@router.post("/reports/send_all", response_class=HTMLResponse)
+async def reports_send_all(
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Send the latest saved report to every eligible user via Telegram."""
+    if not (current_user.is_admin or current_user.role in (
+        RoleEnum.DIVISION_MANAGER, RoleEnum.DEPUTY_DIVISION_MANAGER, RoleEnum.DEPARTMENT_MANAGER
+    )):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    if current_user.role == RoleEnum.DEPARTMENT_MANAGER:
+        stmt = select(User).where(
+            User.role.isnot(None), User.role != RoleEnum.VIEWER,
+            User.manager_id == current_user.id,
+            User.telegram_id.isnot(None),
+        )
+    else:
+        stmt = select(User).where(
+            User.role.isnot(None), User.role != RoleEnum.VIEWER,
+            User.telegram_id.isnot(None),
+        )
+
+    users = (await session.execute(stmt)).scalars().all()
+
+    from app.services.weekly_report_service import send_report_to_user
+    from app.services.telegram_polling import telegram_bot
+    if not telegram_bot.application or not telegram_bot.application.bot:
+        return HTMLResponse('<script>alert("הבוט אינו פעיל."); window.history.back();</script>')
+
+    sent = 0
+    errors = []
+    for u in users:
+        latest = await session.scalar(
+            select(ReportHistory)
+            .where(ReportHistory.user_id == u.id)
+            .order_by(desc(ReportHistory.generated_at))
+            .limit(1)
+        )
+        if not latest:
+            continue
+        try:
+            import asyncio
+            asyncio.create_task(send_report_to_user(
+                telegram_bot.application.bot, u.telegram_id, latest.sections
+            ))
+            sent += 1
+        except Exception as e:
+            errors.append(u.username or str(u.id))
+            logger.error(f"send_all: failed for user {u.id}: {e}")
+
+    msg = f"נשלחו {sent} דוחות."
+    if errors:
+        msg += f" שגיאות: {', '.join(errors)}"
+    return HTMLResponse(
+        f'<script>alert("{msg}"); window.location.href="/dashboard/reports";</script>'
+    )

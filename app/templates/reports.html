@@ -32,6 +32,14 @@
     <span class="page-title">📊 ניהול דוחות שבועיים</span>
     <div class="d-flex gap-2 align-items-center">
         <span style="color:var(--text-2);font-size:.85rem;">{{ current_user.username }}</span>
+        <form method="post" action="/dashboard/reports/generate_all"
+              onsubmit="return confirm('לצור דוחות חדשים לכל המשתמשים?');" style="margin:0;">
+            <button type="submit" class="btn-outline-dim">🔄 צור לכולם</button>
+        </form>
+        <form method="post" action="/dashboard/reports/send_all"
+              onsubmit="return confirm('לשלוח דוחות לכל המשתמשים בטלגרם?');" style="margin:0;">
+            <button type="submit" class="btn-cyan">📤 שלח לכולם</button>
+        </form>
         <a href="/dashboard" class="btn-outline-dim">← לוח בקרה</a>
         <a href="/logout" class="btn-outline-dim">יציאה</a>
     </div>
