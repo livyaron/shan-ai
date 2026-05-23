@@ -28,7 +28,7 @@ def test_keyboard_for_viewer_has_one_button():
     assert "פרוייקטים" in buttons[0].text
 
 
-def test_keyboard_for_operational_has_two_buttons():
+def test_keyboard_for_operational_has_report_button():
     from app.services.telegram_polling import _keyboard_for_user
     from app.models import RoleEnum
     from unittest.mock import MagicMock
@@ -36,7 +36,8 @@ def test_keyboard_for_operational_has_two_buttons():
     user.role = RoleEnum.PROJECT_MANAGER
     kb = _keyboard_for_user(user)
     buttons = [b for row in kb.keyboard for b in row]
-    assert len(buttons) == 2
+    assert len(buttons) == 3  # פרוייקטים, החלטות, דוח שלי
+    assert any("דוח שלי" in b.text for b in buttons)
 
 
 import pytest
