@@ -388,8 +388,8 @@ def _compute_delta(current: dict, prev: dict) -> dict:
         if k in prev_stages and curr_stages[k] != prev_stages[k]
     ]
 
-    curr_risk_ids = {p["project"] for p in current.get("projects_at_risk", [])}
-    prev_risk_ids = {p["project"] for p in prev.get("projects_at_risk", [])}
+    curr_risk_ids = {p.get("project") or p.get("identifier", "") for p in current.get("projects_at_risk", [])}
+    prev_risk_ids = {p.get("project") or p.get("identifier", "") for p in prev.get("projects_at_risk", [])}
 
     return {
         "decisions_change":         curr_total - prev_total,
