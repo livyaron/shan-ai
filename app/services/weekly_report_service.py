@@ -175,7 +175,7 @@ async def generate_report_for_user(
         sent_via=sent_via,
     )
     session.add(row)
-    await session.flush()
+    await session.commit()
 
     return sections
 
