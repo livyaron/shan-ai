@@ -44,7 +44,7 @@
             <button type="submit" class="btn-outline-dim">🔄 צור דוח חדש</button>
         </form>
         <form method="post" action="/dashboard/reports/{{ target_user.id }}/send"
-              onsubmit="return confirm('לשלוח דוח ל-{{ target_user.username }} בטלגרם?');">
+              onsubmit="return confirm('לשלוח דוח בטלגרם?');">
             <button type="submit" class="btn-cyan">📤 שלח לטלגרם</button>
         </form>
         {% if history %}

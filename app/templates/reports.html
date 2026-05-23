@@ -67,7 +67,7 @@
                         </form>
                         {% if u.last_report %}
                         <form method="post" action="/dashboard/reports/{{ u.id }}/send"
-                              onsubmit="return confirm('לשלוח דוח ל-{{ u.username }} בטלגרם?');" style="margin:0;">
+                              onsubmit="return confirm('לשלוח דוח בטלגרם?');" style="margin:0;">
                             <button type="submit" class="btn-cyan">📤 שלח</button>
                         </form>
                         {% endif %}
