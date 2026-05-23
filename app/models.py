@@ -534,3 +534,21 @@ class RouteTrace(Base):
     created_at        = Column(DateTime, default=datetime.utcnow, index=True)
 
     query_log = relationship("QueryLog")
+
+
+class ReportHistory(Base):
+    """Per-user weekly report history. Sections stored as JSON; raw_data snapshot
+    enables structured delta computation on next generation."""
+    __tablename__ = "report_history"
+
+    id           = Column(Integer, primary_key=True)
+    user_id      = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    sections     = Column(JSON, nullable=False)
+    # sections keys: prologue | decisions | projects | summary | delta (null on first run)
+    raw_data     = Column(JSON, nullable=True)
+    # raw_data: structured snapshot used to compute delta for the next report
+    generated_at = Column(DateTime, default=datetime.utcnow, index=True)
+    triggered_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    sent_via     = Column(String(32), nullable=True)  # "telegram" | "dashboard" | "cron"
+
+    user = relationship("User", foreign_keys=[user_id])
