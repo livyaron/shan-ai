@@ -789,20 +789,29 @@ async def process_master_file(file_id: int) -> None:
             await session.commit()
             logger.info(f"process_master_file {file_id}: {len(all_chunks)} project-block chunks stored")
 
-            # Sync to Projects table so the Projects tab reflects the master file
+            # Sync to Projects table — iterate ALL sheets so every project gets updated
             try:
                 from app.services.project_sync import sync_projects_file
-                sync_result = await sync_projects_file(str(path), sheet_name=primary_sheet_name)
-                if sync_result["errors"]:
+                total = {"processed": 0, "created": 0, "updated": 0, "errors": []}
+                for sn in xls.sheet_names:
+                    try:
+                        sr = await sync_projects_file(str(path), sheet_name=sn)
+                        total["processed"] += sr["processed"]
+                        total["created"] += sr["created"]
+                        total["updated"] += sr["updated"]
+                        total["errors"].extend(sr["errors"])
+                    except Exception as sheet_err:
+                        logger.warning(f"process_master_file {file_id}: sheet '{sn}' sync failed: {sheet_err}")
+                if total["errors"]:
                     logger.warning(
-                        f"process_master_file {file_id}: project sync errors: {sync_result['errors']}"
+                        f"process_master_file {file_id}: project sync errors: {total['errors'][:5]}"
                     )
                 logger.info(
                     f"process_master_file {file_id}: project sync complete — "
-                    f"{sync_result['processed']} rows, "
-                    f"{sync_result['created']} created, "
-                    f"{sync_result['updated']} updated, "
-                    f"{len(sync_result['errors'])} errors"
+                    f"{total['processed']} rows, "
+                    f"{total['created']} created, "
+                    f"{total['updated']} updated, "
+                    f"{len(total['errors'])} errors"
                 )
             except Exception as sync_err:
                 logger.warning(f"process_master_file {file_id}: project sync failed (non-fatal): {sync_err}")
