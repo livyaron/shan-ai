@@ -785,11 +785,11 @@ async def process_master_file(file_id: int) -> None:
                 ))
 
             kf.chunk_count = len(all_chunks)
-            kf.status = "ready"
             await session.commit()
             logger.info(f"process_master_file {file_id}: {len(all_chunks)} project-block chunks stored")
 
             # Sync to Projects table — iterate ALL sheets so every project gets updated
+            # File stays "processing" until sync completes so the progress banner stays visible.
             try:
                 from app.services.project_sync import sync_projects_file
                 total = {"processed": 0, "created": 0, "updated": 0, "errors": []}
@@ -815,6 +815,13 @@ async def process_master_file(file_id: int) -> None:
                 )
             except Exception as sync_err:
                 logger.warning(f"process_master_file {file_id}: project sync failed (non-fatal): {sync_err}")
+
+            # Mark file as ready only after both chunking AND sync are done
+            async with async_session_maker() as s2:
+                kf2 = await s2.get(KnowledgeFile, file_id)
+                if kf2:
+                    kf2.status = "ready"
+                    await s2.commit()
 
         except Exception as e:
             logger.error(f"process_master_file error file {file_id}: {e}", exc_info=True)

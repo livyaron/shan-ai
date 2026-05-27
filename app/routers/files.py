@@ -180,14 +180,6 @@ async def sync_status(
     from sqlalchemy import func
     from app.models import Project
 
-    # Find the master file (or most recent processing file)
-    master = (await session.execute(
-        select(KnowledgeFile)
-        .where(KnowledgeFile.is_master.is_(True))
-        .order_by(KnowledgeFile.created_at.desc())
-        .limit(1)
-    )).scalars().first()
-
     processing_file = (await session.execute(
         select(KnowledgeFile)
         .where(KnowledgeFile.status == "processing")
@@ -195,15 +187,24 @@ async def sync_status(
         .limit(1)
     )).scalars().first()
 
+    # Use the processing file if active, else fall back to the current master
+    ref_file = processing_file
+    if not ref_file:
+        ref_file = (await session.execute(
+            select(KnowledgeFile)
+            .where(KnowledgeFile.is_master.is_(True))
+            .order_by(KnowledgeFile.created_at.desc())
+            .limit(1)
+        )).scalars().first()
+
     is_processing = processing_file is not None
 
-    # Count projects updated since the master file was created
     projects_updated = 0
     projects_total = 0
-    if master:
+    if ref_file:
         projects_updated = (await session.execute(
             select(func.count(Project.id)).where(
-                Project.last_updated >= master.created_at
+                Project.last_updated >= ref_file.created_at
             )
         )).scalar() or 0
         projects_total = (await session.execute(
@@ -212,9 +213,9 @@ async def sync_status(
 
     return {
         "is_processing": is_processing,
-        "file_name": processing_file.original_name if processing_file else None,
-        "file_status": processing_file.status if processing_file else (master.status if master else None),
-        "chunk_count": processing_file.chunk_count if processing_file else (master.chunk_count if master else 0),
+        "file_name": ref_file.original_name if ref_file else None,
+        "file_status": ref_file.status if ref_file else None,
+        "chunk_count": ref_file.chunk_count if ref_file else 0,
         "projects_updated": projects_updated,
         "projects_total": projects_total,
     }
