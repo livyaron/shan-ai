@@ -8,6 +8,7 @@ from typing import Any
 
 import pandas as pd
 from rapidfuzz import process as rf_process
+from rapidfuzz.utils import default_process as _rf_default_process
 from sqlalchemy import select
 
 from app.database import async_session_maker
@@ -125,11 +126,13 @@ def _build_column_map(df_columns: list[str]) -> dict[str, str]:
             logger.info(f"  ✓ Weekly column: {actual_col}")
             continue
 
-        # Fuzzy match against known column keys
+        # Explicit processor required — rapidfuzz 3.x does NOT auto-lowercase,
+        # so 'WBS2' vs 'wbs' scores 0 without it.
         result = rf_process.extractOne(
             actual_col,
             KNOWN_COLUMNS.keys(),
             score_cutoff=FUZZY_CUTOFF,
+            processor=_rf_default_process,
         )
         if result:
             best_key, score, _idx = result
