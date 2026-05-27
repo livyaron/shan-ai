@@ -19,8 +19,13 @@ logger = logging.getLogger(__name__)
 # ── Column name mapping: Hebrew header → model field ──────────────────────
 KNOWN_COLUMNS: dict[str, str] = {
     "זיהוי":                           "project_identifier",
+    "wbs":                             "project_identifier",
+    "wbs id":                          "project_identifier",
+    "קוד wbs":                         "project_identifier",
+    "מזהה":                            "project_identifier",
     "שם פרויקט":                       "name",
     "שם הפרויקט":                      "name",
+    "שם":                              "name",
     "סוג":                             "project_type",
     "סוג פרויקט":                      "project_type",
     "סוג תחנה":                        "project_type",
@@ -71,11 +76,17 @@ def _read_file(file_path: str, sheet_name: str | None = None) -> pd.DataFrame:
 
     try:
         if ext in (".xlsx", ".xls"):
-            # Probe first two rows to detect header row offset
             kw = dict(sheet_name=sheet_name) if sheet_name else {}
-            probe = pd.read_excel(path, engine="openpyxl", nrows=2, header=None, **kw)
-            header_row = 1 if (len(probe) > 0 and probe.iloc[0].isna().all()) else 0
-            df = pd.read_excel(path, engine="openpyxl", header=header_row, **kw)
+            # Probe up to 6 rows — pick the row with most non-null cells as header
+            # (mirrors _find_header_row in knowledge_service; handles merged title rows)
+            df_raw = pd.read_excel(path, engine="openpyxl", nrows=6, header=None, **kw)
+            best_row, best_count = 0, 0
+            for i in range(len(df_raw)):
+                non_null = int(df_raw.iloc[i].notna().sum())
+                if non_null > best_count:
+                    best_count = non_null
+                    best_row = i
+            df = pd.read_excel(path, engine="openpyxl", header=best_row, **kw)
         elif ext == ".csv":
             df = pd.read_csv(path, encoding="utf-8-sig")
         else:
@@ -302,6 +313,7 @@ async def sync_projects_file(file_path: str, sheet_name: str | None = None) -> d
                 if existing:
                     # Only update fields that actually changed
                     changed = False
+                    weekly_changed = False
                     for attr, new_val in fields.items():
                         old_val = getattr(existing, attr, None)
                         # Normalise for comparison: treat None and "" as equal
@@ -310,6 +322,11 @@ async def sync_projects_file(file_path: str, sheet_name: str | None = None) -> d
                         if old_norm != new_norm:
                             setattr(existing, attr, new_val)
                             changed = True
+                            if attr == "weekly_report":
+                                weekly_changed = True
+                    if weekly_changed:
+                        # Clear stale brief so generate_all_briefs regenerates it
+                        existing.weekly_report_brief = None
                     if changed:
                         existing.last_updated = datetime.utcnow()
                         result["updated"] += 1

@@ -181,7 +181,7 @@ async def _ensure_eval_caches(session: AsyncSession | None = None) -> None:
     except Exception as e:
         # Common before first deploy: prompt_overrides table doesn't exist yet.
         # Keep previous cache values; do not raise — caller's transaction must stay alive.
-        logger.debug(f"_ensure_eval_caches: skipped ({type(e).__name__}: {e})")
+        logger.warning(f"_ensure_eval_caches: EXCEPTION ({type(e).__name__}: {e})", exc_info=True)
 
 
 def invalidate_eval_caches() -> None:
@@ -784,6 +784,10 @@ async def process_master_file(file_id: int) -> None:
             try:
                 from app.services.project_sync import sync_projects_file
                 sync_result = await sync_projects_file(str(path), sheet_name=primary_sheet_name)
+                if sync_result["errors"]:
+                    logger.warning(
+                        f"process_master_file {file_id}: project sync errors: {sync_result['errors']}"
+                    )
                 logger.info(
                     f"process_master_file {file_id}: project sync complete — "
                     f"{sync_result['processed']} rows, "
