@@ -4,7 +4,7 @@ import json
 import logging
 from typing import Optional
 
-from sqlalchemy import select, or_
+from sqlalchemy import select, or_, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Project
@@ -106,10 +106,8 @@ async def search_by_manager(manager_name: str, session: AsyncSession) -> list[di
         if not tokens:
             return []
         conditions = [Project.manager.ilike(f"%{t}%") for t in tokens]
-        stmt = select(Project).where(
-            or_(*conditions),
-            Project.is_active,
-        ).order_by(Project.name)
+        op = and_(*conditions) if len(conditions) > 1 else conditions[0]
+        stmt = select(Project).where(op, Project.is_active).order_by(Project.name)
         return (await session.execute(stmt)).scalars().all()
 
     projects = await _search_tokens(manager_name)
