@@ -31,11 +31,9 @@ logger = logging.getLogger(__name__)
 def _main_reply_keyboard(user=None) -> ReplyKeyboardMarkup:
     from app.models import RoleEnum
     manager_roles = {RoleEnum.DEPARTMENT_MANAGER, RoleEnum.DEPUTY_DIVISION_MANAGER, RoleEnum.DIVISION_MANAGER}
-    rows = [["📁 פרוייקטים", "📋 החלטות"]]
+    rows = [["📁 פרוייקטים", "📋 החלטות", "📊 דוח שלי"]]
     if user and user.role in manager_roles:
-        rows.append(["📊 דוח שלי", "👥 דוח צוות"])
-    else:
-        rows.append(["📊 דוח שלי"])
+        rows.append(["👥 דוח צוות"])
     return ReplyKeyboardMarkup(rows, resize_keyboard=True, is_persistent=True)
 
 
