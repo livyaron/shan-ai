@@ -529,14 +529,23 @@ def _find_weekly_report_sheet(path, xls):
 
 
 def _find_header_row(df_raw) -> int:
-    """Detect which row index is the actual header (most non-null cells)."""
-    best_row, best_count = 0, 0
-    for i in range(min(6, len(df_raw))):
-        non_null = df_raw.iloc[i].notna().sum()
-        if non_null > best_count:
-            best_count = non_null
-            best_row = i
-    return best_row
+    """Detect which row index is the actual header.
+
+    Uses first-row-above-threshold instead of densest row.
+    Dense data rows always beat the header row on raw non-null count,
+    so we pick the FIRST row whose non-null count >= 50% of the max.
+    This skips empty/merged-title rows (1-2 non-null) while landing on
+    the real header before any data rows.
+    """
+    rows_to_scan = min(8, len(df_raw))
+    counts = [int(df_raw.iloc[i].notna().sum()) for i in range(rows_to_scan)]
+    if not counts:
+        return 0
+    threshold = max(3, max(counts) // 2)
+    for i, c in enumerate(counts):
+        if c >= threshold:
+            return i
+    return 0
 
 
 def _find_latest_weekly_detail_col(df):

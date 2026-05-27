@@ -77,15 +77,14 @@ def _read_file(file_path: str, sheet_name: str | None = None) -> pd.DataFrame:
     try:
         if ext in (".xlsx", ".xls"):
             kw = dict(sheet_name=sheet_name) if sheet_name else {}
-            # Probe up to 6 rows — pick the row with most non-null cells as header
-            # (mirrors _find_header_row in knowledge_service; handles merged title rows)
-            df_raw = pd.read_excel(path, engine="openpyxl", nrows=6, header=None, **kw)
-            best_row, best_count = 0, 0
-            for i in range(len(df_raw)):
-                non_null = int(df_raw.iloc[i].notna().sum())
-                if non_null > best_count:
-                    best_count = non_null
-                    best_row = i
+            # Probe 8 rows — pick FIRST row whose non-null count >= 50% of max.
+            # Dense data rows always score higher than headers on raw non-null count,
+            # so "most non-null" is wrong; "first above threshold" correctly skips
+            # empty/merged-title rows and lands on the actual header row.
+            df_raw = pd.read_excel(path, engine="openpyxl", nrows=8, header=None, **kw)
+            counts = [int(df_raw.iloc[i].notna().sum()) for i in range(len(df_raw))]
+            threshold = max(3, max(counts) // 2) if counts else 3
+            best_row = next((i for i, c in enumerate(counts) if c >= threshold), 0)
             df = pd.read_excel(path, engine="openpyxl", header=best_row, **kw)
         elif ext == ".csv":
             df = pd.read_csv(path, encoding="utf-8-sig")
@@ -343,6 +342,10 @@ async def sync_projects_file(file_path: str, sheet_name: str | None = None) -> d
             except Exception as exc:
                 logger.error(f"project_sync: row {row_idx} error: {exc}")
                 result["errors"].append(f"שגיאה בשורה {row_idx}: {exc}")
+                try:
+                    await session.rollback()
+                except Exception:
+                    pass
 
     logger.info(
         f"project_sync complete: {result['processed']} rows, "
