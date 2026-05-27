@@ -13,6 +13,7 @@ SMOKE_QUESTIONS = [
     "כמה החלטות יש סה\"כ?",
     # project_tools path
     "פרויקט יזרעאל",
+    "ניר יצחק",  # project name that looks like a manager name
     "כמה פרויקטי הקמה פעילים?",
     "מי המנהל של פרויקט נתניה?",
     "באיזה שלב נמצא פרויקט בית הגדי?",  # the spec reproducer
@@ -33,7 +34,7 @@ SMOKE_QUESTIONS = [
     "מה זה pgvector",
 ]
 
-VALID_PATHS = {"correction_pin", "decision", "project_tools", "rag"}
+VALID_PATHS = {"correction_pin", "decision", "project_tools", "rag", "disambiguation"}
 
 
 @pytest.mark.parametrize("question", SMOKE_QUESTIONS)

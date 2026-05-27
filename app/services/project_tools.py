@@ -576,33 +576,50 @@ async def answer_project_query(
             if not param:
                 log_id = await _log_query(text, "לא הצלחתי לזהות את שם המנהל מהשאלה.", intent, None, session, user_id)
                 return "לא הצלחתי לזהות את שם המנהל מהשאלה.", log_id
-            data = await search_by_manager(param, session)
-            if data:
-                compact = [
-                    {
-                        "שם": p["name"],
-                        "זיהוי": p["project_identifier"],
-                        "שלב": p["stage"],
-                        "מנהל": p["manager"],
-                        "עיכוב בחודשים": p["delay_months"],
-                    }
-                    for p in data
+
+            # Project-first: if the param matches a project, prefer the project card.
+            project_first = await find_projects_by_identifier(param, session)
+            if len(project_first) == 1:
+                data_p = project_first[0]
+                user_data["last_project"] = data_p["project_identifier"]
+                current_project_id = data_p["project_identifier"]
+                context_str = json.dumps(data_p, ensure_ascii=False, indent=2)
+                intent = "by_identifier"
+            elif 2 <= len(project_first) <= 4:
+                candidates = [
+                    {"id": p["project_identifier"], "name": p["name"] or p["project_identifier"]}
+                    for p in project_first
                 ]
-                context_str = (
-                    f"פרויקטים של {param} ({len(data)}):\n\n"
-                    + json.dumps(compact, ensure_ascii=False, indent=2)
-                )
+                return f"__DISAMBIG__:{json.dumps(candidates, ensure_ascii=False)}", None
             else:
-                # No manager match — try as project identifier fallback
-                project = await get_project_details(param, session)
-                if project:
-                    user_data["last_project"] = project["project_identifier"]
-                    current_project_id = project["project_identifier"]
-                    context_str = json.dumps(project, ensure_ascii=False, indent=2)
+                # 0 or ≥5 project matches — proceed with manager search
+                data = await search_by_manager(param, session)
+                if data:
+                    compact = [
+                        {
+                            "שם": p["name"],
+                            "זיהוי": p["project_identifier"],
+                            "שלב": p["stage"],
+                            "מנהל": p["manager"],
+                            "עיכוב בחודשים": p["delay_months"],
+                        }
+                        for p in data
+                    ]
+                    context_str = (
+                        f"פרויקטים של {param} ({len(data)}):\n\n"
+                        + json.dumps(compact, ensure_ascii=False, indent=2)
+                    )
                 else:
-                    answer = f"לא נמצאו תוצאות עבור '{param}'."
-                    log_id = await _log_query(text, answer, intent, None, session, user_id)
-                    return answer, log_id
+                    # No manager match — try as project identifier fallback
+                    project = await get_project_details(param, session)
+                    if project:
+                        user_data["last_project"] = project["project_identifier"]
+                        current_project_id = project["project_identifier"]
+                        context_str = json.dumps(project, ensure_ascii=False, indent=2)
+                    else:
+                        answer = f"לא נמצאו תוצאות עבור '{param}'."
+                        log_id = await _log_query(text, answer, intent, None, session, user_id)
+                        return answer, log_id
 
         elif intent == "list_risks":
             data = await list_risks(session)
