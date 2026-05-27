@@ -350,6 +350,23 @@ async def toggle_admin(
     return RedirectResponse(f"/dashboard/users?msg={user.username}+{status}", status_code=303)
 
 
+async def _push_keyboard_to_user(user) -> None:
+    if not user.telegram_id:
+        return
+    try:
+        from app.services.telegram_polling import telegram_bot, _keyboard_for_user
+        bot = telegram_bot.application.bot if telegram_bot and telegram_bot.application else None
+        if not bot:
+            return
+        await bot.send_message(
+            chat_id=user.telegram_id,
+            text="‏✅ תפקידך עודכן במערכת. התפריט מוצג למטה.",
+            reply_markup=_keyboard_for_user(user),
+        )
+    except Exception:
+        logger.warning(f"Could not push keyboard to user {user.id}", exc_info=True)
+
+
 @router.post("/users/{user_id}/set-role")
 async def set_role(
     user_id: int,
@@ -361,6 +378,8 @@ async def set_role(
     if user:
         user.role = RoleEnum(role)
         await session.commit()
+        await session.refresh(user)
+        await _push_keyboard_to_user(user)
     return RedirectResponse("/dashboard/users?msg=תפקיד+עודכן", status_code=303)
 
 
@@ -469,6 +488,7 @@ async def edit_user(
         return RedirectResponse("/dashboard/users?error=משתמש+לא+נמצא", status_code=303)
 
     user.username = username
+    role_changed = bool(role) and (user.role is None or user.role.value != role)
     if role:
         user.role = RoleEnum(role)
         user.hierarchy_level = _ROLE_HIERARCHY.get(role)
@@ -478,6 +498,9 @@ async def edit_user(
     if password.strip():
         user.password_hash = hash_password(password)
     await session.commit()
+    if role_changed:
+        await session.refresh(user)
+        await _push_keyboard_to_user(user)
     return RedirectResponse("/dashboard/users?msg=פרטי+משתמש+עודכנו", status_code=303)
 
 
