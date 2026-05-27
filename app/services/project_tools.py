@@ -557,8 +557,8 @@ async def answer_project_query(
             else:
                 # 2–4 ambiguous matches → signal disambiguation to the caller
                 if 2 <= len(matches) <= 4:
-                    identifiers = [p["project_identifier"] for p in matches]
-                    return f"__DISAMBIG__:{json.dumps(identifiers, ensure_ascii=False)}", None
+                    candidates = [{"id": p["project_identifier"], "name": p["name"] or p["project_identifier"]} for p in matches]
+                    return f"__DISAMBIG__:{json.dumps(candidates, ensure_ascii=False)}", None
                 # 5+ matches — show all cards (original behaviour)
                 user_data.pop("last_project", None)
                 current_project_id = None

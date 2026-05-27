@@ -694,13 +694,14 @@ class TelegramPollingBot:
                         buttons = []
                         row = []
                         for i, c in enumerate(candidates):
-                            row.append(InlineKeyboardButton(f"📁 {c}", callback_data=f"disambig:{i}"))
+                            label = c.get("name") if isinstance(c, dict) else c
+                            row.append(InlineKeyboardButton(f"📁 {label}", callback_data=f"disambig:{i}"))
                             if len(row) == 2:
                                 buttons.append(row)
                                 row = []
                         if row:
                             buttons.append(row)
-                        buttons.append([InlineKeyboardButton("❌ ביטול", callback_data="disambig:__cancel__")])
+                        buttons.append([InlineKeyboardButton("🔙 ביטול", callback_data="disambig:__cancel__")])
                         await update.message.reply_text(
                             "‏🔍 מצאתי מספר פרויקטים תואמים — על איזה מהם התכוונת?",
                             reply_markup=InlineKeyboardMarkup(buttons),
@@ -975,7 +976,8 @@ class TelegramPollingBot:
             # Resolve integer index → identifier (avoids 64-byte callback_data limit)
             candidates = _awaiting_disambiguation.pop(telegram_id, [])
             try:
-                identifier = candidates[int(token)]
+                candidate = candidates[int(token)]
+                identifier = candidate.get("id") if isinstance(candidate, dict) else candidate
             except (IndexError, ValueError):
                 await query.answer("שגיאה — נסה שוב")
                 return
@@ -1538,6 +1540,7 @@ class TelegramPollingBot:
                 )]
                 for p in rows
             ]
+            btns.append([InlineKeyboardButton("🔙 תפריט", callback_data="pm:menu")])
             await update.message.reply_text(
                 "‏נמצאו מספר פרוייקטים — בחר:",
                 reply_markup=InlineKeyboardMarkup(btns),

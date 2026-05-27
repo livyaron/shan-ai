@@ -149,6 +149,8 @@ def build_detail_back_keyboard(shortcut: str, page: int, type_key: int | None = 
     type_suffix = f":{type_key}" if type_key is not None else ""
     if shortcut == "cf":
         back_cd = f"pm_cf:pg:{page}"
+    elif shortcut == "viewer":
+        back_cd = "pm:menu"
     elif shortcut.startswith("th") and shortcut[2:].isdigit():
         back_cd = f"pm:th:{shortcut[2:]}:{page}{type_suffix}"
     else:
@@ -242,7 +244,7 @@ def format_project_line(p: Project) -> str:
     date_str = p.estimated_finish_date.strftime("%m/%y") if p.estimated_finish_date else ""
     stage_part = p.stage or ""
     tail = f"  |  {stage_part} · {date_str}" if date_str else f"  |  {stage_part}"
-    return f"📁 <b>#{p.id}</b> · {_html.escape(name)}{tail}"
+    return f"📁 {_html.escape(name)}{tail}"
 
 
 def format_results_message(title: str, projects: list, total: int, page: int) -> str:
