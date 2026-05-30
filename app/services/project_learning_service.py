@@ -269,3 +269,201 @@ async def save_snapshot(project: Project, session: AsyncSession) -> None:
                 ProjectSnapshot.snapshot_date < cutoff_date,
             )
         )
+
+
+# ── Query functions ──────────────────────────────────────────────────────────
+
+async def get_overview_stats(session: AsyncSession) -> dict:
+    """Cross-project insights: type breakdown, delay trend, stage distribution."""
+    today = date.today()
+
+    latest_subq = (
+        select(
+            ProjectSnapshot.project_id,
+            func.max(ProjectSnapshot.snapshot_date).label("latest_date"),
+        )
+        .where(ProjectSnapshot.is_active == True)
+        .group_by(ProjectSnapshot.project_id)
+        .subquery()
+    )
+
+    rows = (await session.execute(
+        select(Project.project_type, ProjectSnapshot.days_overdue, ProjectSnapshot.risk_score)
+        .join(latest_subq, and_(
+            ProjectSnapshot.project_id == latest_subq.c.project_id,
+            ProjectSnapshot.snapshot_date == latest_subq.c.latest_date,
+        ))
+        .join(Project, Project.id == ProjectSnapshot.project_id)
+        .where(Project.is_active == True)
+    )).all()
+
+    type_counts: dict = {t: {"active": 0, "delayed": 0, "at_risk": 0} for t in TYPE_ORDER}
+    total_active = total_delayed = total_at_risk = 0
+    for ptype, days_over, risk in rows:
+        bucket = type_counts.setdefault(ptype or "אחר", {"active": 0, "delayed": 0, "at_risk": 0})
+        bucket["active"] += 1
+        total_active += 1
+        if days_over and days_over > 0:
+            bucket["delayed"] += 1
+            total_delayed += 1
+        if risk and risk >= 70:
+            bucket["at_risk"] += 1
+            total_at_risk += 1
+
+    trend_rows = (await session.execute(
+        select(ProjectSnapshot.snapshot_date, func.count().label("cnt"))
+        .where(ProjectSnapshot.days_overdue > 0, ProjectSnapshot.is_active == True)
+        .group_by(ProjectSnapshot.snapshot_date)
+        .order_by(desc(ProjectSnapshot.snapshot_date))
+        .limit(8)
+    )).all()
+    delay_trend = [{"week": str(r[0]), "count": r[1]} for r in reversed(trend_rows)]
+
+    stage_rows = (await session.execute(
+        select(Project.stage, func.count().label("cnt"))
+        .where(Project.is_active == True)
+        .group_by(Project.stage)
+    )).all()
+    stage_dist = {(r[0] or "לא ידוע"): r[1] for r in stage_rows}
+
+    risk_rows = await _raw_risk_rows(session)
+    entering_count = sum(
+        1 for _, _, _, sparkline, predicted in risk_rows
+        if predicted is not None and (sparkline[-1] if sparkline else 0) < 70 and predicted >= 70
+    )
+
+    return {
+        "totals":             {"active": total_active, "delayed": total_delayed, "at_risk": total_at_risk, "entering_next_week": entering_count},
+        "type_counts":        type_counts,
+        "delay_trend":        delay_trend,
+        "stage_distribution": stage_dist,
+    }
+
+
+async def _raw_risk_rows(session: AsyncSession) -> list:
+    """Internal: returns (snap, proj, score_result, sparkline, predicted) per active project."""
+    latest_subq = (
+        select(
+            ProjectSnapshot.project_id,
+            func.max(ProjectSnapshot.snapshot_date).label("latest_date"),
+        )
+        .group_by(ProjectSnapshot.project_id)
+        .subquery()
+    )
+
+    rows = (await session.execute(
+        select(ProjectSnapshot, Project)
+        .join(Project, Project.id == ProjectSnapshot.project_id)
+        .join(latest_subq, and_(
+            ProjectSnapshot.project_id == latest_subq.c.project_id,
+            ProjectSnapshot.snapshot_date == latest_subq.c.latest_date,
+        ))
+        .where(Project.is_active == True)
+        .order_by(desc(ProjectSnapshot.risk_score))
+        .limit(50)
+    )).all()
+
+    result = []
+    for snap, proj in rows:
+        sparkline_scores = (await session.execute(
+            select(ProjectSnapshot.risk_score)
+            .where(
+                ProjectSnapshot.project_id == proj.id,
+                ProjectSnapshot.risk_score.isnot(None),
+            )
+            .order_by(desc(ProjectSnapshot.snapshot_date))
+            .limit(8)
+        )).scalars().all()
+        sparkline = list(reversed(sparkline_scores))
+
+        score_result = compute_risk_score(
+            stage=proj.stage,
+            estimated_finish_date=proj.estimated_finish_date,
+            dev_plan_date=proj.dev_plan_date,
+            risks=proj.risks,
+            to_handle=proj.to_handle,
+            last_updated=proj.last_updated,
+        )
+        predicted = predict_next_score(sparkline)
+        result.append((snap, proj, score_result, sparkline, predicted))
+    return result
+
+
+async def get_risk_table(session: AsyncSession) -> list[dict]:
+    """Projects ranked by risk score with sparklines and predictions."""
+    raw = await _raw_risk_rows(session)
+    out = []
+    for snap, proj, score_result, sparkline, predicted in raw:
+        current = snap.risk_score or 0
+        entering = (predicted is not None and current < 70 and predicted >= 70)
+        out.append({
+            "project_id":         proj.id,
+            "name":               proj.name or proj.project_identifier,
+            "identifier":         proj.project_identifier,
+            "type":               proj.project_type or "",
+            "stage":              proj.stage or "",
+            "risk_score":         current,
+            "score_reliable":     score_result["reliable"],
+            "sparkline":          sparkline,
+            "predicted_score":    predicted,
+            "entering_risk_zone": entering,
+            "main_reason":        score_result["main_reason"],
+        })
+    return out
+
+
+async def get_project_detail(project_id: int, session: AsyncSession) -> Optional[dict]:
+    """Full project + snapshot history + score breakdown + finish-date drift."""
+    proj = await session.scalar(select(Project).where(Project.id == project_id))
+    if not proj:
+        return None
+
+    snaps = (await session.execute(
+        select(ProjectSnapshot)
+        .where(ProjectSnapshot.project_id == project_id)
+        .order_by(ProjectSnapshot.snapshot_date.asc())
+        .limit(12)
+    )).scalars().all()
+
+    prior_finish = [s.estimated_finish_date for s in snaps[-3:] if s.estimated_finish_date]
+    current = compute_risk_score(
+        stage=proj.stage,
+        estimated_finish_date=proj.estimated_finish_date,
+        dev_plan_date=proj.dev_plan_date,
+        risks=proj.risks,
+        to_handle=proj.to_handle,
+        last_updated=proj.last_updated,
+        prior_finish_dates=prior_finish,
+    )
+
+    return {
+        "project": {
+            "id":                    proj.id,
+            "name":                  proj.name,
+            "identifier":            proj.project_identifier,
+            "type":                  proj.project_type,
+            "stage":                 proj.stage,
+            "manager":               proj.manager,
+            "estimated_finish_date": str(proj.estimated_finish_date) if proj.estimated_finish_date else None,
+            "dev_plan_date":         str(proj.dev_plan_date) if proj.dev_plan_date else None,
+            "risks":                 proj.risks,
+            "to_handle":             proj.to_handle,
+            "weekly_report_brief":   proj.weekly_report_brief,
+        },
+        "snapshots": [
+            {
+                "snapshot_date":          str(s.snapshot_date),
+                "risk_score":             s.risk_score,
+                "days_overdue":           s.days_overdue,
+                "stage":                  s.stage,
+                "estimated_finish_date":  str(s.estimated_finish_date) if s.estimated_finish_date else None,
+            }
+            for s in snaps
+        ],
+        "current_score":    current["score"],
+        "score_breakdown":  current["breakdown"],
+        "finish_date_drift": [
+            {"date": str(s.snapshot_date), "estimated_finish_date": str(s.estimated_finish_date)}
+            for s in snaps if s.estimated_finish_date
+        ],
+    }
