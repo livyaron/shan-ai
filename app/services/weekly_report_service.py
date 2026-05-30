@@ -145,28 +145,39 @@ async def generate_report_for_user(
         .limit(1)
     )
 
-    delta_section_text = ""
-    has_delta = "false"
+    delta_section_text    = ""
+    has_delta             = "false"
+    overdue_entered_json  = "[]"
+    overdue_resolved_json = "[]"
+
     if prev_row and prev_row.raw_data:
         delta_input = _compute_delta(raw, prev_row.raw_data)
-        prev_date = prev_row.generated_at.strftime("%d/%m/%Y")
+        prev_date   = prev_row.generated_at.strftime("%d/%m/%Y")
         delta_section_text = (
             f"שינויים מהדוח הקודם ({prev_date}):\n"
             f"{json.dumps(delta_input, ensure_ascii=False)}\n"
         )
-        has_delta = "true"
+        has_delta             = "true"
+        overdue_entered_json  = json.dumps(delta_input.get("overdue_entered",  []), ensure_ascii=False)
+        overdue_resolved_json = json.dumps(delta_input.get("overdue_resolved", []), ensure_ascii=False)
 
     prompt = _REPORT_PROMPT.format(
         role_label=role_label,
         username=user.username or role_label,
         date_range=f"{since_str}–{today_str}",
         decisions_json=json.dumps(raw["decisions"], ensure_ascii=False),
+        critical_urgent_json=json.dumps(
+            raw["decisions"].get("critical_urgent", []), ensure_ascii=False
+        ),
         pending_json=json.dumps(raw["pending_approvals"][:5], ensure_ascii=False),
-        behind_json=json.dumps(raw["projects_behind"][:4], ensure_ascii=False),
-        risks_json=json.dumps(raw["projects_at_risk"][:4], ensure_ascii=False),
+        behind_json=json.dumps(raw["projects_behind"][:8], ensure_ascii=False),
+        risks_json=json.dumps(raw["projects_at_risk"][:8], ensure_ascii=False),
         handle_json=json.dumps(raw["handle_items"][:3], ensure_ascii=False),
+        type_summary_json=json.dumps(raw.get("project_type_summary", {}), ensure_ascii=False),
         delta_section=delta_section_text,
         has_delta=has_delta,
+        overdue_entered_json=overdue_entered_json,
+        overdue_resolved_json=overdue_resolved_json,
     )
 
     sections = dict(_FALLBACK_SECTIONS)
@@ -254,21 +265,23 @@ async def _gather_raw_data(user: User, session: AsyncSession) -> dict:
     since = datetime.utcnow() - timedelta(days=7)
     today = datetime.utcnow().date()
 
-    decisions   = await _decisions_summary(user, session, since)
-    pending     = await _pending_approvals(user, session)
-    behind      = await _projects_behind_schedule(user, session, today)
-    at_risk     = await _risky_projects(user, session)
-    handle      = await _handle_projects(user, session)
+    decisions    = await _decisions_summary(user, session, since)
+    pending      = await _pending_approvals(user, session)
+    behind       = await _projects_behind_schedule(user, session, today)
+    at_risk      = await _risky_projects(user, session)
+    handle       = await _handle_projects(user, session)
     stage_map, name_map = await _project_stage_map(user, session)
+    type_summary = await _project_type_summary(user, session)
 
     return {
-        "decisions":         decisions,
-        "pending_approvals": pending,
-        "projects_behind":   behind,
-        "projects_at_risk":  at_risk,
-        "handle_items":      handle,
-        "stage_map":         stage_map,
-        "name_map":          name_map,
+        "decisions":            decisions,
+        "pending_approvals":    pending,
+        "projects_behind":      behind,
+        "projects_at_risk":     at_risk,
+        "handle_items":         handle,
+        "stage_map":            stage_map,
+        "name_map":             name_map,
+        "project_type_summary": type_summary,
     }
 
 
