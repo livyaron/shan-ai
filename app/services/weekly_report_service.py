@@ -387,18 +387,18 @@ async def _projects_behind_schedule(user: User, session: AsyncSession, today) ->
         days_behind = (today - p.estimated_finish_date).days
         health = "🔴 קריטי" if days_behind > 30 else "🟡 באיחור"
         result.append({
-            "project":     f"{p.name or p.project_identifier} ({p.project_identifier})",
-            "stage":       p.stage or "",
-            "finish_date": str(p.estimated_finish_date),
-            "days_behind": days_behind,
-            "health":      health,
-            "brief":       (p.weekly_report_brief or "")[:200],
-            "manager":     p.manager or "",
+            "project":      f"{p.name or p.project_identifier} ({p.project_identifier})",
+            "project_type": p.project_type or "",
+            "stage":        p.stage or "",
+            "finish_date":  str(p.estimated_finish_date),
+            "days_behind":  days_behind,
+            "health":       health,
+            "brief":        (p.weekly_report_brief or "")[:200],
+            "manager":      p.manager or "",
         })
     # Python-side sort ensures correct order even when DB ordering is mocked
     result.sort(key=lambda x: (
-        TYPE_ORDER.index(next((t for t in TYPE_ORDER if t in x["project"]), ""))
-        if any(t in x["project"] for t in TYPE_ORDER) else len(TYPE_ORDER),
+        TYPE_ORDER.index(x["project_type"]) if x["project_type"] in TYPE_ORDER else len(TYPE_ORDER),
         -x["days_behind"]
     ))
     return result
@@ -422,16 +422,16 @@ async def _risky_projects(user: User, session: AsyncSession) -> list[dict]:
 
     result = [
         {
-            "project": f"{p.name or p.project_identifier} ({p.project_identifier})",
-            "stage":   p.stage or "",
-            "risks":   (p.risks or "")[:100],
-            "brief":   (p.weekly_report_brief or "")[:150],
+            "project":      f"{p.name or p.project_identifier} ({p.project_identifier})",
+            "project_type": p.project_type or "",
+            "stage":        p.stage or "",
+            "risks":        (p.risks or "")[:100],
+            "brief":        (p.weekly_report_brief or "")[:150],
         }
         for p in rows
     ]
     result.sort(key=lambda x: (
-        TYPE_ORDER.index(next((t for t in TYPE_ORDER if t in x["project"]), ""))
-        if any(t in x["project"] for t in TYPE_ORDER) else len(TYPE_ORDER)
+        TYPE_ORDER.index(x["project_type"]) if x["project_type"] in TYPE_ORDER else len(TYPE_ORDER)
     ))
     return result
 
