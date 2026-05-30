@@ -145,3 +145,36 @@ def test_predict_needs_only_3_scores():
     pred = predict_next_score([30, 50, 70])
     assert pred is not None
     assert pred > 70
+
+
+import pytest
+from unittest.mock import AsyncMock, MagicMock, patch
+from app.services.project_learning_service import save_snapshot
+from app.models import Project
+
+
+@pytest.mark.asyncio
+async def test_save_snapshot_executes_upsert():
+    proj = MagicMock(spec=Project)
+    proj.id = 1
+    proj.stage = "ביצוע"
+    proj.estimated_finish_date = date(2026, 4, 1)
+    proj.dev_plan_date = date(2026, 3, 1)
+    proj.risks = "תקוע"
+    proj.to_handle = "פריט אחד\nפריט שניים"
+    proj.weekly_report_brief = "עדכון"
+    proj.is_active = True
+    proj.last_updated = datetime.utcnow()
+
+    session = AsyncMock()
+    # scalars().all() for prior snapshots query
+    mock_scalars = MagicMock()
+    mock_scalars.all.return_value = []
+    mock_result = MagicMock()
+    mock_result.scalars.return_value = mock_scalars
+    session.execute = AsyncMock(return_value=mock_result)
+    session.scalar = AsyncMock(return_value=None)
+
+    await save_snapshot(proj, session)
+
+    assert session.execute.called

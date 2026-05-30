@@ -5,6 +5,12 @@ from math import ceil
 from datetime import date, datetime
 from typing import Optional
 
+from sqlalchemy import select, func, desc, delete, and_
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models import Project, ProjectSnapshot
+from app.services.projects_menu_service import TYPE_ORDER
+
 logger = logging.getLogger(__name__)
 
 # ── Risk scoring constants ───────────────────────────────────────────────────
@@ -196,3 +202,70 @@ def predict_next_score(scores: list[int]) -> Optional[int]:
     slope = sorted(pairs)[len(pairs) // 2]
 
     return max(0, min(100, ceil(ewma + 2 * slope)))
+
+
+async def save_snapshot(project: Project, session: AsyncSession) -> None:
+    """
+    Upsert one ProjectSnapshot row for today.
+    ON CONFLICT (project_id, snapshot_date) → update all fields.
+    Prunes snapshots older than the 52nd most-recent per project.
+    """
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+    today = date.today()
+
+    # Fetch last 3 finish dates for velocity calculation
+    prior_rows = (await session.execute(
+        select(ProjectSnapshot.estimated_finish_date)
+        .where(ProjectSnapshot.project_id == project.id)
+        .order_by(desc(ProjectSnapshot.snapshot_date))
+        .limit(3)
+    )).scalars().all()
+    prior_finish_dates = [d for d in reversed(prior_rows) if d is not None]
+
+    result = compute_risk_score(
+        stage=project.stage,
+        estimated_finish_date=project.estimated_finish_date,
+        dev_plan_date=project.dev_plan_date,
+        risks=project.risks,
+        to_handle=project.to_handle,
+        last_updated=project.last_updated,
+        prior_finish_dates=prior_finish_dates,
+        today=today,
+    )
+
+    values = dict(
+        project_id            = project.id,
+        snapshot_date         = today,
+        stage                 = project.stage,
+        estimated_finish_date = project.estimated_finish_date,
+        dev_plan_date         = project.dev_plan_date,
+        risks                 = project.risks,
+        to_handle             = project.to_handle,
+        weekly_report_brief   = project.weekly_report_brief,
+        is_active             = project.is_active,
+        risk_score            = result["score"],
+        days_overdue          = result["days_overdue"],
+    )
+
+    stmt = pg_insert(ProjectSnapshot).values(**values).on_conflict_do_update(
+        index_elements=["project_id", "snapshot_date"],
+        set_={k: v for k, v in values.items() if k not in ("project_id", "snapshot_date")},
+    )
+    await session.execute(stmt)
+
+    # Prune: keep only the 52 most-recent snapshots per project
+    cutoff_date = await session.scalar(
+        select(ProjectSnapshot.snapshot_date)
+        .where(ProjectSnapshot.project_id == project.id)
+        .order_by(desc(ProjectSnapshot.snapshot_date))
+        .offset(51)
+        .limit(1)
+    )
+    if cutoff_date:
+        await session.execute(
+            delete(ProjectSnapshot).where(
+                ProjectSnapshot.project_id == project.id,
+                ProjectSnapshot.snapshot_date < cutoff_date,
+            )
+        )
