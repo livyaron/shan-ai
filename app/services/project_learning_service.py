@@ -1,7 +1,7 @@
 """Project learning service — risk scoring, snapshots, insight queries."""
 import math
 import logging
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -150,16 +150,18 @@ def compute_risk_score(
         "to_handle": handle,
         "staleness": stale,
     }
-    main_signal = max(breakdown, key=breakdown.get)
-
     days_overdue = None
     if estimated_finish_date:
         d = (today - estimated_finish_date).days
         days_overdue = d if d > 0 else None
 
-    main_reason = _MAIN_REASON_MAP.get(main_signal, "")
-    if main_signal == "overdue" and days_overdue:
-        main_reason = f"{days_overdue} ימי איחור"
+    if score == 0:
+        main_reason = ""
+    else:
+        main_signal = max(breakdown, key=breakdown.get)
+        main_reason = _MAIN_REASON_MAP.get(main_signal, "")
+        if main_signal == "overdue" and days_overdue:
+            main_reason = f"{days_overdue} ימי איחור"
 
     return {
         "score":        score,
