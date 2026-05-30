@@ -2,13 +2,11 @@
 import json as _json
 import logging
 from datetime import datetime, timedelta
-from typing import Optional
-
-from sqlalchemy import select, func, desc
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
-    User, Project, ProjectSnapshot, Decision,
+    User, ProjectSnapshot, Decision,
     ProjectReport, RoleEnum, DecisionTypeEnum, DecisionStatusEnum,
 )
 from app.services.project_learning_service import get_overview_stats, get_risk_table
@@ -44,7 +42,6 @@ async def gather_report_data(user: User, session: AsyncSession) -> dict:
 
     # Decisions last 30 days
     since30 = datetime.utcnow() - timedelta(days=30)
-    from sqlalchemy import or_
 
     dec_stmt = select(
         func.count(Decision.id).label("total"),
@@ -136,7 +133,12 @@ async def generate_report_html(data: dict) -> str:
     raw = await llm_chat(usage="project_report", messages=[{"role": "user", "content": prompt}])
 
     try:
-        clean = raw.strip().lstrip("```json").lstrip("```").rstrip("```").strip()
+        clean = raw.strip()
+        if clean.startswith("```"):
+            clean = clean.split("\n", 1)[1] if "\n" in clean else clean[3:]
+        if clean.endswith("```"):
+            clean = clean.rsplit("\n", 1)[0]
+        clean = clean.strip()
         narratives = _json.loads(clean)
     except Exception:
         logger.warning("project_report: LLM JSON parse failed, using empty narratives")
@@ -169,7 +171,7 @@ def _render_html(data: dict, narratives: dict) -> str:
 
     risk_rows = "".join(
         f'<tr>'
-        f'<td><strong>{r["name"]}</strong> <span style="color:#64748b;font-size:.8rem;">{r["identifier"]}</span></td>'
+        f'<td><strong>{r.get("name","")}</strong> <span style="color:#64748b;font-size:.8rem;">{r.get("identifier","")}</span></td>'
         f'<td>{r.get("type","")}</td>'
         f'<td>{r.get("stage","")}</td>'
         f'<td style="color:{"#ef4444" if r["risk_score"]>=70 else "#f59e0b" if r["risk_score"]>=40 else "#10b981"};">'
