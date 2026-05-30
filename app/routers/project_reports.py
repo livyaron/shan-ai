@@ -86,64 +86,7 @@ async def _generate_video_background(report_id: int, report_data: dict) -> None:
         logger.info(f"Video saved: {video_path}")
 
 
-@router.get("/{report_id}", response_class=HTMLResponse)
-async def project_report_detail(
-    report_id: int,
-    request: Request,
-    current_user: User = Depends(get_current_user),
-    session: AsyncSession = Depends(get_db_session),
-):
-    report = await session.scalar(
-        select(ProjectReport).where(
-            ProjectReport.id == report_id,
-            ProjectReport.user_id == current_user.id,
-        )
-    )
-    if not report:
-        raise HTTPException(status_code=404, detail="Report not found")
-
-    return templates.TemplateResponse("project_report_detail.html", {
-        "request": request,
-        "current_user": current_user,
-        "report": {
-            "id":              report.id,
-            "generated_at":    report.generated_at.strftime("%d/%m/%Y %H:%M"),
-            "html_content":    report.html_content or "",
-            "video_path":      report.video_path,
-            "notebooklm_url":  report.notebooklm_url,
-        },
-    })
-
-
-@router.post("/{report_id}/delete", response_class=HTMLResponse)
-async def project_report_delete(
-    report_id: int,
-    current_user: User = Depends(get_current_user),
-    session: AsyncSession = Depends(get_db_session),
-):
-    import os
-    report = await session.scalar(
-        select(ProjectReport).where(
-            ProjectReport.id == report_id,
-            ProjectReport.user_id == current_user.id,
-        )
-    )
-    if not report:
-        raise HTTPException(status_code=404, detail="Report not found")
-
-    if report.video_path:
-        full = os.path.join("static", report.video_path)
-        try:
-            os.unlink(full)
-        except FileNotFoundError:
-            pass
-
-    await session.delete(report)
-    await session.commit()
-    return RedirectResponse("/dashboard/project-reports", status_code=302)
-
-
-# ── Schedule management (admin only) ─────────────────────────────────────────
+# ── Schedule management (admin only) — declared BEFORE /{report_id} ──────────
 
 def _check_admin(user: User) -> None:
     from app.models import RoleEnum
@@ -260,3 +203,62 @@ async def report_schedule_send_now(
 
     asyncio.create_task(auto_send_project_report(target, session, bot))
     return RedirectResponse("/dashboard/project-reports/schedule", status_code=302)
+
+
+# ── Report detail + delete (parameterized — must be LAST) ────────────────────
+
+@router.get("/{report_id}", response_class=HTMLResponse)
+async def project_report_detail(
+    report_id: int,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+):
+    report = await session.scalar(
+        select(ProjectReport).where(
+            ProjectReport.id == report_id,
+            ProjectReport.user_id == current_user.id,
+        )
+    )
+    if not report:
+        raise HTTPException(status_code=404, detail="Report not found")
+
+    return templates.TemplateResponse("project_report_detail.html", {
+        "request": request,
+        "current_user": current_user,
+        "report": {
+            "id":              report.id,
+            "generated_at":    report.generated_at.strftime("%d/%m/%Y %H:%M"),
+            "html_content":    report.html_content or "",
+            "video_path":      report.video_path,
+            "notebooklm_url":  report.notebooklm_url,
+        },
+    })
+
+
+@router.post("/{report_id}/delete", response_class=HTMLResponse)
+async def project_report_delete(
+    report_id: int,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+):
+    import os
+    report = await session.scalar(
+        select(ProjectReport).where(
+            ProjectReport.id == report_id,
+            ProjectReport.user_id == current_user.id,
+        )
+    )
+    if not report:
+        raise HTTPException(status_code=404, detail="Report not found")
+
+    if report.video_path:
+        full = os.path.join("static", report.video_path)
+        try:
+            os.unlink(full)
+        except FileNotFoundError:
+            pass
+
+    await session.delete(report)
+    await session.commit()
+    return RedirectResponse("/dashboard/project-reports", status_code=302)
