@@ -371,6 +371,12 @@ class ProjectReportSchedule(Base):
     minute_il     = Column(Integer, default=0,  nullable=False)
     last_sent_at  = Column(DateTime, nullable=True)
     created_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    # User (weekly) report schedule
+    ur_enabled    = Column(Boolean, default=False, nullable=False)
+    ur_dow        = Column(Integer, nullable=True)
+    ur_hour_il    = Column(Integer, default=8,  nullable=False)
+    ur_minute_il  = Column(Integer, default=0,  nullable=False)
+    ur_last_sent_at = Column(DateTime, nullable=True)
 
     user       = relationship("User", foreign_keys=[user_id])
     created_by = relationship("User", foreign_keys=[created_by_id])

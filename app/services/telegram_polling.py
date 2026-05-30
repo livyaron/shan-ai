@@ -34,7 +34,9 @@ def _main_reply_keyboard(user=None) -> ReplyKeyboardMarkup:
     manager_roles = {RoleEnum.DEPARTMENT_MANAGER, RoleEnum.DEPUTY_DIVISION_MANAGER, RoleEnum.DIVISION_MANAGER}
     rows = [["📁 פרוייקטים", "📋 החלטות", "📊 דוח שלי"]]
     if user and user.role in manager_roles:
-        rows.append(["👥 דוח צוות"])
+        rows.append(["👥 דוח צוות", "📊 דוח פרויקטים"])
+    else:
+        rows.append(["📊 דוח פרויקטים"])
     return ReplyKeyboardMarkup(rows, resize_keyboard=True, is_persistent=True)
 
 
@@ -609,6 +611,37 @@ class TelegramPollingBot:
                     sent_via="telegram",
                 )
                 await send_report_to_user(context.bot, update.effective_chat.id, sections)
+                return
+
+            # Project report shortcut — "📊 דוח פרויקטים"
+            if "דוח פרויקטים" in text.strip():
+                await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+                from app.services.project_report_service import gather_report_data, generate_report_html
+                from app.models import ProjectReport as _PR
+                await update.message.reply_text("‏⏳ מייצר דוח פרויקטים... זה עשוי לקחת מספר שניות.")
+                try:
+                    report_data = await gather_report_data(user, session)
+                    html = await generate_report_html(report_data)
+                    report = _PR(user_id=user.id, report_data=report_data, html_content=html)
+                    session.add(report)
+                    await session.flush()
+                    rid = report.id
+                    await session.commit()
+                    es = report_data.get("executive_summary", {})
+                    meta = report_data.get("meta", {})
+                    msg = (
+                        f"‏📊 *דוח פרויקטים* — {meta.get('generated_at','')}\n\n"
+                        f"📌 פעיל: *{es.get('total_active',0)}* | "
+                        f"🟡 באיחור: *{es.get('total_delayed',0)}* | "
+                        f"🔴 סיכון: *{es.get('total_at_risk',0)}*\n"
+                        f"ציון סיכון ממוצע: *{es.get('avg_risk_score',0)}*\n\n"
+                        f"[צפה בדוח המלא]"
+                        f"(https://easygoing-endurance-production-df54.up.railway.app/dashboard/project-reports/{rid})"
+                    )
+                    await update.message.reply_text(msg, parse_mode="Markdown")
+                except Exception as _pe:
+                    logger.error(f"Telegram project report failed: {_pe}")
+                    await update.message.reply_text("‏❌ שגיאה בייצור הדוח. נסה שוב מאוחר יותר.")
                 return
 
             # Team report shortcut — "👥 דוח צוות" (managers only)

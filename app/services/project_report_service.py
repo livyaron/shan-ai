@@ -56,9 +56,6 @@ async def gather_report_data(user: User, session: AsyncSession) -> dict:
         ).label("approved"),
     ).where(Decision.created_at >= since30, Decision.is_relevant == True)
 
-    if user.role == RoleEnum.PROJECT_MANAGER:
-        dec_stmt = dec_stmt.where(Decision.submitter_id == user.id)
-
     dec_row = (await session.execute(dec_stmt)).one()
     total_dec    = dec_row[0] or 0
     approval_rate = round((dec_row[2] / total_dec * 100) if total_dec else 0)

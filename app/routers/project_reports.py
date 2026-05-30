@@ -26,7 +26,6 @@ async def project_reports_list(
 ):
     reports = (await session.execute(
         select(ProjectReport)
-        .where(ProjectReport.user_id == current_user.id)
         .order_by(desc(ProjectReport.generated_at))
         .limit(20)
     )).scalars().all()
@@ -126,6 +125,10 @@ async def report_schedule_page(
             "hour_il":     s.hour_il if s else 8,
             "minute_il":   s.minute_il if s else 0,
             "last_sent":   s.last_sent_at.strftime("%d/%m/%Y %H:%M") if (s and s.last_sent_at) else "—",
+            "ur_enabled":  s.ur_enabled if s else False,
+            "ur_dow":      s.ur_dow if s else None,
+            "ur_hour_il":  s.ur_hour_il if s else 8,
+            "ur_minute_il": s.ur_minute_il if s else 0,
         })
 
     return templates.TemplateResponse("report_schedule.html", {
@@ -145,37 +148,57 @@ async def report_schedule_save(
     from app.models import ProjectReportSchedule
 
     form = await request.form()
-    enabled_ids = {int(k.split("_")[1]) for k, v in form.items()
-                   if k.startswith("enabled_") and v == "on"}
-    all_ids = {int(k.split("_", 1)[1]) for k in form.keys()
-               if k.startswith(("enabled_", "dow_", "hour_", "minute_"))}
+
+    def _fint(key, default=0):
+        try: return int(form.get(key, default))
+        except (ValueError, TypeError): return default
+
+    def _fdow(key):
+        v = form.get(key, "")
+        try: return int(v) if v != "" else None
+        except (ValueError, TypeError): return None
+
+    # Collect all user ids present in form
+    all_ids = {int(k.rsplit("_", 1)[1]) for k in form.keys()
+               if k.startswith(("enabled_", "dow_", "hour_", "minute_",
+                                 "ur_enabled_", "ur_dow_", "ur_hour_", "ur_minute_"))
+               and k.rsplit("_", 1)[1].isdigit()}
 
     existing = {s.user_id: s for s in (await session.execute(
         select(ProjectReportSchedule)
     )).scalars().all()}
 
     for uid in all_ids:
-        try:
-            dow_raw = form.get(f"dow_{uid}", "")
-            dow    = int(dow_raw) if dow_raw != "" else None
-            hour   = int(form.get(f"hour_{uid}", 8))
-            minute = int(form.get(f"minute_{uid}", 0))
-        except (ValueError, TypeError):
-            continue
+        pr_en  = form.get(f"enabled_{uid}") == "on"
+        pr_dow = _fdow(f"dow_{uid}")
+        pr_h   = max(0, min(23, _fint(f"hour_{uid}", 8)))
+        pr_m   = max(0, min(59, _fint(f"minute_{uid}", 0)))
+        ur_en  = form.get(f"ur_enabled_{uid}") == "on"
+        ur_dow = _fdow(f"ur_dow_{uid}")
+        ur_h   = max(0, min(23, _fint(f"ur_hour_{uid}", 8)))
+        ur_m   = max(0, min(59, _fint(f"ur_minute_{uid}", 0)))
 
         if uid in existing:
             s = existing[uid]
-            s.enabled     = (uid in enabled_ids)
-            s.day_of_week = dow
-            s.hour_il     = max(0, min(23, hour))
-            s.minute_il   = max(0, min(59, minute))
+            s.enabled     = pr_en
+            s.day_of_week = pr_dow
+            s.hour_il     = pr_h
+            s.minute_il   = pr_m
+            s.ur_enabled  = ur_en
+            s.ur_dow      = ur_dow
+            s.ur_hour_il  = ur_h
+            s.ur_minute_il = ur_m
         else:
             s = ProjectReportSchedule(
                 user_id       = uid,
-                enabled       = (uid in enabled_ids),
-                day_of_week   = dow,
-                hour_il       = max(0, min(23, hour)),
-                minute_il     = max(0, min(59, minute)),
+                enabled       = pr_en,
+                day_of_week   = pr_dow,
+                hour_il       = pr_h,
+                minute_il     = pr_m,
+                ur_enabled    = ur_en,
+                ur_dow        = ur_dow,
+                ur_hour_il    = ur_h,
+                ur_minute_il  = ur_m,
                 created_by_id = current_user.id,
             )
             session.add(s)
@@ -205,6 +228,33 @@ async def report_schedule_send_now(
     return RedirectResponse("/dashboard/project-reports/schedule", status_code=302)
 
 
+@router.post("/schedule/send-user-now/{user_id}", response_class=HTMLResponse)
+async def report_schedule_send_user_now(
+    user_id: int,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+):
+    _check_admin(current_user)
+
+    target = await session.scalar(select(User).where(User.id == user_id))
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    async def _send():
+        from app.database import async_session_maker
+        from app.services.weekly_report_service import generate_report_for_user, send_report_to_user
+        from app.services.telegram_polling import telegram_bot
+        bot = (telegram_bot.application.bot
+               if telegram_bot.application and telegram_bot.application.bot else None)
+        async with async_session_maker() as s:
+            sections = await generate_report_for_user(target, s, sent_via="dashboard")
+        if bot and target.telegram_id:
+            await send_report_to_user(bot, target.telegram_id, sections)
+
+    asyncio.create_task(_send())
+    return RedirectResponse("/dashboard/project-reports/schedule", status_code=302)
+
+
 # ── Report detail + delete (parameterized — must be LAST) ────────────────────
 
 @router.get("/{report_id}", response_class=HTMLResponse)
@@ -215,10 +265,7 @@ async def project_report_detail(
     session: AsyncSession = Depends(get_db_session),
 ):
     report = await session.scalar(
-        select(ProjectReport).where(
-            ProjectReport.id == report_id,
-            ProjectReport.user_id == current_user.id,
-        )
+        select(ProjectReport).where(ProjectReport.id == report_id)
     )
     if not report:
         raise HTTPException(status_code=404, detail="Report not found")
@@ -244,10 +291,7 @@ async def project_report_delete(
 ):
     import os
     report = await session.scalar(
-        select(ProjectReport).where(
-            ProjectReport.id == report_id,
-            ProjectReport.user_id == current_user.id,
-        )
+        select(ProjectReport).where(ProjectReport.id == report_id)
     )
     if not report:
         raise HTTPException(status_code=404, detail="Report not found")

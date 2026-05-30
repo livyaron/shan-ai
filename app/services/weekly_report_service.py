@@ -13,17 +13,16 @@ import json
 import logging
 from datetime import datetime, timedelta
 
-from sqlalchemy import select, desc, or_, func, and_, case as sa_case
+from sqlalchemy import select, desc, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
-    User, Decision, Project, RoleEnum, DecisionStatusEnum, DecisionTypeEnum,
+    User, Decision, RoleEnum, DecisionStatusEnum, DecisionTypeEnum,
     DecisionDistribution, DistributionTypeEnum, DistributionStatusEnum,
     ReportHistory,
 )
 import app.database as _app_database
 from app.services.llm_router import llm_chat
-from app.services.projects_menu_service import TYPE_ORDER
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +36,6 @@ _ROLE_LABELS = {
 _SECTION_HEADERS = [
     ("prologue",  "📊 פתיח"),
     ("decisions", "📋 החלטות השבוע"),
-    ("projects",  "🏗️ מצב פרויקטים"),
     ("summary",   "✅ סיכום ומסקנות"),
     ("delta",     "📈 שינויים מהדוח הקודם"),
 ]
@@ -45,51 +43,38 @@ _SECTION_HEADERS = [
 _REPORT_PROMPT = """\
 כתוב בעברית שוטפת וידידותית — כאילו מנהל בכיר מדווח בעל-פה לעמית. משפטים קצרים. אין מונחים טכניים מיותרים.
 
-אתה עוזר ניהול פרויקטים לתשתיות חשמל. צור דוח שבועי בעברית עבור {username} (תפקיד: {role_label}).
+אתה עוזר מערכת החלטות לתשתיות חשמל. צור דוח שבועי בעברית עבור {username} (תפקיד: {role_label}).
 תאריך: שבוע {date_range}
 
 --- נתוני קלט ---
 החלטות (7 ימים אחרונים): {decisions_json}
 החלטות קריטיות/לא-ודאות: {critical_urgent_json}
 אישורים ממתינים שלך: {pending_json}
-פרויקטים באיחור: {behind_json}
-פרויקטים בסיכון: {risks_json}
-פרויקטים לטיפול (to_handle): {handle_json}
-סיכום פרויקטים לפי סוג: {type_summary_json}
-פרויקטים שנכנסו לאיחור השבוע: {overdue_entered_json}
-פרויקטים שיצאו מאיחור השבוע: {overdue_resolved_json}
 {delta_section}
 --- הנחיות לפלט ---
 
-prologue (50-70 מילה):
-שלום {username}, 1-2 פריטים קריטיים לטיפול היום, ספירות (החלטות/פרויקטים/אישורים).
+prologue (40-60 מילה):
+שלום {username}, 1-2 פריטים קריטיים לטיפול היום, ספירות (החלטות/אישורים).
 
-decisions (100-130 מילה):
+decisions (80-120 מילה):
 אם יש החלטות קריטיות/לא-ודאות — פתח בהן עם ⚠️, כל אחת בשורה: "#ID — תיאור — פעולה מומלצת".
 אחר כך: ספירה לפי סוג, אחוז אישורים, רשימה קצרה של אישורים ממתינים.
 דגל ⚠️ אם נפח חריג.
 
-projects (150-200 מילה) — ניתוח מלא:
-פתח בטבלת סיכום: | סוג | פעיל | מאחר | בסיכון | — שורה לכל סוג (הקמה/הרחבה/שוש/ניידות).
-לכל פרויקט באיחור: שם + 🔴/🟡 + כמה ימים + שלב נוכחי + סיבה קצרה. מיין לפי חשיבות סוג (הקמה ראשון).
-"חייב לפעול השבוע" — 3 פריטים: מי (שם מנהל אם קיים, אחרת "דרוש טיפול") / מה / מתי.
-
-summary (80-100 מילה):
-3 משימות לשבוע הבא בפורמט: "• [שם מנהל / "דרוש טיפול"] — [פעולה ספציפית] — [מתי]".
+summary (60-80 מילה):
+3 משימות לשבוע הבא בפורמט: "• [פעולה ספציפית] — [מתי]".
 הישג בולט אחד. סיכון מרכזי אחד. משפט עידוד קצר.
 
 delta: {has_delta} — אם "true":
-פתח ב"מאז הדוח הקודם:". ציין פרויקטים שנכנסו לאיחור (overdue_entered) ופרויקטים שיצאו מאיחור (overdue_resolved).
-שינויי שלב: "פרויקט X עבר מ-Y ל-Z". מגמת החלטות (↑↓%). פסקה רציפה, ללא bullet points.
+פתח ב"מאז הדוח הקודם:". מגמת החלטות (↑↓%). שינויים בסוג/סטטוס החלטות. פסקה רציפה, ללא bullet points.
 אם "false": null.
 
 --- פורמט תשובה (JSON בלבד, ללא טקסט לפני ואחרי) ---
-{{"prologue":"...","decisions":"...","projects":"...","summary":"...","delta":"..."}}"""
+{{"prologue":"...","decisions":"...","summary":"...","delta":"..."}}"""
 
 _FALLBACK_SECTIONS = {
     "prologue":  "‏⚠️ שגיאה בייצור הדוח. נסה שוב מאוחר יותר.",
     "decisions": None,
-    "projects":  None,
     "summary":   None,
     "delta":     None,
 }
@@ -155,21 +140,17 @@ async def generate_report_for_user(
         .limit(1)
     )
 
-    delta_section_text    = ""
-    has_delta             = "false"
-    overdue_entered_json  = "[]"
-    overdue_resolved_json = "[]"
+    delta_section_text = ""
+    has_delta          = "false"
 
     if prev_row and prev_row.raw_data:
-        delta_input = _compute_delta(raw, prev_row.raw_data)
-        prev_date   = prev_row.generated_at.strftime("%d/%m/%Y")
+        delta_input    = _compute_delta(raw, prev_row.raw_data)
+        prev_date      = prev_row.generated_at.strftime("%d/%m/%Y")
         delta_section_text = (
             f"שינויים מהדוח הקודם ({prev_date}):\n"
             f"{json.dumps(delta_input, ensure_ascii=False)}\n"
         )
-        has_delta             = "true"
-        overdue_entered_json  = json.dumps(delta_input.get("overdue_entered",  []), ensure_ascii=False)
-        overdue_resolved_json = json.dumps(delta_input.get("overdue_resolved", []), ensure_ascii=False)
+        has_delta = "true"
 
     prompt = _REPORT_PROMPT.format(
         role_label=role_label,
@@ -180,14 +161,8 @@ async def generate_report_for_user(
             raw["decisions"].get("critical_urgent", []), ensure_ascii=False
         ),
         pending_json=json.dumps(raw["pending_approvals"][:5], ensure_ascii=False),
-        behind_json=json.dumps(raw["projects_behind"][:8], ensure_ascii=False),
-        risks_json=json.dumps(raw["projects_at_risk"][:8], ensure_ascii=False),
-        handle_json=json.dumps(raw["handle_items"][:3], ensure_ascii=False),
-        type_summary_json=json.dumps(raw.get("project_type_summary", {}), ensure_ascii=False),
         delta_section=delta_section_text,
         has_delta=has_delta,
-        overdue_entered_json=overdue_entered_json,
-        overdue_resolved_json=overdue_resolved_json,
     )
 
     sections = dict(_FALLBACK_SECTIONS)
@@ -209,7 +184,6 @@ async def generate_report_for_user(
         sections = {
             "prologue":  str(parsed.get("prologue") or ""),
             "decisions": parsed.get("decisions") or None,
-            "projects":  parsed.get("projects") or None,
             "summary":   parsed.get("summary") or None,
             "delta":     parsed.get("delta") or None,
         }
@@ -273,25 +247,13 @@ async def send_weekly_reports_cron(bot) -> None:
 
 async def _gather_raw_data(user: User, session: AsyncSession) -> dict:
     since = datetime.utcnow() - timedelta(days=7)
-    today = datetime.utcnow().date()
 
-    decisions    = await _decisions_summary(user, session, since)
-    pending      = await _pending_approvals(user, session)
-    behind       = await _projects_behind_schedule(user, session, today)
-    at_risk      = await _risky_projects(user, session)
-    handle       = await _handle_projects(user, session)
-    stage_map, name_map = await _project_stage_map(user, session)
-    type_summary = await _project_type_summary(user, session)
+    decisions = await _decisions_summary(user, session, since)
+    pending   = await _pending_approvals(user, session)
 
     return {
-        "decisions":            decisions,
-        "pending_approvals":    pending,
-        "projects_behind":      behind,
-        "projects_at_risk":     at_risk,
-        "handle_items":         handle,
-        "stage_map":            stage_map,
-        "name_map":             name_map,
-        "project_type_summary": type_summary,
+        "decisions":         decisions,
+        "pending_approvals": pending,
     }
 
 
@@ -522,37 +484,6 @@ def _compute_delta(current: dict, prev: dict) -> dict:
     curr_total = c_dec.get("total", 0)
     prev_total = p_dec.get("total", 0)
 
-    curr_stages = current.get("stage_map", {})
-    prev_stages = prev.get("stage_map", {})
-    curr_names  = current.get("name_map", {})
-    prev_names  = prev.get("name_map", {})
-
-    stage_changes = [
-        {
-            "id":   k,
-            "name": curr_names.get(k, k),
-            "from": prev_stages[k],
-            "to":   curr_stages[k],
-        }
-        for k in curr_stages
-        if k in prev_stages and curr_stages[k] != prev_stages[k]
-    ]
-
-    curr_risk_ids = {p.get("project") or p.get("identifier", "") for p in current.get("projects_at_risk", [])}
-    prev_risk_ids = {p.get("project") or p.get("identifier", "") for p in prev.get("projects_at_risk", [])}
-
-    curr_behind = current.get("projects_behind", [])
-    prev_behind = prev.get("projects_behind", [])
-    curr_behind_names = {p["project"] for p in curr_behind}
-    prev_behind_names = {p["project"] for p in prev_behind}
-
-    overdue_entered = [
-        {"name": p["project"], "days_behind": p["days_behind"]}
-        for p in curr_behind
-        if p["project"] not in prev_behind_names
-    ]
-    overdue_resolved = list(prev_behind_names - curr_behind_names)
-
     return {
         "decisions_change":         curr_total - prev_total,
         "prev_decisions_total":     prev_total,
@@ -563,13 +494,4 @@ def _compute_delta(current: dict, prev: dict) -> dict:
             len(current.get("pending_approvals", [])) -
             len(prev.get("pending_approvals", []))
         ),
-        "stage_changes":            stage_changes,
-        "new_risks":                list(curr_risk_ids - prev_risk_ids),
-        "resolved_risks":           list(prev_risk_ids - curr_risk_ids),
-        "behind_schedule_change":   (
-            len(current.get("projects_behind", [])) -
-            len(prev.get("projects_behind", []))
-        ),
-        "overdue_entered":          overdue_entered,
-        "overdue_resolved":         overdue_resolved,
     }

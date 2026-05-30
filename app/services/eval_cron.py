@@ -117,3 +117,32 @@ async def _project_report_cron() -> None:
             if ok:
                 sched.last_sent_at = datetime.utcnow()
                 await session.commit()
+
+        # ── User report schedules ─────────────────────────────────────
+        for sched in schedules:
+            if not sched.ur_enabled:
+                continue
+            if sched.ur_dow is not None and sched.ur_dow != current_dow_sun:
+                continue
+            if sched.ur_hour_il != current_hour:
+                continue
+            if not (sched.ur_minute_il <= current_minute < sched.ur_minute_il + 15):
+                continue
+            if sched.ur_last_sent_at:
+                if (datetime.utcnow() - sched.ur_last_sent_at) < timedelta(minutes=30):
+                    continue
+
+            user = await session.get(User, sched.user_id)
+            if not user or not user.telegram_id:
+                continue
+
+            from app.services.weekly_report_service import generate_report_for_user, send_report_to_user
+            logger.info(f"project_report_cron: sending user report for user {user.id} ({user.username})")
+            try:
+                sections = await generate_report_for_user(user, session, sent_via="cron")
+                if bot:
+                    await send_report_to_user(bot, user.telegram_id, sections)
+                sched.ur_last_sent_at = datetime.utcnow()
+                await session.commit()
+            except Exception as exc:
+                logger.error(f"user_report_cron failed for user {user.id}: {exc}")
