@@ -108,7 +108,13 @@ class Decision(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     completed_at = Column(DateTime, nullable=True)
 
+    is_relevant        = Column(Boolean, nullable=False, default=True, server_default="true")
+    irrelevant_reason  = Column(Text, nullable=True)
+    irrelevant_at      = Column(DateTime, nullable=True)
+    irrelevant_by_id   = Column(Integer, ForeignKey("users.id"), nullable=True)
+
     submitter = relationship("User", back_populates="decisions", foreign_keys=[submitter_id])
+    irrelevant_by = relationship("User", foreign_keys=[irrelevant_by_id])
     distributions = relationship("DecisionDistribution", back_populates="decision", cascade="all, delete-orphan")
     raci_roles = relationship("DecisionRaciRole", back_populates="decision", cascade="all, delete-orphan")
 
