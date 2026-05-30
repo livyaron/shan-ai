@@ -2329,6 +2329,37 @@ async def profile_page(token: str, request: Request, session: AsyncSession = Dep
 # Learning / Calibration Dashboard
 # -----------------------------------------------------------------------
 
+@router.get("/learning/projects/overview")
+async def learning_projects_overview(
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+):
+    from app.services.project_learning_service import get_overview_stats
+    return await get_overview_stats(session)
+
+
+@router.get("/learning/projects/risk-table")
+async def learning_projects_risk_table(
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+):
+    from app.services.project_learning_service import get_risk_table
+    return await get_risk_table(session)
+
+
+@router.get("/learning/projects/{project_id}/detail")
+async def learning_project_detail(
+    project_id: int,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+):
+    from app.services.project_learning_service import get_project_detail
+    result = await get_project_detail(project_id, session)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return result
+
+
 @router.get("/learning", response_class=HTMLResponse)
 async def learning_page(
     request: Request,
