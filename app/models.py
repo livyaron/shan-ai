@@ -360,6 +360,22 @@ class ProjectReport(Base):
     user = relationship("User")
 
 
+class ProjectReportSchedule(Base):
+    __tablename__ = "project_report_schedules"
+
+    id            = Column(Integer, primary_key=True, index=True)
+    user_id       = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), unique=True, nullable=False, index=True)
+    enabled       = Column(Boolean, default=False, nullable=False)
+    day_of_week   = Column(Integer, nullable=True)   # 0=Sun … 6=Sat; None = every day
+    hour_il       = Column(Integer, default=8,  nullable=False)  # Israel time
+    minute_il     = Column(Integer, default=0,  nullable=False)
+    last_sent_at  = Column(DateTime, nullable=True)
+    created_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+
+    user       = relationship("User", foreign_keys=[user_id])
+    created_by = relationship("User", foreign_keys=[created_by_id])
+
+
 # =============================================================================
 # Eval & Self-Repair Loop tables
 # =============================================================================
