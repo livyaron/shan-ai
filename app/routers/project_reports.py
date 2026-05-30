@@ -141,3 +141,122 @@ async def project_report_delete(
     await session.delete(report)
     await session.commit()
     return RedirectResponse("/dashboard/project-reports", status_code=302)
+
+
+# ── Schedule management (admin only) ─────────────────────────────────────────
+
+def _check_admin(user: User) -> None:
+    from app.models import RoleEnum
+    allowed = {RoleEnum.DIVISION_MANAGER, RoleEnum.DEPUTY_DIVISION_MANAGER}
+    if not user.is_admin and user.role not in allowed:
+        raise HTTPException(status_code=403, detail="Admin only")
+
+
+@router.get("/schedule", response_class=HTMLResponse)
+async def report_schedule_page(
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+):
+    _check_admin(current_user)
+    from app.models import RoleEnum, ProjectReportSchedule
+
+    users = (await session.execute(
+        select(User)
+        .where(User.role.isnot(None), User.role != RoleEnum.VIEWER)
+        .order_by(User.role, User.username)
+    )).scalars().all()
+
+    schedules = (await session.execute(select(ProjectReportSchedule))).scalars().all()
+    sched_map = {s.user_id: s for s in schedules}
+
+    rows = []
+    for u in users:
+        s = sched_map.get(u.id)
+        rows.append({
+            "id":          u.id,
+            "username":    u.username,
+            "role":        u.role.value if u.role else "",
+            "telegram":    bool(u.telegram_id),
+            "enabled":     s.enabled if s else False,
+            "day_of_week": s.day_of_week if s else None,
+            "hour_il":     s.hour_il if s else 8,
+            "minute_il":   s.minute_il if s else 0,
+            "last_sent":   s.last_sent_at.strftime("%d/%m/%Y %H:%M") if (s and s.last_sent_at) else "—",
+        })
+
+    return templates.TemplateResponse("report_schedule.html", {
+        "request": request,
+        "current_user": current_user,
+        "rows": rows,
+    })
+
+
+@router.post("/schedule/save", response_class=HTMLResponse)
+async def report_schedule_save(
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+):
+    _check_admin(current_user)
+    from app.models import ProjectReportSchedule
+
+    form = await request.form()
+    enabled_ids = {int(k.split("_")[1]) for k, v in form.items()
+                   if k.startswith("enabled_") and v == "on"}
+    all_ids = {int(k.split("_", 1)[1]) for k in form.keys()
+               if k.startswith(("enabled_", "dow_", "hour_", "minute_"))}
+
+    existing = {s.user_id: s for s in (await session.execute(
+        select(ProjectReportSchedule)
+    )).scalars().all()}
+
+    for uid in all_ids:
+        try:
+            dow_raw = form.get(f"dow_{uid}", "")
+            dow    = int(dow_raw) if dow_raw != "" else None
+            hour   = int(form.get(f"hour_{uid}", 8))
+            minute = int(form.get(f"minute_{uid}", 0))
+        except (ValueError, TypeError):
+            continue
+
+        if uid in existing:
+            s = existing[uid]
+            s.enabled     = (uid in enabled_ids)
+            s.day_of_week = dow
+            s.hour_il     = max(0, min(23, hour))
+            s.minute_il   = max(0, min(59, minute))
+        else:
+            s = ProjectReportSchedule(
+                user_id       = uid,
+                enabled       = (uid in enabled_ids),
+                day_of_week   = dow,
+                hour_il       = max(0, min(23, hour)),
+                minute_il     = max(0, min(59, minute)),
+                created_by_id = current_user.id,
+            )
+            session.add(s)
+
+    await session.commit()
+    return RedirectResponse("/dashboard/project-reports/schedule", status_code=302)
+
+
+@router.post("/schedule/send-now/{user_id}", response_class=HTMLResponse)
+async def report_schedule_send_now(
+    user_id: int,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+):
+    _check_admin(current_user)
+
+    target = await session.scalar(select(User).where(User.id == user_id))
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    from app.services.project_report_service import auto_send_project_report
+    from app.services.telegram_polling import telegram_bot
+    bot = (telegram_bot.application.bot
+           if telegram_bot.application and telegram_bot.application.bot else None)
+
+    asyncio.create_task(auto_send_project_report(target, session, bot))
+    return RedirectResponse("/dashboard/project-reports/schedule", status_code=302)
