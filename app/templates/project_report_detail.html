@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Shan-AI — דוח פרויקטים {{ report.generated_at }}</title>
+  <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    :root { --bg-deep:#070b12; --bg-surface:#0c1220; --bg-card:#0f1826; --border:#1a2d47; --cyan:#00d4ff; --text-1:#e2e8f0; --text-2:#64748b; }
+    body { background:var(--bg-deep); color:var(--text-1); font-family:'Heebo',sans-serif; min-height:100vh; }
+    .navbar { background:var(--bg-surface); border-bottom:1px solid var(--border); padding:12px 24px; }
+    .page-title { color:var(--cyan); font-size:1.2rem; font-weight:700; }
+    .btn-outline-dim { border:1px solid var(--border); color:var(--text-2); background:transparent; border-radius:6px; padding:6px 16px; text-decoration:none; display:inline-block; }
+    .btn-outline-dim:hover { color:var(--text-1); border-color:var(--cyan); }
+    .section-card { background:var(--bg-card); border:1px solid var(--border); border-radius:8px; margin-bottom:16px; }
+    .section-header { padding:12px 16px; cursor:pointer; display:flex; justify-content:space-between; align-items:center; font-weight:600; color:var(--cyan); }
+    .section-body { padding:0; border-top:1px solid var(--border); }
+    video { width:100%; border-radius:8px; background:#000; }
+    .video-card { background:var(--bg-card); border:1px solid var(--border); border-radius:8px; padding:16px; margin-bottom:16px; }
+    .spinner { display:inline-block; width:16px; height:16px; border:2px solid rgba(0,212,255,.3); border-top-color:var(--cyan); border-radius:50%; animation:spin .8s linear infinite; }
+    @keyframes spin { to { transform:rotate(360deg); } }
+  </style>
+</head>
+<body>
+<nav class="navbar d-flex justify-content-between align-items-center">
+  <span class="page-title">📋 דוח {{ report.generated_at }}</span>
+  <div class="d-flex gap-2 align-items-center">
+    <span style="color:var(--text-2);font-size:.85rem;">{{ current_user.username }}</span>
+    <a href="/dashboard/project-reports" class="btn-outline-dim">← רשימת דוחות</a>
+    <a href="/logout" class="btn-outline-dim">יציאה</a>
+  </div>
+</nav>
+
+<div class="container-fluid px-4 py-4">
+
+  <div class="video-card">
+    <div style="font-size:.9rem;font-weight:600;color:var(--cyan);margin-bottom:12px;">🎬 וידאו הדוח</div>
+    {% if report.video_path %}
+    <video controls preload="metadata">
+      <source src="/static/{{ report.video_path }}" type="video/mp4">
+      הדפדפן שלך אינו תומך בהפעלת וידאו.
+    </video>
+    {% else %}
+    <div style="color:var(--text-2);padding:20px 0;">
+      <span class="spinner"></span> &nbsp; הוידאו נמצא בהכנה — רענן בעוד מספר דקות.
+    </div>
+    <script>setTimeout(() => location.reload(), 15000);</script>
+    {% endif %}
+
+    {% if report.notebooklm_url %}
+    <div style="margin-top:12px;font-size:.82rem;">
+      🎙️ <a href="{{ report.notebooklm_url }}" target="_blank" style="color:var(--cyan);">
+        פתח Audio Overview ב-NotebookLM
+      </a>
+    </div>
+    {% endif %}
+  </div>
+
+  <div class="section-card">
+    <div class="section-header" onclick="toggleReport()">
+      <span>📄 דוח HTML מלא</span>
+      <span id="rep-arr">▼</span>
+    </div>
+    <div class="section-body" id="rep-body">
+      <iframe srcdoc="{{ report.html_content | e }}" style="width:100%;height:1200px;border:none;background:#070b12;"></iframe>
+    </div>
+  </div>
+
+</div>
+
+<script>
+function toggleReport() {
+  const b = document.getElementById('rep-body');
+  const a = document.getElementById('rep-arr');
+  b.style.display = b.style.display === 'none' ? '' : 'none';
+  a.textContent = b.style.display === 'none' ? '▶' : '▼';
+}
+</script>
+</body>
+</html>
