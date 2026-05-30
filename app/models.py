@@ -346,6 +346,20 @@ class ProjectSnapshot(Base):
     __table_args__ = (UniqueConstraint("project_id", "snapshot_date"),)
 
 
+class ProjectReport(Base):
+    __tablename__ = "project_reports"
+
+    id             = Column(Integer, primary_key=True, index=True)
+    user_id        = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    generated_at   = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    report_data    = Column(JSON, nullable=True)
+    html_content   = Column(Text, nullable=True)
+    video_path     = Column(String(500), nullable=True)
+    notebooklm_url = Column(String(500), nullable=True)
+
+    user = relationship("User")
+
+
 # =============================================================================
 # Eval & Self-Repair Loop tables
 # =============================================================================
