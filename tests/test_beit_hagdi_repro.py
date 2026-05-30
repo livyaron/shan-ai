@@ -6,6 +6,7 @@ CORRECTLY after.
 """
 import json
 import sys
+import time as _time
 from contextlib import contextmanager
 
 import pytest
@@ -15,7 +16,7 @@ from unittest.mock import patch
 from app.models import EvalGoldAnswer, Project, ProjectAlias
 from app.services.ask_router import route
 from app.services.gold_truth_service import save_gold
-from app.services.per_question_loop_service import run_one_question
+from app.services.per_question_loop_service import run_one_question, _clear_kill_switch
 from app.services import knowledge_service as ks
 
 
@@ -73,6 +74,8 @@ async def test_beit_hagdi_baseline_is_wrong(db_session):
 
 @pytest.mark.asyncio
 async def test_beit_hagdi_repair_loop_creates_alias_and_fixes_answer(db_session):
+    await _clear_kill_switch(db_session)
+
     proj = Project(name="בית הגדי", project_identifier="BG-04",
                    stage="תכנון", is_active=True)
     db_session.add(proj)
@@ -92,12 +95,15 @@ async def test_beit_hagdi_repair_loop_creates_alias_and_fixes_answer(db_session)
                 "risk": "low",
             })
         if usage == "eval_judge":
-            return "YES"
+            # Only YES when AI answer actually contains the gold phrase.
+            # Unconditional YES causes passed_first_try on wrong answers.
+            content = "".join(m.get("content") or "" for m in (messages or []))
+            if "תשובה א (AI):" in content and "תשובה ב (gold):" in content:
+                ai_part = content.split("תשובה א (AI):")[1].split("תשובה ב (gold):")[0].strip()
+                gold_part = content.split("תשובה ב (gold):")[1].split("Equivalent?")[0].strip()
+                return "YES" if gold_part and gold_part in ai_part else "NO"
+            return "NO"
         if usage == "project_query":
-            # Inspect context_str for the seeded project's stage and echo it back.
-            # The system prompt + user message contain the project JSON; we just
-            # return the gold-style summary referencing 'תכנון' so compare_to_gold
-            # has substring overlap to score 1.0 via rule_check.
             content = ""
             for m in messages or []:
                 content += (m.get("content") or "")
@@ -107,6 +113,10 @@ async def test_beit_hagdi_repair_loop_creates_alias_and_fixes_answer(db_session)
         # All other LLM calls (intent detection, etc.) — return empty
         return ""
 
+    alias_row = None
+    alias_key = None
+    after = None
+
     with patch_llm_chat_everywhere(fake_llm_chat):
         all_gold = (await db_session.execute(
             select(EvalGoldAnswer))).scalars().all()
@@ -115,17 +125,32 @@ async def test_beit_hagdi_repair_loop_creates_alias_and_fixes_answer(db_session)
             eval_run_id=None, max_repairs=2, threshold=0.8,
         )
 
+        if result.status == "fixed":
+            alias_row = await db_session.scalar(
+                select(ProjectAlias).where(ProjectAlias.project_id == proj.id))
+            if alias_row is not None:
+                alias_key = alias_row.normalized_alias
+                # _ensure_eval_caches opens its own session which cannot see data
+                # committed within a test-transaction savepoint. Inject the alias
+                # directly so the final route() picks it up via the pre-rule check.
+                ks._DB_PROJECT_ALIASES_CACHE[alias_key] = alias_row.project_id
+                ks._EVAL_CACHE_TS = _time.monotonic()
+        else:
+            ks.invalidate_eval_caches()
+
+        after = await route(Q, db_session, user_id=None, log_to_db=False)
+
+    # Restore module cache state regardless of outcome
+    if alias_key is not None:
+        ks._DB_PROJECT_ALIASES_CACHE.pop(alias_key, None)
+    ks._EVAL_CACHE_TS = 0.0
+
     assert result.status in ("fixed", "passed_first_try"), \
         f"expected fixed/passed_first_try, got {result.status} (rejected={result.rejected_fixes!r}, error={result.error!r})"
 
     if result.status == "fixed":
-        row = await db_session.scalar(
-            select(ProjectAlias).where(ProjectAlias.project_id == proj.id))
-        assert row is not None, "expected alias row created"
-        assert row.alias_text == "בית הגדי"
+        assert alias_row is not None, "expected alias row created"
+        assert alias_row.alias_text == "בית הגדי"
 
-    # Re-route the same question — answer must now contain the gold key phrase.
-    ks.invalidate_eval_caches()
-    after = await route(Q, db_session, user_id=None, log_to_db=False)
     assert "תכנון" in after.answer, \
         f"after repair, expected 'תכנון' in answer, got: {after.answer!r}"

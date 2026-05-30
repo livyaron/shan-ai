@@ -263,7 +263,9 @@ async def compare_to_gold(question: str, ai_answer: str, gold_answer: str) -> fl
     rule = _rule_check(ai_answer, gold_answer)
     if q_tokens:
         entity = q_tokens[-1]
-        if entity not in na and rule == 1.0:
+        # Strip non-letter/digit chars so "ים?" matches "ים" in the answer
+        entity_clean = ''.join(c for c in entity if c.isalpha() or c.isdigit())
+        if entity_clean and entity_clean not in na and rule == 1.0:
             # Entity not mentioned in answer → suppress false-positive substring match
             # Defer to LLM judge below
             rule = None
