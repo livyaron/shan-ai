@@ -2599,10 +2599,11 @@ async def report_view(
 async def report_generate(
     request: Request,
     user_id: int,
+    next: str | None = None,
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_db_session),
 ):
-    """Regenerate report for user and redirect to view page."""
+    """Regenerate report for user and redirect to view page (or ?next= override)."""
     target = await session.scalar(select(User).where(User.id == user_id))
     if not target:
         raise HTTPException(status_code=404, detail="User not found")
@@ -2621,7 +2622,8 @@ async def report_generate(
         triggered_by_id=current_user.id,
         sent_via="dashboard",
     )
-    return RedirectResponse(f"/dashboard/reports/{user_id}", status_code=302)
+    redirect_url = next if (next and next.startswith("/dashboard/")) else f"/dashboard/reports/{user_id}"
+    return RedirectResponse(redirect_url, status_code=302)
 
 
 @router.post("/reports/{user_id}/send", response_class=HTMLResponse)

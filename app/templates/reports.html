@@ -70,7 +70,7 @@
                     </td>
                     <td class="d-flex gap-2">
                         <a href="/dashboard/reports/{{ u.id }}" class="btn-outline-dim">👁 צפה</a>
-                        <form method="post" action="/dashboard/reports/{{ u.id }}/generate" style="margin:0;">
+                        <form method="post" action="/dashboard/reports/{{ u.id }}/generate?next=/dashboard/reports" style="margin:0;">
                             <button type="submit" class="btn-outline-dim">🔄 צור חדש</button>
                         </form>
                         {% if u.last_report %}
