@@ -14,6 +14,7 @@ from sqlalchemy import select
 from app.database import async_session_maker
 from app.models import Project
 from app.services.llm_router import llm_chat
+from app.services.project_learning_service import save_snapshot
 
 logger = logging.getLogger(__name__)
 
@@ -341,6 +342,18 @@ async def sync_projects_file(file_path: str, sheet_name: str | None = None) -> d
 
                 # Commit per row — progress is saved immediately
                 await session.commit()
+
+                # Save daily snapshot for learning / risk tracking
+                _snap_target = existing if existing is not None else project
+                try:
+                    await save_snapshot(_snap_target, session)
+                    await session.commit()
+                except Exception as snap_exc:
+                    logger.warning(f"project_sync: snapshot failed for {ident}: {snap_exc}")
+                    try:
+                        await session.rollback()
+                    except Exception:
+                        pass
 
             except Exception as exc:
                 logger.error(f"project_sync: row {row_idx} error: {exc}")
