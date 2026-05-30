@@ -442,7 +442,7 @@ def _render_html(data: dict, narratives: dict) -> str:
   *{box-sizing:border-box;margin:0;padding:0;}
   body{background:var(--bg);color:var(--text);font-family:'Heebo',Arial,'David',sans-serif;direction:rtl;text-align:right;padding:24px;}
   .page{max-width:940px;margin:0 auto 40px;padding:32px;background:var(--bg-c);border:1px solid var(--border);border-radius:12px;page-break-after:always;}
-  .page-header{display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid var(--cyan);padding-bottom:12px;margin-bottom:20px;flex-direction:row-reverse;}
+  .page-header{display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid var(--cyan);padding-bottom:12px;margin-bottom:20px;}
   .page-title{color:var(--cyan);font-size:1.3rem;font-weight:700;}
   .page-meta{color:var(--text-2);font-size:.82rem;}
   .kpi-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:20px;}
@@ -474,8 +474,8 @@ def _render_html(data: dict, narratives: dict) -> str:
 <!-- PAGE 1: EXECUTIVE SUMMARY -->
 <div class="page">
   <div class="page-header">
-    <div class="page-meta">עמוד 1 מתוך 10 | {meta["generated_at"]} | {meta["username"]} | {meta["role"]}</div>
     <div class="page-title">📊 דוח פרויקטים — סיכום מנהלים</div>
+    <div class="page-meta">עמוד 1 מתוך 10 | {meta["generated_at"]} | {meta["username"]} | {meta["role"]}</div>
   </div>
   <div class="kpi-grid">
     <div class="kpi"><div class="kpi-val">{es["total_active"]}</div><div class="kpi-label">פרויקטים פעילים</div></div>
@@ -496,8 +496,8 @@ def _render_html(data: dict, narratives: dict) -> str:
 <!-- PAGE 2: PORTFOLIO HEALTH -->
 <div class="page">
   <div class="page-header">
-    <div class="page-meta">עמוד 2 | {meta["generated_at"]}</div>
     <div class="page-title">🏗️ בריאות תיק הפרויקטים</div>
+    <div class="page-meta">עמוד 2 | {meta["generated_at"]}</div>
   </div>
   <div class="narrative">{narratives.get("portfolio_narrative","")}</div>
   <h3>מגמת איחורים — שבועות אחרונים</h3>
@@ -513,8 +513,8 @@ def _render_html(data: dict, narratives: dict) -> str:
 <!-- PAGE 3: RISK REGISTER -->
 <div class="page">
   <div class="page-header">
-    <div class="page-meta">עמוד 3 | {meta["generated_at"]}</div>
     <div class="page-title">⚠️ רישום סיכונים — 10 פרויקטים מובילים</div>
+    <div class="page-meta">עמוד 3 | {meta["generated_at"]}</div>
   </div>
   <div class="narrative">{narratives.get("risk_narrative","")}</div>
   <table>
@@ -526,8 +526,8 @@ def _render_html(data: dict, narratives: dict) -> str:
 <!-- PAGE 4: ACTION ITEMS -->
 <div class="page">
   <div class="page-header">
-    <div class="page-meta">עמוד 4 | {meta["generated_at"]}</div>
     <div class="page-title">✅ פעולות נדרשות</div>
+    <div class="page-meta">עמוד 4 | {meta["generated_at"]}</div>
   </div>
   <div class="narrative">{narratives.get("action_narrative","")}</div>
   <table>
@@ -539,8 +539,8 @@ def _render_html(data: dict, narratives: dict) -> str:
 <!-- PAGE 5: FINISHING SOON -->
 <div class="page">
   <div class="page-header">
-    <div class="page-meta">עמוד 5 | {meta["generated_at"]}</div>
     <div class="page-title">🏁 פרויקטים המסתיימים ב-90 הימים הקרובים ({finishing_count})</div>
+    <div class="page-meta">עמוד 5 | {meta["generated_at"]}</div>
   </div>
   <div class="narrative">{narratives.get("finishing_narrative","")}</div>
   {finishing_html}
@@ -549,8 +549,8 @@ def _render_html(data: dict, narratives: dict) -> str:
 <!-- PAGE 6: DELAYED DEEP-DIVE -->
 <div class="page">
   <div class="page-header">
-    <div class="page-meta">עמוד 6 | {meta["generated_at"]}</div>
     <div class="page-title">🔴 פרויקטים באיחור — ניתוח מעמיק ({len(dd)})</div>
+    <div class="page-meta">עמוד 6 | {meta["generated_at"]}</div>
   </div>
   <div class="narrative">{narratives.get("delay_narrative","")}</div>
   <table>
@@ -562,8 +562,8 @@ def _render_html(data: dict, narratives: dict) -> str:
 <!-- PAGE 7: BY-TYPE ANALYSIS -->
 <div class="page">
   <div class="page-header">
-    <div class="page-meta">עמוד 7 | {meta["generated_at"]}</div>
     <div class="page-title">📂 ניתוח לפי סוג פרויקט</div>
+    <div class="page-meta">עמוד 7 | {meta["generated_at"]}</div>
   </div>
   {by_type_html or '<div style="color:var(--text-2);">אין נתונים</div>'}
 </div>
@@ -571,8 +571,8 @@ def _render_html(data: dict, narratives: dict) -> str:
 <!-- PAGE 8: TO-HANDLE ITEMS -->
 <div class="page">
   <div class="page-header">
-    <div class="page-meta">עמוד 8 | {meta["generated_at"]}</div>
     <div class="page-title">📋 פריטים לטיפול מפרויקטים בסיכון (ציון ≥50)</div>
+    <div class="page-meta">עמוד 8 | {meta["generated_at"]}</div>
   </div>
   <table>
     <thead><tr><th>פרויקט</th><th>סוג</th><th>ציון</th><th>פריט לטיפול</th></tr></thead>
@@ -583,8 +583,8 @@ def _render_html(data: dict, narratives: dict) -> str:
 <!-- PAGE 9: RISK FORECAST -->
 <div class="page">
   <div class="page-header">
-    <div class="page-meta">עמוד 9 | {meta["generated_at"]}</div>
     <div class="page-title">🔮 תחזית סיכונים — צפויים להיכנס לאזור סיכון</div>
+    <div class="page-meta">עמוד 9 | {meta["generated_at"]}</div>
   </div>
   <div style="padding:10px 14px;background:rgba(167,139,250,.08);border:1px solid rgba(167,139,250,.25);border-radius:6px;font-size:.82rem;color:#a78bfa;margin-bottom:16px;">
     פרויקטים אלה נמצאים כיום מתחת לסף סיכון גבוה (70), אך מגמת הציון צפויה להחצות את הסף בשבוע הקרוב.
@@ -598,8 +598,8 @@ def _render_html(data: dict, narratives: dict) -> str:
 <!-- PAGE 10: DATA QUALITY / STALE -->
 <div class="page">
   <div class="page-header">
-    <div class="page-meta">עמוד 10 | {meta["generated_at"]}</div>
     <div class="page-title">📅 איכות נתונים — פרויקטים לא מעודכנים (&gt;14 ימים)</div>
+    <div class="page-meta">עמוד 10 | {meta["generated_at"]}</div>
   </div>
   <div style="padding:10px 14px;background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.25);border-radius:6px;font-size:.82rem;color:#f59e0b;margin-bottom:16px;">
     פרויקטים שלא עודכנו מעל 14 ימים — הציון שלהם עלול להיות לא מדויק. נדרש עדכון.

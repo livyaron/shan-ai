@@ -63,7 +63,10 @@
       <span id="rep-arr">▼</span>
     </div>
     <div class="section-body" id="rep-body">
-      <iframe srcdoc="{{ report.html_content | e }}" style="width:100%;height:1200px;border:none;background:#070b12;"></iframe>
+      <iframe id="reportFrame" srcdoc="{{ report.html_content | e }}"
+        style="width:100%;height:12000px;border:none;background:#070b12;"
+        onload="try{this.style.height=Math.max(4000,this.contentDocument.documentElement.scrollHeight+40)+'px';}catch(e){}">
+      </iframe>
     </div>
   </div>
 
