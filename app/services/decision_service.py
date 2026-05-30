@@ -400,6 +400,45 @@ class DecisionService:
         logger.info(f"Decision #{decision_id} rejected by {approver.username}: {notes}")
         return True, f"החלטה #{decision_id} נדחתה. המגיש קיבל הודעה."
 
+    async def set_decision_relevance(
+        self,
+        decision_id: int,
+        actor: User,
+        is_relevant: bool,
+        reason: str = "",
+    ) -> tuple[bool, str]:
+        """Toggle is_relevant on a decision. Returns (success, hebrew_message)."""
+        from app.models import DecisionRaciRole, RaciRoleEnum
+
+        decision = await self.session.get(Decision, decision_id)
+        if not decision:
+            return False, f"‏החלטה #{decision_id} לא נמצאה."
+
+        # Permission: submitter, admin, or RACI Accountable
+        if not getattr(actor, "is_admin", False) and decision.submitter_id != actor.id:
+            accountable_id = await self.session.scalar(
+                select(DecisionRaciRole.user_id).where(
+                    DecisionRaciRole.decision_id == decision_id,
+                    DecisionRaciRole.role == RaciRoleEnum.ACCOUNTABLE,
+                )
+            )
+            if accountable_id != actor.id:
+                return False, "‏אין לך הרשאה לשנות את הרלוונטיות של החלטה זו."
+
+        decision.is_relevant = is_relevant
+        if not is_relevant:
+            decision.irrelevant_reason = reason.strip() or None
+            decision.irrelevant_at = datetime.utcnow()
+            decision.irrelevant_by_id = actor.id
+        else:
+            decision.irrelevant_reason = None
+            decision.irrelevant_at = None
+            decision.irrelevant_by_id = None
+
+        await self.session.commit()
+        label = "סומנה כלא רלוונטית ⛔" if not is_relevant else "שוחזרה כרלוונטית ♻️"
+        return True, f"‏החלטה #{decision_id} {label}."
+
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
