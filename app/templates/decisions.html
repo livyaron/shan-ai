@@ -592,6 +592,14 @@
                 {% endfor %}
             </select>
         </div>
+        <div>
+            <label class="form-label mb-1" style="font-size:.75rem;">רלוונטיות</label>
+            <select name="filter_relevant" class="form-select form-select-sm" style="min-width:140px;">
+                <option value="yes" {% if filter_relevant == "yes" %}selected{% endif %}>✅ רלוונטיות בלבד</option>
+                <option value="no"  {% if filter_relevant == "no"  %}selected{% endif %}>⛔ לא רלוונטיות</option>
+                <option value=""    {% if filter_relevant == ""    %}selected{% endif %}>🔄 הכל</option>
+            </select>
+        </div>
         <div class="d-flex gap-2 align-items-end">
             <button type="submit" class="btn btn-sm btn-primary" style="border-radius:8px;">סנן</button>
             <a href="/dashboard/decisions" class="btn btn-sm btn-outline-secondary" style="border-radius:8px;border-color:#2d3047;color:#8b9cf4;">נקה</a>
@@ -614,6 +622,9 @@
                 <div class="card-badges">
                     <span class="badge badge-{{ d.type }}" style="font-size:.72rem; padding:3px 9px; border-radius:6px;">{{ type_labels.get(d.type, d.type) }}</span>
                     <span class="badge badge-{{ d.status }}" style="font-size:.72rem; padding:3px 9px; border-radius:6px;">{{ status_labels.get(d.status, d.status) }}</span>
+                    {% if not d.is_relevant %}
+                    <span class="badge bg-secondary ms-1" style="font-size:.72rem; padding:3px 9px; border-radius:6px;" title="{{ d.irrelevant_reason }}{% if d.irrelevant_at %} ({{ d.irrelevant_at }}){% endif %}">⛔ לא רלוונטי</span>
+                    {% endif %}
                     {% if d.can_approve %}
                     <!-- I need to approve this -->
                     <span class="badge" style="font-size:.65rem;background:rgba(255,107,107,.2);color:#ff6b7a;border:1px solid rgba(255,107,107,.4);border-radius:6px;padding:3px 7px;">⏳ אני צריך לאשר</span>
@@ -703,6 +714,20 @@
                 </button>
                 {% endif %}
                 <span class="spacer"></span>
+                {% if d.can_toggle_relevance %}
+                {% if d.is_relevant %}
+                <form method="POST" action="/dashboard/decisions/{{ d.id }}/relevance"
+                      onsubmit="return confirm('סמן החלטה #{{ d.id }} כלא רלוונטית?')" class="d-inline">
+                    <input type="hidden" name="is_relevant" value="false">
+                    <button type="submit" class="btn btn-outline-secondary btn-sm" title="סמן כלא רלוונטי">⛔</button>
+                </form>
+                {% else %}
+                <form method="POST" action="/dashboard/decisions/{{ d.id }}/relevance" class="d-inline">
+                    <input type="hidden" name="is_relevant" value="true">
+                    <button type="submit" class="btn btn-outline-success btn-sm" title="שחזר כרלוונטי">♻️</button>
+                </form>
+                {% endif %}
+                {% endif %}
                 {% if d.can_delete %}
                 <form method="POST" action="/dashboard/decisions/{{ d.id }}/delete"
                       onsubmit="return confirm('למחוק החלטה #{{ d.id }}?')" class="d-inline">

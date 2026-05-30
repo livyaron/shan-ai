@@ -58,6 +58,17 @@ def _can_delete(decision: Decision, user: User) -> bool:
     return user.is_admin or decision.submitter_id == user.id
 
 
+def _can_toggle_relevance(decision: Decision, user: User, my_raci_roles: dict | None = None) -> bool:
+    """Check if user can toggle is_relevant (submitter, RACI A, or admin)."""
+    if user.is_admin:
+        return True
+    if decision.submitter_id == user.id:
+        return True
+    if my_raci_roles and my_raci_roles.get(decision.id) == "A":
+        return True
+    return False
+
+
 async def _pending_approvals_count(user_id: int, session: AsyncSession) -> int:
     """Count decisions awaiting approval by this user (where user is RACI A)."""
     from app.models import DecisionRaciRole, RaciRoleEnum
@@ -1104,6 +1115,7 @@ async def decisions_page(
     error: str = None,
     filter_status: str = None,
     filter_type: str = None,
+    filter_relevant: str = "yes",
 ):
     import json as _json
 
@@ -1130,6 +1142,11 @@ async def decisions_page(
         q = q.where(Decision.status == DecisionStatusEnum(filter_status))
     if filter_type:
         q = q.where(Decision.type == DecisionTypeEnum(filter_type))
+    if filter_relevant == "yes":
+        q = q.where(Decision.is_relevant == True)
+    elif filter_relevant == "no":
+        q = q.where(Decision.is_relevant == False)
+    # else: show all
 
     rows = (await session.execute(q)).all()
 
@@ -1223,6 +1240,10 @@ async def decisions_page(
             "can_change_status": can_change_status,
             "can_delete": can_delete,
             "can_edit_raci": can_edit_raci,
+            "is_relevant":           d.is_relevant,
+            "irrelevant_reason":     d.irrelevant_reason or "",
+            "irrelevant_at":         d.irrelevant_at.strftime("%d/%m/%Y") if d.irrelevant_at else "",
+            "can_toggle_relevance":  _can_toggle_relevance(d, current_user, my_raci_roles),
         })
 
     users_q = (await session.execute(select(User).order_by(User.username))).scalars().all()
@@ -1246,6 +1267,7 @@ async def decisions_page(
         "types": [t.value for t in DecisionTypeEnum],
         "filter_status": filter_status or "",
         "filter_type": filter_type or "",
+        "filter_relevant": filter_relevant,
         "msg": msg,
         "error": error,
         "pending_approvals": pending_approvals,
@@ -1582,6 +1604,25 @@ async def quick_status_update(
     await session.commit()
     status_he = "אושרה" if new_status == "approved" else "נדחתה"
     return RedirectResponse(f"/dashboard/decisions?msg=החלטה+%23{decision_id}+{status_he}", status_code=303)
+
+
+@router.post("/decisions/{decision_id}/relevance")
+async def toggle_decision_relevance(
+    decision_id: int,
+    is_relevant: str = Form(...),  # "true" or "false" from HTML hidden input
+    reason: str = Form(default=""),
+    session: AsyncSession = Depends(get_db_session),
+    current_user: User = Depends(get_current_user),
+):
+    """Toggle is_relevant on a decision from the dashboard."""
+    from app.services.decision_service import DecisionService
+    relevant_bool = is_relevant.lower() == "true"
+    svc = DecisionService(session, None)
+    success, msg = await svc.set_decision_relevance(decision_id, current_user, relevant_bool, reason)
+    if not success:
+        return RedirectResponse(f"/dashboard/decisions?error={msg}", status_code=303)
+    label = "סומנה+כלא+רלוונטית" if not relevant_bool else "שוחזרה+כרלוונטית"
+    return RedirectResponse(f"/dashboard/decisions?msg=החלטה+%23{decision_id}+{label}", status_code=303)
 
 
 @router.get("/decisions/{decision_id}/feedbacks")
