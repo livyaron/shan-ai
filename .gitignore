@@ -60,3 +60,4 @@ htmlcov/
 
 # Scratch files with credentials
 bot token.py
+.superpowers/
