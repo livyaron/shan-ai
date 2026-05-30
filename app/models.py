@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, BigInteger, String, Text, DateTime, Date, Boolean, ForeignKey, Enum, JSON, Float, Index
+from sqlalchemy import Column, Integer, BigInteger, String, Text, DateTime, Date, Boolean, ForeignKey, Enum, JSON, Float, Index, UniqueConstraint
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 from pgvector.sqlalchemy import Vector
@@ -320,6 +320,30 @@ class Project(Base):
     estimated_finish_date = Column(Date, nullable=True)
     last_updated          = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     is_active             = Column(Boolean, default=True, nullable=False)
+
+    snapshots = relationship("ProjectSnapshot", back_populates="project", order_by="ProjectSnapshot.snapshot_date")
+
+
+class ProjectSnapshot(Base):
+    __tablename__ = "project_snapshots"
+
+    id                    = Column(Integer, primary_key=True)
+    project_id            = Column(Integer, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    snapshot_date         = Column(Date, nullable=False, index=True)
+    stage                 = Column(String(100), nullable=True)
+    estimated_finish_date = Column(Date, nullable=True)
+    dev_plan_date         = Column(Date, nullable=True)
+    risks                 = Column(Text, nullable=True)
+    to_handle             = Column(Text, nullable=True)
+    weekly_report_brief   = Column(String(500), nullable=True)
+    is_active             = Column(Boolean, nullable=True)
+    risk_score            = Column(Integer, nullable=True)
+    days_overdue          = Column(Integer, nullable=True)
+    created_at            = Column(DateTime, default=datetime.utcnow)
+
+    project               = relationship("Project", back_populates="snapshots")
+
+    __table_args__ = (UniqueConstraint("project_id", "snapshot_date"),)
 
 
 # =============================================================================
