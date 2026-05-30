@@ -501,14 +501,34 @@ def _compute_delta(current: dict, prev: dict) -> dict:
 
     curr_stages = current.get("stage_map", {})
     prev_stages = prev.get("stage_map", {})
+    curr_names  = current.get("name_map", {})
+    prev_names  = prev.get("name_map", {})
+
     stage_changes = [
-        {"id": k, "from": prev_stages[k], "to": curr_stages[k]}
+        {
+            "id":   k,
+            "name": prev_names.get(k, k) if "name_map" in prev else k,
+            "from": prev_stages[k],
+            "to":   curr_stages[k],
+        }
         for k in curr_stages
         if k in prev_stages and curr_stages[k] != prev_stages[k]
     ]
 
     curr_risk_ids = {p.get("project") or p.get("identifier", "") for p in current.get("projects_at_risk", [])}
     prev_risk_ids = {p.get("project") or p.get("identifier", "") for p in prev.get("projects_at_risk", [])}
+
+    curr_behind = current.get("projects_behind", [])
+    prev_behind = prev.get("projects_behind", [])
+    curr_behind_names = {p["project"] for p in curr_behind}
+    prev_behind_names = {p["project"] for p in prev_behind}
+
+    overdue_entered = [
+        {"name": p["project"], "days_behind": p["days_behind"]}
+        for p in curr_behind
+        if p["project"] not in prev_behind_names
+    ]
+    overdue_resolved = list(prev_behind_names - curr_behind_names)
 
     return {
         "decisions_change":         curr_total - prev_total,
@@ -527,4 +547,6 @@ def _compute_delta(current: dict, prev: dict) -> dict:
             len(current.get("projects_behind", [])) -
             len(prev.get("projects_behind", []))
         ),
+        "overdue_entered":          overdue_entered,
+        "overdue_resolved":         overdue_resolved,
     }

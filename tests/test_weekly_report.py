@@ -373,3 +373,94 @@ def test_project_type_summary_structure():
     assert result["הרחבה"] == {"active": 5,  "delayed": 1, "at_risk": 0}
     assert result["שוש"]    == {"active": 0, "delayed": 0, "at_risk": 0}
     assert result["ניידות"] == {"active": 0, "delayed": 0, "at_risk": 0}
+
+
+# ── Task 6 (new) ─────────────────────────────────────────────────────────────
+
+def test_compute_delta_stage_changes_include_project_name():
+    """stage_changes entries have a 'name' field from current name_map."""
+    from app.services.weekly_report_service import _compute_delta
+
+    current = {
+        "decisions": {"total": 5, "approval_rate_pct": 60},
+        "pending_approvals": [],
+        "projects_behind": [],
+        "projects_at_risk": [],
+        "stage_map": {"P001": "ביצוע"},
+        "name_map":  {"P001": "פרויקט ראשון"},
+    }
+    prev = {
+        "decisions": {"total": 3, "approval_rate_pct": 50},
+        "pending_approvals": [],
+        "projects_behind": [],
+        "projects_at_risk": [],
+        "stage_map": {"P001": "תכנון"},
+        "name_map":  {"P001": "פרויקט ראשון"},
+    }
+
+    delta = _compute_delta(current, prev)
+
+    assert len(delta["stage_changes"]) == 1
+    sc = delta["stage_changes"][0]
+    assert sc["id"]   == "P001"
+    assert sc["name"] == "פרויקט ראשון"
+    assert sc["from"] == "תכנון"
+    assert sc["to"]   == "ביצוע"
+
+
+def test_compute_delta_overdue_entered_and_resolved():
+    """overdue_entered contains projects new to behind list; overdue_resolved contains ones that left."""
+    from app.services.weekly_report_service import _compute_delta
+
+    current = {
+        "decisions": {},
+        "pending_approvals": [],
+        "projects_behind": [
+            {"project": "פרויקט חדש (P002)", "days_behind": 10},
+        ],
+        "projects_at_risk": [],
+        "stage_map": {},
+        "name_map":  {},
+    }
+    prev = {
+        "decisions": {},
+        "pending_approvals": [],
+        "projects_behind": [
+            {"project": "פרויקט ישן (P001)", "days_behind": 20},
+        ],
+        "projects_at_risk": [],
+        "stage_map": {},
+        "name_map":  {},
+    }
+
+    delta = _compute_delta(current, prev)
+
+    entered_names = [e["name"] for e in delta["overdue_entered"]]
+    assert "פרויקט חדש (P002)" in entered_names
+    assert "פרויקט ישן (P001)" in delta["overdue_resolved"]
+
+
+def test_compute_delta_backward_compat_missing_name_map():
+    """_compute_delta works when prev raw_data has no name_map (old report row)."""
+    from app.services.weekly_report_service import _compute_delta
+
+    current = {
+        "decisions": {"total": 2, "approval_rate_pct": 50},
+        "pending_approvals": [],
+        "projects_behind": [],
+        "projects_at_risk": [],
+        "stage_map": {"P001": "ביצוע"},
+        "name_map":  {"P001": "פרויקט ראשון"},
+    }
+    prev = {
+        "decisions": {"total": 1, "approval_rate_pct": 40},
+        "pending_approvals": [],
+        "projects_behind": [],
+        "projects_at_risk": [],
+        "stage_map": {"P001": "תכנון"},
+        # no name_map key — old row
+    }
+
+    delta = _compute_delta(current, prev)
+
+    assert delta["stage_changes"][0]["name"] == "P001"  # fallback to identifier
