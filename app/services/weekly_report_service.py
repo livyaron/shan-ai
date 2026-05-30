@@ -13,7 +13,7 @@ import json
 import logging
 from datetime import datetime, timedelta
 
-from sqlalchemy import select, desc, or_
+from sqlalchemy import select, desc, or_, func, and_, case as sa_case
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
@@ -23,6 +23,7 @@ from app.models import (
 )
 import app.database as _app_database
 from app.services.llm_router import llm_chat
+from app.services.projects_menu_service import TYPE_ORDER
 
 logger = logging.getLogger(__name__)
 
@@ -343,9 +344,6 @@ async def _pending_approvals(user: User, session: AsyncSession) -> list[dict]:
 
 
 async def _projects_behind_schedule(user: User, session: AsyncSession, today) -> list[dict]:
-    from app.services.projects_menu_service import TYPE_ORDER
-    from sqlalchemy import case as sa_case
-
     stmt = select(Project).where(
         Project.is_active == True,
         Project.estimated_finish_date.isnot(None),
@@ -384,9 +382,6 @@ async def _projects_behind_schedule(user: User, session: AsyncSession, today) ->
 
 
 async def _risky_projects(user: User, session: AsyncSession) -> list[dict]:
-    from app.services.projects_menu_service import TYPE_ORDER
-    from sqlalchemy import case as sa_case
-
     stmt = select(Project).where(
         Project.is_active == True,
         Project.risks.isnot(None),
@@ -431,6 +426,52 @@ async def _handle_projects(user: User, session: AsyncSession) -> list[dict]:
         {"project": f"{p.name or p.project_identifier} ({p.project_identifier})", "to_handle": (p.to_handle or "")[:120]}
         for p in rows
     ]
+
+
+async def _project_type_summary(user: User, session: AsyncSession) -> dict:
+    """Count active/delayed/at_risk projects per TYPE_ORDER type. Role-scoped."""
+    today = datetime.utcnow().date()
+
+    base_filters = [Project.is_active.is_(True)]
+    if user.role == RoleEnum.PROJECT_MANAGER and user.username:
+        base_filters.append(Project.manager.ilike(f"%{user.username}%"))
+
+    stmt = select(
+        Project.project_type,
+        func.count().label("active"),
+        func.sum(
+            sa_case(
+                (
+                    and_(
+                        Project.estimated_finish_date.isnot(None),
+                        Project.estimated_finish_date <= today,
+                    ),
+                    1,
+                ),
+                else_=0,
+            )
+        ).label("delayed"),
+        func.sum(
+            sa_case(
+                (
+                    and_(
+                        Project.risks.isnot(None),
+                        Project.risks != "",
+                    ),
+                    1,
+                ),
+                else_=0,
+            )
+        ).label("at_risk"),
+    ).where(*base_filters).group_by(Project.project_type)
+
+    rows = (await session.execute(stmt)).all()
+    counts = {
+        row[0]: {"active": row[1], "delayed": int(row[2] or 0), "at_risk": int(row[3] or 0)}
+        for row in rows
+        if row[0]
+    }
+    return {t: counts.get(t, {"active": 0, "delayed": 0, "at_risk": 0}) for t in TYPE_ORDER}
 
 
 async def _project_stage_map(user: User, session: AsyncSession) -> tuple[dict[str, str], dict[str, str]]:

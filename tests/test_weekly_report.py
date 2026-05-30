@@ -340,3 +340,36 @@ def test_risky_projects_sorted_by_type_order():
 
     assert result[0]["project"].startswith("פרויקט הרחבה")
     assert result[1]["project"].startswith("פרויקט שוש")
+
+
+# ── Task 5 (new) ─────────────────────────────────────────────────────────────
+
+def test_project_type_summary_structure():
+    """_project_type_summary returns dict keyed by all 4 TYPE_ORDER types."""
+    from app.services.weekly_report_service import _project_type_summary
+    from app.models import RoleEnum
+    from app.services.projects_menu_service import TYPE_ORDER
+    from unittest.mock import MagicMock, AsyncMock
+    import asyncio
+
+    mock_result = MagicMock()
+    mock_result.all.return_value = [
+        ("הקמה",  10, 3, 2),
+        ("הרחבה", 5,  1, 0),
+    ]
+    mock_session = MagicMock()
+    mock_session.execute = AsyncMock(return_value=mock_result)
+
+    user = MagicMock()
+    user.role = RoleEnum.DIVISION_MANAGER
+    user.username = "admin"
+
+    result = asyncio.run(
+        _project_type_summary(user, mock_session)
+    )
+
+    assert set(result.keys()) == set(TYPE_ORDER)
+    assert result["הקמה"]  == {"active": 10, "delayed": 3, "at_risk": 2}
+    assert result["הרחבה"] == {"active": 5,  "delayed": 1, "at_risk": 0}
+    assert result["שוש"]    == {"active": 0, "delayed": 0, "at_risk": 0}
+    assert result["ניידות"] == {"active": 0, "delayed": 0, "at_risk": 0}
