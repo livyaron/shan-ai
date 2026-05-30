@@ -7,6 +7,9 @@ and handle_callback always reference the same dict objects.
 # { telegram_id (int): decision_id (int) }  — waiting for rejection reason
 _awaiting_rejection_note: dict[int, int] = {}
 
+# { telegram_id (int): decision_id (int) }  — waiting for irrelevance reason
+_awaiting_irrelevant_reason: dict[int, int] = {}
+
 # { telegram_id (int): distribution_id (int) }  — waiting for rejection reason on a distribution
 _awaiting_dist_rejection: dict[int, int] = {}
 

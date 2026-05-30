@@ -17,6 +17,7 @@ from app.services.telegram_state import (
     _awaiting_clarification, _awaiting_master_confirm,
     _awaiting_decision_confirm, _awaiting_mgr_approval_confirm,
     _raci_edit_state, _awaiting_decision_preview,
+    _awaiting_irrelevant_reason,
     get_context, append_context, clear_context,
 )
 from app.services.telegram_routing import (
@@ -542,6 +543,15 @@ class TelegramPollingBot:
                     "\u200F✅ תודה! הפידבק נשמר ויסייע לשיפור ההחלטות הבאות.",
                     parse_mode="HTML",
                 )
+                return
+
+            # Check if user is providing a reason to mark a decision irrelevant
+            if telegram_id in _awaiting_irrelevant_reason:
+                decision_id = _awaiting_irrelevant_reason.pop(telegram_id)
+                reason = "" if text.strip() in ("ללא", "/skip") else text.strip()
+                decision_svc = DecisionService(session, self.application)
+                success, msg = await decision_svc.set_decision_relevance(decision_id, user, is_relevant=False, reason=reason)
+                await update.message.reply_text(f"‏{msg}", parse_mode="HTML")
                 return
 
             # Check if user is providing a rejection reason for a distribution
@@ -1123,6 +1133,23 @@ class TelegramPollingBot:
                 await query.edit_message_text(f"\u200F{reply}", parse_mode="HTML")
                 return
 
+            # --- Decision relevance toggle ---
+            if action == "dec_irrel":
+                _awaiting_irrelevant_reason[telegram_id] = decision_id
+                await query.edit_message_text(
+                    "‏⛔ <b>סמן כלא רלוונטי</b>\n\n"
+                    f"שלח סיבה קצרה להחלטה #{decision_id}\n"
+                    "(או שלח <code>ללא</code> לדילוג)",
+                    parse_mode="HTML",
+                )
+                return
+
+            if action == "dec_rel":
+                decision_svc = DecisionService(session, self.application)
+                success, msg = await decision_svc.set_decision_relevance(decision_id, approver, is_relevant=True)
+                await query.edit_message_text(f"‏{msg}", parse_mode="HTML")
+                return
+
             # --- RACI proposal: approve / edit ---
             if action in ("raci_approve", "raci_edit"):
                 from app.services.raci_service import _pending_raci_suggestions, save_pregenerated_raci
@@ -1618,6 +1645,7 @@ class TelegramPollingBot:
         if data == "dm:custom":
             _decisions_menu_state[telegram_id] = {
                 "owner": "all", "type": None, "status": None, "date_days": 30, "page": 0, "raci": None,
+                "show_irrelevant": False,
             }
             await query.edit_message_text(
                 build_custom_filter_message(),
@@ -1774,6 +1802,19 @@ class TelegramPollingBot:
                 )
                 return
 
+            if sub == "rel" and state is not None and len(parts) > 2:
+                val = parts[2]
+                if val == "yes":
+                    state["show_irrelevant"] = False
+                elif val == "no":
+                    state["show_irrelevant"] = True
+                else:  # "all"
+                    state["show_irrelevant"] = None
+                await query.edit_message_reply_markup(
+                    reply_markup=build_custom_filter_keyboard(state)
+                )
+                return
+
             if sub == "show":
                 if state is None:
                     await query.edit_message_text(
@@ -1786,6 +1827,7 @@ class TelegramPollingBot:
                         session, user.id,
                         state["owner"], state["type"], state["status"], state["date_days"],
                         0, raci=state.get("raci"),
+                        show_irrelevant=state.get("show_irrelevant", False),
                     )
                     raci_map = await get_user_raci_roles(session, [d.id for d in decisions], user.id)
                 # Keep state for pagination — cleared only on dm:menu
@@ -1812,6 +1854,7 @@ class TelegramPollingBot:
                         session, user.id,
                         state["owner"], state["type"], state["status"], state["date_days"],
                         page, raci=state.get("raci"),
+                        show_irrelevant=state.get("show_irrelevant", False),
                     )
                     raci_map = await get_user_raci_roles(session, [d.id for d in decisions], user.id)
                 await query.edit_message_text(

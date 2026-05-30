@@ -124,6 +124,11 @@ def build_custom_filter_keyboard(state: dict) -> InlineKeyboardMarkup:
             _btn("I",          "dm_cf:r:I",   raci == "I"),
         ],
         [
+            _btn("✅ רלוונטיות בלבד", "dm_cf:rel:yes", not state.get("show_irrelevant")),
+            _btn("⛔ לא רלוונטיות",   "dm_cf:rel:no",  state.get("show_irrelevant") is True),
+            _btn("🔄 הכל",            "dm_cf:rel:all", state.get("show_irrelevant") is None),
+        ],
+        [
             InlineKeyboardButton("🔍 הצג תוצאות", callback_data="dm_cf:show"),
             InlineKeyboardButton("🔙 תפריט",       callback_data="dm:menu"),
         ],
@@ -157,7 +162,8 @@ def format_result_line(d: Decision, raci_badge: str = "") -> str:
     date_str = d.created_at.strftime("%d/%m") if d.created_at else ""
     date_part = f" · {date_str}" if date_str else ""
     raci_part = f"  <b>[{raci_badge}]</b>" if raci_badge else ""
-    return f"{t_emoji} <b>#{d.id}</b> — {_html.escape(summary)}  {s_emoji} {s_label}{date_part}{raci_part}"
+    irrel = "⛔ " if not getattr(d, "is_relevant", True) else ""
+    return f"{irrel}{t_emoji} <b>#{d.id}</b> — {_html.escape(summary)}  {s_emoji} {s_label}{date_part}{raci_part}"
 
 
 def format_results_message(title: str, decisions: list, total: int, page: int, raci_map: dict | None = None) -> str:
@@ -179,7 +185,7 @@ def build_custom_filter_message() -> str:
         "‏🔍 <b>סינון מותאם אישית</b>\n\n"
         "בחר פילטרים ולחץ הצג:\n"
         "──────────────────\n"
-        "👤 <b>מקור</b> · 🏷️ <b>סוג</b> · 📌 <b>סטטוס</b> · 📅 <b>תקופה</b>"
+        "👤 <b>מקור</b> · 🏷️ <b>סוג</b> · 📌 <b>סטטוס</b> · 📅 <b>תקופה</b> · 🔄 <b>רלוונטיות</b>"
     )
 
 
