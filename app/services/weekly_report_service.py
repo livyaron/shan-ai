@@ -507,7 +507,7 @@ def _compute_delta(current: dict, prev: dict) -> dict:
     stage_changes = [
         {
             "id":   k,
-            "name": prev_names.get(k, k) if "name_map" in prev else k,
+            "name": curr_names.get(k, k),
             "from": prev_stages[k],
             "to":   curr_stages[k],
         }

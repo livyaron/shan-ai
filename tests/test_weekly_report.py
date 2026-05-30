@@ -463,4 +463,4 @@ def test_compute_delta_backward_compat_missing_name_map():
 
     delta = _compute_delta(current, prev)
 
-    assert delta["stage_changes"][0]["name"] == "P001"  # fallback to identifier
+    assert delta["stage_changes"][0]["name"] == "פרויקט ראשון"  # uses curr_names
