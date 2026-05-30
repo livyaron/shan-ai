@@ -174,6 +174,55 @@
 
 <div class="container-fluid py-4 px-4">
 
+<!-- ── Page-level tab bar ── -->
+<div style="display:flex;gap:4px;border-bottom:1px solid var(--border);margin-bottom:20px;" id="learn-tab-bar">
+  <button class="learn-tab learn-tab-active" onclick="switchLearnTab('decisions')" id="ltab-decisions">
+    🧠 למידה וכיול
+  </button>
+  <button class="learn-tab" onclick="switchLearnTab('projects')" id="ltab-projects">
+    🏗️ פרויקטים
+  </button>
+</div>
+
+<style>
+.learn-tab {
+  padding: 7px 18px; font-size: .88rem; font-family: var(--ui);
+  border: 1px solid transparent; border-bottom: none;
+  border-radius: 6px 6px 0 0; cursor: pointer;
+  background: transparent; color: var(--text-2);
+  transition: all .14s;
+}
+.learn-tab:hover { color: var(--text-1); }
+.learn-tab-active {
+  background: var(--bg-card); color: var(--cyan) !important;
+  border-color: var(--border); font-weight: 600;
+}
+.proj-stab {
+  padding: 4px 14px; font-size: .8rem; border-radius: 20px;
+  border: 1px solid var(--border); background: transparent;
+  color: var(--text-2); cursor: pointer; font-family: var(--ui);
+}
+.proj-stab-active { background: var(--cyan-dim); color: var(--cyan); border-color: rgba(0,212,255,.4); }
+.proj-kpi { background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 14px; text-align: center; }
+.proj-kpi-val { font-size: 1.7rem; font-weight: 700; color: var(--cyan); }
+.proj-kpi-val.warn { color: #f59e0b; }
+.proj-kpi-val.danger { color: var(--red); }
+.proj-kpi-val.purple { color: #a78bfa; }
+.proj-kpi-label { font-size: .72rem; color: var(--text-2); margin-top: 2px; }
+.proj-tbl { width: 100%; border-collapse: collapse; font-size: .82rem; }
+.proj-tbl th { color: var(--text-2); border-bottom: 1px solid var(--border); padding: 6px 8px; text-align: right; font-size: .72rem; text-transform: uppercase; }
+.proj-tbl td { border-bottom: 1px solid #0c1422; padding: 7px 8px; vertical-align: middle; }
+.proj-tbl tr:hover td { background: var(--cyan-dim); cursor: pointer; }
+.score-bar-wrap { display: inline-flex; align-items: center; gap: 6px; }
+.score-bar-track { width: 48px; height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; }
+.score-bar-fill { height: 100%; border-radius: 3px; }
+.proj-badge { font-size: .68rem; padding: 2px 7px; border-radius: 4px; }
+.proj-badge-type { background: var(--cyan-dim); color: var(--cyan); }
+.sparkline-svg { overflow: visible; }
+</style>
+
+<div id="learn-panel-decisions">
+
         <!-- Phase 4: learning-effectiveness card -->
         <div id="learn-eff-card" style="background: #0e1020; border: 1px solid #1a1e38;
              border-radius: 14px; padding: 18px 22px; margin-bottom: 24px;">
@@ -638,5 +687,237 @@ new Chart(trendCtx, {
 </script>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</div><!-- end learn-panel-decisions -->
+
+<!-- ══ PROJECTS TAB PANEL ══════════════════════════════════════════════════ -->
+<div id="learn-panel-projects" style="display:none">
+
+  <div style="display:flex;gap:8px;margin-bottom:16px;">
+    <button class="proj-stab proj-stab-active" onclick="switchProjTab('overview')" id="pstab-overview">🌐 תובנות כלליות</button>
+    <button class="proj-stab" onclick="switchProjTab('risk')" id="pstab-risk">⚠️ סיכון וחיזוי</button>
+  </div>
+
+  <!-- Overview sub-panel -->
+  <div id="proj-panel-overview">
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px;">
+      <div class="proj-kpi"><div class="proj-kpi-val" id="pkpi-active">—</div><div class="proj-kpi-label">פרויקטים פעילים</div></div>
+      <div class="proj-kpi"><div class="proj-kpi-val warn" id="pkpi-delayed">—</div><div class="proj-kpi-label">באיחור</div></div>
+      <div class="proj-kpi"><div class="proj-kpi-val danger" id="pkpi-risk">—</div><div class="proj-kpi-label">סיכון גבוה (≥70)</div></div>
+      <div class="proj-kpi"><div class="proj-kpi-val purple" id="pkpi-entering">—</div><div class="proj-kpi-label">חיזוי — נכנסים לסיכון</div></div>
+    </div>
+    <div style="display:grid;grid-template-columns:1.2fr 1fr;gap:12px;margin-bottom:16px;">
+      <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:14px;">
+        <div style="font-size:.75rem;color:var(--text-2);text-transform:uppercase;letter-spacing:.05em;margin-bottom:10px;">ניתוח לפי סוג פרויקט</div>
+        <div id="proj-type-bars">טוען...</div>
+      </div>
+      <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:14px;">
+        <div style="font-size:.75rem;color:var(--text-2);text-transform:uppercase;letter-spacing:.05em;margin-bottom:10px;">מגמת איחורים — 8 שבועות</div>
+        <div id="proj-trend-chart" style="display:flex;align-items:flex-end;gap:5px;height:70px;"></div>
+      </div>
+    </div>
+    <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:14px;">
+      <div style="font-size:.75rem;color:var(--text-2);text-transform:uppercase;letter-spacing:.05em;margin-bottom:10px;">התפלגות שלבים</div>
+      <div id="proj-stage-dist" style="display:flex;gap:8px;flex-wrap:wrap;"></div>
+    </div>
+  </div>
+
+  <!-- Risk sub-panel -->
+  <div id="proj-panel-risk" style="display:none">
+    <div style="background:rgba(167,139,250,.06);border:1px solid rgba(167,139,250,.2);border-radius:8px;padding:9px 14px;margin-bottom:12px;font-size:.8rem;color:#a78bfa;">
+      ⚡ ציון סיכון = שילוב: ימי איחור · מגמת תאריך סיום · מרווח תכנון · מילות מפתח · פריטי טיפול · טריות עדכון
+    </div>
+    <table class="proj-tbl">
+      <thead>
+        <tr>
+          <th>פרויקט</th><th>סוג</th><th>שלב</th><th>ציון</th>
+          <th>8 שבועות</th><th>חיזוי הבא</th><th>סיבה עיקרית</th>
+        </tr>
+      </thead>
+      <tbody id="proj-risk-tbody">
+        <tr><td colspan="7" style="color:var(--text-2);text-align:center;padding:20px;">טוען...</td></tr>
+      </tbody>
+    </table>
+    <div id="proj-detail-card" style="display:none;background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:16px;margin-top:10px;"></div>
+  </div>
+
+</div><!-- end learn-panel-projects -->
+
+<script>
+function switchLearnTab(tab) {
+  document.getElementById('learn-panel-decisions').style.display = tab === 'decisions' ? '' : 'none';
+  document.getElementById('learn-panel-projects').style.display  = tab === 'projects'  ? '' : 'none';
+  document.getElementById('ltab-decisions').classList.toggle('learn-tab-active', tab === 'decisions');
+  document.getElementById('ltab-projects').classList.toggle('learn-tab-active',  tab === 'projects');
+  if (tab === 'projects') initProjectsTab();
+}
+
+function switchProjTab(sub) {
+  document.getElementById('proj-panel-overview').style.display = sub === 'overview' ? '' : 'none';
+  document.getElementById('proj-panel-risk').style.display     = sub === 'risk'     ? '' : 'none';
+  document.getElementById('pstab-overview').classList.toggle('proj-stab-active', sub === 'overview');
+  document.getElementById('pstab-risk').classList.toggle('proj-stab-active',     sub === 'risk');
+  if (sub === 'risk' && !window._riskLoaded) loadRiskTable();
+}
+
+let _overviewLoaded = false;
+window._riskLoaded = false;
+
+function initProjectsTab() {
+  if (!_overviewLoaded) { loadOverview(); _overviewLoaded = true; }
+}
+
+async function loadOverview() {
+  const data = await fetch('/dashboard/learning/projects/overview').then(r => r.json());
+  const t = data.totals || {};
+  document.getElementById('pkpi-active').textContent   = t.active   ?? '—';
+  document.getElementById('pkpi-delayed').textContent  = t.delayed  ?? '—';
+  document.getElementById('pkpi-risk').textContent     = t.at_risk  ?? '—';
+  document.getElementById('pkpi-entering').textContent = t.entering_next_week ?? '—';
+
+  const typeBarsEl = document.getElementById('proj-type-bars');
+  typeBarsEl.innerHTML = '';
+  const types = data.type_counts || {};
+  const maxActive = Math.max(1, ...Object.values(types).map(v => v.active));
+  for (const [name, vals] of Object.entries(types)) {
+    const pct = Math.round((vals.active / maxActive) * 100);
+    typeBarsEl.innerHTML += `
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:7px;font-size:.8rem;">
+        <span style="width:52px;color:var(--text-2);text-align:right;">${name}</span>
+        <div style="flex:1;background:var(--border);border-radius:3px;height:9px;">
+          <div style="width:${pct}%;height:100%;background:var(--cyan);border-radius:3px;"></div>
+        </div>
+        <span style="color:#f59e0b;width:18px;text-align:center;">${vals.delayed}</span>
+        <span style="color:var(--red);width:18px;text-align:center;">${vals.at_risk}</span>
+      </div>`;
+  }
+
+  const trendEl = document.getElementById('proj-trend-chart');
+  trendEl.innerHTML = '';
+  const trend = data.delay_trend || [];
+  const maxCnt = Math.max(1, ...trend.map(r => r.count));
+  trend.forEach(r => {
+    const h = Math.max(6, Math.round((r.count / maxCnt) * 64));
+    const color = r.count > maxCnt * 0.7 ? 'var(--red)' : r.count > maxCnt * 0.4 ? '#f59e0b' : 'var(--border)';
+    trendEl.innerHTML += `
+      <div style="display:flex;flex-direction:column;align-items:center;gap:2px;flex:1;">
+        <div style="width:100%;height:${h}px;background:${color};border-radius:3px 3px 0 0;"></div>
+        <span style="font-size:.6rem;color:var(--text-2);">${(r.week||'').slice(5)}</span>
+      </div>`;
+  });
+
+  const stageEl = document.getElementById('proj-stage-dist');
+  stageEl.innerHTML = '';
+  const stages = data.stage_distribution || {};
+  const colors = ['var(--cyan)','#f59e0b','var(--red)','#a78bfa','var(--green)'];
+  Object.entries(stages).forEach(([stage, cnt], i) => {
+    const c = colors[i % colors.length];
+    stageEl.innerHTML += `<div style="background:rgba(0,0,0,.2);border:1px solid var(--border);border-radius:6px;padding:5px 12px;font-size:.8rem;">
+      <span style="color:${c};font-weight:700;">${cnt}</span> ${stage}</div>`;
+  });
+}
+
+async function loadRiskTable() {
+  window._riskLoaded = true;
+  const tbody = document.getElementById('proj-risk-tbody');
+  tbody.innerHTML = '<tr><td colspan="7" style="color:var(--text-2);text-align:center;">טוען...</td></tr>';
+  const rows = await fetch('/dashboard/learning/projects/risk-table').then(r => r.json());
+  tbody.innerHTML = '';
+  rows.forEach(p => {
+    const scoreColor = p.risk_score >= 70 ? 'var(--red)' : p.risk_score >= 40 ? '#f59e0b' : 'var(--green)';
+    const spark = renderSparkline(p.sparkline, p.predicted_score);
+    const predTxt = p.predicted_score === null ? '—'
+      : p.entering_risk_zone ? `<span style="color:var(--red);">⚡ ${p.predicted_score}</span>`
+      : `<span style="color:var(--text-2);">${p.predicted_score}</span>`;
+    const reliableBadge = p.score_reliable ? '' : ' <span title="עדכון ישן" style="color:#f59e0b;font-size:.75rem;">⚠️</span>';
+    tbody.innerHTML += `
+      <tr onclick="toggleDetail(${p.project_id}, this)">
+        <td><strong>${p.name}</strong> <span style="color:var(--text-2);font-size:.72rem;">${p.identifier}</span></td>
+        <td><span class="proj-badge proj-badge-type">${p.type}</span></td>
+        <td style="color:var(--text-2);">${p.stage}</td>
+        <td>
+          <div class="score-bar-wrap">
+            <div class="score-bar-track"><div class="score-bar-fill" style="width:${p.risk_score}%;background:${scoreColor};"></div></div>
+            <span style="color:${scoreColor};font-weight:700;">${p.risk_score}</span>${reliableBadge}
+          </div>
+        </td>
+        <td>${spark}</td>
+        <td>${predTxt}</td>
+        <td style="color:var(--text-2);font-size:.75rem;">${p.main_reason}</td>
+      </tr>`;
+  });
+}
+
+function renderSparkline(scores, predicted) {
+  if (!scores || scores.length === 0) return '—';
+  const all = predicted !== null ? [...scores, predicted] : scores;
+  const max = Math.max(100, ...all);
+  const w = 8, gap = 2, h = 24;
+  const totalW = all.length * (w + gap) - gap;
+  let bars = '';
+  all.forEach((s, i) => {
+    const barH = Math.max(2, Math.round((s / max) * h));
+    const y = h - barH;
+    const isDashed = (predicted !== null && i === all.length - 1);
+    const color = s >= 70 ? '#ef4444' : s >= 40 ? '#f59e0b' : '#1a2d47';
+    bars += isDashed
+      ? `<rect x="${i*(w+gap)}" y="${y}" width="${w}" height="${barH}" fill="none" stroke="${color}" stroke-width="1" stroke-dasharray="2,2" rx="1"/>`
+      : `<rect x="${i*(w+gap)}" y="${y}" width="${w}" height="${barH}" fill="${color}" rx="1"/>`;
+  });
+  return `<svg class="sparkline-svg" width="${totalW}" height="${h}" viewBox="0 0 ${totalW} ${h}">${bars}</svg>`;
+}
+
+let _openDetailId = null;
+async function toggleDetail(projectId, row) {
+  const card = document.getElementById('proj-detail-card');
+  if (_openDetailId === projectId) {
+    card.style.display = 'none';
+    _openDetailId = null;
+    return;
+  }
+  _openDetailId = projectId;
+  card.style.display = '';
+  card.innerHTML = '<div style="color:var(--text-2);">טוען פרטים...</div>';
+  row.parentNode.insertBefore(card, row.nextSibling);
+
+  const d = await fetch(`/dashboard/learning/projects/${projectId}/detail`).then(r => r.json());
+  const p = d.project;
+  const bd = d.score_breakdown || {};
+
+  const driftRows = (d.finish_date_drift || []).map(fd =>
+    `<span style="font-size:.75rem;color:var(--text-2);">${fd.date}: <span style="color:var(--text-1);">${fd.estimated_finish_date}</span></span>`
+  ).join(' → ');
+
+  const bdRows = Object.entries(bd).map(([k, v]) =>
+    `<div style="display:flex;justify-content:space-between;font-size:.78rem;margin-bottom:3px;">
+      <span style="color:var(--text-2);">${k}</span>
+      <span style="color:var(--cyan);">${v}</span>
+    </div>`
+  ).join('');
+
+  card.innerHTML = `
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;">
+      <div>
+        <div style="color:var(--text-2);font-size:.75rem;margin-bottom:6px;">פרטי פרויקט</div>
+        <div style="font-size:.82rem;line-height:1.7;">
+          <strong>${p.name || p.identifier}</strong><br>
+          מנהל: ${p.manager || '—'}<br>
+          שלב: ${p.stage || '—'}<br>
+          סיום משוער: ${p.estimated_finish_date || '—'}<br>
+          ${p.risks ? `<span style="color:#f59e0b;">⚠️ ${p.risks.slice(0,120)}${p.risks.length>120?'...':''}</span>` : ''}
+        </div>
+      </div>
+      <div>
+        <div style="color:var(--text-2);font-size:.75rem;margin-bottom:6px;">פירוק ציון</div>
+        ${bdRows}
+        <div style="font-size:.72rem;color:var(--text-2);margin-top:6px;">סה"כ: <strong style="color:var(--cyan);">${d.current_score}</strong></div>
+      </div>
+      <div>
+        <div style="color:var(--text-2);font-size:.75rem;margin-bottom:6px;">היסטוריית תאריך סיום</div>
+        <div style="line-height:2;">${driftRows || 'אין מספיק היסטוריה'}</div>
+      </div>
+    </div>`;
+}
+</script>
+
 </body>
 </html>
