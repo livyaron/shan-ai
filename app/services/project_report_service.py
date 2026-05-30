@@ -1,15 +1,17 @@
 """Project portfolio report service — data gathering, HTML generation."""
 import json as _json
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
-    User, ProjectSnapshot, Decision,
+    User, Project, ProjectSnapshot, Decision,
     ProjectReport, RoleEnum, DecisionTypeEnum, DecisionStatusEnum,
 )
-from app.services.project_learning_service import get_overview_stats, get_risk_table
+from app.services.project_learning_service import (
+    get_overview_stats, get_risk_table, compute_risk_score,
+)
 from app.services.llm_router import llm_chat
 
 logger = logging.getLogger(__name__)
@@ -73,6 +75,85 @@ async def gather_report_data(user: User, session: AsyncSession) -> dict:
         for r in delayed
     ]
 
+    # ── Extended data for new report pages ───────────────────────────────────
+    today = date.today()
+    all_projects = (await session.execute(
+        select(Project).where(Project.is_active == True)
+    )).scalars().all()
+
+    finishing_30, finishing_60, finishing_90 = [], [], []
+    delayed_detail = []
+    stale_projects = []
+    to_handle_items = []
+    by_type_detail: dict = {}
+
+    for proj in all_projects:
+        score_res = compute_risk_score(
+            stage=proj.stage,
+            estimated_finish_date=proj.estimated_finish_date,
+            dev_plan_date=proj.dev_plan_date,
+            risks=proj.risks,
+            to_handle=proj.to_handle,
+            last_updated=proj.last_updated,
+            today=today,
+        )
+        score = score_res["score"]
+        days_over = score_res["days_overdue"] or 0
+
+        ptype = proj.project_type or "אחר"
+        if ptype not in by_type_detail:
+            by_type_detail[ptype] = []
+
+        row = {
+            "id":         proj.id,
+            "name":       proj.name or proj.project_identifier,
+            "identifier": proj.project_identifier,
+            "type":       ptype,
+            "stage":      proj.stage or "—",
+            "manager":    proj.manager or "—",
+            "risk_score": score,
+            "days_overdue": days_over,
+            "main_reason":  score_res["main_reason"],
+            "estimated_finish_date": str(proj.estimated_finish_date) if proj.estimated_finish_date else None,
+        }
+
+        if proj.estimated_finish_date:
+            days_until = (proj.estimated_finish_date - today).days
+            if 0 <= days_until <= 30:
+                finishing_30.append(row)
+            elif 31 <= days_until <= 60:
+                finishing_60.append(row)
+            elif 61 <= days_until <= 90:
+                finishing_90.append(row)
+
+        if days_over > 0:
+            delayed_detail.append(row)
+
+        if proj.last_updated:
+            days_stale = (datetime.utcnow() - proj.last_updated).days
+            if days_stale > 14:
+                stale_projects.append({**row, "days_stale": days_stale})
+
+        if score >= 50 and proj.to_handle:
+            for item in proj.to_handle.splitlines():
+                item = item.strip()
+                if item:
+                    to_handle_items.append({
+                        "project":    proj.name or proj.project_identifier,
+                        "type":       ptype,
+                        "item":       item,
+                        "risk_score": score,
+                    })
+
+        if score > 0:
+            by_type_detail[ptype].append(row)
+
+    delayed_detail.sort(key=lambda r: r["days_overdue"], reverse=True)
+    stale_projects.sort(key=lambda r: r["days_stale"], reverse=True)
+    to_handle_items.sort(key=lambda r: r["risk_score"], reverse=True)
+    for rows in by_type_detail.values():
+        rows.sort(key=lambda r: r["risk_score"], reverse=True)
+
     return {
         "meta": {
             "generated_at": datetime.utcnow().strftime("%d/%m/%Y %H:%M"),
@@ -95,8 +176,15 @@ async def gather_report_data(user: User, session: AsyncSession) -> dict:
             "delay_trend":        overview.get("delay_trend", []),
             "stage_distribution": overview.get("stage_distribution", {}),
         },
-        "risk_register": risk_rows[:10],
-        "action_items":  action_items,
+        "risk_register":   risk_rows[:10],
+        "action_items":    action_items,
+        "finishing_30":    finishing_30[:20],
+        "finishing_60":    finishing_60[:20],
+        "finishing_90":    finishing_90[:20],
+        "delayed_detail":  delayed_detail[:25],
+        "stale_projects":  stale_projects[:20],
+        "to_handle_items": to_handle_items[:30],
+        "by_type_detail":  by_type_detail,
     }
 
 
@@ -106,14 +194,16 @@ _REPORT_PROMPT = """\
 נתוני קלט:
 {data_json}
 
-הנחיות: כתוב פסקה קצרה (3-4 משפטים) לכל אחד מ-4 המפתחות הבאים.
+הנחיות: כתוב פסקה קצרה (3-4 משפטים) לכל אחד מ-6 המפתחות הבאים.
 אל תוסיף מפתחות נוספים. החזר JSON בלבד, ללא טקסט לפני ואחרי.
 
 {{
   "executive_narrative": "...",
   "portfolio_narrative": "...",
   "risk_narrative": "...",
-  "action_narrative": "..."
+  "action_narrative": "...",
+  "finishing_narrative": "...",
+  "delay_narrative": "..."
 }}"""
 
 
@@ -126,7 +216,15 @@ async def generate_report_html(data: dict) -> str:
                 {"name": r["name"], "risk_score": r["risk_score"], "main_reason": r.get("main_reason", "")}
                 for r in data["risk_register"][:5]
             ],
-            "action_items_count": len(data["action_items"]),
+            "action_items_count":  len(data["action_items"]),
+            "finishing_30d_count": len(data.get("finishing_30", [])),
+            "finishing_60d_count": len(data.get("finishing_60", [])),
+            "delayed_count":       len(data.get("delayed_detail", [])),
+            "stale_count":         len(data.get("stale_projects", [])),
+            "top_delayed": [
+                {"name": r["name"], "days_overdue": r["days_overdue"], "main_reason": r["main_reason"]}
+                for r in data.get("delayed_detail", [])[:5]
+            ],
         }, ensure_ascii=False)
     )
 
@@ -142,7 +240,11 @@ async def generate_report_html(data: dict) -> str:
         narratives = _json.loads(clean)
     except Exception:
         logger.warning("project_report: LLM JSON parse failed, using empty narratives")
-        narratives = {k: "" for k in ("executive_narrative", "portfolio_narrative", "risk_narrative", "action_narrative")}
+        narratives = {k: "" for k in (
+            "executive_narrative", "portfolio_narrative",
+            "risk_narrative", "action_narrative",
+            "finishing_narrative", "delay_narrative",
+        )}
 
     return _render_html(data, narratives)
 
@@ -154,12 +256,44 @@ def _rag_badge(status: str) -> str:
     return f'<span style="color:{c};font-weight:700;">{labels.get(status, status)}</span>'
 
 
+def _score_color(score: int) -> str:
+    if score >= 70:
+        return "#ef4444"
+    if score >= 40:
+        return "#f59e0b"
+    return "#10b981"
+
+
+def _project_row(r: dict, show_type: bool = True) -> str:
+    sc = r.get("risk_score", 0)
+    cols = (
+        f'<td><strong>{r.get("name","")}</strong>'
+        f'<span style="color:#64748b;font-size:.75rem;margin-right:6px;">{r.get("identifier","")}</span></td>'
+    )
+    if show_type:
+        cols += f'<td style="color:#94a3b8;">{r.get("type","")}</td>'
+    cols += (
+        f'<td style="color:#94a3b8;">{r.get("stage","—")}</td>'
+        f'<td style="color:#94a3b8;">{r.get("manager","—")}</td>'
+        f'<td style="color:{_score_color(sc)};font-weight:700;">{sc}</td>'
+        f'<td style="color:#94a3b8;font-size:.8rem;">{r.get("main_reason","")}</td>'
+    )
+    return f"<tr>{cols}</tr>"
+
+
 def _render_html(data: dict, narratives: dict) -> str:
     meta = data["meta"]
     es   = data["executive_summary"]
     ph   = data["portfolio_health"]
     rr   = data["risk_register"]
     ai   = data["action_items"]
+    f30  = data.get("finishing_30", [])
+    f60  = data.get("finishing_60", [])
+    f90  = data.get("finishing_90", [])
+    dd   = data.get("delayed_detail", [])
+    sp   = data.get("stale_projects", [])
+    thi  = data.get("to_handle_items", [])
+    btd  = data.get("by_type_detail", {})
 
     rag_rows = "".join(
         f'<tr><td>{t}</td><td>{counts.get("active",0)}</td>'
@@ -169,13 +303,13 @@ def _render_html(data: dict, narratives: dict) -> str:
         for t, counts in ph["type_counts"].items()
     )
 
-    risk_rows = "".join(
+    risk_rows_html = "".join(
         f'<tr>'
-        f'<td><strong>{r.get("name","")}</strong> <span style="color:#64748b;font-size:.8rem;">{r.get("identifier","")}</span></td>'
+        f'<td><strong>{r.get("name","")}</strong>'
+        f'<span style="color:#64748b;font-size:.8rem;margin-right:4px;">{r.get("identifier","")}</span></td>'
         f'<td>{r.get("type","")}</td>'
         f'<td>{r.get("stage","")}</td>'
-        f'<td style="color:{"#ef4444" if r["risk_score"]>=70 else "#f59e0b" if r["risk_score"]>=40 else "#10b981"};">'
-        f'<strong>{r["risk_score"]}</strong></td>'
+        f'<td style="color:{_score_color(r["risk_score"])};"><strong>{r["risk_score"]}</strong></td>'
         f'<td style="color:#94a3b8;font-size:.8rem;">{r.get("main_reason","")}</td>'
         f'</tr>'
         for r in rr
@@ -210,6 +344,125 @@ def _render_html(data: dict, narratives: dict) -> str:
         for stage, cnt in ph["stage_distribution"].items()
     ) or "<span style='color:var(--text-2);'>אין נתונים</span>"
 
+    # Page 5: finishing soon
+    def _finishing_section(rows, label, color):
+        if not rows:
+            return f'<div style="color:var(--text-2);padding:8px 0;">אין פרויקטים {label}</div>'
+        hdr = f'<h3 style="color:{color};">{label} ({len(rows)})</h3>'
+        trs = "".join(
+            f'<tr><td><strong>{r["name"]}</strong>'
+            f'<span style="color:#64748b;font-size:.75rem;margin-right:4px;">{r["identifier"]}</span></td>'
+            f'<td style="color:#94a3b8;">{r["type"]}</td>'
+            f'<td style="color:#94a3b8;">{r["stage"]}</td>'
+            f'<td style="color:#94a3b8;">{r["manager"]}</td>'
+            f'<td style="color:{color};font-weight:700;">{r["estimated_finish_date"] or "—"}</td>'
+            f'<td style="color:{_score_color(r["risk_score"])}">{r["risk_score"]}</td>'
+            f'</tr>'
+            for r in rows
+        )
+        return (
+            hdr +
+            '<table><thead><tr>'
+            '<th>פרויקט</th><th>סוג</th><th>שלב</th><th>מנהל</th><th>תאריך סיום</th><th>ציון סיכון</th>'
+            f'</tr></thead><tbody>{trs}</tbody></table>'
+        )
+
+    finishing_html = (
+        _finishing_section(f30, "מסתיימים תוך 30 יום", "#ef4444") +
+        _finishing_section(f60, "מסתיימים תוך 31-60 יום", "#f59e0b") +
+        _finishing_section(f90, "מסתיימים תוך 61-90 יום", "#10b981")
+    )
+    finishing_count = len(f30) + len(f60) + len(f90)
+
+    # Page 6: delayed deep-dive
+    delayed_rows_html = "".join(
+        f'<tr>'
+        f'<td><strong>{r["name"]}</strong>'
+        f'<span style="color:#64748b;font-size:.75rem;margin-right:4px;">{r["identifier"]}</span></td>'
+        f'<td style="color:#94a3b8;">{r["type"]}</td>'
+        f'<td style="color:#94a3b8;">{r["stage"]}</td>'
+        f'<td style="color:#94a3b8;">{r["manager"]}</td>'
+        f'<td style="color:#ef4444;font-weight:700;">{r["days_overdue"]}</td>'
+        f'<td style="color:{_score_color(r["risk_score"])};font-weight:700;">{r["risk_score"]}</td>'
+        f'<td style="color:#94a3b8;font-size:.8rem;">{r["main_reason"]}</td>'
+        f'</tr>'
+        for r in dd
+    ) or "<tr><td colspan='7' style='color:var(--text-2);text-align:center;'>אין פרויקטים באיחור</td></tr>"
+
+    # Page 7: by-type detail
+    by_type_html = ""
+    for ptype, rows in btd.items():
+        if not rows:
+            continue
+        top = rows[:5]
+        trs = "".join(_project_row(r, show_type=False) for r in top)
+        by_type_html += (
+            f'<h3>{ptype} — {len(rows)} פרויקטים פעילים</h3>'
+            f'<table><thead><tr><th>פרויקט</th><th>שלב</th><th>מנהל</th><th>ציון</th><th>סיבה</th></tr></thead>'
+            f'<tbody>{trs}</tbody></table>'
+        )
+
+    # Page 8: to-handle items from high-risk projects
+    thi_rows = "".join(
+        f'<tr>'
+        f'<td><strong>{t["project"]}</strong></td>'
+        f'<td style="color:#94a3b8;">{t["type"]}</td>'
+        f'<td style="color:{_score_color(t["risk_score"])};font-weight:700;">{t["risk_score"]}</td>'
+        f'<td>{t["item"]}</td>'
+        f'</tr>'
+        for t in thi
+    ) or "<tr><td colspan='4' style='color:var(--text-2);text-align:center;'>אין פריטים לטיפול</td></tr>"
+
+    # Page 9: risk forecast (entering risk zone)
+    forecast_rows = "".join(
+        f'<tr>'
+        f'<td><strong>{r["name"]}</strong>'
+        f'<span style="color:#64748b;font-size:.75rem;margin-right:4px;">{r["identifier"]}</span></td>'
+        f'<td style="color:#94a3b8;">{r["type"]}</td>'
+        f'<td style="color:#94a3b8;">{r["stage"]}</td>'
+        f'<td style="color:#a78bfa;font-weight:700;">{r["risk_score"]}</td>'
+        f'<td style="color:#94a3b8;font-size:.8rem;">{r["main_reason"]}</td>'
+        f'</tr>'
+        for r in rr if r.get("entering_risk_zone")
+    ) or "<tr><td colspan='5' style='color:var(--text-2);text-align:center;'>אין פרויקטים בתחזית כניסה לסיכון</td></tr>"
+
+    # Page 10: stale/data-quality
+    stale_rows = "".join(
+        f'<tr>'
+        f'<td><strong>{r["name"]}</strong>'
+        f'<span style="color:#64748b;font-size:.75rem;margin-right:4px;">{r["identifier"]}</span></td>'
+        f'<td style="color:#94a3b8;">{r["type"]}</td>'
+        f'<td style="color:#94a3b8;">{r["stage"]}</td>'
+        f'<td style="color:#94a3b8;">{r["manager"]}</td>'
+        f'<td style="color:#f59e0b;font-weight:700;">{r["days_stale"]}</td>'
+        f'<td style="color:{_score_color(r["risk_score"])}">{r["risk_score"]}</td>'
+        f'</tr>'
+        for r in sp
+    ) or "<tr><td colspan='6' style='color:var(--text-2);text-align:center;'>כל הפרויקטים עודכנו לאחרונה</td></tr>"
+
+    CSS = """
+  :root{--bg:#070b12;--bg-c:#0f1826;--border:#1a2d47;--cyan:#00d4ff;--text:#e2e8f0;--text-2:#64748b;--red:#ef4444;--amber:#f59e0b;--green:#10b981;}
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{background:var(--bg);color:var(--text);font-family:'Heebo',Arial,'David',sans-serif;direction:rtl;text-align:right;padding:24px;}
+  .page{max-width:940px;margin:0 auto 40px;padding:32px;background:var(--bg-c);border:1px solid var(--border);border-radius:12px;page-break-after:always;}
+  .page-header{display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid var(--cyan);padding-bottom:12px;margin-bottom:20px;flex-direction:row-reverse;}
+  .page-title{color:var(--cyan);font-size:1.3rem;font-weight:700;}
+  .page-meta{color:var(--text-2);font-size:.82rem;}
+  .kpi-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:20px;}
+  .kpi{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;text-align:center;}
+  .kpi-val{font-size:2rem;font-weight:700;color:var(--cyan);}
+  .kpi-val.warn{color:var(--amber);}.kpi-val.danger{color:var(--red);}
+  .kpi-label{font-size:.75rem;color:var(--text-2);margin-top:4px;}
+  .narrative{color:#cbd5e1;line-height:1.8;font-size:.92rem;margin-bottom:20px;background:var(--bg);border-right:3px solid var(--cyan);padding:12px 16px;border-radius:4px;}
+  table{width:100%;border-collapse:collapse;font-size:.85rem;}
+  th{color:var(--text-2);border-bottom:1px solid var(--border);padding:7px 8px;text-align:right;font-size:.75rem;letter-spacing:.04em;}
+  td{border-bottom:1px solid rgba(26,45,71,.5);padding:8px;text-align:right;}
+  tr:hover td{background:rgba(0,212,255,.04);}
+  h3{color:var(--cyan);font-size:1rem;margin:16px 0 10px;}
+  .badge-grid{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;}
+  .badge{background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:6px 14px;font-size:.85rem;}
+"""
+
     return f"""<!DOCTYPE html>
 <html lang="he" dir="rtl">
 <head>
@@ -217,41 +470,23 @@ def _render_html(data: dict, narratives: dict) -> str:
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>דוח פרויקטים — {meta["generated_at"]}</title>
 <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-<style>
-  :root {{--bg:#070b12;--bg-c:#0f1826;--border:#1a2d47;--cyan:#00d4ff;--text:#e2e8f0;--text-2:#64748b;--red:#ef4444;--amber:#f59e0b;--green:#10b981;}}
-  *{{box-sizing:border-box;margin:0;padding:0;}}
-  body{{background:var(--bg);color:var(--text);font-family:'Heebo',sans-serif;direction:rtl;padding:24px;}}
-  .page{{max-width:900px;margin:0 auto 40px;padding:32px;background:var(--bg-c);border:1px solid var(--border);border-radius:12px;page-break-after:always;}}
-  .page-header{{display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid var(--cyan);padding-bottom:12px;margin-bottom:20px;}}
-  .page-title{{color:var(--cyan);font-size:1.3rem;font-weight:700;}}
-  .page-meta{{color:var(--text-2);font-size:.82rem;}}
-  .kpi-grid{{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:20px;}}
-  .kpi{{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;text-align:center;}}
-  .kpi-val{{font-size:2rem;font-weight:700;color:var(--cyan);}}
-  .kpi-val.warn{{color:var(--amber);}} .kpi-val.danger{{color:var(--red);}}
-  .kpi-label{{font-size:.75rem;color:var(--text-2);margin-top:4px;}}
-  .narrative{{color:#cbd5e1;line-height:1.8;font-size:.92rem;margin-bottom:20px;background:var(--bg);border-right:3px solid var(--cyan);padding:12px 16px;border-radius:4px;}}
-  table{{width:100%;border-collapse:collapse;font-size:.85rem;}}
-  th{{color:var(--text-2);border-bottom:1px solid var(--border);padding:7px 8px;text-align:right;font-size:.75rem;text-transform:uppercase;letter-spacing:.04em;}}
-  td{{border-bottom:1px solid rgba(26,45,71,.5);padding:8px;}}
-  tr:hover td{{background:rgba(0,212,255,.04);}}
-  h3{{color:var(--cyan);font-size:1rem;margin:16px 0 10px;}}
-</style>
+<style>{CSS}</style>
 </head>
 <body>
 
+<!-- PAGE 1: EXECUTIVE SUMMARY -->
 <div class="page">
   <div class="page-header">
+    <div class="page-meta">עמוד 1 מתוך 10 | {meta["generated_at"]} | {meta["username"]} | {meta["role"]}</div>
     <div class="page-title">📊 דוח פרויקטים — סיכום מנהלים</div>
-    <div class="page-meta">נוצר: {meta["generated_at"]} | {meta["username"]} | {meta["role"]}</div>
   </div>
   <div class="kpi-grid">
     <div class="kpi"><div class="kpi-val">{es["total_active"]}</div><div class="kpi-label">פרויקטים פעילים</div></div>
     <div class="kpi"><div class="kpi-val warn">{es["total_delayed"]}</div><div class="kpi-label">באיחור</div></div>
     <div class="kpi"><div class="kpi-val danger">{es["total_at_risk"]}</div><div class="kpi-label">סיכון גבוה (≥70)</div></div>
-    <div class="kpi"><div class="kpi-val" style="color:#a78bfa;">{es["entering_next_week"]}</div><div class="kpi-label">חיזוי — נכנסים לסיכון</div></div>
+    <div class="kpi"><div class="kpi-val" style="color:#a78bfa;">{es["entering_next_week"]}</div><div class="kpi-label">צפויים להיכנס לסיכון</div></div>
     <div class="kpi"><div class="kpi-val">{es["avg_risk_score"]}</div><div class="kpi-label">ציון סיכון ממוצע</div></div>
-    <div class="kpi"><div class="kpi-val">{es["approval_rate_pct"]}%</div><div class="kpi-label">אחוז אישורי החלטות</div></div>
+    <div class="kpi"><div class="kpi-val">{es["approval_rate_pct"]}%</div><div class="kpi-label">אחוז אישורי החלטות (30י׳)</div></div>
   </div>
   <div class="narrative">{narratives.get("executive_narrative","")}</div>
   <h3>סטטוס לפי סוג פרויקט</h3>
@@ -261,45 +496,122 @@ def _render_html(data: dict, narratives: dict) -> str:
   </table>
 </div>
 
+<!-- PAGE 2: PORTFOLIO HEALTH -->
 <div class="page">
   <div class="page-header">
+    <div class="page-meta">עמוד 2 | {meta["generated_at"]}</div>
     <div class="page-title">🏗️ בריאות תיק הפרויקטים</div>
-    <div class="page-meta">{meta["generated_at"]}</div>
   </div>
   <div class="narrative">{narratives.get("portfolio_narrative","")}</div>
   <h3>מגמת איחורים — שבועות אחרונים</h3>
   <div style="display:flex;gap:6px;align-items:flex-end;height:80px;margin:12px 0 20px;background:var(--bg);padding:12px;border-radius:8px;">{trend_bars}</div>
   <h3>התפלגות שלבים</h3>
-  <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;">{stage_badges}</div>
+  <div class="badge-grid">{stage_badges}</div>
   <div style="margin-top:20px;padding:12px;background:var(--bg);border:1px solid var(--border);border-radius:8px;font-size:.82rem;color:var(--text-2);">
     🔢 סה"כ החלטות (30 ימים): <strong style="color:var(--text);">{es["decisions_30d"]}</strong> &nbsp;|&nbsp;
     ⚠️ קריטיות ממתינות: <strong style="color:#ef4444;">{es["critical_pending"]}</strong>
   </div>
 </div>
 
+<!-- PAGE 3: RISK REGISTER -->
 <div class="page">
   <div class="page-header">
+    <div class="page-meta">עמוד 3 | {meta["generated_at"]}</div>
     <div class="page-title">⚠️ רישום סיכונים — 10 פרויקטים מובילים</div>
-    <div class="page-meta">{meta["generated_at"]}</div>
   </div>
   <div class="narrative">{narratives.get("risk_narrative","")}</div>
   <table>
     <thead><tr><th>פרויקט</th><th>סוג</th><th>שלב</th><th>ציון</th><th>סיבה עיקרית</th></tr></thead>
-    <tbody>{risk_rows}</tbody>
+    <tbody>{risk_rows_html}</tbody>
   </table>
 </div>
 
+<!-- PAGE 4: ACTION ITEMS -->
 <div class="page">
   <div class="page-header">
+    <div class="page-meta">עמוד 4 | {meta["generated_at"]}</div>
     <div class="page-title">✅ פעולות נדרשות</div>
-    <div class="page-meta">{meta["generated_at"]}</div>
   </div>
   <div class="narrative">{narratives.get("action_narrative","")}</div>
   <table>
-    <thead><tr><th>עדיפות</th><th>פעולה</th><th>בעלים</th></tr></thead>
+    <thead><tr><th>עדיפות</th><th>פעולה</th><th>שלב</th></tr></thead>
     <tbody>{ai_rows}</tbody>
   </table>
-  <div style="margin-top:24px;padding:14px;background:var(--bg);border:1px solid rgba(0,212,255,.2);border-radius:8px;font-size:.8rem;color:var(--text-2);text-align:center;">
+</div>
+
+<!-- PAGE 5: FINISHING SOON -->
+<div class="page">
+  <div class="page-header">
+    <div class="page-meta">עמוד 5 | {meta["generated_at"]}</div>
+    <div class="page-title">🏁 פרויקטים המסתיימים ב-90 הימים הקרובים ({finishing_count})</div>
+  </div>
+  <div class="narrative">{narratives.get("finishing_narrative","")}</div>
+  {finishing_html}
+</div>
+
+<!-- PAGE 6: DELAYED DEEP-DIVE -->
+<div class="page">
+  <div class="page-header">
+    <div class="page-meta">עמוד 6 | {meta["generated_at"]}</div>
+    <div class="page-title">🔴 פרויקטים באיחור — ניתוח מעמיק ({len(dd)})</div>
+  </div>
+  <div class="narrative">{narratives.get("delay_narrative","")}</div>
+  <table>
+    <thead><tr><th>פרויקט</th><th>סוג</th><th>שלב</th><th>מנהל</th><th>ימי איחור</th><th>ציון</th><th>סיבה</th></tr></thead>
+    <tbody>{delayed_rows_html}</tbody>
+  </table>
+</div>
+
+<!-- PAGE 7: BY-TYPE ANALYSIS -->
+<div class="page">
+  <div class="page-header">
+    <div class="page-meta">עמוד 7 | {meta["generated_at"]}</div>
+    <div class="page-title">📂 ניתוח לפי סוג פרויקט</div>
+  </div>
+  {by_type_html or '<div style="color:var(--text-2);">אין נתונים</div>'}
+</div>
+
+<!-- PAGE 8: TO-HANDLE ITEMS -->
+<div class="page">
+  <div class="page-header">
+    <div class="page-meta">עמוד 8 | {meta["generated_at"]}</div>
+    <div class="page-title">📋 פריטים לטיפול מפרויקטים בסיכון (ציון ≥50)</div>
+  </div>
+  <table>
+    <thead><tr><th>פרויקט</th><th>סוג</th><th>ציון</th><th>פריט לטיפול</th></tr></thead>
+    <tbody>{thi_rows}</tbody>
+  </table>
+</div>
+
+<!-- PAGE 9: RISK FORECAST -->
+<div class="page">
+  <div class="page-header">
+    <div class="page-meta">עמוד 9 | {meta["generated_at"]}</div>
+    <div class="page-title">🔮 תחזית סיכונים — צפויים להיכנס לאזור סיכון</div>
+  </div>
+  <div style="padding:10px 14px;background:rgba(167,139,250,.08);border:1px solid rgba(167,139,250,.25);border-radius:6px;font-size:.82rem;color:#a78bfa;margin-bottom:16px;">
+    פרויקטים אלה נמצאים כיום מתחת לסף סיכון גבוה (70), אך מגמת הציון צפויה להחצות את הסף בשבוע הקרוב.
+  </div>
+  <table>
+    <thead><tr><th>פרויקט</th><th>סוג</th><th>שלב</th><th>ציון נוכחי</th><th>סיבה</th></tr></thead>
+    <tbody>{forecast_rows}</tbody>
+  </table>
+</div>
+
+<!-- PAGE 10: DATA QUALITY / STALE -->
+<div class="page">
+  <div class="page-header">
+    <div class="page-meta">עמוד 10 | {meta["generated_at"]}</div>
+    <div class="page-title">📅 איכות נתונים — פרויקטים לא מעודכנים (&gt;14 ימים)</div>
+  </div>
+  <div style="padding:10px 14px;background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.25);border-radius:6px;font-size:.82rem;color:#f59e0b;margin-bottom:16px;">
+    פרויקטים שלא עודכנו מעל 14 ימים — הציון שלהם עלול להיות לא מדויק. נדרש עדכון.
+  </div>
+  <table>
+    <thead><tr><th>פרויקט</th><th>סוג</th><th>שלב</th><th>מנהל</th><th>ימים ללא עדכון</th><th>ציון</th></tr></thead>
+    <tbody>{stale_rows}</tbody>
+  </table>
+  <div style="margin-top:32px;padding:14px;background:var(--bg);border:1px solid rgba(0,212,255,.2);border-radius:8px;font-size:.8rem;color:var(--text-2);text-align:center;">
     דוח זה נוצר אוטומטית על ידי Shan-AI | {meta["generated_at"]}
   </div>
 </div>

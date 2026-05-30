@@ -72,22 +72,25 @@ async def get_current_user(request: Request, session: AsyncSession = Depends(get
     token = request.cookies.get("access_token")
     if not token:
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Not authenticated"
+            status_code=status.HTTP_303_SEE_OTHER,
+            detail="Not authenticated",
+            headers={"Location": "/login"},
         )
 
     payload = verify_token(token)
     if not payload:
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token"
+            status_code=status.HTTP_303_SEE_OTHER,
+            detail="Invalid token",
+            headers={"Location": "/login"},
         )
 
     user = await session.get(User, payload["user_id"])
     if not user:
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="User not found"
+            status_code=status.HTTP_303_SEE_OTHER,
+            detail="User not found",
+            headers={"Location": "/login"},
         )
 
     return user
