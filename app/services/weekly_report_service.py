@@ -13,7 +13,7 @@ import json
 import logging
 from datetime import datetime, timedelta
 
-from sqlalchemy import select, desc
+from sqlalchemy import select, desc, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
@@ -277,7 +277,6 @@ async def _decisions_summary(user: User, session: AsyncSession, since: datetime)
     elif user.role == RoleEnum.DEPARTMENT_MANAGER:
         sub_ids = await _subordinate_ids(user, session)
         if sub_ids:
-            from sqlalchemy import or_
             stmt = stmt.where(or_(
                 Decision.submitter_id == user.id,
                 Decision.submitter_id.in_(sub_ids),
