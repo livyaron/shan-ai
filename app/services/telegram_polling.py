@@ -616,9 +616,9 @@ class TelegramPollingBot:
             # Project report shortcut — "📊 דוח פרויקטים"
             if "דוח פרויקטים" in text.strip():
                 await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
-                from app.services.project_report_service import gather_report_data, generate_report_html
+                from app.services.project_report_service import gather_report_data, generate_report_html, _telegram_send_report
                 from app.models import ProjectReport as _PR
-                await update.message.reply_text("‏⏳ מייצר דוח פרויקטים... זה עשוי לקחת מספר שניות.")
+                await update.message.reply_text("‏⏳ מייצר דוח פרויקטים... כמה שניות.")
                 try:
                     report_data = await gather_report_data(user, session)
                     html = await generate_report_html(report_data)
@@ -627,18 +627,7 @@ class TelegramPollingBot:
                     await session.flush()
                     rid = report.id
                     await session.commit()
-                    es = report_data.get("executive_summary", {})
-                    meta = report_data.get("meta", {})
-                    msg = (
-                        f"‏📊 *דוח פרויקטים* — {meta.get('generated_at','')}\n\n"
-                        f"📌 פעיל: *{es.get('total_active',0)}* | "
-                        f"🟡 באיחור: *{es.get('total_delayed',0)}* | "
-                        f"🔴 סיכון: *{es.get('total_at_risk',0)}*\n"
-                        f"ציון סיכון ממוצע: *{es.get('avg_risk_score',0)}*\n\n"
-                        f"[צפה בדוח המלא]"
-                        f"(https://easygoing-endurance-production-df54.up.railway.app/dashboard/project-reports/{rid})"
-                    )
-                    await update.message.reply_text(msg, parse_mode="Markdown")
+                    await _telegram_send_report(context.bot, user, rid, report_data)
                 except Exception as _pe:
                     logger.error(f"Telegram project report failed: {_pe}")
                     await update.message.reply_text("‏❌ שגיאה בייצור הדוח. נסה שוב מאוחר יותר.")
