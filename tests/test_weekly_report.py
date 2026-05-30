@@ -253,3 +253,90 @@ def test_project_stage_map_returns_tuple_with_name_map():
     assert stage_map == {"P001": "תכנון", "P002": "ביצוע"}
     assert name_map["P001"] == "פרויקט ראשון"
     assert name_map["P002"] == "P002"   # fallback to identifier when name is None
+
+
+# ── Task 3 (new) ─────────────────────────────────────────────────────────────
+
+def test_projects_behind_schedule_sorted_by_type_order():
+    """הקמה projects appear before ניידות even if ניידות is more overdue."""
+    from app.services.weekly_report_service import _projects_behind_schedule
+    from app.models import Project, RoleEnum
+    from unittest.mock import MagicMock, AsyncMock
+    from datetime import date
+    import asyncio
+
+    today = date(2026, 5, 30)
+
+    def _make_proj(identifier, name, ptype, finish_date):
+        p = MagicMock(spec=Project)
+        p.project_identifier = identifier
+        p.name = name
+        p.project_type = ptype
+        p.stage = "ביצוע"
+        p.estimated_finish_date = finish_date
+        p.weekly_report_brief = ""
+        p.manager = "מנהל"
+        return p
+
+    nadut  = _make_proj("N001", "פרויקט ניידות", "ניידות",  date(2026, 2, 19))  # 100 days behind
+    hakama = _make_proj("H001", "פרויקט הקמה",   "הקמה",    date(2026, 5, 25))  # 5 days behind
+
+    mock_scalars = MagicMock()
+    mock_scalars.all.return_value = [nadut, hakama]
+    mock_execute = MagicMock()
+    mock_execute.scalars.return_value = mock_scalars
+    mock_session = MagicMock()
+    mock_session.execute = AsyncMock(return_value=mock_execute)
+
+    user = MagicMock()
+    user.role = RoleEnum.DIVISION_MANAGER
+    user.username = "admin"
+
+    result = asyncio.run(
+        _projects_behind_schedule(user, mock_session, today)
+    )
+
+    # הקמה must come first despite fewer days behind
+    assert result[0]["project"].startswith("פרויקט הקמה")
+    assert result[1]["project"].startswith("פרויקט ניידות")
+
+
+# ── Task 4 (new) ─────────────────────────────────────────────────────────────
+
+def test_risky_projects_sorted_by_type_order():
+    """הרחבה risk project appears before שוש risk project."""
+    from app.services.weekly_report_service import _risky_projects
+    from app.models import Project, RoleEnum
+    from unittest.mock import MagicMock, AsyncMock
+    import asyncio
+
+    def _make_risky(identifier, name, ptype):
+        p = MagicMock(spec=Project)
+        p.project_identifier = identifier
+        p.name = name
+        p.project_type = ptype
+        p.stage = "ביצוע"
+        p.risks = "סיכון כלשהו"
+        p.weekly_report_brief = ""
+        return p
+
+    shoresh  = _make_risky("S001", "פרויקט שוש",   "שוש")
+    harchava = _make_risky("HR01", "פרויקט הרחבה", "הרחבה")
+
+    mock_scalars = MagicMock()
+    mock_scalars.all.return_value = [shoresh, harchava]
+    mock_execute = MagicMock()
+    mock_execute.scalars.return_value = mock_scalars
+    mock_session = MagicMock()
+    mock_session.execute = AsyncMock(return_value=mock_execute)
+
+    user = MagicMock()
+    user.role = RoleEnum.DIVISION_MANAGER
+    user.username = "admin"
+
+    result = asyncio.run(
+        _risky_projects(user, mock_session)
+    )
+
+    assert result[0]["project"].startswith("פרויקט הרחבה")
+    assert result[1]["project"].startswith("פרויקט שוש")

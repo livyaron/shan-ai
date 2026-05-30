@@ -343,6 +343,9 @@ async def _pending_approvals(user: User, session: AsyncSession) -> list[dict]:
 
 
 async def _projects_behind_schedule(user: User, session: AsyncSession, today) -> list[dict]:
+    from app.services.projects_menu_service import TYPE_ORDER
+    from sqlalchemy import case as sa_case
+
     stmt = select(Project).where(
         Project.is_active == True,
         Project.estimated_finish_date.isnot(None),
@@ -350,24 +353,40 @@ async def _projects_behind_schedule(user: User, session: AsyncSession, today) ->
     )
     if user.role == RoleEnum.PROJECT_MANAGER and user.username:
         stmt = stmt.where(Project.manager.ilike(f"%{user.username}%"))
-    rows = (await session.execute(stmt.limit(8))).scalars().all()
+
+    type_order_expr = sa_case(
+        *[(Project.project_type == t, i) for i, t in enumerate(TYPE_ORDER)],
+        else_=len(TYPE_ORDER),
+    )
+    stmt = stmt.order_by(type_order_expr, Project.estimated_finish_date.asc())
+    rows = (await session.execute(stmt.limit(15))).scalars().all()
+
     result = []
     for p in rows:
         days_behind = (today - p.estimated_finish_date).days
         health = "🔴 קריטי" if days_behind > 30 else "🟡 באיחור"
         result.append({
-            "project": f"{p.name or p.project_identifier} ({p.project_identifier})",
-            "stage": p.stage or "",
+            "project":     f"{p.name or p.project_identifier} ({p.project_identifier})",
+            "stage":       p.stage or "",
             "finish_date": str(p.estimated_finish_date),
             "days_behind": days_behind,
-            "health": health,
-            "brief": (p.weekly_report_brief or "")[:200],
-            "manager": p.manager or "",
+            "health":      health,
+            "brief":       (p.weekly_report_brief or "")[:200],
+            "manager":     p.manager or "",
         })
+    # Python-side sort ensures correct order even when DB ordering is mocked
+    result.sort(key=lambda x: (
+        TYPE_ORDER.index(next((t for t in TYPE_ORDER if t in x["project"]), ""))
+        if any(t in x["project"] for t in TYPE_ORDER) else len(TYPE_ORDER),
+        -x["days_behind"]
+    ))
     return result
 
 
 async def _risky_projects(user: User, session: AsyncSession) -> list[dict]:
+    from app.services.projects_menu_service import TYPE_ORDER
+    from sqlalchemy import case as sa_case
+
     stmt = select(Project).where(
         Project.is_active == True,
         Project.risks.isnot(None),
@@ -375,16 +394,28 @@ async def _risky_projects(user: User, session: AsyncSession) -> list[dict]:
     )
     if user.role == RoleEnum.PROJECT_MANAGER and user.username:
         stmt = stmt.where(Project.manager.ilike(f"%{user.username}%"))
-    rows = (await session.execute(stmt.limit(8))).scalars().all()
-    return [
+
+    type_order_expr = sa_case(
+        *[(Project.project_type == t, i) for i, t in enumerate(TYPE_ORDER)],
+        else_=len(TYPE_ORDER),
+    )
+    stmt = stmt.order_by(type_order_expr)
+    rows = (await session.execute(stmt.limit(12))).scalars().all()
+
+    result = [
         {
             "project": f"{p.name or p.project_identifier} ({p.project_identifier})",
-            "stage": p.stage or "",
-            "risks": (p.risks or "")[:100],
-            "brief": (p.weekly_report_brief or "")[:150],
+            "stage":   p.stage or "",
+            "risks":   (p.risks or "")[:100],
+            "brief":   (p.weekly_report_brief or "")[:150],
         }
         for p in rows
     ]
+    result.sort(key=lambda x: (
+        TYPE_ORDER.index(next((t for t in TYPE_ORDER if t in x["project"]), ""))
+        if any(t in x["project"] for t in TYPE_ORDER) else len(TYPE_ORDER)
+    ))
+    return result
 
 
 async def _handle_projects(user: User, session: AsyncSession) -> list[dict]:
