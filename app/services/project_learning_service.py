@@ -274,40 +274,41 @@ async def save_snapshot(project: Project, session: AsyncSession) -> None:
 # ── Query functions ──────────────────────────────────────────────────────────
 
 async def get_overview_stats(session: AsyncSession) -> dict:
-    """Cross-project insights: type breakdown, delay trend, stage distribution."""
-    latest_subq = (
-        select(
-            ProjectSnapshot.project_id,
-            func.max(ProjectSnapshot.snapshot_date).label("latest_date"),
-        )
-        .where(ProjectSnapshot.is_active == True)
-        .group_by(ProjectSnapshot.project_id)
-        .subquery()
-    )
-
-    rows = (await session.execute(
-        select(Project.project_type, ProjectSnapshot.days_overdue, ProjectSnapshot.risk_score)
-        .join(latest_subq, and_(
-            ProjectSnapshot.project_id == latest_subq.c.project_id,
-            ProjectSnapshot.snapshot_date == latest_subq.c.latest_date,
-        ))
-        .join(Project, Project.id == ProjectSnapshot.project_id)
-        .where(Project.is_active == True)
-    )).all()
+    """Cross-project insights: type breakdown, delay trend, stage distribution.
+    Computed live from Project rows so it works even with no snapshots.
+    """
+    today = date.today()
+    projects = (await session.execute(
+        select(Project).where(Project.is_active == True)
+    )).scalars().all()
 
     type_counts: dict = {t: {"active": 0, "delayed": 0, "at_risk": 0} for t in TYPE_ORDER}
     total_active = total_delayed = total_at_risk = 0
-    for ptype, days_over, risk in rows:
-        bucket = type_counts.setdefault(ptype or "אחר", {"active": 0, "delayed": 0, "at_risk": 0})
+
+    for proj in projects:
+        result = compute_risk_score(
+            stage=proj.stage,
+            estimated_finish_date=proj.estimated_finish_date,
+            dev_plan_date=proj.dev_plan_date,
+            risks=proj.risks,
+            to_handle=proj.to_handle,
+            last_updated=proj.last_updated,
+            today=today,
+        )
+        days_over = result["days_overdue"]
+        risk = result["score"]
+
+        bucket = type_counts.setdefault(proj.project_type or "אחר", {"active": 0, "delayed": 0, "at_risk": 0})
         bucket["active"] += 1
         total_active += 1
         if days_over and days_over > 0:
             bucket["delayed"] += 1
             total_delayed += 1
-        if risk and risk >= 70:
+        if risk >= 70:
             bucket["at_risk"] += 1
             total_at_risk += 1
 
+    # Trend from snapshots (historical — empty until snapshots accumulate)
     trend_rows = (await session.execute(
         select(ProjectSnapshot.snapshot_date, func.count().label("cnt"))
         .where(ProjectSnapshot.days_overdue > 0, ProjectSnapshot.is_active == True)
@@ -326,7 +327,7 @@ async def get_overview_stats(session: AsyncSession) -> dict:
 
     risk_rows = await _raw_risk_rows(session)
     entering_count = sum(
-        1 for _, _, _, sparkline, predicted in risk_rows
+        1 for _, _, sparkline, predicted in risk_rows
         if predicted is not None and (sparkline[-1] if sparkline else 0) < 70 and predicted >= 70
     )
 
@@ -339,30 +340,16 @@ async def get_overview_stats(session: AsyncSession) -> dict:
 
 
 async def _raw_risk_rows(session: AsyncSession) -> list:
-    """Internal: returns (snap, proj, score_result, sparkline, predicted) per active project."""
-    latest_subq = (
-        select(
-            ProjectSnapshot.project_id,
-            func.max(ProjectSnapshot.snapshot_date).label("latest_date"),
-        )
-        .group_by(ProjectSnapshot.project_id)
-        .subquery()
-    )
-
-    rows = (await session.execute(
-        select(ProjectSnapshot, Project)
-        .join(Project, Project.id == ProjectSnapshot.project_id)
-        .join(latest_subq, and_(
-            ProjectSnapshot.project_id == latest_subq.c.project_id,
-            ProjectSnapshot.snapshot_date == latest_subq.c.latest_date,
-        ))
-        .where(Project.is_active == True)
-        .order_by(desc(ProjectSnapshot.risk_score))
-        .limit(50)
-    )).all()
+    """Internal: returns (proj, score_result, sparkline, predicted) per active project.
+    Computed live from Project — works even with no snapshots.
+    Tuple changed: no longer includes snap as first element.
+    """
+    projects = (await session.execute(
+        select(Project).where(Project.is_active == True)
+    )).scalars().all()
 
     result = []
-    for snap, proj in rows:
+    for proj in projects:
         sparkline_scores = (await session.execute(
             select(ProjectSnapshot.risk_score)
             .where(
@@ -383,16 +370,18 @@ async def _raw_risk_rows(session: AsyncSession) -> list:
             last_updated=proj.last_updated,
         )
         predicted = predict_next_score(sparkline)
-        result.append((snap, proj, score_result, sparkline, predicted))
-    return result
+        result.append((proj, score_result, sparkline, predicted))
+
+    result.sort(key=lambda x: x[1]["score"], reverse=True)
+    return result[:50]
 
 
 async def get_risk_table(session: AsyncSession) -> list[dict]:
     """Projects ranked by risk score with sparklines and predictions."""
     raw = await _raw_risk_rows(session)
     out = []
-    for snap, proj, score_result, sparkline, predicted in raw:
-        current = snap.risk_score or 0
+    for proj, score_result, sparkline, predicted in raw:
+        current = score_result["score"]
         entering = (predicted is not None and current < 70 and predicted >= 70)
         out.append({
             "project_id":         proj.id,
