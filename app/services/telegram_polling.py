@@ -1618,7 +1618,8 @@ class TelegramPollingBot:
             get_menu_keyboard, get_menu_text, get_menu_counts,
             build_custom_filter_keyboard, build_custom_filter_message,
             build_results_keyboard, build_custom_results_keyboard,
-            format_results_message, query_decisions, get_user_raci_roles, SHORTCUT_PRESETS,
+            format_results_message, format_decision_card, build_decision_card_keyboard,
+            query_decisions, get_user_raci_roles, SHORTCUT_PRESETS,
             query_pending_feedback, build_feedback_results_keyboard,
         )
         from app.services.telegram_state import _decisions_menu_state, _awaiting_fb_menu_text
@@ -1730,6 +1731,30 @@ class TelegramPollingBot:
                 )
             return
 
+        # ── dm:d:{id}:{back_shortcut}:{back_page} — decision detail card ────────
+        if data.startswith("dm:d:"):
+            parts = data.split(":")
+            try:
+                card_dec_id  = int(parts[2])
+                back_shortcut = parts[3] if len(parts) > 3 else "my"
+                back_page     = int(parts[4]) if len(parts) > 4 else 0
+            except (IndexError, ValueError):
+                return
+            async with async_session_maker() as session:
+                from app.models import Decision as _Decision
+                card_dec = await session.get(_Decision, card_dec_id)
+                if not card_dec:
+                    await query.edit_message_text("‏⚠️ החלטה לא נמצאה.", parse_mode="HTML")
+                    return
+                raci_map = await get_user_raci_roles(session, [card_dec_id], user.id)
+            raci_badge = raci_map.get(card_dec_id, "")
+            await query.edit_message_text(
+                format_decision_card(card_dec, raci_badge),
+                parse_mode="HTML",
+                reply_markup=build_decision_card_keyboard(card_dec, back_shortcut, back_page),
+            )
+            return
+
         # ── dm:{shortcut}:{page} — stateless shortcut results ────────────────
         if data.startswith("dm:"):
             parts = data.split(":")
@@ -1751,7 +1776,7 @@ class TelegramPollingBot:
             await query.edit_message_text(
                 format_results_message(preset["title"], decisions, total, page, raci_map),
                 parse_mode="HTML",
-                reply_markup=build_results_keyboard(shortcut, page, total),
+                reply_markup=build_results_keyboard(decisions, shortcut, page, total),
             )
             return
 
@@ -1834,7 +1859,7 @@ class TelegramPollingBot:
                 await query.edit_message_text(
                     format_results_message("🔍 תוצאות סינון מותאם", decisions, total, 0, raci_map),
                     parse_mode="HTML",
-                    reply_markup=build_custom_results_keyboard(0, total),
+                    reply_markup=build_custom_results_keyboard(decisions, 0, total),
                 )
                 return
 
@@ -1860,7 +1885,7 @@ class TelegramPollingBot:
                 await query.edit_message_text(
                     format_results_message("🔍 תוצאות סינון מותאם", decisions, total, page, raci_map),
                     parse_mode="HTML",
-                    reply_markup=build_custom_results_keyboard(page, total),
+                    reply_markup=build_custom_results_keyboard(decisions, page, total),
                 )
                 return
 

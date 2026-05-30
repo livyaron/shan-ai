@@ -71,9 +71,16 @@ def get_menu_shortcut_keyboard() -> InlineKeyboardMarkup:
     ]])
 
 
-def build_results_keyboard(shortcut: str, page: int, total: int) -> InlineKeyboardMarkup:
-    total_pages = max(1, (total + 9) // 10)
+def build_results_keyboard(decisions: list, shortcut: str, page: int, total: int) -> InlineKeyboardMarkup:
     rows = []
+    for d in decisions:
+        irrel = "⛔ " if not getattr(d, "is_relevant", True) else ""
+        summary = (d.summary or "")[:35]
+        rows.append([InlineKeyboardButton(
+            f"{irrel}#{d.id} — {summary}",
+            callback_data=f"dm:d:{d.id}:{shortcut}:{page}",
+        )])
+    total_pages = max(1, (total + 9) // 10)
     if total_pages > 1:
         nav = []
         if page > 0:
@@ -135,9 +142,16 @@ def build_custom_filter_keyboard(state: dict) -> InlineKeyboardMarkup:
     ])
 
 
-def build_custom_results_keyboard(page: int, total: int) -> InlineKeyboardMarkup:
-    total_pages = max(1, (total + 9) // 10)
+def build_custom_results_keyboard(decisions: list, page: int, total: int) -> InlineKeyboardMarkup:
     rows = []
+    for d in decisions:
+        irrel = "⛔ " if not getattr(d, "is_relevant", True) else ""
+        summary = (d.summary or "")[:35]
+        rows.append([InlineKeyboardButton(
+            f"{irrel}#{d.id} — {summary}",
+            callback_data=f"dm:d:{d.id}:cf:{page}",
+        )])
+    total_pages = max(1, (total + 9) // 10)
     if total_pages > 1:
         nav = []
         if page > 0:
@@ -178,6 +192,49 @@ def format_results_message(title: str, decisions: list, total: int, page: int, r
     ]
     lines.extend(format_result_line(d, (raci_map or {}).get(d.id, "")) for d in decisions)
     return "\n".join(lines)
+
+
+def format_decision_card(d: Decision, raci_badge: str = "") -> str:
+    t_emoji = TYPE_EMOJI.get(d.type, "❓")
+    t_label = {
+        DecisionTypeEnum.CRITICAL: "קריטי", DecisionTypeEnum.NORMAL: "רגיל",
+        DecisionTypeEnum.INFO: "מידע", DecisionTypeEnum.UNCERTAIN: "לא ודאי",
+    }.get(d.type, d.type.value)
+    s_emoji = STATUS_EMOJI.get(d.status, "")
+    s_label = STATUS_LABEL.get(d.status, "")
+    date_str = d.created_at.strftime("%d/%m/%Y") if d.created_at else ""
+    lines = [
+        f"‏📋 <b>החלטה #{d.id}</b>",
+        "──────────────────",
+        f"{t_emoji} {t_label}  |  {s_emoji} {s_label}  |  📅 {date_str}",
+    ]
+    if raci_badge:
+        lines.append(f"👤 RACI: <b>[{raci_badge}]</b>")
+    if d.summary:
+        lines.append(f"\n<b>סיכום:</b>\n{_html.escape(d.summary)}")
+    if d.recommended_action:
+        lines.append(f"\n<b>פעולה מומלצת:</b>\n{_html.escape(d.recommended_action)}")
+    if not getattr(d, "is_relevant", True):
+        irrel_line = "\n⛔ <i>לא רלוונטי</i>"
+        if d.irrelevant_reason:
+            irrel_line += f" — {_html.escape(d.irrelevant_reason)}"
+        if d.irrelevant_at:
+            irrel_line += f" ({d.irrelevant_at.strftime('%d/%m/%Y')})"
+        lines.append(irrel_line)
+    return "\n".join(lines)
+
+
+def build_decision_card_keyboard(d: Decision, back_shortcut: str, back_page: int) -> InlineKeyboardMarkup:
+    back_cb = f"dm:{back_shortcut}:{back_page}" if back_shortcut != "cf" else "dm:menu"
+    toggle_btn = (
+        InlineKeyboardButton("⛔ סמן כלא רלוונטי", callback_data=f"dec_irrel:{d.id}")
+        if getattr(d, "is_relevant", True)
+        else InlineKeyboardButton("♻️ שחזר כרלוונטי", callback_data=f"dec_rel:{d.id}")
+    )
+    return InlineKeyboardMarkup([
+        [toggle_btn],
+        [InlineKeyboardButton("🔙 חזרה", callback_data=back_cb)],
+    ])
 
 
 def build_custom_filter_message() -> str:
