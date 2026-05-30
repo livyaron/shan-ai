@@ -258,7 +258,7 @@ async def _gather_raw_data(user: User, session: AsyncSession) -> dict:
     behind      = await _projects_behind_schedule(user, session, today)
     at_risk     = await _risky_projects(user, session)
     handle      = await _handle_projects(user, session)
-    stage_map   = await _project_stage_map(user, session)
+    stage_map, name_map = await _project_stage_map(user, session)
 
     return {
         "decisions":         decisions,
@@ -267,6 +267,7 @@ async def _gather_raw_data(user: User, session: AsyncSession) -> dict:
         "projects_at_risk":  at_risk,
         "handle_items":      handle,
         "stage_map":         stage_map,
+        "name_map":          name_map,
     }
 
 
@@ -401,12 +402,14 @@ async def _handle_projects(user: User, session: AsyncSession) -> list[dict]:
     ]
 
 
-async def _project_stage_map(user: User, session: AsyncSession) -> dict[str, str]:
-    stmt = select(Project.project_identifier, Project.stage).where(Project.is_active == True)
+async def _project_stage_map(user: User, session: AsyncSession) -> tuple[dict[str, str], dict[str, str]]:
+    stmt = select(Project.project_identifier, Project.stage, Project.name).where(Project.is_active == True)
     if user.role == RoleEnum.PROJECT_MANAGER and user.username:
         stmt = stmt.where(Project.manager.ilike(f"%{user.username}%"))
     rows = (await session.execute(stmt.limit(200))).all()
-    return {row[0]: (row[1] or "") for row in rows if row[0]}
+    stage_map = {row[0]: (row[1] or "") for row in rows if row[0]}
+    name_map  = {row[0]: (row[2] or row[0]) for row in rows if row[0]}
+    return stage_map, name_map
 
 
 async def _subordinate_ids(user: User, session: AsyncSession) -> list[int]:

@@ -178,7 +178,7 @@ def test_decisions_summary_splits_critical_from_sample():
     user = MagicMock()
     user.role = RoleEnum.DIVISION_MANAGER
 
-    result = asyncio.get_event_loop().run_until_complete(
+    result = asyncio.run(
         _decisions_summary(user, mock_session, datetime(2026, 4, 24))
     )
 
@@ -218,8 +218,38 @@ def test_decisions_summary_critical_urgent_capped_at_8():
     user = MagicMock()
     user.role = RoleEnum.DIVISION_MANAGER
 
-    result = asyncio.get_event_loop().run_until_complete(
+    result = asyncio.run(
         _decisions_summary(user, mock_session, datetime(2026, 4, 24))
     )
 
     assert len(result["critical_urgent"]) == 8
+
+
+# ── Task 2 (new) ─────────────────────────────────────────────────────────────
+
+def test_project_stage_map_returns_tuple_with_name_map():
+    """_project_stage_map returns (stage_map, name_map) both keyed by identifier."""
+    from app.services.weekly_report_service import _project_stage_map
+    from app.models import RoleEnum
+    from unittest.mock import MagicMock, AsyncMock
+    import asyncio
+
+    mock_result = MagicMock()
+    mock_result.all.return_value = [
+        ("P001", "תכנון", "פרויקט ראשון"),
+        ("P002", "ביצוע", None),  # name_map should fall back to identifier
+    ]
+    mock_session = MagicMock()
+    mock_session.execute = AsyncMock(return_value=mock_result)
+
+    user = MagicMock()
+    user.role = RoleEnum.DIVISION_MANAGER
+    user.username = "admin"
+
+    stage_map, name_map = asyncio.run(
+        _project_stage_map(user, mock_session)
+    )
+
+    assert stage_map == {"P001": "תכנון", "P002": "ביצוע"}
+    assert name_map["P001"] == "פרויקט ראשון"
+    assert name_map["P002"] == "P002"   # fallback to identifier when name is None
