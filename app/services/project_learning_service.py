@@ -1,6 +1,7 @@
 """Project learning service — risk scoring, snapshots, insight queries."""
 import math
 import logging
+from math import ceil
 from datetime import date, datetime
 from typing import Optional
 
@@ -170,3 +171,28 @@ def compute_risk_score(
         "main_reason":  main_reason,
         "days_overdue": days_overdue,
     }
+
+
+def predict_next_score(scores: list[int]) -> Optional[int]:
+    """
+    EWMA (α=0.4) level + Theil-Sen 3-point slope → next-week prediction.
+    Returns None if fewer than 3 data points.
+    """
+    if len(scores) < 3:
+        return None
+
+    # EWMA over all scores
+    ewma = float(scores[0])
+    for s in scores[1:]:
+        ewma = 0.4 * s + 0.6 * ewma
+
+    # Theil-Sen slope on last 3 (robust to outliers)
+    last3 = scores[-3:]
+    pairs = [
+        (last3[j] - last3[i]) / (j - i)
+        for i in range(3)
+        for j in range(i + 1, 3)
+    ]
+    slope = sorted(pairs)[len(pairs) // 2]
+
+    return max(0, min(100, ceil(ewma + 2 * slope)))

@@ -111,3 +111,37 @@ def test_score_capped_at_100():
         today=today,
     )
     assert result["score"] <= 100
+
+
+from app.services.project_learning_service import predict_next_score
+
+
+def test_predict_returns_none_with_fewer_than_3_scores():
+    assert predict_next_score([]) is None
+    assert predict_next_score([50]) is None
+    assert predict_next_score([40, 50]) is None
+
+
+def test_predict_rising_trend():
+    scores = [20, 30, 40, 50, 60, 70, 75, 80]
+    pred = predict_next_score(scores)
+    assert pred is not None
+    assert pred > 80
+
+
+def test_predict_falling_trend():
+    scores = [80, 70, 60, 50, 40, 30, 20, 15]
+    pred = predict_next_score(scores)
+    assert pred is not None
+    assert pred < 15
+
+
+def test_predict_clamped_0_100():
+    assert predict_next_score([95, 98, 99, 100, 100, 100, 100, 100]) <= 100
+    assert predict_next_score([5, 3, 2, 1, 1, 1, 1, 1]) >= 0
+
+
+def test_predict_needs_only_3_scores():
+    pred = predict_next_score([30, 50, 70])
+    assert pred is not None
+    assert pred > 70
