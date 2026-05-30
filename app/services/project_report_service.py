@@ -306,3 +306,77 @@ def _render_html(data: dict, narratives: dict) -> str:
 
 </body>
 </html>"""
+
+
+async def auto_send_project_report(user, session, bot=None) -> bool:
+    """Generate report + video for user, save to project_reports, send via Telegram."""
+    import os
+    from app.models import ProjectReport
+    from app.services.video_report_service import generate_report_video
+
+    try:
+        report_data = await gather_report_data(user, session)
+        html        = await generate_report_html(report_data)
+
+        report = ProjectReport(
+            user_id=user.id,
+            report_data=report_data,
+            html_content=html,
+        )
+        session.add(report)
+        await session.flush()
+        report_id = report.id
+        await session.commit()
+
+        video_path = await generate_report_video(report_data, report_id)
+        if video_path:
+            report = await session.get(ProjectReport, report_id)
+            if report:
+                report.video_path = video_path
+                await session.commit()
+
+        if bot and user.telegram_id:
+            await _telegram_send_report(bot, user, report_id, report_data, video_path)
+
+        return True
+
+    except Exception as exc:
+        logger.error(f"auto_send_project_report failed for user {user.id}: {exc}")
+        return False
+
+
+async def _telegram_send_report(bot, user, report_id: int, data: dict, video_path) -> None:
+    """Send report summary text + MP4 video via Telegram."""
+    import os
+    es   = data.get("executive_summary", {})
+    meta = data.get("meta", {})
+
+    summary = (
+        f"‏📋 *דוח פרויקטים* — {meta.get('generated_at', '')}\n\n"
+        f"📊 פעיל: *{es.get('total_active', 0)}* | "
+        f"🟡 באיחור: *{es.get('total_delayed', 0)}* | "
+        f"🔴 סיכון: *{es.get('total_at_risk', 0)}*\n"
+        f"ציון סיכון ממוצע: *{es.get('avg_risk_score', 0)}*\n"
+        f"אחוז אישורי החלטות: *{es.get('approval_rate_pct', 0)}%*\n\n"
+        f"[צפה בדוח המלא בדשבורד]"
+        f"(https://easygoing-endurance-production-df54.up.railway.app/dashboard/project-reports/{report_id})"
+    )
+
+    await bot.send_message(
+        chat_id=user.telegram_id,
+        text=summary,
+        parse_mode="Markdown",
+    )
+
+    if video_path:
+        full_path = os.path.join("static", video_path)
+        if os.path.exists(full_path):
+            try:
+                with open(full_path, "rb") as vf:
+                    await bot.send_video(
+                        chat_id=user.telegram_id,
+                        video=vf,
+                        caption=f"‏🎬 וידאו דוח פרויקטים — {meta.get('generated_at', '')}",
+                    )
+            except Exception as ve:
+                logger.warning(f"Telegram video send failed for user {user.id}: {ve}")
