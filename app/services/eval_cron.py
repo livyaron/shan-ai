@@ -26,10 +26,17 @@ def start_scheduler() -> None:
         id="weekly_report",
         replace_existing=True,
     )
+    sch.add_job(
+        _project_report_cron,
+        CronTrigger(minute="*/15"),
+        id="project_report_cron",
+        replace_existing=True,
+    )
     sch.start()
     _scheduler = sch
     logger.info("eval_cron: scheduler started (03:00 UTC nightly)")
     logger.info("eval_cron: weekly_report job registered (Thu 17:00 Asia/Jerusalem)")
+    logger.info("eval_cron: project_report_cron registered (every 15 min)")
 
 
 def stop_scheduler() -> None:
@@ -63,3 +70,50 @@ async def _weekly_report_run() -> None:
         await send_weekly_reports_cron(telegram_bot.application.bot)
     else:
         logger.warning("weekly_report_run: bot not available, skipping")
+
+
+async def _project_report_cron() -> None:
+    """Check project report schedules and send due reports (runs every 15 min)."""
+    from zoneinfo import ZoneInfo
+    from datetime import datetime, timedelta
+    from app.database import async_session_maker
+    from app.models import ProjectReportSchedule, User
+    from app.services.project_report_service import auto_send_project_report
+    from app.services.telegram_polling import telegram_bot
+    from sqlalchemy import select
+
+    tz_il = ZoneInfo("Asia/Jerusalem")
+    now_il = datetime.now(tz=tz_il)
+    # Python weekday(): 0=Mon…6=Sun → remap to 0=Sun…6=Sat
+    current_dow_sun = (now_il.weekday() + 1) % 7
+    current_hour    = now_il.hour
+    current_minute  = now_il.minute
+
+    async with async_session_maker() as session:
+        schedules = (await session.execute(
+            select(ProjectReportSchedule).where(ProjectReportSchedule.enabled == True)
+        )).scalars().all()
+
+        bot = (telegram_bot.application.bot
+               if telegram_bot.application and telegram_bot.application.bot else None)
+
+        for sched in schedules:
+            if sched.day_of_week is not None and sched.day_of_week != current_dow_sun:
+                continue
+            if sched.hour_il != current_hour:
+                continue
+            if not (sched.minute_il <= current_minute < sched.minute_il + 15):
+                continue
+            if sched.last_sent_at:
+                if (datetime.utcnow() - sched.last_sent_at) < timedelta(minutes=30):
+                    continue
+
+            user = await session.get(User, sched.user_id)
+            if not user:
+                continue
+
+            logger.info(f"project_report_cron: sending report for user {user.id} ({user.username})")
+            ok = await auto_send_project_report(user, session, bot)
+            if ok:
+                sched.last_sent_at = datetime.utcnow()
+                await session.commit()
