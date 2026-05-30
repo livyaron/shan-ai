@@ -202,15 +202,20 @@ async def get_menu_counts(session: AsyncSession, user_id: int) -> dict:
         .scalar_subquery()
     )
     my_count = await session.scalar(
-        select(func.count(Decision.id)).where(Decision.submitter_id == user_id)
+        select(func.count(Decision.id)).where(
+            Decision.submitter_id == user_id, Decision.is_relevant == True
+        )
     ) or 0
     recv_count = await session.scalar(
-        select(func.count(Decision.id)).where(Decision.id.in_(recv_subq))
+        select(func.count(Decision.id)).where(
+            Decision.id.in_(recv_subq), Decision.is_relevant == True
+        )
     ) or 0
     pending_count = await session.scalar(
         select(func.count(Decision.id)).where(
             or_(Decision.submitter_id == user_id, Decision.id.in_(recv_subq)),
             Decision.status == DecisionStatusEnum.PENDING,
+            Decision.is_relevant == True,
         )
     ) or 0
     rated_subq = (
@@ -223,6 +228,7 @@ async def get_menu_counts(session: AsyncSession, user_id: int) -> dict:
             Decision.status.in_([DecisionStatusEnum.EXECUTED, DecisionStatusEnum.APPROVED]),
             Decision.submitter_id != user_id,
             Decision.id.notin_(rated_subq),
+            Decision.is_relevant == True,
             or_(
                 Decision.id.in_(recv_subq),
                 Decision.id.in_(raci_subq),
@@ -320,7 +326,8 @@ async def query_decisions(
     status: str | None, # "pending" | "approved" | "rejected" | "executed" | None
     date_days: int,     # 0 = all time
     page: int,
-    raci: str | None = None,  # "R" | "A" | "C" | "I" | None
+    raci: str | None = None,    # "R" | "A" | "C" | "I" | None
+    show_irrelevant: bool = False,  # True = include irrelevant decisions
 ) -> tuple[list[Decision], int]:
     recv_subq = (
         select(DecisionDistribution.decision_id)
@@ -351,6 +358,9 @@ async def query_decisions(
             .where(DecisionRaciRole.user_id == user_id)
             .where(DecisionRaciRole.role == raci)
         )
+
+    if not show_irrelevant:
+        base = base.where(Decision.is_relevant == True)
 
     count_q = select(func.count()).select_from(base.subquery())
     total: int = await session.scalar(count_q) or 0

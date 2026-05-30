@@ -48,6 +48,7 @@ async def get_similar_decisions(session: AsyncSession, query_text: str, limit: i
             .where(Decision.embedding.isnot(None))
             .where(Decision.status.in_([DecisionStatusEnum.EXECUTED, DecisionStatusEnum.APPROVED]))
             .where(Decision.feedback_score.isnot(None))
+            .where(Decision.is_relevant == True)
             .order_by(Decision.embedding.cosine_distance(query_vector))
             .limit(limit)
         )

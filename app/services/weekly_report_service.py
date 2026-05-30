@@ -280,7 +280,7 @@ async def _gather_raw_data(user: User, session: AsyncSession) -> dict:
 
 
 async def _decisions_summary(user: User, session: AsyncSession, since: datetime) -> dict:
-    stmt = select(Decision).where(Decision.created_at >= since)
+    stmt = select(Decision).where(Decision.created_at >= since, Decision.is_relevant == True)
     if user.role == RoleEnum.PROJECT_MANAGER:
         stmt = stmt.where(Decision.submitter_id == user.id)
     elif user.role == RoleEnum.DEPARTMENT_MANAGER:
