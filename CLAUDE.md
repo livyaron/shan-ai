@@ -24,8 +24,9 @@
 ## 4. Critical Operational Guardrails
 - **The "BIGINT" Fix:** After any Docker rebuild, MUST run:
   `docker exec shan-ai-postgres psql -U shan_user -d shan_ai -c "ALTER TABLE users ALTER COLUMN telegram_id TYPE BIGINT;"`
-- **is_relevant columns:** After any Docker rebuild, also run:
-  `docker exec shan-ai-postgres psql -U shan_user -d shan_ai -c "ALTER TABLE decisions ADD COLUMN IF NOT EXISTS is_relevant BOOLEAN NOT NULL DEFAULT TRUE, ADD COLUMN IF NOT EXISTS irrelevant_reason TEXT, ADD COLUMN IF NOT EXISTS irrelevant_at TIMESTAMP, ADD COLUMN IF NOT EXISTS irrelevant_by_id INTEGER REFERENCES users(id);"`
+- **is_relevant columns:** After any Docker rebuild OR Railway deploy with new schema, run on BOTH local and Railway DB:
+  Local: `docker exec shan-ai-postgres psql -U shan_user -d shan_ai -c "ALTER TABLE decisions ADD COLUMN IF NOT EXISTS is_relevant BOOLEAN NOT NULL DEFAULT TRUE, ADD COLUMN IF NOT EXISTS irrelevant_reason TEXT, ADD COLUMN IF NOT EXISTS irrelevant_at TIMESTAMP, ADD COLUMN IF NOT EXISTS irrelevant_by_id INTEGER REFERENCES users(id);"`
+  Railway: `docker exec shan-ai-postgres psql "postgresql://shan_user:shan_secure_pass_2025@interchange.proxy.rlwy.net:15720/shan_ai" -c "ALTER TABLE decisions ADD COLUMN IF NOT EXISTS is_relevant BOOLEAN NOT NULL DEFAULT TRUE, ADD COLUMN IF NOT EXISTS irrelevant_reason TEXT, ADD COLUMN IF NOT EXISTS irrelevant_at TIMESTAMP, ADD COLUMN IF NOT EXISTS irrelevant_by_id INTEGER REFERENCES users(id);"`
 - **Polling Conflict:** Local Docker and Railway **cannot** run simultaneously. Stop local before Railway is live.
 - **No Data Loss:** NEVER run `docker-compose down -v` without explicit confirmation.
 - **Build Cycle:** After code changes, run `docker-compose restart fastapi`.
