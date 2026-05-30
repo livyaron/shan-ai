@@ -275,8 +275,6 @@ async def save_snapshot(project: Project, session: AsyncSession) -> None:
 
 async def get_overview_stats(session: AsyncSession) -> dict:
     """Cross-project insights: type breakdown, delay trend, stage distribution."""
-    today = date.today()
-
     latest_subq = (
         select(
             ProjectSnapshot.project_id,
