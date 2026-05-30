@@ -2516,7 +2516,7 @@ async def reports_index(
         stmt = select(User).where(
             User.role.isnot(None),
             User.role != RoleEnum.VIEWER,
-            User.manager_id == current_user.id,
+            or_(User.manager_id == current_user.id, User.id == current_user.id),
         )
     else:
         return RedirectResponse(f"/dashboard/reports/{current_user.id}", status_code=302)
@@ -2731,8 +2731,7 @@ async def reports_generate_all(
     if current_user.role == RoleEnum.DEPARTMENT_MANAGER:
         stmt = select(User).where(
             User.role.isnot(None), User.role != RoleEnum.VIEWER,
-            User.manager_id == current_user.id,
-            User.id != current_user.id,
+            or_(User.manager_id == current_user.id, User.id == current_user.id),
         )
     else:
         stmt = select(User).where(User.role.isnot(None), User.role != RoleEnum.VIEWER)
