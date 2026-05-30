@@ -138,3 +138,88 @@ async def test_cron_skips_viewer(db_session):
         await send_weekly_reports_cron(mock_bot)
 
     mock_bot.send_message.assert_not_called()
+
+
+# ── Task 1 (new) ─────────────────────────────────────────────────────────────
+
+def test_decisions_summary_splits_critical_from_sample():
+    """CRITICAL and UNCERTAIN go to critical_urgent; INFO/NORMAL go to sample."""
+    from app.services.weekly_report_service import _decisions_summary
+    from app.models import Decision, DecisionTypeEnum, DecisionStatusEnum
+    from unittest.mock import MagicMock, AsyncMock
+    from datetime import datetime
+    import asyncio
+
+    def _make_decision(id_, dtype):
+        d = MagicMock(spec=Decision)
+        d.id = id_
+        d.type = dtype
+        d.status = DecisionStatusEnum.PENDING
+        d.summary = f"summary {id_}"
+        d.recommended_action = f"action {id_}"
+        d.created_at = datetime(2026, 5, 1)
+        d.is_relevant = True
+        return d
+
+    decisions = [
+        _make_decision(1, DecisionTypeEnum.CRITICAL),
+        _make_decision(2, DecisionTypeEnum.INFO),
+        _make_decision(3, DecisionTypeEnum.UNCERTAIN),
+        _make_decision(4, DecisionTypeEnum.NORMAL),
+        _make_decision(5, DecisionTypeEnum.CRITICAL),
+    ]
+
+    mock_result = MagicMock()
+    mock_result.scalars.return_value.all.return_value = decisions
+    mock_session = MagicMock()
+    mock_session.execute = AsyncMock(return_value=mock_result)
+
+    from app.models import RoleEnum
+    user = MagicMock()
+    user.role = RoleEnum.DIVISION_MANAGER
+
+    result = asyncio.get_event_loop().run_until_complete(
+        _decisions_summary(user, mock_session, datetime(2026, 4, 24))
+    )
+
+    cu_ids = {d["id"] for d in result["critical_urgent"]}
+    sample_ids = {d["id"] for d in result["sample"]}
+
+    assert cu_ids == {1, 3, 5}
+    assert sample_ids == {2, 4}
+    assert all("recommended_action" in d for d in result["critical_urgent"])
+
+
+def test_decisions_summary_critical_urgent_capped_at_8():
+    """critical_urgent never exceeds 8 entries."""
+    from app.services.weekly_report_service import _decisions_summary
+    from app.models import Decision, DecisionTypeEnum, DecisionStatusEnum, RoleEnum
+    from unittest.mock import MagicMock, AsyncMock
+    from datetime import datetime
+    import asyncio
+
+    decisions = []
+    for i in range(12):
+        d = MagicMock(spec=Decision)
+        d.id = i
+        d.type = DecisionTypeEnum.CRITICAL
+        d.status = DecisionStatusEnum.PENDING
+        d.summary = f"s{i}"
+        d.recommended_action = f"a{i}"
+        d.created_at = datetime(2026, 5, i % 28 + 1)
+        d.is_relevant = True
+        decisions.append(d)
+
+    mock_result = MagicMock()
+    mock_result.scalars.return_value.all.return_value = decisions
+    mock_session = MagicMock()
+    mock_session.execute = AsyncMock(return_value=mock_result)
+
+    user = MagicMock()
+    user.role = RoleEnum.DIVISION_MANAGER
+
+    result = asyncio.get_event_loop().run_until_complete(
+        _decisions_summary(user, mock_session, datetime(2026, 4, 24))
+    )
+
+    assert len(result["critical_urgent"]) == 8

@@ -17,7 +17,7 @@ from sqlalchemy import select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
-    User, Decision, Project, RoleEnum, DecisionStatusEnum,
+    User, Decision, Project, RoleEnum, DecisionStatusEnum, DecisionTypeEnum,
     DecisionDistribution, DistributionTypeEnum, DistributionStatusEnum,
     ReportHistory,
 )
@@ -121,15 +121,6 @@ def _sanitize_json_string(s: str) -> str:
     return ''.join(result)
 
 
-def _trim_decisions(d: dict) -> dict:
-    """Strip sample list down to 3 items for prompt efficiency."""
-    if not d:
-        return d
-    out = dict(d)
-    out["sample"] = d.get("sample", [])[:3]
-    return out
-
-
 # ── Public API ────────────────────────────────────────────────────────────────
 
 async def generate_report_for_user(
@@ -168,7 +159,7 @@ async def generate_report_for_user(
         role_label=role_label,
         username=user.username or role_label,
         date_range=f"{since_str}–{today_str}",
-        decisions_json=json.dumps(_trim_decisions(raw["decisions"]), ensure_ascii=False),
+        decisions_json=json.dumps(raw["decisions"], ensure_ascii=False),
         pending_json=json.dumps(raw["pending_approvals"][:5], ensure_ascii=False),
         behind_json=json.dumps(raw["projects_behind"][:4], ensure_ascii=False),
         risks_json=json.dumps(raw["projects_at_risk"][:4], ensure_ascii=False),
@@ -293,7 +284,6 @@ async def _decisions_summary(user: User, session: AsyncSession, since: datetime)
             ))
         else:
             stmt = stmt.where(Decision.submitter_id == user.id)
-    # DEPUTY / DIVISION_MANAGER: no filter — see all
 
     rows = (await session.execute(stmt)).scalars().all()
     if not rows:
@@ -307,13 +297,30 @@ async def _decisions_summary(user: User, session: AsyncSession, since: datetime)
         if d.status == DecisionStatusEnum.APPROVED:
             approved += 1
 
+    _critical_types = {DecisionTypeEnum.CRITICAL, DecisionTypeEnum.UNCERTAIN}
+    critical_urgent = sorted(
+        [d for d in rows if d.type in _critical_types],
+        key=lambda d: d.created_at or datetime.min,
+        reverse=True,
+    )[:8]
+    sample = [d for d in rows if d.type not in _critical_types][:5]
+
     return {
         "total":             len(rows),
         "by_type":           type_counts,
         "approval_rate_pct": round(approved / len(rows) * 100),
+        "critical_urgent": [
+            {
+                "id":                 d.id,
+                "type":               d.type.value if d.type else "",
+                "summary":            (d.summary or "")[:80],
+                "recommended_action": (d.recommended_action or "")[:120],
+            }
+            for d in critical_urgent
+        ],
         "sample": [
             {"id": d.id, "type": d.type.value if d.type else "", "summary": (d.summary or "")[:80]}
-            for d in rows[:8]
+            for d in sample
         ],
     }
 
