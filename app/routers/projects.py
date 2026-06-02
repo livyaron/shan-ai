@@ -144,3 +144,14 @@ async def upload_project_file(
         "message": "הקובץ הועלה ומעובד ברקע. רענן את הדף בעוד כמה שניות.",
         "filename": file.filename,
     })
+
+
+@router.post("/regenerate-briefs")
+async def regenerate_briefs(
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(get_current_user),
+):
+    """Trigger AI brief regeneration for all projects missing or having malformed briefs."""
+    from app.services.project_sync import generate_all_briefs
+    background_tasks.add_task(generate_all_briefs)
+    return JSONResponse({"status": "ok", "message": "יצירת סיכומים החלה ברקע."})

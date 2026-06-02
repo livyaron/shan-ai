@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -202,6 +203,48 @@ def _parse_date(val: Any):
 
 # ── AI Briefing generation ────────────────────────────────────────────────
 
+_BRIEF_BAD_PREFIXES = [
+    "here is a brief hebrew summary:",
+    "here is a brief summary:",
+    "here's a brief hebrew summary:",
+    "here's a brief summary:",
+    "brief hebrew summary:",
+    "brief summary:",
+    "summary:",
+    "or, even more concise:",
+    "or even more concise:",
+    "or more concise:",
+    "concise version:",
+    "סיכום קצר:",
+    "סיכום:",
+]
+
+# Regex: catch any leading  "EnglishWords...: " wrapper not in the explicit list
+_BRIEF_ENGLISH_PREFIX_RE = re.compile(r'^[A-Za-z][A-Za-z ,\'"]*:\s*', re.IGNORECASE)
+
+
+def _clean_brief(text: str) -> str:
+    """Strip LLM meta-text wrappers from a generated brief."""
+    t = text.strip()
+    lower = t.lower()
+    # Strip known bad prefixes (may repeat — e.g. two options on separate lines)
+    changed = True
+    while changed:
+        changed = False
+        for prefix in _BRIEF_BAD_PREFIXES:
+            if lower.startswith(prefix):
+                t = t[len(prefix):].strip()
+                lower = t.lower()
+                changed = True
+    # Catch-all: strip any remaining  "EnglishLabel: " prefix
+    t = _BRIEF_ENGLISH_PREFIX_RE.sub('', t).strip()
+    # Strip surrounding quotes (straight, curly, Hebrew gershayim)
+    t = t.strip('"\'""״')
+    # Strip trailing punctuation artifacts
+    t = re.sub(r'[.,"\'"״\s]+$', '', t).strip()
+    return t
+
+
 async def _generate_weekly_brief(weekly_report: str | None) -> str | None:
     """
     Generate a short 1-2 sentence AI briefing from the weekly report.
@@ -211,25 +254,37 @@ async def _generate_weekly_brief(weekly_report: str | None) -> str | None:
         return None
 
     try:
-        # Truncate very long reports to avoid token limits
         report_preview = weekly_report[:1000] if len(weekly_report) > 1000 else weekly_report
 
-        prompt = (
-            f"Generate a VERY brief (50-80 characters max) Hebrew summary of this project update. "
-            f"Use 1-2 sentences. Be concise and actionable:\n\n{report_preview}"
+        system = (
+            "אתה מסכם עדכוני פרויקטים בעברית בלבד. "
+            "החזר אך ורק את טקסט הסיכום — ללא מלל באנגלית, ללא כותרת, ללא מבוא, ללא ציטוטים, ללא חלופות. "
+            "אסור להשתמש בביטויים כגון 'brief Hebrew summary:', 'Or, even more concise:', 'summary:' וכדומה."
         )
-        messages = [{"role": "user", "content": prompt}]
+        prompt = (
+            "סכם בעברית בלבד את עדכון הפרויקט הבא ב-1-2 משפטים קצרים (עד 100 תווים). "
+            "ענה אך ורק בטקסט הסיכום עצמו.\n\n"
+            f"{report_preview}"
+        )
+        messages = [
+            {"role": "system", "content": system},
+            {"role": "user", "content": prompt},
+        ]
         brief = await llm_chat("project_brief", messages, max_tokens=150, temperature=0.2)
 
         if not brief or not brief.strip():
             return None
 
-        # Truncate to 500 chars to fit in DB column
+        brief = _clean_brief(brief)
+
+        if not brief:
+            return None
+
         if len(brief) > 500:
             brief = brief[:497] + "..."
 
         logger.info(f"Generated brief ({len(brief)} chars): {brief[:80]}...")
-        return brief.strip()
+        return brief
     except Exception as exc:
         logger.warning(f"Brief generation failed (will use truncated text): {exc}")
         return None
@@ -390,6 +445,23 @@ async def generate_all_briefs() -> None:
             )
         )
         projects = result.scalars().all()
+
+        # Also re-generate briefs that still carry LLM meta-text wrappers
+        bad_result = await session.execute(
+            select(Project).where(
+                Project.weekly_report_brief.isnot(None)
+            )
+        )
+        for p in bad_result.scalars().all():
+            brief_lower = (p.weekly_report_brief or "").lower()
+            if p.weekly_report_brief and (
+                any(brief_lower.startswith(pfx) for pfx in _BRIEF_BAD_PREFIXES + ["here is", "here's"])
+                or bool(_BRIEF_ENGLISH_PREFIX_RE.match(p.weekly_report_brief))
+                or any(eng in brief_lower for eng in ["brief hebrew", "even more concise", "concise version"])
+            ):
+                p.weekly_report_brief = None
+                projects = list(projects) + [p]
+        await session.commit()
 
     logger.info(f"generate_all_briefs: {len(projects)} projects to process")
 
