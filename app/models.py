@@ -354,8 +354,6 @@ class ProjectReport(Base):
     generated_at   = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
     report_data    = Column(JSON, nullable=True)
     html_content   = Column(Text, nullable=True)
-    video_path     = Column(String(500), nullable=True)
-    notebooklm_url = Column(String(500), nullable=True)
 
     user = relationship("User")
 

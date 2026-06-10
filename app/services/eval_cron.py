@@ -26,17 +26,10 @@ def start_scheduler() -> None:
         id="weekly_report",
         replace_existing=True,
     )
-    sch.add_job(
-        _project_report_cron,
-        CronTrigger(minute="*/15"),
-        id="project_report_cron",
-        replace_existing=True,
-    )
     sch.start()
     _scheduler = sch
     logger.info("eval_cron: scheduler started (03:00 UTC nightly)")
     logger.info("eval_cron: weekly_report job registered (Thu 17:00 Asia/Jerusalem)")
-    logger.info("eval_cron: project_report_cron registered (every 15 min)")
 
 
 def stop_scheduler() -> None:

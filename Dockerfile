@@ -11,6 +11,10 @@ RUN apt-get update && apt-get install -y \
     libsm6 \
     libxext6 \
     libxrender-dev \
+    libpango-1.0-0 \
+    libharfbuzz0b \
+    libfontconfig1 \
+    fonts-dejavu \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements

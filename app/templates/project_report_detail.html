@@ -15,19 +15,10 @@
     .btn-outline-dim:hover { color:var(--text-1); border-color:var(--cyan); }
     .btn-cyan   { background:var(--cyan); color:#000; font-weight:700; border:none; border-radius:8px; padding:10px 28px; font-size:1rem; cursor:pointer; text-decoration:none; display:inline-block; transition:.15s; }
     .btn-cyan:hover { opacity:.85; }
-    .btn-purple { background:rgba(167,139,250,.15); color:#a78bfa; font-weight:700; border:1px solid rgba(167,139,250,.4); border-radius:8px; padding:10px 28px; font-size:1rem; cursor:pointer; text-decoration:none; display:inline-block; transition:.15s; }
-    .btn-purple:hover { background:rgba(167,139,250,.25); }
     .action-bar { display:flex; gap:12px; align-items:center; padding:20px 24px; background:var(--bg-surface); border-bottom:1px solid var(--border); flex-wrap:wrap; }
     .section-card { background:var(--bg-card); border:1px solid var(--border); border-radius:8px; margin-bottom:16px; }
     .section-header { padding:14px 20px; cursor:pointer; display:flex; justify-content:space-between; align-items:center; font-weight:600; font-size:1rem; color:var(--cyan); }
     .section-body { border-top:1px solid var(--border); }
-    audio { width:100%; margin-top:8px; }
-    .audio-card { background:var(--bg-card); border:1px solid var(--border); border-radius:8px; padding:20px; margin-bottom:16px; }
-    .audio-title { color:var(--cyan); font-size:1rem; font-weight:700; margin-bottom:8px; }
-    .spinner { display:inline-block; width:16px; height:16px; border:2px solid rgba(0,212,255,.3); border-top-color:var(--cyan); border-radius:50%; animation:spin .8s linear infinite; vertical-align:middle; }
-    @keyframes spin { to { transform:rotate(360deg); } }
-    .badge-ready { background:rgba(16,185,129,.15); color:var(--green); border:1px solid rgba(16,185,129,.3); border-radius:4px; font-size:.75rem; padding:2px 8px; }
-    .badge-pending { background:rgba(245,158,11,.1); color:var(--amber); border:1px solid rgba(245,158,11,.25); border-radius:4px; font-size:.75rem; padding:2px 8px; }
   </style>
 </head>
 <body>
@@ -41,53 +32,15 @@
   </div>
 </nav>
 
-<!-- Action bar — two main buttons -->
+<!-- Action bar -->
 <div class="action-bar">
   <a href="#report-section" class="btn-cyan" onclick="openReport()">
     📄 דוח HTML מלא
   </a>
-  <a href="#audio-section" class="btn-purple" onclick="openAudio()">
-    🎵 האזן לדוח
-  </a>
-  {% if report.notebooklm_url %}
-  <a href="{{ report.notebooklm_url }}" target="_blank" class="btn-outline-dim" style="font-size:.88rem;">
-    🔗 פתח ב-NotebookLM
-  </a>
-  {% endif %}
   <span style="color:var(--text-2);font-size:.8rem;margin-right:auto;">נוצר: {{ report.generated_at }}</span>
 </div>
 
 <div class="container-fluid px-4 py-4">
-
-  <!-- Audio section -->
-  <div class="audio-card" id="audio-section">
-    <div class="audio-title">🎵 האזנה לדוח (עברית)</div>
-    {% if report.video_path %}
-      {% if report.video_path.endswith('.m4a') or report.video_path.endswith('.mp3') or report.video_path.endswith('.ogg') %}
-      <span class="badge-ready">✅ מוכן</span>
-      <audio controls preload="metadata">
-        <source src="/static/{{ report.video_path }}" type="audio/mp4">
-        הדפדפן שלך אינו תומך בנגן אודיו.
-      </audio>
-      {% else %}
-      <span class="badge-ready">✅ מוכן</span>
-      <video controls preload="metadata" style="width:100%;border-radius:8px;background:#000;">
-        <source src="/static/{{ report.video_path }}" type="video/mp4">
-      </video>
-      {% endif %}
-    {% elif report.notebooklm_url %}
-    <span class="badge-pending">⏳ בהכנה</span>
-    <div style="color:var(--text-2);margin-top:10px;font-size:.9rem;">
-      <span class="spinner"></span>&nbsp; האודיו בהכנה — <a href="{{ report.notebooklm_url }}" target="_blank" style="color:var(--cyan);">האזן ישירות ב-NotebookLM</a>
-    </div>
-    {% else %}
-    <span class="badge-pending">⏳ ממתין לעיבוד</span>
-    <div style="color:var(--text-2);margin-top:10px;font-size:.9rem;">
-      <span class="spinner"></span>&nbsp; הוורקר המקומי יעבד את הדוח בקרוב.
-    </div>
-    <script>setTimeout(() => location.reload(), 30000);</script>
-    {% endif %}
-  </div>
 
   <!-- HTML report section -->
   <div class="section-card" id="report-section">
@@ -120,9 +73,6 @@ function openReport() {
     document.getElementById('rep-arr').textContent = '▼';
   }
   setTimeout(() => document.getElementById('report-section').scrollIntoView({behavior:'smooth'}), 100);
-}
-function openAudio() {
-  setTimeout(() => document.getElementById('audio-section').scrollIntoView({behavior:'smooth'}), 100);
 }
 </script>
 </body>

@@ -427,7 +427,44 @@ async def sync_projects_file(file_path: str, sheet_name: str | None = None) -> d
     # Spawn brief generation as a background task (don't wait for it)
     asyncio.create_task(generate_all_briefs())
 
+    # Trigger project reports for all enabled-schedule users after sync
+    asyncio.create_task(_trigger_reports_after_sync())
+
     return result
+
+
+async def _trigger_reports_after_sync() -> None:
+    """Fire-and-forget: send project reports to all enabled-schedule users after file sync."""
+    try:
+        from datetime import timedelta
+        from app.models import ProjectReportSchedule, User
+        from app.services.project_report_service import auto_send_project_report
+        from app.services.telegram_polling import telegram_bot
+        from sqlalchemy import select as _select
+
+        bot = (telegram_bot.application.bot
+               if telegram_bot and telegram_bot.application and telegram_bot.application.bot
+               else None)
+
+        async with async_session_maker() as session:
+            schedules = (await session.execute(
+                _select(ProjectReportSchedule).where(ProjectReportSchedule.enabled == True)
+            )).scalars().all()
+
+            for sched in schedules:
+                if sched.last_sent_at and (datetime.utcnow() - sched.last_sent_at) < timedelta(minutes=30):
+                    logger.info(f"project_sync: skipping report for user {sched.user_id} — sent recently")
+                    continue
+                user = await session.get(User, sched.user_id)
+                if not user or not user.telegram_id:
+                    continue
+                logger.info(f"project_sync: triggering report for user {user.id} after file upload")
+                ok = await auto_send_project_report(user, session, bot)
+                if ok:
+                    sched.last_sent_at = datetime.utcnow()
+                    await session.commit()
+    except Exception as exc:
+        logger.error(f"_trigger_reports_after_sync failed: {exc}")
 
 
 # ── Brief generation (async, per-row commit) ──────────────────────────────

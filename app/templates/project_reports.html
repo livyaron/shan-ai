@@ -26,9 +26,6 @@
   <span class="page-title">📋 דוחות פרויקטים</span>
   <div class="d-flex gap-2 align-items-center">
     <span style="color:var(--text-2);font-size:.85rem;">{{ current_user.username }}</span>
-    <form method="post" action="/dashboard/project-reports/generate" style="margin:0;">
-      <button type="submit" class="btn-cyan">🔄 צור דוח חדש</button>
-    </form>
     <a href="/dashboard/project-reports/schedule" class="btn-outline-dim">⏰ תזמון אוטומטי</a>
     <a href="/dashboard" class="btn-outline-dim">← לוח בקרה</a>
     <a href="/logout" class="btn-outline-dim">יציאה</a>
@@ -39,30 +36,14 @@
   <div class="card p-3">
     {% if reports %}
     <table class="table table-hover mb-0">
-      <thead><tr><th>תאריך יצירה</th><th>אודיו</th><th>פעולות</th></tr></thead>
+      <thead><tr><th>תאריך יצירה</th><th>פעולות</th></tr></thead>
       <tbody>
       {% for r in reports %}
       <tr>
         <td><strong>{{ r.generated_at }}</strong></td>
         <td>
-          {% if r.has_audio %}
-            <span style="background:rgba(16,185,129,.15);color:#10b981;border:1px solid rgba(16,185,129,.3);border-radius:4px;font-size:.72rem;padding:2px 8px;">✅ מוכן</span>
-          {% elif r.notebooklm_url %}
-            <a href="{{ r.notebooklm_url }}" target="_blank" style="color:#a78bfa;font-size:.8rem;">🎙️ NotebookLM</a>
-          {% else %}
-            <span style="color:var(--text-2);font-size:.8rem;">⏳ בהכנה</span>
-          {% endif %}
-        </td>
-        <td>
           <div class="d-flex gap-2">
             <a href="/dashboard/project-reports/{{ r.id }}" class="btn-outline-dim" style="font-size:.85rem;">📄 דוח</a>
-            {% if r.has_audio %}
-            <a href="/dashboard/project-reports/{{ r.id }}#audio-section" class="btn-outline-dim"
-               style="font-size:.85rem;color:#a78bfa;border-color:rgba(167,139,250,.35);">🎵 האזן</a>
-            {% elif r.notebooklm_url %}
-            <a href="{{ r.notebooklm_url }}" target="_blank" class="btn-outline-dim"
-               style="font-size:.85rem;color:#a78bfa;border-color:rgba(167,139,250,.35);">🎵 NotebookLM</a>
-            {% endif %}
             <form method="post" action="/dashboard/project-reports/{{ r.id }}/delete"
                   onsubmit="return confirm('למחוק דוח זה?');" style="margin:0;">
               <button type="submit" class="btn-outline-dim" style="color:#ef4444;font-size:.85rem;">🗑</button>
@@ -75,10 +56,7 @@
     </table>
     {% else %}
     <div style="text-align:center;padding:60px 0;color:var(--text-2);">
-      <p style="font-size:1.1rem;">אין דוחות עדיין.</p>
-      <form method="post" action="/dashboard/project-reports/generate" style="margin-top:16px;">
-        <button type="submit" class="btn-cyan">🔄 צור דוח ראשון</button>
-      </form>
+      <p style="font-size:1.1rem;">אין דוחות עדיין. העלה קובץ פרויקטים כדי לקבל דוח.</p>
     </div>
     {% endif %}
   </div>
