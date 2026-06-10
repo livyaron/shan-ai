@@ -62,12 +62,12 @@ def _velocity_pts(prior_finish_dates: list, current_finish: Optional[date]) -> i
 
 
 def _overdue_pts(estimated_finish_date: Optional[date], today: date) -> int:
-    """0-30: log-scaled overdue or urgency for imminent deadlines."""
+    """0-40: log-scaled overdue (steeper curve) or urgency for imminent deadlines."""
     if not estimated_finish_date:
         return 0
     days_diff = (today - estimated_finish_date).days  # positive = overdue
     if days_diff > 0:
-        return min(int(25 * math.log(1 + days_diff) / math.log(60)), 30)
+        return min(int(35 * math.log(1 + days_diff) / math.log(50)), 40)
     days_until = -days_diff
     if days_until < 14:
         return max(0, int(15 - (days_until / 14 * 5)))
