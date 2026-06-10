@@ -326,61 +326,42 @@ async def generate_report_html(data: dict) -> str:
 
     raw = await llm_chat(usage="project_report", messages=[{"role": "user", "content": prompt}])
 
-    def _repair_llm_json(s: str) -> str:
-        """Fix unescaped double-quotes and literal newlines inside JSON string values."""
-        result = []
-        in_string = False
-        i = 0
-        while i < len(s):
-            c = s[i]
-            if c == '\\' and in_string and i + 1 < len(s):
-                result.append(c)
-                i += 1
-                result.append(s[i])
-            elif c == '"':
-                if in_string:
-                    # Lookahead: skip whitespace and check next significant char
-                    j = i + 1
-                    while j < len(s) and s[j] in ' \t\r\n':
-                        j += 1
-                    next_sig = s[j] if j < len(s) else ''
-                    if next_sig in (':', ',', '}', ']', ''):
-                        in_string = False
-                        result.append(c)
-                    else:
-                        result.append('\\"')
-                else:
-                    in_string = True
-                    result.append(c)
-            elif c == '\n' and in_string:
-                result.append('\\n')
-            else:
-                result.append(c)
-            i += 1
-        return ''.join(result)
+    _NARRATIVE_KEYS = [
+        "prologue_narrative", "executive_narrative", "portfolio_narrative",
+        "risk_narrative", "action_narrative",
+        "finishing_narrative", "delay_narrative", "epilogue_narrative",
+    ]
 
-    try:
-        clean = raw.strip()
-        if clean.startswith("```"):
-            clean = clean.split("\n", 1)[1] if "\n" in clean else clean[3:]
-        if clean.endswith("```"):
-            clean = clean.rsplit("\n", 1)[0]
-        clean = clean.strip()
-        if not clean.startswith("{"):
-            start = clean.find("{")
-            end   = clean.rfind("}")
-            if start != -1 and end != -1:
-                clean = clean[start:end + 1]
-        clean = _repair_llm_json(clean)
-        narratives = _json.loads(clean)
-        logger.info(f"project_report: LLM narratives parsed OK, keys={list(narratives.keys())}")
-    except Exception as exc:
-        logger.warning(f"project_report: LLM JSON parse failed ({exc}), raw[:200]={raw[:200]!r}")
-        narratives = {k: "" for k in (
-            "prologue_narrative", "executive_narrative", "portfolio_narrative",
-            "risk_narrative", "action_narrative",
-            "finishing_narrative", "delay_narrative", "epilogue_narrative",
-        )}
+    import re as _re
+
+    def _extract_narratives(text: str) -> dict:
+        """
+        Extract narrative values by key-boundary scanning — tolerant of unescaped
+        quotes and literal newlines in LLM output (both common with Hebrew text).
+        """
+        result = {k: "" for k in _NARRATIVE_KEYS}
+        for idx, key in enumerate(_NARRATIVE_KEYS):
+            m = _re.search(rf'"{_re.escape(key)}"\s*:\s*"', text)
+            if not m:
+                continue
+            val_start = m.end()
+            # End boundary: next key pattern or closing brace
+            if idx + 1 < len(_NARRATIVE_KEYS):
+                next_key = _NARRATIVE_KEYS[idx + 1]
+                end_m = _re.search(rf'",?\s*\n\s*"{_re.escape(next_key)}"', text[val_start:])
+                val_end = val_start + end_m.start() if end_m else len(text)
+            else:
+                end_m = _re.search(r'"\s*\n?\s*\}', text[val_start:])
+                val_end = val_start + end_m.start() if end_m else len(text)
+            value = text[val_start:val_end].replace('\\"', '"').replace('\\n', '\n')
+            result[key] = value.strip()
+        return result
+
+    narratives = _extract_narratives(raw)
+    if any(narratives.values()):
+        logger.info(f"project_report: narratives extracted OK")
+    else:
+        logger.warning(f"project_report: all narratives empty, raw[:300]={raw[:300]!r}")
 
     return _render_html(data, narratives)
 
