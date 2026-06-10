@@ -613,24 +613,23 @@ class TelegramPollingBot:
                 await send_report_to_user(context.bot, update.effective_chat.id, sections)
                 return
 
-            # Project report shortcut — "📊 דוח פרויקטים"
+            # Project report shortcut — "📊 דוח פרויקטים" — sends last saved report
             if "דוח פרויקטים" in text.strip():
                 await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
-                from app.services.project_report_service import gather_report_data, generate_report_html, _telegram_send_report
+                from app.services.project_report_service import _telegram_send_report
                 from app.models import ProjectReport as _PR
-                await update.message.reply_text("‏⏳ מייצר דוח פרויקטים... כמה שניות.")
+                from sqlalchemy import select as _sel, desc as _desc
                 try:
-                    report_data = await gather_report_data(user, session)
-                    html = await generate_report_html(report_data)
-                    report = _PR(user_id=user.id, report_data=report_data, html_content=html)
-                    session.add(report)
-                    await session.flush()
-                    rid = report.id
-                    await session.commit()
-                    await _telegram_send_report(context.bot, user, rid, report_data)
+                    report = await session.scalar(
+                        _sel(_PR).order_by(_desc(_PR.generated_at)).limit(1)
+                    )
+                    if not report:
+                        await update.message.reply_text("‏📊 אין דוחות עדיין. העלה קובץ פרויקטים כדי לקבל דוח.")
+                    else:
+                        await _telegram_send_report(context.bot, user, report.id, report.report_data or {})
                 except Exception as _pe:
                     logger.error(f"Telegram project report failed: {_pe}")
-                    await update.message.reply_text("‏❌ שגיאה בייצור הדוח. נסה שוב מאוחר יותר.")
+                    await update.message.reply_text("‏❌ שגיאה בשליחת הדוח. נסה שוב מאוחר יותר.")
                 return
 
             # Team report shortcut — "👥 דוח צוות" (managers only)
