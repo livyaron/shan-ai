@@ -326,24 +326,52 @@ async def generate_report_html(data: dict) -> str:
 
     raw = await llm_chat(usage="project_report", messages=[{"role": "user", "content": prompt}])
 
+    def _repair_llm_json(s: str) -> str:
+        """Fix unescaped double-quotes and literal newlines inside JSON string values."""
+        result = []
+        in_string = False
+        i = 0
+        while i < len(s):
+            c = s[i]
+            if c == '\\' and in_string and i + 1 < len(s):
+                result.append(c)
+                i += 1
+                result.append(s[i])
+            elif c == '"':
+                if in_string:
+                    # Lookahead: skip whitespace and check next significant char
+                    j = i + 1
+                    while j < len(s) and s[j] in ' \t\r\n':
+                        j += 1
+                    next_sig = s[j] if j < len(s) else ''
+                    if next_sig in (':', ',', '}', ']', ''):
+                        in_string = False
+                        result.append(c)
+                    else:
+                        result.append('\\"')
+                else:
+                    in_string = True
+                    result.append(c)
+            elif c == '\n' and in_string:
+                result.append('\\n')
+            else:
+                result.append(c)
+            i += 1
+        return ''.join(result)
+
     try:
-        import re as _re
         clean = raw.strip()
-        # Strip markdown fences (```json ... ``` or ``` ... ```)
         if clean.startswith("```"):
             clean = clean.split("\n", 1)[1] if "\n" in clean else clean[3:]
         if clean.endswith("```"):
             clean = clean.rsplit("\n", 1)[0]
         clean = clean.strip()
-        # Extract first { ... } block in case LLM added preamble text
         if not clean.startswith("{"):
             start = clean.find("{")
             end   = clean.rfind("}")
             if start != -1 and end != -1:
                 clean = clean[start:end + 1]
-        # Repair: replace " surrounded by word chars (Hebrew abbreviations like חח"י)
-        # with Hebrew gershayim ״ so they don't break JSON string parsing
-        clean = _re.sub(r'(?<=\w)"(?=\w)', '״', clean)
+        clean = _repair_llm_json(clean)
         narratives = _json.loads(clean)
         logger.info(f"project_report: LLM narratives parsed OK, keys={list(narratives.keys())}")
     except Exception as exc:
