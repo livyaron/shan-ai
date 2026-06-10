@@ -150,16 +150,17 @@ async def gather_report_data(user: User, session: AsyncSession) -> dict:
             by_type_detail[ptype] = []
 
         row = {
-            "id":         proj.id,
-            "name":       proj.name or proj.project_identifier,
-            "identifier": proj.project_identifier,
-            "type":       ptype,
-            "stage":      proj.stage or "—",
-            "manager":    proj.manager or "—",
-            "risk_score": score,
-            "days_overdue": days_over,
-            "main_reason":  score_res["main_reason"],
+            "id":                  proj.id,
+            "name":                proj.name or proj.project_identifier,
+            "identifier":          proj.project_identifier,
+            "type":                ptype,
+            "stage":               proj.stage or "—",
+            "manager":             proj.manager or "—",
+            "risk_score":          score,
+            "days_overdue":        days_over,
+            "main_reason":         score_res["main_reason"],
             "estimated_finish_date": str(proj.estimated_finish_date) if proj.estimated_finish_date else None,
+            "weekly_report_brief": proj.weekly_report_brief or "",
         }
 
         if proj.estimated_finish_date:
@@ -297,7 +298,12 @@ async def generate_report_html(data: dict) -> str:
                 "last_week_avg_risk": wd.get("prv_avg_risk", 0),
             },
             "top_risk_projects": [
-                {"name": r["name"], "risk_score": r["risk_score"], "main_reason": r.get("main_reason", "")}
+                {
+                    "name":               r["name"],
+                    "risk_score":         r["risk_score"],
+                    "main_reason":        r.get("main_reason", ""),
+                    "weekly_brief":       r.get("weekly_report_brief", ""),
+                }
                 for r in data["risk_register"][:5]
             ],
             "action_items_count":  len(data["action_items"]),
@@ -435,6 +441,7 @@ def _render_html(data: dict, narratives: dict) -> str:
         f'<td>{r.get("stage","")}</td>'
         f'<td style="color:{_score_color(r["risk_score"])};"><strong>{r["risk_score"]}</strong></td>'
         f'<td style="color:#94a3b8;font-size:.8rem;">{r.get("main_reason","")}</td>'
+        f'<td style="color:#cbd5e1;font-size:.78rem;max-width:220px;">{r.get("weekly_report_brief","")}</td>'
         f'</tr>'
         for r in rr
     )
@@ -718,7 +725,7 @@ def _render_html(data: dict, narratives: dict) -> str:
   </div>
   <div class="narrative">{narratives.get("risk_narrative","")}</div>
   <table>
-    <thead><tr><th>פרויקט</th><th>סוג</th><th>שלב</th><th>ציון</th><th>סיבה עיקרית</th></tr></thead>
+    <thead><tr><th>פרויקט</th><th>סוג</th><th>שלב</th><th>ציון</th><th>סיבה עיקרית</th><th>עדכון שבועי</th></tr></thead>
     <tbody>{risk_rows_html}</tbody>
   </table>
 </div>

@@ -361,16 +361,22 @@ async def _raw_risk_rows(session: AsyncSession) -> list:
 
     result = []
     for proj in projects:
-        sparkline_scores = (await session.execute(
-            select(ProjectSnapshot.risk_score)
+        snap_rows = (await session.execute(
+            select(ProjectSnapshot.risk_score, ProjectSnapshot.estimated_finish_date)
             .where(
                 ProjectSnapshot.project_id == proj.id,
                 ProjectSnapshot.risk_score.isnot(None),
             )
             .order_by(desc(ProjectSnapshot.snapshot_date))
             .limit(8)
-        )).scalars().all()
-        sparkline = list(reversed(sparkline_scores))
+        )).all()
+
+        sparkline = list(reversed([r[0] for r in snap_rows]))
+        # Prior finish dates for velocity (ascending chronological, most recent last)
+        prior_finish_dates = [r[1] for r in reversed(snap_rows) if r[1] is not None]
+
+        # Use stored snapshot score (calculated with full history) if available
+        stored_score = sparkline[-1] if sparkline else None
 
         score_result = compute_risk_score(
             stage=proj.stage,
@@ -379,7 +385,14 @@ async def _raw_risk_rows(session: AsyncSession) -> list:
             risks=proj.risks,
             to_handle=proj.to_handle,
             last_updated=proj.last_updated,
+            weekly_report=proj.weekly_report,
+            prior_finish_dates=prior_finish_dates,
         )
+        # Blend: if stored snapshot score is available, use the higher of the two
+        # (prevents stale snapshots masking current deterioration)
+        if stored_score is not None:
+            score_result = {**score_result, "score": max(score_result["score"], stored_score)}
+
         predicted = predict_next_score(sparkline)
         result.append((proj, score_result, sparkline, predicted))
 
@@ -395,17 +408,19 @@ async def get_risk_table(session: AsyncSession) -> list[dict]:
         current = score_result["score"]
         entering = (predicted is not None and current < 70 and predicted >= 70)
         out.append({
-            "project_id":         proj.id,
-            "name":               proj.name or proj.project_identifier,
-            "identifier":         proj.project_identifier,
-            "type":               proj.project_type or "",
-            "stage":              proj.stage or "",
-            "risk_score":         current,
-            "score_reliable":     score_result["reliable"],
-            "sparkline":          sparkline,
-            "predicted_score":    predicted,
-            "entering_risk_zone": entering,
-            "main_reason":        score_result["main_reason"],
+            "project_id":          proj.id,
+            "name":                proj.name or proj.project_identifier,
+            "identifier":          proj.project_identifier,
+            "type":                proj.project_type or "",
+            "stage":               proj.stage or "",
+            "manager":             proj.manager or "—",
+            "risk_score":          current,
+            "score_reliable":      score_result["reliable"],
+            "sparkline":           sparkline,
+            "predicted_score":     predicted,
+            "entering_risk_zone":  entering,
+            "main_reason":         score_result["main_reason"],
+            "weekly_report_brief": proj.weekly_report_brief or "",
         })
     return out
 
