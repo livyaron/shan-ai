@@ -353,6 +353,27 @@ def _score_color(score: int) -> str:
     return "#10b981"
 
 
+def _svg_linechart(values: list, color: str, max_val: int = 100, width: int = 820, height: int = 90) -> str:
+    """Render a simple SVG polyline chart for trend data."""
+    if not values:
+        return "<span style='color:#64748b;font-size:.8rem;'>אין נתונים היסטוריים</span>"
+    n = len(values)
+    pad = 8
+    effective_w = width - pad * 2
+    effective_h = height - pad * 2
+    mv = max(max_val, max(values) if values else 1)
+    pts = []
+    for i, v in enumerate(values):
+        x = pad + int(i / max(n - 1, 1) * effective_w)
+        y = pad + effective_h - int(v / mv * effective_h)
+        pts.append(f"{x},{y}")
+    return (
+        f'<svg width="{width}" height="{height}" style="display:block;overflow:visible;">'
+        f'<polyline points="{" ".join(pts)}" fill="none" stroke="{color}" stroke-width="2" stroke-linejoin="round"/>'
+        f'</svg>'
+    )
+
+
 def _project_row(r: dict, show_type: bool = True) -> str:
     sc = r.get("risk_score", 0)
     cols = (
@@ -383,6 +404,20 @@ def _render_html(data: dict, narratives: dict) -> str:
     sp   = data.get("stale_projects", [])
     thi  = data.get("to_handle_items", [])
     btd  = data.get("by_type_detail", {})
+    wd   = data.get("weekly_delta", {})
+    tr   = data.get("trends", [])
+    epd  = data.get("epilogue_data", {})
+
+    risk_history    = [t["avg_risk"]      for t in tr]
+    delayed_history = [t["delayed_count"] for t in tr]
+    date_labels     = [t["date"][5:]      for t in tr]
+
+    def _delta_html(val: int) -> str:
+        if val > 0:
+            return f'<span style="color:#ef4444;">↑ +{val}</span>'
+        if val < 0:
+            return f'<span style="color:#10b981;">↓ {val}</span>'
+        return '<span style="color:#64748b;">— ללא שינוי</span>'
 
     rag_rows = "".join(
         f'<tr><td>{t}</td><td>{counts.get("active",0)}</td>'
@@ -563,11 +598,36 @@ def _render_html(data: dict, narratives: dict) -> str:
 </head>
 <body>
 
+<!-- PAGE 0: PROLOGUE -->
+<div class="page" style="border-color:rgba(239,68,68,.4);background:rgba(239,68,68,.04);">
+  <div class="page-header" style="border-color:#ef4444;">
+    <div class="page-title" style="color:#ef4444;">🔴 תמצית מנהלים — {meta["generated_at"]}</div>
+    <div class="page-meta">{meta["username"]} | {meta["role"]}</div>
+  </div>
+  <div style="font-size:1.05rem;line-height:2;color:#e2e8f0;padding:16px 20px;border-right:4px solid #ef4444;background:rgba(239,68,68,.06);border-radius:4px;">
+    {narratives.get("prologue_narrative","—")}
+  </div>
+  <div style="display:flex;gap:16px;margin-top:20px;flex-wrap:wrap;">
+    <div class="kpi" style="flex:1;min-width:160px;">
+      <div class="kpi-val danger">{es["avg_risk_score"]}</div>
+      <div class="kpi-label">ציון סיכון ממוצע {_delta_html(wd.get("avg_risk",0))}</div>
+    </div>
+    <div class="kpi" style="flex:1;min-width:160px;">
+      <div class="kpi-val warn">{es["total_delayed"]}</div>
+      <div class="kpi-label">באיחור {_delta_html(wd.get("delayed_count",0))}</div>
+    </div>
+    <div class="kpi" style="flex:1;min-width:160px;">
+      <div class="kpi-val danger">{es["total_at_risk"]}</div>
+      <div class="kpi-label">סיכון גבוה (≥70) {_delta_html(wd.get("at_risk_count",0))}</div>
+    </div>
+  </div>
+</div>
+
 <!-- PAGE 1: EXECUTIVE SUMMARY -->
 <div class="page">
   <div class="page-header">
     <div class="page-title">📊 דוח פרויקטים — סיכום מנהלים</div>
-    <div class="page-meta">עמוד 1 מתוך 10 | {meta["generated_at"]} | {meta["username"]} | {meta["role"]}</div>
+    <div class="page-meta">עמוד 1 מתוך 12 | {meta["generated_at"]} | {meta["username"]} | {meta["role"]}</div>
   </div>
   <div class="kpi-grid">
     <div class="kpi"><div class="kpi-val">{es["total_active"]}</div><div class="kpi-label">פרויקטים פעילים</div></div>
@@ -589,7 +649,7 @@ def _render_html(data: dict, narratives: dict) -> str:
 <div class="page">
   <div class="page-header">
     <div class="page-title">🏗️ בריאות תיק הפרויקטים</div>
-    <div class="page-meta">עמוד 2 | {meta["generated_at"]}</div>
+    <div class="page-meta">עמוד 2 מתוך 12 | {meta["generated_at"]}</div>
   </div>
   <div class="narrative">{narratives.get("portfolio_narrative","")}</div>
   <h3>מגמת איחורים — שבועות אחרונים</h3>
@@ -602,11 +662,59 @@ def _render_html(data: dict, narratives: dict) -> str:
   </div>
 </div>
 
-<!-- PAGE 3: RISK REGISTER -->
+<!-- PAGE 3: TRENDS -->
+<div class="page">
+  <div class="page-header">
+    <div class="page-title">📈 מגמות — שינויים לאורך זמן</div>
+    <div class="page-meta">עמוד 3 מתוך 12 | {meta["generated_at"]}</div>
+  </div>
+  <h3>שינוי שבועי (השבוע מול שבוע שעבר)</h3>
+  <table style="margin-bottom:24px;">
+    <thead><tr><th>מדד</th><th>שבוע שעבר</th><th>השבוע</th><th>שינוי</th></tr></thead>
+    <tbody>
+      <tr>
+        <td>ציון סיכון ממוצע</td>
+        <td>{wd.get("prv_avg_risk","—")}</td>
+        <td><strong>{wd.get("cur_avg_risk", es["avg_risk_score"])}</strong></td>
+        <td>{_delta_html(wd.get("avg_risk",0))}</td>
+      </tr>
+      <tr>
+        <td>פרויקטים באיחור</td>
+        <td>{wd.get("prv_delayed","—")}</td>
+        <td><strong>{wd.get("cur_delayed", es["total_delayed"])}</strong></td>
+        <td>{_delta_html(wd.get("delayed_count",0))}</td>
+      </tr>
+      <tr>
+        <td>פרויקטים בסיכון גבוה (≥70)</td>
+        <td>{wd.get("prv_at_risk","—")}</td>
+        <td><strong>{wd.get("cur_at_risk", es["total_at_risk"])}</strong></td>
+        <td>{_delta_html(wd.get("at_risk_count",0))}</td>
+      </tr>
+    </tbody>
+  </table>
+  <h3>ציון סיכון ממוצע — היסטוריה מלאה</h3>
+  <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:20px;">
+    {_svg_linechart(risk_history, "#ef4444", 100)}
+    <div style="display:flex;justify-content:space-between;font-size:.65rem;color:var(--text-2);margin-top:4px;">
+      <span>{date_labels[0] if date_labels else ""}</span>
+      <span>{date_labels[-1] if date_labels else ""}</span>
+    </div>
+  </div>
+  <h3>מספר פרויקטים באיחור — היסטוריה מלאה</h3>
+  <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px;">
+    {_svg_linechart(delayed_history, "#f59e0b", max(delayed_history) if delayed_history else 10)}
+    <div style="display:flex;justify-content:space-between;font-size:.65rem;color:var(--text-2);margin-top:4px;">
+      <span>{date_labels[0] if date_labels else ""}</span>
+      <span>{date_labels[-1] if date_labels else ""}</span>
+    </div>
+  </div>
+</div>
+
+<!-- PAGE 4: RISK REGISTER -->
 <div class="page">
   <div class="page-header">
     <div class="page-title">⚠️ רישום סיכונים — 10 פרויקטים מובילים</div>
-    <div class="page-meta">עמוד 3 | {meta["generated_at"]}</div>
+    <div class="page-meta">עמוד 4 מתוך 12 | {meta["generated_at"]}</div>
   </div>
   <div class="narrative">{narratives.get("risk_narrative","")}</div>
   <table>
@@ -615,11 +723,11 @@ def _render_html(data: dict, narratives: dict) -> str:
   </table>
 </div>
 
-<!-- PAGE 4: ACTION ITEMS -->
+<!-- PAGE 5: ACTION ITEMS -->
 <div class="page">
   <div class="page-header">
     <div class="page-title">✅ פעולות נדרשות</div>
-    <div class="page-meta">עמוד 4 | {meta["generated_at"]}</div>
+    <div class="page-meta">עמוד 5 מתוך 12 | {meta["generated_at"]}</div>
   </div>
   <div class="narrative">{narratives.get("action_narrative","")}</div>
   <table>
@@ -628,21 +736,21 @@ def _render_html(data: dict, narratives: dict) -> str:
   </table>
 </div>
 
-<!-- PAGE 5: FINISHING SOON -->
+<!-- PAGE 6: FINISHING SOON -->
 <div class="page">
   <div class="page-header">
     <div class="page-title">🏁 פרויקטים המסתיימים ב-90 הימים הקרובים ({finishing_count})</div>
-    <div class="page-meta">עמוד 5 | {meta["generated_at"]}</div>
+    <div class="page-meta">עמוד 6 מתוך 12 | {meta["generated_at"]}</div>
   </div>
   <div class="narrative">{narratives.get("finishing_narrative","")}</div>
   {finishing_html}
 </div>
 
-<!-- PAGE 6: DELAYED DEEP-DIVE -->
+<!-- PAGE 7: DELAYED DEEP-DIVE -->
 <div class="page">
   <div class="page-header">
     <div class="page-title">🔴 פרויקטים באיחור — ניתוח מעמיק ({len(dd)})</div>
-    <div class="page-meta">עמוד 6 | {meta["generated_at"]}</div>
+    <div class="page-meta">עמוד 7 מתוך 12 | {meta["generated_at"]}</div>
   </div>
   <div class="narrative">{narratives.get("delay_narrative","")}</div>
   <table>
@@ -651,20 +759,20 @@ def _render_html(data: dict, narratives: dict) -> str:
   </table>
 </div>
 
-<!-- PAGE 7: BY-TYPE ANALYSIS -->
+<!-- PAGE 8: BY-TYPE ANALYSIS -->
 <div class="page">
   <div class="page-header">
     <div class="page-title">📂 ניתוח לפי סוג פרויקט</div>
-    <div class="page-meta">עמוד 7 | {meta["generated_at"]}</div>
+    <div class="page-meta">עמוד 8 מתוך 12 | {meta["generated_at"]}</div>
   </div>
   {by_type_html or '<div style="color:var(--text-2);">אין נתונים</div>'}
 </div>
 
-<!-- PAGE 8: TO-HANDLE ITEMS -->
+<!-- PAGE 9: TO-HANDLE ITEMS -->
 <div class="page">
   <div class="page-header">
     <div class="page-title">📋 פריטים לטיפול מפרויקטים בסיכון (ציון ≥50)</div>
-    <div class="page-meta">עמוד 8 | {meta["generated_at"]}</div>
+    <div class="page-meta">עמוד 9 מתוך 12 | {meta["generated_at"]}</div>
   </div>
   <table>
     <thead><tr><th>פרויקט</th><th>סוג</th><th>ציון</th><th>פריט לטיפול</th></tr></thead>
@@ -672,11 +780,11 @@ def _render_html(data: dict, narratives: dict) -> str:
   </table>
 </div>
 
-<!-- PAGE 9: RISK FORECAST -->
+<!-- PAGE 10: RISK FORECAST -->
 <div class="page">
   <div class="page-header">
     <div class="page-title">🔮 תחזית סיכונים — צפויים להיכנס לאזור סיכון</div>
-    <div class="page-meta">עמוד 9 | {meta["generated_at"]}</div>
+    <div class="page-meta">עמוד 10 מתוך 12 | {meta["generated_at"]}</div>
   </div>
   <div style="padding:10px 14px;background:rgba(167,139,250,.08);border:1px solid rgba(167,139,250,.25);border-radius:6px;font-size:.82rem;color:#a78bfa;margin-bottom:16px;">
     פרויקטים אלה נמצאים כיום מתחת לסף סיכון גבוה (70), אך מגמת הציון צפויה להחצות את הסף בשבוע הקרוב.
@@ -687,11 +795,11 @@ def _render_html(data: dict, narratives: dict) -> str:
   </table>
 </div>
 
-<!-- PAGE 10: DATA QUALITY / STALE -->
+<!-- PAGE 11: DATA QUALITY / STALE -->
 <div class="page">
   <div class="page-header">
     <div class="page-title">📅 איכות נתונים — פרויקטים לא מעודכנים (&gt;14 ימים)</div>
-    <div class="page-meta">עמוד 10 | {meta["generated_at"]}</div>
+    <div class="page-meta">עמוד 11 מתוך 12 | {meta["generated_at"]}</div>
   </div>
   <div style="padding:10px 14px;background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.25);border-radius:6px;font-size:.82rem;color:#f59e0b;margin-bottom:16px;">
     פרויקטים שלא עודכנו מעל 14 ימים — הציון שלהם עלול להיות לא מדויק. נדרש עדכון.
@@ -703,6 +811,25 @@ def _render_html(data: dict, narratives: dict) -> str:
   <div style="margin-top:32px;padding:14px;background:var(--bg);border:1px solid rgba(0,212,255,.2);border-radius:8px;font-size:.8rem;color:var(--text-2);text-align:center;">
     דוח זה נוצר אוטומטית על ידי Shan-AI | {meta["generated_at"]}
   </div>
+</div>
+
+<!-- PAGE 12: EPILOGUE -->
+<div class="page" style="border-color:rgba(167,139,250,.3);background:rgba(167,139,250,.03);">
+  <div class="page-header" style="border-color:#a78bfa;">
+    <div class="page-title" style="color:#a78bfa;">🔮 מה לעקוב בשבוע הבא</div>
+    <div class="page-meta">עמוד 12 מתוך 12 | {meta["generated_at"]}</div>
+  </div>
+  <div style="font-size:.95rem;line-height:2;color:#e2e8f0;padding:16px 20px;border-right:4px solid #a78bfa;background:rgba(167,139,250,.06);border-radius:4px;margin-bottom:20px;">
+    {narratives.get("epilogue_narrative","—")}
+  </div>
+  {"".join(
+      f'<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 12px;border-bottom:1px solid rgba(26,45,71,.5);font-size:.85rem;">'
+      f'<span><strong>{r["name"]}</strong></span>'
+      f'<span style="color:#a78bfa;font-size:.8rem;">📈 מגמה עולה</span>'
+      f'<span style="color:{_score_color(r["risk_score"])};font-weight:700;">{r["risk_score"]}</span>'
+      f'</div>'
+      for r in epd.get("rising_trend", [])
+  ) or "<div style='color:var(--text-2);padding:8px;font-size:.85rem;'>אין פרויקטים במגמת עלייה מתמשכת</div>"}
 </div>
 
 </body>
