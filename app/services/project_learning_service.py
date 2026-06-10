@@ -124,6 +124,7 @@ def compute_risk_score(
     risks: Optional[str],
     to_handle: Optional[str],
     last_updated: Optional[datetime],
+    weekly_report: Optional[str] = None,
     prior_finish_dates: Optional[list] = None,
     today: Optional[date] = None,
 ) -> dict:
@@ -147,7 +148,16 @@ def compute_risk_score(
     handle = _to_handle_pts(to_handle, stage)
     stale, unreliable = _staleness_pts(last_updated)
 
-    score = min(schedule_pts + kw + handle + stale, 100)
+    # Missing-data penalties: absence of data is suspicious, not clean
+    missing = 0
+    if not risks or len(risks.strip()) < 10:
+        missing += 12
+    if not to_handle or len(to_handle.strip()) < 10:
+        missing += 8
+    if not weekly_report or len(weekly_report.strip()) < 20:
+        missing += 5
+
+    score = min(schedule_pts + kw + handle + stale + missing, 100)
 
     breakdown = {
         "velocity":  vel,
@@ -230,6 +240,7 @@ async def save_snapshot(project: Project, session: AsyncSession) -> None:
         risks=project.risks,
         to_handle=project.to_handle,
         last_updated=project.last_updated,
+        weekly_report=project.weekly_report,
         prior_finish_dates=prior_finish_dates,
         today=today,
     )
