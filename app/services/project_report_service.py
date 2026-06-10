@@ -3,7 +3,7 @@ import asyncio
 import json as _json
 import logging
 from datetime import datetime, timedelta, date
-from sqlalchemy import select, func
+from sqlalchemy import select, func, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
@@ -49,6 +49,45 @@ async def gather_report_data(user: User, session: AsyncSession) -> dict:
         .where(ProjectSnapshot.is_active == True, ProjectSnapshot.risk_score.isnot(None))
     )).scalar()
     avg_risk = round(float(avg_risk_row or 0))
+
+    # Portfolio trends: last 52 snapshot dates aggregated
+    trends_raw = (await session.execute(text("""
+        SELECT snapshot_date,
+               ROUND(AVG(risk_score))::int AS avg_risk,
+               COUNT(*) FILTER (WHERE days_overdue > 0) AS delayed_count,
+               COUNT(*) FILTER (WHERE risk_score >= 70) AS at_risk_count
+        FROM project_snapshots
+        WHERE is_active = TRUE AND risk_score IS NOT NULL
+        GROUP BY snapshot_date
+        ORDER BY snapshot_date DESC
+        LIMIT 52
+    """))).all()
+
+    trends_list = [
+        {
+            "date":          str(r[0]),
+            "avg_risk":      int(r[1] or 0),
+            "delayed_count": int(r[2] or 0),
+            "at_risk_count": int(r[3] or 0),
+        }
+        for r in reversed(trends_raw)
+    ]
+
+    weekly_delta: dict = {"avg_risk": 0, "delayed_count": 0, "at_risk_count": 0}
+    if len(trends_list) >= 2:
+        cur = trends_list[-1]
+        prv = trends_list[-2]
+        weekly_delta = {
+            "avg_risk":      cur["avg_risk"] - prv["avg_risk"],
+            "delayed_count": cur["delayed_count"] - prv["delayed_count"],
+            "at_risk_count": cur["at_risk_count"] - prv["at_risk_count"],
+            "cur_avg_risk":  cur["avg_risk"],
+            "prv_avg_risk":  prv["avg_risk"],
+            "cur_delayed":   cur["delayed_count"],
+            "prv_delayed":   prv["delayed_count"],
+            "cur_at_risk":   cur["at_risk_count"],
+            "prv_at_risk":   prv["at_risk_count"],
+        }
 
     # Decisions last 30 days
     since30 = datetime.utcnow() - timedelta(days=30)
@@ -100,6 +139,7 @@ async def gather_report_data(user: User, session: AsyncSession) -> dict:
             risks=proj.risks,
             to_handle=proj.to_handle,
             last_updated=proj.last_updated,
+            weekly_report=proj.weekly_report,
             today=today,
         )
         score = score_res["score"]
@@ -159,6 +199,24 @@ async def gather_report_data(user: User, session: AsyncSession) -> dict:
     for rows in by_type_detail.values():
         rows.sort(key=lambda r: r["risk_score"], reverse=True)
 
+    # Epilogue: projects with rising risk trend (last 3 snapshots all increasing)
+    rising_trend = []
+    for r in risk_rows:
+        sp = r.get("sparkline", [])
+        if len(sp) >= 3 and sp[-3] < sp[-2] < sp[-1]:
+            rising_trend.append({
+                "name":        r["name"],
+                "risk_score":  r["risk_score"],
+                "main_reason": r.get("main_reason", ""),
+            })
+
+    # Epilogue: at-risk projects finishing within 14 days
+    finishing_soon_atrisk = [
+        r for r in finishing_30[:20]
+        if r["risk_score"] >= 50 and r.get("estimated_finish_date") and
+        (date.fromisoformat(r["estimated_finish_date"]) - today).days <= 14
+    ]
+
     return {
         "meta": {
             "generated_at": datetime.utcnow().strftime("%d/%m/%Y %H:%M"),
@@ -190,6 +248,13 @@ async def gather_report_data(user: User, session: AsyncSession) -> dict:
         "stale_projects":  stale_projects[:20],
         "to_handle_items": to_handle_items[:30],
         "by_type_detail":  by_type_detail,
+        "trends":          trends_list,
+        "weekly_delta":    weekly_delta,
+        "epilogue_data": {
+            "rising_trend":          rising_trend[:5],
+            "entering_risk_zone":    [r for r in risk_rows[:10] if r.get("entering_risk_zone")],
+            "finishing_soon_atrisk": finishing_soon_atrisk[:5],
+        },
     }
 
 
