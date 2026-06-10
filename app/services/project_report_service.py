@@ -264,6 +264,7 @@ _REPORT_PROMPT = """\
 אל תרכך בעיות. אם מגמה שלילית — אמור זאת ישירות.
 אם הנתונים נראים טובים מדי — ציין זאת כסיכון בפני עצמו.
 כתוב בעברית. החזר JSON בלבד, ללא טקסט לפני ואחרי.
+חשוב ביותר: אל תשתמש במרכאות כפולות (\") בתוך הערכים עצמם — השתמש בגרש בודד (׳) בלבד עבור קיצורים.
 
 נתוני קלט:
 {data_json}
@@ -326,6 +327,7 @@ async def generate_report_html(data: dict) -> str:
     raw = await llm_chat(usage="project_report", messages=[{"role": "user", "content": prompt}])
 
     try:
+        import re as _re
         clean = raw.strip()
         # Strip markdown fences (```json ... ``` or ``` ... ```)
         if clean.startswith("```"):
@@ -333,12 +335,15 @@ async def generate_report_html(data: dict) -> str:
         if clean.endswith("```"):
             clean = clean.rsplit("\n", 1)[0]
         clean = clean.strip()
-        # Fallback: extract first { ... } block in case LLM added preamble text
+        # Extract first { ... } block in case LLM added preamble text
         if not clean.startswith("{"):
             start = clean.find("{")
             end   = clean.rfind("}")
             if start != -1 and end != -1:
                 clean = clean[start:end + 1]
+        # Repair: replace " surrounded by word chars (Hebrew abbreviations like חח"י)
+        # with Hebrew gershayim ״ so they don't break JSON string parsing
+        clean = _re.sub(r'(?<=\w)"(?=\w)', '״', clean)
         narratives = _json.loads(clean)
         logger.info(f"project_report: LLM narratives parsed OK, keys={list(narratives.keys())}")
     except Exception as exc:
