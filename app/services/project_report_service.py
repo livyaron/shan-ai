@@ -259,29 +259,43 @@ async def gather_report_data(user: User, session: AsyncSession) -> dict:
 
 
 _REPORT_PROMPT = """\
-כתוב בעברית שוטפת ומקצועית. אתה כותב דוח פרויקטים לתשתיות חשמל.
+אתה אנליסט תשתיות חשמל. המשימה שלך: לזהות מה לא בסדר, לא לתאר מה עובד.
+אל תרכך בעיות. אם מגמה שלילית — אמור זאת ישירות.
+אם הנתונים נראים טובים מדי — ציין זאת כסיכון בפני עצמו.
+כתוב בעברית. החזר JSON בלבד, ללא טקסט לפני ואחרי.
 
 נתוני קלט:
 {data_json}
 
-הנחיות: כתוב פסקה קצרה (3-4 משפטים) לכל אחד מ-6 המפתחות הבאים.
-אל תוסיף מפתחות נוספים. החזר JSON בלבד, ללא טקסט לפני ואחרי.
+כתוב ערך לכל אחד מ-8 המפתחות הבאים. prologue ו-epilogue: 2-3 משפטים ישירים וקריטיים. שאר המפתחות: פסקה קצרה (3-4 משפטים).
 
 {{
+  "prologue_narrative": "...",
   "executive_narrative": "...",
   "portfolio_narrative": "...",
   "risk_narrative": "...",
   "action_narrative": "...",
   "finishing_narrative": "...",
-  "delay_narrative": "..."
+  "delay_narrative": "...",
+  "epilogue_narrative": "..."
 }}"""
 
 
 async def generate_report_html(data: dict) -> str:
     """Call Groq for narrative text, then wrap in full HTML template."""
+    wd = data.get("weekly_delta", {})
+    ep = data.get("epilogue_data", {})
+
     prompt = _REPORT_PROMPT.format(
         data_json=_json.dumps({
             "executive_summary": data["executive_summary"],
+            "weekly_delta": {
+                "avg_risk_change":    wd.get("avg_risk", 0),
+                "delayed_change":     wd.get("delayed_count", 0),
+                "at_risk_change":     wd.get("at_risk_count", 0),
+                "this_week_avg_risk": wd.get("cur_avg_risk", data["executive_summary"]["avg_risk_score"]),
+                "last_week_avg_risk": wd.get("prv_avg_risk", 0),
+            },
             "top_risk_projects": [
                 {"name": r["name"], "risk_score": r["risk_score"], "main_reason": r.get("main_reason", "")}
                 for r in data["risk_register"][:5]
@@ -295,6 +309,11 @@ async def generate_report_html(data: dict) -> str:
                 {"name": r["name"], "days_overdue": r["days_overdue"], "main_reason": r["main_reason"]}
                 for r in data.get("delayed_detail", [])[:5]
             ],
+            "epilogue": {
+                "rising_trend":      ep.get("rising_trend", []),
+                "entering_risk_zone": [{"name": r["name"], "risk_score": r["risk_score"]} for r in ep.get("entering_risk_zone", [])],
+                "finishing_at_risk":  [{"name": r["name"], "estimated_finish_date": r.get("estimated_finish_date")} for r in ep.get("finishing_soon_atrisk", [])],
+            },
         }, ensure_ascii=False)
     )
 
@@ -311,9 +330,9 @@ async def generate_report_html(data: dict) -> str:
     except Exception:
         logger.warning("project_report: LLM JSON parse failed, using empty narratives")
         narratives = {k: "" for k in (
-            "executive_narrative", "portfolio_narrative",
+            "prologue_narrative", "executive_narrative", "portfolio_narrative",
             "risk_narrative", "action_narrative",
-            "finishing_narrative", "delay_narrative",
+            "finishing_narrative", "delay_narrative", "epilogue_narrative",
         )}
 
     return _render_html(data, narratives)
