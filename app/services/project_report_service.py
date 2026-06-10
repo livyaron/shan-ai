@@ -327,14 +327,22 @@ async def generate_report_html(data: dict) -> str:
 
     try:
         clean = raw.strip()
+        # Strip markdown fences (```json ... ``` or ``` ... ```)
         if clean.startswith("```"):
             clean = clean.split("\n", 1)[1] if "\n" in clean else clean[3:]
         if clean.endswith("```"):
             clean = clean.rsplit("\n", 1)[0]
         clean = clean.strip()
+        # Fallback: extract first { ... } block in case LLM added preamble text
+        if not clean.startswith("{"):
+            start = clean.find("{")
+            end   = clean.rfind("}")
+            if start != -1 and end != -1:
+                clean = clean[start:end + 1]
         narratives = _json.loads(clean)
-    except Exception:
-        logger.warning("project_report: LLM JSON parse failed, using empty narratives")
+        logger.info(f"project_report: LLM narratives parsed OK, keys={list(narratives.keys())}")
+    except Exception as exc:
+        logger.warning(f"project_report: LLM JSON parse failed ({exc}), raw[:200]={raw[:200]!r}")
         narratives = {k: "" for k in (
             "prologue_narrative", "executive_narrative", "portfolio_narrative",
             "risk_narrative", "action_narrative",
