@@ -181,10 +181,23 @@ async def _weekly_eval_summary() -> None:
 
     async with async_session_maker() as s:
         try:
-            await run_cycle(s, user_id=None, repair=False)
+            cycle_res = await run_cycle(s, user_id=None, repair=False)
         except Exception as e:
             logger.exception(f"weekly_eval_summary run failed: {e}")
             return
+
+        # Extract newly-failing questions from cycle results
+        newly_failing = []
+        try:
+            if cycle_res and isinstance(cycle_res, dict) and "results" in cycle_res:
+                newly_failing = [
+                    r.get("question", "")
+                    for r in cycle_res["results"]
+                    if r.get("status") in ("unfixable", "error") and r.get("question")
+                ]
+        except Exception as extract_err:
+            logger.warning(f"Failed to extract newly_failing from cycle_res: {extract_err}")
+            newly_failing = []
 
         runs = (await s.execute(
             select(EvalRun)
@@ -205,7 +218,7 @@ async def _weekly_eval_summary() -> None:
             if len(runs) > 1 else None
         )
 
-        msg = format_eval_summary(cur, prev, newly_failing=[])
+        msg = format_eval_summary(cur, prev, newly_failing=newly_failing)
 
         admins = (await s.execute(
             select(User).where(
