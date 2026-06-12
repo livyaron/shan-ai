@@ -138,10 +138,12 @@ def _format_field_answer(project: Project, field: str) -> str | None:
     return f"{RTL}{label}: {val}"
 
 
-async def propose_gold(session: AsyncSession, question: str) -> dict:
+async def propose_gold(session: AsyncSession, question: str, *, use_llm: bool = True) -> dict:
     """Return {answer, source, target_project, target_field} for a question.
 
-    Tries DB lookup first (cheap, deterministic); falls back to a constrained LLM call.
+    Tries DB lookup first (cheap, deterministic); falls back to a constrained LLM call
+    when use_llm=True. With use_llm=False, returns an empty manual proposal on misses
+    so the UI can render instantly and the user can request LLM per-row on demand.
     """
     project = await _detect_project(session, question)
     field = _detect_field(question)
@@ -155,6 +157,14 @@ async def propose_gold(session: AsyncSession, question: str) -> dict:
                 "target_project": project.project_identifier,
                 "target_field": field,
             }
+
+    if not use_llm:
+        return {
+            "answer": "",
+            "source": "manual",
+            "target_project": project.project_identifier if project else None,
+            "target_field": field,
+        }
 
     # LLM fallback: give it the project rows as JSON, instruct strict grounding
     rows = (await session.execute(select(Project).where(Project.is_active.is_(True)).limit(80))).scalars()

@@ -155,7 +155,9 @@ async def gold_proposals(
             })
         else:
             try:
-                proposal = await gts.propose_gold(session, q)
+                # Fast path: skip LLM fallback so the page loads instantly.
+                # User can request LLM per-row via /eval/gold/propose_one.
+                proposal = await gts.propose_gold(session, q, use_llm=False)
             except Exception as e:
                 logger.warning(f"propose_gold failed for {q!r}: {e}")
                 proposal = {"answer": "", "source": "manual", "target_project": None, "target_field": None}
@@ -223,7 +225,7 @@ async def gold_bulk_approve(
         if existing:
             continue
         try:
-            proposal = await gts.propose_gold(session, q)
+            proposal = await gts.propose_gold(session, q, use_llm=False)
         except Exception as e:
             logger.warning(f"bulk_approve propose_gold failed for {q!r}: {e}")
             continue
@@ -240,6 +242,25 @@ async def gold_bulk_approve(
         )
         approved += 1
     return JSONResponse({"approved": approved})
+
+
+@router.post("/eval/gold/propose_one")
+async def gold_propose_one(
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+    current_user: User = Depends(get_current_user),
+):
+    """Force a single LLM proposal for a question (slow — used per-row on demand)."""
+    body = await request.json()
+    question = (body.get("question") or "").strip()
+    if not question:
+        raise HTTPException(400, "question required")
+    try:
+        proposal = await gts.propose_gold(session, question, use_llm=True)
+    except Exception as e:
+        logger.warning(f"propose_one failed for {question!r}: {e}")
+        raise HTTPException(500, str(e))
+    return JSONResponse(proposal)
 
 
 @router.delete("/eval/gold/{q_hash}")

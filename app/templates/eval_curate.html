@@ -103,6 +103,7 @@ function render(proposals) {
             <td>${badge(p.source)}</td>
             <td class="actions">
                 <button class="success" data-action="approve" data-idx="${idx}">${p.approved ? 'עדכון' : '✓ אישור'}</button>
+                ${!p.approved && p.source !== 'db_lookup' ? `<button data-action="llm" data-idx="${idx}">🪄 LLM</button>` : ''}
                 <button data-action="skip" data-idx="${idx}">דילוג</button>
                 ${p.approved ? `<button class="danger" data-action="delete" data-idx="${idx}">✗</button>` : ''}
             </td>
@@ -146,6 +147,27 @@ rowsEl.addEventListener("click", async (e) => {
         if (!confirm("למחוק תשובת זהב?")) return;
         await fetch(`/dashboard/eval/gold/${p.question_hash}`, {method: "DELETE"});
         await load();
+    } else if (btn.dataset.action === "llm") {
+        const ta = document.querySelector(`textarea[data-idx="${idx}"]`);
+        const orig = btn.textContent;
+        btn.disabled = true; btn.textContent = "⏳ חושב…";
+        try {
+            const r = await fetch("/dashboard/eval/gold/propose_one", {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({question: p.question}),
+            });
+            if (r.ok) {
+                const data = await r.json();
+                ta.value = data.answer || "";
+                p.proposed_answer = data.answer;
+                p.source = data.source;
+                p.target_project = data.target_project;
+                p.target_field = data.target_field;
+            }
+        } finally {
+            btn.disabled = false; btn.textContent = orig;
+        }
     } else if (btn.dataset.action === "skip") {
         btn.closest("tr").style.opacity = 0.4;
     }
