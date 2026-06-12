@@ -591,6 +591,7 @@ async def run_one_question(
     max_repairs: int = 3,
     threshold: float = 0.8,
     emit: EmitFn = lambda e: None,
+    repair: bool = True,
 ) -> QuestionResult:
     res = QuestionResult(
         question_hash=gold.question_hash,
@@ -618,6 +619,11 @@ async def run_one_question(
 
     if score >= threshold:
         res.status = "passed_first_try"
+        emit({"type": "question_done", "result": res.to_event()})
+        return res
+
+    if not repair:
+        res.status = "unfixable"
         emit({"type": "question_done", "result": res.to_event()})
         return res
 
@@ -723,6 +729,7 @@ async def run_cycle(
     threshold: float = 0.8,
     max_repairs: int = 3,
     emit: EmitFn = lambda e: None,
+    repair: bool = True,
 ) -> dict:
     """Run the full per-question cycle. Creates an EvalRun row; partial-unique index
     on EvalRun.status='running' enforces single concurrent cycle."""
@@ -757,6 +764,7 @@ async def run_cycle(
             r = await run_one_question(
                 session, g, user_id, gold_rows, eval_run.id,
                 max_repairs=max_repairs, threshold=threshold, emit=emit,
+                repair=repair,
             )
             results.append(r)
             counts[r.status] = counts.get(r.status, 0) + 1

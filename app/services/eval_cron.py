@@ -1,8 +1,26 @@
 """Nightly cron for the eval loop. 03:00 UTC kicks off run_cycle with a system user."""
 
 import logging
+from typing import Optional
 
 logger = logging.getLogger(__name__)
+
+
+def format_eval_summary(cur: dict, prev: Optional[dict], newly_failing: list) -> str:
+    """Hebrew Telegram summary of a completed eval run vs the previous one."""
+    rate = round(cur["n_pass"] / cur["n_probes"] * 100) if cur["n_probes"] else 0
+    lines = [
+        f"‏\U0001f9ea סיכום eval שבועי ({cur['started_at']})",
+        f"‏הצלחה: {cur['n_pass']}/{cur['n_probes']} ({rate}%)",
+    ]
+    if prev and prev.get("n_probes"):
+        prev_rate = round(prev["n_pass"] / prev["n_probes"] * 100)
+        arrow = "\U0001f4c8" if rate >= prev_rate else "\U0001f4c9"
+        lines.append(f"‏{arrow} ריצה קודמת: {prev_rate}%")
+    if newly_failing:
+        lines.append("‏❌ נכשלו הפעם:")
+        lines.extend(f"‏• {q}" for q in newly_failing[:10])
+    return "\n".join(lines)
 
 _scheduler = None
 
@@ -26,10 +44,22 @@ def start_scheduler() -> None:
         id="weekly_report",
         replace_existing=True,
     )
+    sch.add_job(
+        _project_report_cron,
+        "interval", minutes=15,
+        id="project_report_cron", replace_existing=True,
+    )
+    sch.add_job(
+        _weekly_eval_summary,
+        CronTrigger(day_of_week="sun", hour=7, minute=0, timezone="Asia/Jerusalem"),
+        id="weekly_eval_summary", replace_existing=True,
+    )
     sch.start()
     _scheduler = sch
     logger.info("eval_cron: scheduler started (03:00 UTC nightly)")
     logger.info("eval_cron: weekly_report job registered (Thu 17:00 Asia/Jerusalem)")
+    logger.info("eval_cron: project_report_cron job registered (every 15 min)")
+    logger.info("eval_cron: weekly_eval_summary job registered (Sun 07:00 Asia/Jerusalem)")
 
 
 def stop_scheduler() -> None:
@@ -139,3 +169,59 @@ async def _project_report_cron() -> None:
                 await session.commit()
             except Exception as exc:
                 logger.error(f"user_report_cron failed for user {user.id}: {exc}")
+
+
+async def _weekly_eval_summary() -> None:
+    """Sunday 07:00 IL: judge-only eval over the gold set + admin Telegram summary."""
+    from sqlalchemy import select
+    from app.database import async_session_maker
+    from app.models import EvalRun, User, RoleEnum
+    from app.services.per_question_loop_service import run_cycle
+    from app.services.telegram_polling import telegram_bot
+
+    async with async_session_maker() as s:
+        try:
+            await run_cycle(s, user_id=None, repair=False)
+        except Exception as e:
+            logger.exception(f"weekly_eval_summary run failed: {e}")
+            return
+
+        runs = (await s.execute(
+            select(EvalRun)
+            .where(EvalRun.status == "completed")
+            .order_by(EvalRun.id.desc())
+            .limit(2)
+        )).scalars().all()
+        if not runs:
+            return
+
+        cur = {
+            "n_probes": runs[0].n_probes,
+            "n_pass": runs[0].n_pass,
+            "started_at": runs[0].started_at.strftime("%d/%m"),
+        }
+        prev = (
+            {"n_probes": runs[1].n_probes, "n_pass": runs[1].n_pass}
+            if len(runs) > 1 else None
+        )
+
+        msg = format_eval_summary(cur, prev, newly_failing=[])
+
+        admins = (await s.execute(
+            select(User).where(
+                User.role == RoleEnum.DIVISION_MANAGER,
+                User.telegram_id.isnot(None),
+            )
+        )).scalars().all()
+
+        bot = (
+            telegram_bot.application.bot
+            if telegram_bot.application and telegram_bot.application.bot
+            else None
+        )
+        if bot:
+            for a in admins:
+                try:
+                    await bot.send_message(chat_id=a.telegram_id, text=msg)
+                except Exception as e:
+                    logger.warning(f"weekly_eval_summary: send to {a.id} failed: {e}")
