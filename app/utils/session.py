@@ -1,9 +1,14 @@
 """Session and authentication management."""
 
+import os
+import secrets
 from datetime import datetime, timedelta
 from jose import JWTError, jwt
 
-SECRET_KEY = "shan-ai-secret-key-change-in-production-2024"
+# Must be set in the environment (.env locally, service vars on Railway).
+# Fallback is a random per-process key: app still works, but sessions
+# reset on every restart until JWT_SECRET_KEY is configured.
+SECRET_KEY = os.getenv("JWT_SECRET_KEY") or secrets.token_hex(32)
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_DAYS = 7
 

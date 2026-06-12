@@ -1348,14 +1348,14 @@ git commit -m "feat(reports): wire router, update Dockerfile with ffmpeg+fonts, 
 - [ ] **Step 1: Run migration on Railway DB**
 
 ```bash
-TOKEN="62eb95f1-6f66-46f2-8d0f-23a4908fa298"
+TOKEN="$RAILWAY_API_TOKEN"
 # Use the existing Railway Postgres connection
 docker exec shan-ai-api python -c "
 import asyncio, os
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy import text
 
-RAILWAY_URL = 'postgresql+asyncpg://shan_user:shan_secure_pass_2025@interchange.proxy.rlwy.net:15720/shan_ai'
+RAILWAY_URL = '$RAILWAY_DATABASE_URL'
 
 async def run():
     engine = create_async_engine(RAILWAY_URL)
@@ -1386,7 +1386,7 @@ Expected: `railway migration ok`
 ```bash
 git push origin master
 
-TOKEN="62eb95f1-6f66-46f2-8d0f-23a4908fa298"
+TOKEN="$RAILWAY_API_TOKEN"
 SVC_ID="a2df9c28-03eb-456a-a3e1-ae3355a96376"
 ENV_ID="1bfcc433-4657-45bb-961c-c99c07bd9c21"
 curl -s -X POST "https://backboard.railway.app/graphql/v2" \

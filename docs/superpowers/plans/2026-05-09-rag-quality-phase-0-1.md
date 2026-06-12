@@ -84,7 +84,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 # Allow tests to override DATABASE_URL via env; default to docker host.
 TEST_DB_URL = os.environ.get(
     "TEST_DATABASE_URL",
-    "postgresql+asyncpg://shan_user:shan_secure_pass_2025@localhost:5432/shan_ai",
+    "$DATABASE_URL",
 )
 
 

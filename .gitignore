@@ -61,3 +61,10 @@ htmlcov/
 # Scratch files with credentials
 bot token.py
 .superpowers/
+
+# Claude Code runtime artifacts
+.claude/worktrees/
+.claude/scheduled_tasks.lock
+
+# Generated report media (videos/audio created at runtime)
+static/project_reports/
