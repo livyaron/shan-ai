@@ -97,9 +97,44 @@ async def eval_curate_page(request: Request, current_user: User = Depends(get_cu
 async def gold_proposals(
     session: AsyncSession = Depends(get_db_session),
     current_user: User = Depends(get_current_user),
+    question: str | None = None,
 ):
     existing_rows = await gts.list_gold(session)
     existing = {r.question_hash: r for r in existing_rows}
+
+    # Single-question mode: return proposal for just this question
+    if question:
+        q = question.strip()
+        h = question_hash(q)
+        existing_row = existing.get(h)
+        if existing_row:
+            item = {
+                "question_hash": h,
+                "question": q,
+                "proposed_answer": existing_row.gold_answer,
+                "source": existing_row.source,
+                "target_project": existing_row.target_project,
+                "target_field": existing_row.target_field,
+                "approved": True,
+                "approved_at": existing_row.approved_at.isoformat() if existing_row.approved_at else None,
+            }
+        else:
+            try:
+                proposal = await gts.propose_gold(session, q)
+            except Exception as e:
+                logger.warning(f"propose_gold failed for {q!r}: {e}")
+                proposal = {"answer": "", "source": "manual", "target_project": None, "target_field": None}
+            item = {
+                "question_hash": h,
+                "question": q,
+                "proposed_answer": proposal["answer"],
+                "source": proposal["source"],
+                "target_project": proposal["target_project"],
+                "target_field": proposal["target_field"],
+                "approved": False,
+                "approved_at": None,
+            }
+        return JSONResponse({"proposals": [item], "approved_count": 1 if item["approved"] else 0, "total": 1})
 
     out = []
     seen_hashes: set[str] = set()
