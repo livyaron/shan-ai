@@ -39,7 +39,7 @@
     <div class="col-md-3"><div class="card p-3"><h6>סוגי כשל</h6><canvas id="failures"></canvas></div></div>
     <div class="col-md-6"><div class="card p-3"><h6>פידבק שבועי</h6><canvas id="fb"></canvas></div></div>
     <div class="col-md-6"><div class="card p-3"><h6>שאלות שנכשלו (20 אחרונות)</h6>
-      <table class="table table-sm mb-0"><thead><tr><th>שאלה</th><th>כשל</th><th>מתי</th><th></th></tr></thead>
+      <table class="table table-sm mb-0"><thead><tr><th>שאלה</th><th>תשובה</th><th>כשל</th><th>מתי</th><th></th></tr></thead>
       <tbody id="worst"></tbody></table>
     </div></div>
   </div>
@@ -77,15 +77,16 @@ async function load() {
   for (const w of d.worst) {
     const tr = document.createElement("tr");
     const t1 = document.createElement("td"); t1.textContent = w.question;
+    const tA = document.createElement("td"); tA.textContent = w.answer || ""; tA.style.color = "var(--text-2)";
     const t2 = document.createElement("td"); t2.textContent = w.failure_type || "—";
     const t3 = document.createElement("td"); t3.textContent = w.ts;
     const t4 = document.createElement("td");
     const a = document.createElement("a"); a.href = "/dashboard/logs"; a.textContent = "לוג ↗"; a.style.color = "var(--cyan)";
     t4.appendChild(a);
-    tr.append(t1, t2, t3, t4);
+    tr.append(t1, tA, t2, t3, t4);
     worstEl.appendChild(tr);
   }
-  if (!d.worst.length) worstEl.innerHTML = '<tr><td colspan="4" style="color:var(--text-2);text-align:center;">אין כשלים מתועדים</td></tr>';
+  if (!d.worst.length) worstEl.innerHTML = '<tr><td colspan="5" style="color:var(--text-2);text-align:center;">אין כשלים מתועדים</td></tr>';
 }
 
 async function startBackfill() {
