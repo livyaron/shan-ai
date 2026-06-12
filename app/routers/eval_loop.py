@@ -222,6 +222,7 @@ async def gold_delete(
 # ───────────────────────── cycle control ─────────────────────────
 
 _cycle_task: asyncio.Task | None = None
+_backfill_task: asyncio.Task | None = None
 
 
 @router.post("/eval/run")
@@ -301,6 +302,9 @@ async def start_backfill(
     current_user: User = Depends(get_current_user),
 ):
     """Kick off judge backfill in the background; UI polls /eval/backfill/status."""
+    global _backfill_task
+    if _backfill_task is not None and not _backfill_task.done():
+        return {"status": "already_running"}
     if judge_backfill_service.get_progress()["running"]:
         return {"status": "already_running"}
 
@@ -308,7 +312,7 @@ async def start_backfill(
         async with async_session_maker() as s:
             await judge_backfill_service.run_backfill(s, limit=limit)
 
-    asyncio.create_task(_run())
+    _backfill_task = asyncio.create_task(_run())
     return {"status": "started", "limit": limit}
 
 
@@ -332,14 +336,17 @@ async def gold_candidates(
     gold_hashes = {g.question_hash for g in await gts.list_gold(session)}
 
     rows = (await session.execute(
-        select(QueryLog)
+        select(
+            QueryLog.id, QueryLog.question, QueryLog.ai_response,
+            QueryLog.user_feedback, QueryLog.judge_verdict, QueryLog.failure_type,
+        )
         .where(QueryLog.ai_response.isnot(None))
         .order_by(QueryLog.timestamp.desc())
         .limit(1000)
-    )).scalars().all()
+    )).all()
 
     freq: dict[str, int] = {}
-    best: dict[str, QueryLog] = {}
+    best: dict[str, any] = {}
     for r in rows:
         key = (r.question or "").strip().lower()
         if not key:

@@ -119,26 +119,28 @@ async def run_backfill(session: AsyncSession, limit: int = 200) -> dict:
 
     _progress.update({"running": True, "total": len(rows), "done": 0, "judged": 0, "errors": 0})
 
-    for log in rows:
-        try:
-            verdict, failure = await judge_one(session, log)
-            log.judge_verdict = verdict
-            if failure:
-                log.failure_type = failure
-            await session.commit()
-            _progress["judged"] += 1
-        except Exception as e:
-            await session.rollback()
-            _progress["errors"] += 1
-            logger.warning(f"judge_backfill: row {log.id} failed: {e}")
-            await asyncio.sleep(2)
-            if not session.is_active:
-                logger.error("judge_backfill: session no longer active, aborting batch")
-                break
-        finally:
-            _progress["done"] += 1
+    try:
+        for log in rows:
+            try:
+                verdict, failure = await judge_one(session, log)
+                log.judge_verdict = verdict
+                if failure:
+                    log.failure_type = failure
+                await session.commit()
+                _progress["judged"] += 1
+            except Exception as e:
+                await session.rollback()
+                _progress["errors"] += 1
+                logger.warning(f"judge_backfill: row {log.id} failed: {e}")
+                await asyncio.sleep(2)
+                if not session.is_active:
+                    logger.error("judge_backfill: session no longer active, aborting batch")
+                    break
+            finally:
+                _progress["done"] += 1
+    finally:
+        _progress["running"] = False
 
-    _progress["running"] = False
     stats = get_progress()
     logger.info(f"judge_backfill: finished {stats}")
     return stats
