@@ -38,29 +38,23 @@ def test_no_info_constant():
 
 @pytest.mark.asyncio
 async def test_backfill_skips_already_judged(db_session):
-    from sqlalchemy import select
+    from sqlalchemy import delete
 
-    # Create one unjudged row
-    row_unjudged = QueryLog(question="test_unjudged", ai_response="response", judge_verdict=None)
-    db_session.add(row_unjudged)
+    # Clean existing unjudged rows to isolate this test
+    await db_session.execute(delete(QueryLog).where(QueryLog.judge_verdict.is_(None)))
     await db_session.commit()
 
-    # Record calls to judge_one
-    judged_ids = []
-
-    async def track_judge(session, log):
-        judged_ids.append(log.id)
-        return ("FAIL", "MISSING_DATA")
+    db_session.add_all([
+        QueryLog(question="ש1", ai_response="ת1", judge_verdict="PASS"),
+        QueryLog(question="ש2", ai_response="ת2", judge_verdict=None),
+    ])
+    await db_session.commit()
 
     with patch(
         "app.services.judge_backfill_service.judge_one",
-        new=AsyncMock(side_effect=track_judge),
-    ):
-        await run_backfill(db_session, limit=1)
+        new=AsyncMock(return_value=("FAIL", "MISSING_DATA")),
+    ) as mocked:
+        stats = await run_backfill(db_session, limit=50)
 
-    # Verify judge_one was called with our test row
-    assert row_unjudged.id in judged_ids, "Unjudged row should have been judged"
-    # Verify the verdict was set (reload the row to check)
-    await db_session.refresh(row_unjudged)
-    assert row_unjudged.judge_verdict == "FAIL"
-    assert row_unjudged.failure_type == "MISSING_DATA"
+    assert mocked.await_count == 1
+    assert stats["judged"] == 1
