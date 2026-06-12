@@ -163,6 +163,11 @@ load();
 
 async function loadCandidates() {
     const res = await fetch("/dashboard/eval/gold/candidates");
+    if (!res.ok) {
+        document.getElementById("cand-rows").innerHTML =
+            '<tr><td colspan="4" style="text-align:center;color:var(--red);">שגיאה בטעינת מועמדים</td></tr>';
+        return;
+    }
     const data = await res.json();
     const tb = document.getElementById("cand-rows");
     tb.innerHTML = "";
@@ -192,7 +197,7 @@ async function proposeFor(question) {
     const p = (data.proposals || [])[0] || {};
     const answer = prompt("‏אשר/ערוך תשובת זהב:", p.proposed_answer || "");
     if (answer === null) return;
-    await fetch("/dashboard/eval/gold/save", {
+    const saveRes = await fetch("/dashboard/eval/gold/save", {
         method: "POST",
         headers: {"Content-Type": "application/json"},
         body: JSON.stringify({
@@ -203,6 +208,10 @@ async function proposeFor(question) {
             source: p.source || "manual",
         }),
     });
+    if (!saveRes.ok) {
+        alert("‏שמירת תשובת הזהב נכשלה — נסה שוב.");
+        return;
+    }
     loadCandidates();
     await load();
 }
