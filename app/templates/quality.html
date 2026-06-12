@@ -37,7 +37,7 @@
     <div class="col-md-6"><div class="card p-3"><h6>מגמת הצלחה ב-eval</h6><canvas id="trend"></canvas></div></div>
     <div class="col-md-3"><div class="card p-3"><h6>פסקי דין (שופט)</h6><canvas id="verdicts"></canvas></div></div>
     <div class="col-md-3"><div class="card p-3"><h6>סוגי כשל</h6><canvas id="failures"></canvas></div></div>
-    <div class="col-md-6"><div class="card p-3"><h6>פידבק שבועי</h6><canvas id="fb"></canvas></div></div>
+    <div class="col-md-6"><div class="card p-3"><h6 id="fb-title">פידבק שבועי</h6><canvas id="fb"></canvas></div></div>
     <div class="col-md-6"><div class="card p-3"><h6>שאלות שנכשלו (20 אחרונות)</h6>
       <table class="table table-sm mb-0"><thead><tr><th>שאלה</th><th>תשובה</th><th>כשל</th><th>מתי</th><th></th></tr></thead>
       <tbody id="worst"></tbody></table>
@@ -68,9 +68,12 @@ async function load() {
 
   mkChart("fb", {type:"bar", data:{labels:d.feedback_weekly.map(w=>w.week),
     datasets:[{label:"👍",data:d.feedback_weekly.map(w=>w.up),backgroundColor:"#10b981"},
-              {label:"👎",data:d.feedback_weekly.map(w=>w.down),backgroundColor:"#ef4444"},
-              {label:"ללא",data:d.feedback_weekly.map(w=>w.none),backgroundColor:"#344156"}]},
+              {label:"👎",data:d.feedback_weekly.map(w=>w.down),backgroundColor:"#ef4444"}]},
     options:{scales:{x:{stacked:true},y:{stacked:true}}}});
+
+  const rated = d.feedback_weekly.reduce((a,w)=>a+w.up+w.down,0);
+  const total = d.feedback_weekly.reduce((a,w)=>a+w.up+w.down+w.none,0);
+  document.getElementById("fb-title").textContent = `פידבק שבועי (דירוג: ${rated} מתוך ${total})`;
 
   const worstEl = document.getElementById("worst");
   worstEl.innerHTML = "";
