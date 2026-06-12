@@ -12,7 +12,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import async_session_maker, get_db_session
@@ -354,6 +354,68 @@ async def start_backfill(
 @router.get("/eval/backfill/status")
 async def backfill_status(current_user: User = Depends(get_current_user)):
     return judge_backfill_service.get_progress()
+
+
+# ───────────────────────── quality dashboard ─────────────────────────
+
+@router.get("/quality", response_class=HTMLResponse)
+async def quality_page(request: Request, current_user: User = Depends(get_current_user)):
+    return templates.TemplateResponse("quality.html", {"request": request, "current_user": current_user})
+
+
+@router.get("/quality/data")
+async def quality_data(
+    session: AsyncSession = Depends(get_db_session),
+    current_user: User = Depends(get_current_user),
+):
+    runs = (await session.execute(
+        select(EvalRun).where(EvalRun.status == "completed").order_by(EvalRun.started_at)
+    )).scalars().all()
+    run_trend = [
+        {"date": r.started_at.strftime("%d/%m"), "pass_rate": round(r.n_pass / r.n_probes * 100) if r.n_probes else 0}
+        for r in runs
+    ]
+
+    verdicts = dict((await session.execute(
+        select(QueryLog.judge_verdict, func.count()).where(QueryLog.judge_verdict.isnot(None)).group_by(QueryLog.judge_verdict)
+    )).all())
+
+    failures = [
+        {"type": ft, "count": c}
+        for ft, c in (await session.execute(
+            select(QueryLog.failure_type, func.count()).where(QueryLog.failure_type.isnot(None))
+            .group_by(QueryLog.failure_type).order_by(func.count().desc())
+        )).all()
+    ]
+
+    fb_weekly = [
+        {"week": w.strftime("%d/%m"), "up": up, "down": down, "none": none}
+        for w, up, down, none in (await session.execute(
+            select(
+                func.date_trunc("week", QueryLog.timestamp).label("w"),
+                func.count().filter(QueryLog.user_feedback == 1),
+                func.count().filter(QueryLog.user_feedback == -1),
+                func.count().filter(QueryLog.user_feedback == 0),
+            ).group_by("w").order_by("w")
+        )).all()
+    ]
+
+    worst = [
+        {
+            "id": r.id,
+            "question": r.question,
+            "answer": (r.ai_response or "")[:200],
+            "failure_type": r.failure_type,
+            "ts": r.timestamp.strftime("%d/%m/%Y %H:%M"),
+        }
+        for r in (await session.execute(
+            select(QueryLog).where(QueryLog.judge_verdict == "FAIL")
+            .order_by(QueryLog.timestamp.desc()).limit(20)
+        )).scalars().all()
+    ]
+
+    return {"run_trend": run_trend, "verdicts": verdicts, "failures": failures,
+            "feedback_weekly": fb_weekly, "worst": worst}
 
 
 # ───────────────────────── gold candidates ─────────────────────────
