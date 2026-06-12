@@ -16,9 +16,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import async_session_maker, get_db_session
-from app.models import EvalGoldAnswer, EvalRun, RepairProposal, SystemFlag, User
+from app.models import EvalGoldAnswer, EvalRun, QueryLog, RepairProposal, SystemFlag, User
 from app.routers.login import get_current_user
 from app.services import gold_truth_service as gts
+from app.services import judge_backfill_service
 from app.services.gold_truth_service import question_hash
 from app.services.per_question_loop_service import run_cycle
 
@@ -290,3 +291,78 @@ async def eval_runs(
             "n_proposals_applied": r.n_proposals_applied,
         })
     return JSONResponse({"runs": out})
+
+
+# ───────────────────────── judge backfill ─────────────────────────
+
+@router.post("/eval/backfill")
+async def start_backfill(
+    limit: int = 200,
+    current_user: User = Depends(get_current_user),
+):
+    """Kick off judge backfill in the background; UI polls /eval/backfill/status."""
+    if judge_backfill_service.get_progress()["running"]:
+        return {"status": "already_running"}
+
+    async def _run():
+        async with async_session_maker() as s:
+            await judge_backfill_service.run_backfill(s, limit=limit)
+
+    asyncio.create_task(_run())
+    return {"status": "started", "limit": limit}
+
+
+@router.get("/eval/backfill/status")
+async def backfill_status(current_user: User = Depends(get_current_user)):
+    return judge_backfill_service.get_progress()
+
+
+# ───────────────────────── gold candidates ─────────────────────────
+
+@router.get("/eval/gold/candidates")
+async def gold_candidates(
+    session: AsyncSession = Depends(get_db_session),
+    current_user: User = Depends(get_current_user),
+):
+    """Ranked gold candidates from production logs.
+
+    Rank 1: human-rated rows; rank 2: judge FAIL/PARTIAL; rank 3: frequent questions.
+    Dedup by normalized question text; exclude questions already in gold.
+    """
+    gold_hashes = {g.question_hash for g in await gts.list_gold(session)}
+
+    rows = (await session.execute(
+        select(QueryLog)
+        .where(QueryLog.ai_response.isnot(None))
+        .order_by(QueryLog.timestamp.desc())
+        .limit(1000)
+    )).scalars().all()
+
+    freq: dict[str, int] = {}
+    best: dict[str, QueryLog] = {}
+    for r in rows:
+        key = (r.question or "").strip().lower()
+        if not key:
+            continue
+        freq[key] = freq.get(key, 0) + 1
+        best.setdefault(key, r)
+
+    out = []
+    for key, r in best.items():
+        if question_hash(r.question) in gold_hashes:
+            continue
+        out.append({
+            "log_id": r.id,
+            "question": r.question,
+            "ai_response": r.ai_response,
+            "count": freq[key],
+            "user_feedback": r.user_feedback,
+            "judge_verdict": r.judge_verdict,
+            "failure_type": r.failure_type,
+        })
+    out.sort(key=lambda d: (
+        0 if (d["user_feedback"] or 0) != 0 else 1,
+        0 if d["judge_verdict"] in ("FAIL", "PARTIAL") else 1,
+        -d["count"],
+    ))
+    return {"candidates": out[:50]}
