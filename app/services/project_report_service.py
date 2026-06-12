@@ -25,6 +25,91 @@ def generate_pdf(html_content: str) -> bytes:
     )
 
 
+def _compute_insights(data: dict) -> list:
+    """Data-driven actionable insights — no LLM, pure numbers."""
+    insights = []
+    es  = data.get("executive_summary", {})
+    wd  = data.get("weekly_delta", {})
+    epd = data.get("epilogue_data", {})
+    dd  = data.get("delayed_detail", [])
+    sp  = data.get("stale_projects", [])
+    rr  = data.get("risk_register", [])
+
+    def _suf(n): return "ים" if n != 1 else ""
+
+    # 1. Portfolio risk drift
+    rd = wd.get("avg_risk", 0)
+    if rd >= 5:
+        insights.append({"sev": "critical", "icon": "🔴",
+            "headline": f"ציון הסיכון הממוצע עלה ב-{rd} נקודות השבוע ({wd.get('prv_avg_risk','?')} ← {wd.get('cur_avg_risk','?')})",
+            "action": "בדוק את 3 הפרויקטים עם העלייה החדה ביותר"})
+    elif rd >= 2:
+        insights.append({"sev": "warning", "icon": "🟡",
+            "headline": f"ציון הסיכון הממוצע עלה ב-{rd} נקודות ({wd.get('prv_avg_risk','?')} ← {wd.get('cur_avg_risk','?')})",
+            "action": "עקוב אחר המגמה בשבוע הבא"})
+    elif rd <= -5:
+        insights.append({"sev": "info", "icon": "🟢",
+            "headline": f"ציון הסיכון הממוצע ירד ב-{abs(rd)} נקודות — שיפור לכאורה",
+            "action": "וודא שהשיפור אינו תוצאה של נתונים חסרים"})
+
+    # 2. New entries into risk zone
+    new_risk = epd.get("entering_risk_zone", [])
+    if new_risk:
+        names = ", ".join(r["name"] for r in new_risk[:3])
+        insights.append({"sev": "critical", "icon": "🔴",
+            "headline": f"{len(new_risk)} פרויקט{_suf(len(new_risk))} צפוי{_suf(len(new_risk))} לחצות סף סיכון בשבוע הקרוב",
+            "action": f"התערבות מונעת: {names}"})
+
+    # 3. Rising trend — 3 consecutive weeks worsening
+    rising = epd.get("rising_trend", [])
+    if rising:
+        w = rising[0]
+        insights.append({"sev": "critical", "icon": "🔴",
+            "headline": f"{len(rising)} פרויקט{_suf(len(rising))} במגמת החמרה מתמשכת (3 שבועות)",
+            "action": f"הגרוע: {w['name']} (ציון {w['risk_score']}) — {w.get('main_reason','')}"})
+
+    # 4. Critical deadlines
+    cf = epd.get("finishing_soon_atrisk", [])
+    if cf:
+        names = ", ".join(r["name"] for r in cf[:3])
+        insights.append({"sev": "critical", "icon": "🔴",
+            "headline": f"{len(cf)} פרויקט{_suf(len(cf))} מסתיים{_suf(len(cf))} תוך 14 יום עם ציון סיכון ≥50",
+            "action": f"בדוק חסמים פתוחים: {names}"})
+
+    # 5. Worst single delay
+    if dd:
+        w = dd[0]
+        sev = "critical" if w["days_overdue"] > 60 else "warning"
+        insights.append({"sev": sev, "icon": "🔴" if sev == "critical" else "🟡",
+            "headline": f"הפרויקט המאוחר ביותר: {w['name']} — {w['days_overdue']} ימי איחור (ציון {w['risk_score']})",
+            "action": "בחן האצה או עדכון תאריך סיום רשמי"})
+
+    # 6. Delayed count increase
+    dd_delta = wd.get("delayed_count", 0)
+    if dd_delta > 0:
+        insights.append({"sev": "warning", "icon": "🟡",
+            "headline": f"{dd_delta} פרויקט{_suf(dd_delta)} נוסף{_suf(dd_delta)} לרשימת האיחורים השבוע (סה\"כ: {es.get('total_delayed',0)})",
+            "action": "זהה גורמי העיכוב החדשים"})
+
+    # 7. Stale data
+    if len(sp) >= 5:
+        w = sp[0]
+        insights.append({"sev": "warning", "icon": "🟡",
+            "headline": f"{len(sp)} פרויקטים לא עודכנו מעל 14 יום — הציון שלהם אינו מהימן",
+            "action": f"הישן ביותר: {w['name']} ({w.get('days_stale',0)} ימים) — שלח תזכורת עדכון"})
+
+    # 8. Missing data (low scores from silence, not from health)
+    silent = sum(1 for r in rr if not r.get("weekly_report_brief") and r.get("risk_score", 0) < 35)
+    if silent >= 3:
+        insights.append({"sev": "warning", "icon": "🟡",
+            "headline": f"{silent} פרויקטים עם ציון נמוך שעשוי לשקף חוסר נתונים — לא בהכרח מצב טוב",
+            "action": "בקש דיווח שבועי מהאחראים"})
+
+    order = {"critical": 0, "warning": 1, "info": 2}
+    insights.sort(key=lambda x: order.get(x["sev"], 3))
+    return insights[:8]
+
+
 async def gather_report_data(user: User, session: AsyncSession) -> dict:
     """Assemble all data needed to render the report and video."""
     overview = await get_overview_stats(session)
@@ -218,7 +303,7 @@ async def gather_report_data(user: User, session: AsyncSession) -> dict:
         (date.fromisoformat(r["estimated_finish_date"]) - today).days <= 14
     ]
 
-    return {
+    report_data = {
         "meta": {
             "generated_at": datetime.utcnow().strftime("%d/%m/%Y %H:%M"),
             "username":     user.username or "—",
@@ -257,6 +342,8 @@ async def gather_report_data(user: User, session: AsyncSession) -> dict:
             "finishing_soon_atrisk": finishing_soon_atrisk[:5],
         },
     }
+    report_data["insights"] = _compute_insights(report_data)
+    return report_data
 
 
 _REPORT_PROMPT = """\
@@ -435,6 +522,7 @@ def _render_html(data: dict, narratives: dict) -> str:
     wd   = data.get("weekly_delta", {})
     tr   = data.get("trends", [])
     epd  = data.get("epilogue_data", {})
+    ins  = data.get("insights", [])
 
     risk_history    = [t["avg_risk"]      for t in tr]
     delayed_history = [t["delayed_count"] for t in tr]
@@ -846,7 +934,7 @@ def _render_html(data: dict, narratives: dict) -> str:
 <div class="page" style="border-color:rgba(167,139,250,.3);background:rgba(167,139,250,.03);">
   <div class="page-header" style="border-color:#a78bfa;">
     <div class="page-title" style="color:#a78bfa;">🔮 מה לעקוב בשבוע הבא</div>
-    <div class="page-meta">עמוד 12 מתוך 12 | {meta["generated_at"]}</div>
+    <div class="page-meta">עמוד 12 מתוך 13 | {meta["generated_at"]}</div>
   </div>
   <div style="font-size:.95rem;line-height:2;color:#e2e8f0;padding:16px 20px;border-right:4px solid #a78bfa;background:rgba(167,139,250,.06);border-radius:4px;margin-bottom:20px;">
     {narratives.get("epilogue_narrative","—")}
@@ -859,6 +947,26 @@ def _render_html(data: dict, narratives: dict) -> str:
       f'</div>'
       for r in epd.get("rising_trend", [])
   ) or "<div style='color:var(--text-2);padding:8px;font-size:.85rem;'>אין פרויקטים במגמת עלייה מתמשכת</div>"}
+</div>
+
+<!-- PAGE 13: INSIGHTS -->
+<div class="page" style="border-color:rgba(0,212,255,.35);">
+  <div class="page-header">
+    <div class="page-title" style="color:var(--cyan);">💡 תובנות מפתח — ממצאים מנוהלים לפעולה</div>
+    <div class="page-meta">עמוד 13 מתוך 13 | {meta["generated_at"]}</div>
+  </div>
+  {"".join(
+      f'<div style="display:flex;gap:14px;align-items:flex-start;padding:14px 16px;margin-bottom:10px;'
+      f'background:{"rgba(239,68,68,.06)" if i["sev"]=="critical" else "rgba(245,158,11,.06)" if i["sev"]=="warning" else "rgba(16,185,129,.06)"};'
+      f'border-right:4px solid {"#ef4444" if i["sev"]=="critical" else "#f59e0b" if i["sev"]=="warning" else "#10b981"};'
+      f'border-radius:6px;">'
+      f'<span style="font-size:1.3rem;flex-shrink:0;">{i["icon"]}</span>'
+      f'<div>'
+      f'<div style="font-weight:700;font-size:.92rem;color:#e2e8f0;margin-bottom:4px;">{i["headline"]}</div>'
+      f'<div style="font-size:.82rem;color:#94a3b8;">⚡ {i["action"]}</div>'
+      f'</div></div>'
+      for i in ins
+  ) or "<div style='color:var(--text-2);padding:16px;'>אין תובנות מספיקות עדיין — נדרש צבירת נתונים נוספת.</div>"}
 </div>
 
 </body>
@@ -920,6 +1028,18 @@ async def _telegram_send_report(bot, user, report_id: int, data: dict) -> None:
                 caption=caption,
                 parse_mode="Markdown",
             )
+            # Send insights summary as follow-up text message
+            insights = data.get("insights", [])
+            if insights:
+                lines = [f"‏💡 *תובנות מפתח*\n"]
+                for ins in insights[:6]:
+                    lines.append(f"{ins['icon']} {ins['headline']}")
+                    lines.append(f"   ⚡ _{ins['action']}_\n")
+                await bot.send_message(
+                    chat_id=user.telegram_id,
+                    text="\n".join(lines),
+                    parse_mode="Markdown",
+                )
             return
         except Exception as pdf_exc:
             logger.warning(f"_telegram_send_report: PDF failed, falling back to text: {pdf_exc}")
