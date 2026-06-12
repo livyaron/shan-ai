@@ -25,17 +25,13 @@
   </style>
 </head>
 <body>
-<nav class="navbar d-flex justify-content-between align-items-center">
-  <span class="page-title">⏰ תזמון דוחות אוטומטיים</span>
-  <div class="d-flex gap-2 align-items-center">
-    <span style="color:var(--text-2);font-size:.85rem;">{{ current_user.username }}</span>
-    <a href="/dashboard/project-reports" class="btn-outline-dim">← דוחות</a>
-    <a href="/dashboard" class="btn-outline-dim">לוח בקרה</a>
-    <a href="/logout" class="btn-outline-dim">יציאה</a>
-  </div>
-</nav>
+{% include "_navbar.html" %}
 
 <div class="container-fluid px-4 py-4">
+  <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+    <span class="page-title">⏰ תזמון דוחות אוטומטיים</span>
+    <a href="/dashboard/project-reports" class="btn-outline-dim">← דוחות פרויקטים</a>
+  </div>
 
   <div style="background:rgba(0,212,255,.06);border:1px solid rgba(0,212,255,.2);border-radius:8px;padding:10px 16px;margin-bottom:16px;font-size:.82rem;color:var(--cyan);">
     ⏰ שני סוגי דוחות: <strong>דוח פרויקטים</strong> (HTML + וידאו לכל הפרויקטים) | <strong>דוח משתמש</strong> (החלטות אישיות בטלגרם).

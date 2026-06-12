@@ -10,7 +10,8 @@
             --cyan: #00d4ff; --green: #10b981; --orange: #f59e0b; --red: #ef4444;
             --text: #e2e8f0; --text-2: #64748b;
         }
-        body { background: var(--bg); color: var(--text); font-family: 'Heebo', sans-serif; margin: 0; padding: 1rem 1.5rem; }
+        body { background: var(--bg); color: var(--text); font-family: 'Heebo', sans-serif; margin: 0; padding: 0; }
+        .eval-wrap { padding: 1rem 1.5rem; }
         h1 { color: var(--cyan); font-size: 1.4rem; margin: 0 0 0.5rem; }
         .topbar { display: flex; justify-content: space-between; align-items: center; gap: 1rem; padding: 0.5rem 0 1rem; border-bottom: 1px solid var(--border); margin-bottom: 1rem; }
         .counter { font-weight: 600; color: var(--green); }
@@ -35,10 +36,11 @@
     </style>
 </head>
 <body>
+{% include "_navbar.html" %}
+<div class="eval-wrap">
     <div class="topbar">
         <div>
-            <a class="nav" href="/dashboard">⟵ דשבורד</a>
-            <a class="nav" href="/dashboard/eval">▶ הפעלה</a>
+            <a class="nav" href="/dashboard/eval">▶ הפעלת מחזור אבחון</a>
             <h1 style="display:inline-block; margin: 0 1rem 0 0;">🎯 אימות תשובות זהב</h1>
         </div>
         <div>
@@ -61,6 +63,7 @@
             <tr><td colspan="4" style="text-align:center; color: var(--text-2);">טוען…</td></tr>
         </tbody>
     </table>
+</div>
 
 <script>
 const rowsEl = document.getElementById("rows");

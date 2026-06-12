@@ -47,24 +47,7 @@
 </head>
 <body>
 
-<nav class="navbar navbar-dark d-flex align-items-center justify-content-between">
-    <a href="/dashboard/" class="navbar-brand">SHAN-AI / DSS</a>
-    <div class="d-flex align-items-center gap-1 flex-wrap">
-        <a href="/dashboard/" class="nav-link">דשבורד</a>
-        <a href="/dashboard/decisions" class="nav-link">החלטות</a>
-        <a href="/dashboard/users" class="nav-link">משתמשים</a>
-        <a href="/dashboard/files" class="nav-link">קבצים</a>
-        <a href="/dashboard/ask" class="nav-link">שאל</a>
-        <a href="/dashboard/learning" class="nav-link">למידה</a>
-        <a href="/dashboard/learning/rules" class="nav-link nav-active">כללי למידה</a>
-        <a href="/dashboard/logs" class="nav-link">לוגים</a>
-        <a href="/dashboard/projects" class="nav-link">פרויקטים</a>
-    </div>
-    <div class="d-flex align-items-center gap-2">
-        <div class="user-chip"><div class="user-online"></div>{{ current_user.username }}</div>
-        <a href="/logout" class="logout-btn">יציאה</a>
-    </div>
-</nav>
+{% include "_navbar.html" %}
 
 <div class="container-fluid p-4">
     <h2>כללי למידה</h2>

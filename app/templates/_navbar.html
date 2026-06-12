@@ -1,0 +1,205 @@
+{# ── Shared navbar — include on every dashboard page ──────────────────────
+   Requires: request (always passed). Optional: current_user / user,
+   pending_approvals. All styles scoped under .shan-nav — no page clashes. #}
+{% set _path = request.url.path %}
+{% set _u = current_user if current_user is defined and current_user else (user if user is defined else none) %}
+<style>
+    .shan-nav {
+        background: rgba(7,11,18,0.96);
+        border-bottom: 1px solid #1a2d47;
+        backdrop-filter: blur(24px);
+        -webkit-backdrop-filter: blur(24px);
+        padding: 0 1.25rem;
+        min-height: 50px;
+        position: sticky;
+        top: 0;
+        z-index: 1000;
+        box-shadow: 0 4px 24px rgba(0,0,0,0.4);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+        font-family: 'Heebo', sans-serif;
+        direction: rtl;
+    }
+    .shan-nav::after {
+        content: '';
+        position: absolute;
+        bottom: -1px; left: 0; right: 0;
+        height: 1px;
+        background: linear-gradient(90deg, transparent 0%, #00d4ff 30%, #8b9cf4 70%, transparent 100%);
+        opacity: 0.2;
+    }
+    .shan-nav-brand {
+        font-family: 'IBM Plex Mono', monospace;
+        font-size: 1rem;
+        font-weight: 600;
+        color: #00d4ff;
+        letter-spacing: 0.08em;
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        text-decoration: none;
+        white-space: nowrap;
+    }
+    .shan-nav-brand:hover { color: #00d4ff; opacity: 0.85; }
+    .shan-nav-pulse {
+        width: 5px; height: 5px;
+        background: #00d4ff;
+        border-radius: 50%;
+        box-shadow: 0 0 8px #00d4ff;
+        animation: shanNavBlink 2.4s ease-in-out infinite;
+        flex-shrink: 0;
+    }
+    @keyframes shanNavBlink { 0%,100% { opacity: 1; } 50% { opacity: 0.25; } }
+
+    .shan-nav-links { display: flex; align-items: center; gap: 2px; flex-wrap: wrap; }
+    .shan-nav-link {
+        font-size: 0.92rem;
+        font-weight: 500;
+        color: #64748b;
+        padding: 0.3rem 0.7rem;
+        border-radius: 4px;
+        transition: all 0.14s;
+        letter-spacing: 0.02em;
+        white-space: nowrap;
+        text-decoration: none;
+        position: relative;
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        background: transparent;
+        border: none;
+        cursor: pointer;
+    }
+    .shan-nav-link:hover { color: #e2e8f0; background: rgba(255,255,255,0.04); }
+    .shan-nav-link.active { color: #00d4ff; background: rgba(0,212,255,0.09); }
+
+    .shan-nav-badge {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 17px; height: 17px;
+        padding: 0 5px;
+        background: #ef4444;
+        color: #fff;
+        font-size: 0.7rem;
+        font-weight: 700;
+        border-radius: 9px;
+        box-shadow: 0 0 8px rgba(239,68,68,0.5);
+    }
+
+    .shan-nav-dd { position: relative; }
+    .shan-nav-dd-menu {
+        display: none;
+        position: absolute;
+        top: 100%;
+        right: 0;
+        min-width: 185px;
+        background: #0c1220;
+        border: 1px solid #1e3a5f;
+        border-radius: 8px;
+        padding: 5px;
+        box-shadow: 0 12px 32px rgba(0,0,0,0.55);
+        z-index: 1001;
+    }
+    .shan-nav-dd:hover .shan-nav-dd-menu,
+    .shan-nav-dd:focus-within .shan-nav-dd-menu { display: block; }
+    .shan-nav-dd-menu .shan-nav-link { display: flex; width: 100%; padding: 0.42rem 0.7rem; }
+    .shan-nav-caret { font-size: 0.6rem; opacity: 0.6; }
+
+    .shan-nav-user {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-shrink: 0;
+    }
+    .shan-nav-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 0.85rem;
+        color: #e2e8f0;
+        background: rgba(255,255,255,0.04);
+        border: 1px solid #1a2d47;
+        border-radius: 999px;
+        padding: 3px 12px;
+        text-decoration: none;
+        white-space: nowrap;
+        transition: border-color 0.14s;
+    }
+    .shan-nav-chip:hover { color: #00d4ff; border-color: #1e3a5f; }
+    .shan-nav-online {
+        width: 6px; height: 6px;
+        background: #10b981;
+        border-radius: 50%;
+        box-shadow: 0 0 6px rgba(16,185,129,0.7);
+    }
+    .shan-nav-logout {
+        font-size: 0.85rem;
+        color: #64748b;
+        text-decoration: none;
+        padding: 3px 10px;
+        border-radius: 4px;
+        white-space: nowrap;
+        transition: all 0.14s;
+    }
+    .shan-nav-logout:hover { color: #ef4444; background: rgba(239,68,68,0.1); }
+    @media (max-width: 900px) {
+        .shan-nav { flex-wrap: wrap; padding: 6px 1rem; }
+        .shan-nav-links { order: 3; width: 100%; }
+    }
+</style>
+<nav class="shan-nav">
+    <a href="/dashboard/" class="shan-nav-brand">
+        <span class="shan-nav-pulse"></span>
+        SHAN-AI / DSS
+    </a>
+
+    <div class="shan-nav-links">
+        <a href="/dashboard/" class="shan-nav-link{% if _path in ('/dashboard', '/dashboard/') %} active{% endif %}">📊 דשבורד</a>
+        <a href="/dashboard/decisions" class="shan-nav-link{% if _path.startswith('/dashboard/decisions') %} active{% endif %}">
+            📋 החלטות
+            {% if pending_approvals is defined and pending_approvals %}<span class="shan-nav-badge">{{ pending_approvals }}</span>{% endif %}
+        </a>
+        <a href="/dashboard/projects" class="shan-nav-link{% if _path.startswith('/dashboard/projects') %} active{% endif %}">📂 פרויקטים</a>
+        <a href="/dashboard/ask" class="shan-nav-link{% if _path.startswith('/dashboard/ask') %} active{% endif %}">💬 שאל</a>
+        <a href="/dashboard/files" class="shan-nav-link{% if _path.startswith('/dashboard/files') %} active{% endif %}">📁 קבצים</a>
+
+        <div class="shan-nav-dd">
+            <button type="button" class="shan-nav-link{% if _path.startswith('/dashboard/reports') or _path.startswith('/dashboard/project-reports') %} active{% endif %}">
+                📈 דוחות <span class="shan-nav-caret">▼</span>
+            </button>
+            <div class="shan-nav-dd-menu">
+                <a href="/dashboard/reports" class="shan-nav-link{% if _path.startswith('/dashboard/reports') %} active{% endif %}">👤 דוחות שבועיים</a>
+                <a href="/dashboard/project-reports" class="shan-nav-link{% if _path.startswith('/dashboard/project-reports') and not _path.startswith('/dashboard/project-reports/schedule') %} active{% endif %}">📊 דוח פרויקטים</a>
+                <a href="/dashboard/project-reports/schedule" class="shan-nav-link{% if _path.startswith('/dashboard/project-reports/schedule') %} active{% endif %}">⏰ תזמון דוחות</a>
+            </div>
+        </div>
+
+        <div class="shan-nav-dd">
+            <button type="button" class="shan-nav-link{% if _path.startswith(('/dashboard/users', '/dashboard/learning', '/dashboard/logs', '/dashboard/llm-config', '/dashboard/raci-intelligence', '/dashboard/eval')) %} active{% endif %}">
+                ⚙️ מערכת <span class="shan-nav-caret">▼</span>
+            </button>
+            <div class="shan-nav-dd-menu">
+                <a href="/dashboard/users" class="shan-nav-link{% if _path.startswith('/dashboard/users') %} active{% endif %}">👥 משתמשים</a>
+                <a href="/dashboard/learning" class="shan-nav-link{% if _path.startswith('/dashboard/learning') and not _path.startswith('/dashboard/learning/rules') %} active{% endif %}">🎓 למידה</a>
+                <a href="/dashboard/learning/rules" class="shan-nav-link{% if _path.startswith('/dashboard/learning/rules') %} active{% endif %}">📜 חוקי למידה</a>
+                <a href="/dashboard/logs" class="shan-nav-link{% if _path.startswith('/dashboard/logs') %} active{% endif %}">📑 לוגים</a>
+                <a href="/dashboard/llm-config" class="shan-nav-link{% if _path.startswith('/dashboard/llm-config') %} active{% endif %}">🤖 מודל AI</a>
+                <a href="/dashboard/raci-intelligence" class="shan-nav-link{% if _path.startswith('/dashboard/raci-intelligence') %} active{% endif %}">🧩 RACI בינה</a>
+                <a href="/dashboard/eval" class="shan-nav-link{% if _path.startswith('/dashboard/eval') %} active{% endif %}">🧪 Eval</a>
+            </div>
+        </div>
+    </div>
+
+    <div class="shan-nav-user">
+        {% if _u %}
+        <span class="shan-nav-chip">
+            <span class="shan-nav-online"></span>
+            {{ _u.username }}
+        </span>
+        {% endif %}
+        <a href="/logout" class="shan-nav-logout">🚪 יציאה</a>
+    </div>
+</nav>

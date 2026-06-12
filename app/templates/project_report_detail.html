@@ -23,20 +23,15 @@
 </head>
 <body>
 
-<nav class="navbar d-flex justify-content-between align-items-center">
-  <span class="page-title">📊 דוח {{ report.generated_at }}</span>
-  <div class="d-flex gap-2 align-items-center">
-    <span style="color:var(--text-2);font-size:.85rem;">{{ current_user.username }}</span>
-    <a href="/dashboard/project-reports" class="btn-outline-dim">רשימת דוחות →</a>
-    <a href="/logout" class="btn-outline-dim">יציאה</a>
-  </div>
-</nav>
+{% include "_navbar.html" %}
 
 <!-- Action bar -->
 <div class="action-bar">
+  <span class="page-title">📊 דוח {{ report.generated_at }}</span>
   <a href="#report-section" class="btn-cyan" onclick="openReport()">
     📄 דוח HTML מלא
   </a>
+  <a href="/dashboard/project-reports" class="btn-outline-dim">← רשימת דוחות</a>
   <span style="color:var(--text-2);font-size:.8rem;margin-right:auto;">נוצר: {{ report.generated_at }}</span>
 </div>
 

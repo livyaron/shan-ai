@@ -520,28 +520,35 @@
             padding-left: 20px;
         }
 
-        /* ── Project ID column narrower ── */
-        .table tbody td:nth-child(1),
-        .table thead th:nth-child(1) {
-            max-width: 80px;
-            width: 80px;
-        }
-
-        /* ── Project Type column wider ── */
-        .table tbody td:nth-child(3),
-        .table thead th:nth-child(3) {
-            min-width: 140px;
-        }
-
-        /* ── Last updated column with special border ── */
-        .table tbody td:nth-child(11),
-        .table thead th:nth-child(11) {
+        /* ── Column width tuning ── */
+        /* 1: זיהוי */
+        .table tbody td:nth-child(1), .table thead th:nth-child(1) { width: 75px;  min-width: 60px;  max-width: 85px; }
+        /* 2: שם פרויקט */
+        .table tbody td:nth-child(2), .table thead th:nth-child(2) { width: 200px; min-width: 150px; max-width: 240px; }
+        /* 3: סוג */
+        .table tbody td:nth-child(3), .table thead th:nth-child(3) { width: 120px; min-width: 100px; max-width: 150px; }
+        /* 4: שלב */
+        .table tbody td:nth-child(4), .table thead th:nth-child(4) { width: 90px;  min-width: 75px;  max-width: 110px; }
+        /* 5: מנהל */
+        .table tbody td:nth-child(5), .table thead th:nth-child(5) { width: 120px; min-width: 90px;  max-width: 150px; }
+        /* 6: עדכון שבועי — main content, gets remaining space */
+        .table tbody td:nth-child(6), .table thead th:nth-child(6) { width: 260px; min-width: 180px; max-width: 340px; }
+        /* 7: סיכונים */
+        .table tbody td:nth-child(7), .table thead th:nth-child(7) { width: 130px; min-width: 90px;  max-width: 160px; }
+        /* 8: לטיפול */
+        .table tbody td:nth-child(8), .table thead th:nth-child(8) { width: 90px;  min-width: 70px;  max-width: 110px; }
+        /* 9: תאריך תכנית */
+        .table tbody td:nth-child(9), .table thead th:nth-child(9) { width: 90px;  min-width: 80px;  max-width: 105px; white-space: nowrap; }
+        /* 10: תאריך סיום */
+        .table tbody td:nth-child(10), .table thead th:nth-child(10) { width: 90px; min-width: 80px; max-width: 105px; white-space: nowrap; }
+        /* 11: עיכוב / מרווח */
+        .table tbody td:nth-child(11), .table thead th:nth-child(11) {
+            width: 100px; min-width: 85px; max-width: 120px;
             border-left: 2px solid rgba(0,212,255,0.4) !important;
         }
-
-        .table tbody tr:hover td:nth-child(11) {
-            border-left-color: rgba(0,212,255,0.7) !important;
-        }
+        .table tbody tr:hover td:nth-child(11) { border-left-color: rgba(0,212,255,0.7) !important; }
+        /* 12: עודכן */
+        .table tbody td:nth-child(12), .table thead th:nth-child(12) { width: 120px; min-width: 100px; max-width: 140px; white-space: nowrap; }
 
         /* ── HI-TECH CELL BORDERS ── */
         .table tbody td,
@@ -581,24 +588,7 @@
 <body>
 
 <!-- ── Navbar ── -->
-<nav class="navbar navbar-dark d-flex align-items-center justify-content-between position-relative">
-    <a href="/dashboard/" class="navbar-brand text-decoration-none"><div class="brand-pulse"></div>SHAN-AI / DSS</a>
-    <div class="d-flex align-items-center gap-1 flex-wrap">
-        <a href="/dashboard/" class="nav-link">📊 דשבורד</a>
-        <a href="/dashboard/decisions" class="nav-link">📋 החלטות</a>
-        <a href="/dashboard/users"    class="nav-link">👥 משתמשים</a>
-        <a href="/dashboard/files"    class="nav-link">📁 קבצים</a>
-        <a href="/dashboard/ask"      class="nav-link">💬 שאל</a>
-        <a href="/dashboard/learning" class="nav-link">🎓 למידה</a>
-        <a href="/dashboard/logs"     class="nav-link">📊 לוגים</a>
-        <a href="/dashboard/projects" class="nav-link nav-active">📂 פרויקטים</a>
-        <a href="/dashboard/raci-intelligence" class="nav-link">🧩 RACI בינה</a>
-    </div>
-    <div class="d-flex align-items-center gap-2">
-        <div class="user-chip"><div class="user-online"></div>{{ current_user.username }}</div>
-        <a href="/logout" class="logout-btn">🚪 יציאה</a>
-    </div>
-</nav>
+{% include "_navbar.html" %}
 
 <!-- ── Toast container ── -->
 <div class="toast-container">
@@ -799,9 +789,12 @@ $(document).ready(function () {
             zeroRecords:    "לא נמצאו פרויקטים התואמים את החיפוש",
         },
         order: [[1, 'asc']],
+        autoWidth: false,
         columnDefs: [
-            { targets: 5, orderable: false },  // weekly_report
-            { targets: 6, orderable: false },  // risks
+            { targets: 5, orderable: false, width: '260px' },
+            { targets: 6, orderable: false, width: '130px' },
+            { targets: [8,9,11], width: '90px' },
+            { targets: 10, width: '100px' },
         ],
     });
 
