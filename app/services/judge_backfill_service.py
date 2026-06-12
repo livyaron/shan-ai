@@ -7,7 +7,9 @@ Judging strategy per row:
 1. propose_gold(question) -> grounded reference answer from current DB.
 2. If both reference and answer are "no info" -> PASS.
 3. Otherwise compare_to_gold(question, ai_response, reference) -> score
-   -> verdict via thresholds (>=0.8 PASS, >=0.5 PARTIAL, else FAIL).
+   -> verdict via score_to_verdict. NOTE: compare_to_gold currently
+   returns binary 0.0/1.0, so PARTIAL is unreachable in practice;
+   thresholds exist for when graded scoring lands (phase 3).
 4. For non-PASS rows, one extra LLM call classifies failure_type.
 
 Idempotent: only selects judge_verdict IS NULL. One bad row never aborts
@@ -29,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 NO_INFO = "אין מידע"
 
-FAILURE_TYPES = ("WRONG_PROJECT", "MISSING_DATA", "HALLUCINATION", "UNSTABLE", "STRUCTURE", "REFUSED")
+FAILURE_TYPES = ("WRONG_PROJECT", "MISSING_DATA", "HALLUCINATION", "UNSTABLE", "STRUCTURE", "REFUSED")  # UNSTABLE: set by eval loop only, never returned by the backfill LLM prompt
 
 _progress = {"running": False, "total": 0, "done": 0, "judged": 0, "errors": 0}
 
@@ -58,7 +60,7 @@ def parse_failure_type(raw: str | None) -> str | None:
 
 
 async def _classify_failure(question: str, answer: str, reference: str) -> str | None:
-    sys = (
+    sys_prompt = (
         "אתה מסווג כשלים של מערכת שאלות-תשובות. החזר אך ורק אחת מהמילים: "
         "WRONG_PROJECT (ענה על פרויקט/ישות לא נכונים), "
         "MISSING_DATA (המידע קיים בהפניה אך חסר בתשובה), "
@@ -70,7 +72,7 @@ async def _classify_failure(question: str, answer: str, reference: str) -> str |
     try:
         raw = await llm_chat(
             "eval_judge",
-            messages=[{"role": "system", "content": sys}, {"role": "user", "content": user}],
+            messages=[{"role": "system", "content": sys_prompt}, {"role": "user", "content": user}],
             max_tokens=20,
             temperature=0.0,
         )
@@ -130,6 +132,9 @@ async def run_backfill(session: AsyncSession, limit: int = 200) -> dict:
             _progress["errors"] += 1
             logger.warning(f"judge_backfill: row {log.id} failed: {e}")
             await asyncio.sleep(2)
+            if not session.is_active:
+                logger.error("judge_backfill: session no longer active, aborting batch")
+                break
         finally:
             _progress["done"] += 1
 

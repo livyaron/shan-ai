@@ -44,10 +44,9 @@ async def test_backfill_skips_already_judged(db_session):
     await db_session.execute(delete(QueryLog).where(QueryLog.judge_verdict.is_(None)))
     await db_session.commit()
 
-    db_session.add_all([
-        QueryLog(question="ש1", ai_response="ת1", judge_verdict="PASS"),
-        QueryLog(question="ש2", ai_response="ת2", judge_verdict=None),
-    ])
+    prejudged = QueryLog(question="ש1", ai_response="ת1", judge_verdict="PASS")
+    unjudged = QueryLog(question="ש2", ai_response="ת2", judge_verdict=None)
+    db_session.add_all([prejudged, unjudged])
     await db_session.commit()
 
     with patch(
@@ -58,3 +57,6 @@ async def test_backfill_skips_already_judged(db_session):
 
     assert mocked.await_count == 1
     assert stats["judged"] == 1
+    await db_session.refresh(unjudged)
+    assert unjudged.judge_verdict == "FAIL"
+    assert unjudged.failure_type == "MISSING_DATA"

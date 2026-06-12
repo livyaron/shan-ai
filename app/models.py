@@ -231,7 +231,7 @@ class QueryLog(Base):
     admin_note    = Column(Text, nullable=True)
     is_accurate   = Column(Boolean, nullable=True)
     analyzed      = Column(Boolean, default=False)     # True after optimization run consumed this log
-    failure_type  = Column(String(20), nullable=True)  # "TERMINOLOGY" | "STRUCTURE" | None
+    failure_type  = Column(String(20), nullable=True)  # taxonomy: WRONG_PROJECT|MISSING_DATA|HALLUCINATION|UNSTABLE|STRUCTURE|REFUSED (legacy: TERMINOLOGY)
     fix_suggestion = Column(Text, nullable=True)
     user_id       = Column(Integer, ForeignKey("users.id"), nullable=True)
     timestamp     = Column(DateTime, default=datetime.utcnow, index=True)
