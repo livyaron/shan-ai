@@ -1048,13 +1048,19 @@ class TelegramPollingBot:
         # --- Query log failure cause (after 👎) ---
         if query.data.startswith("lfc:"):
             from app.models import QueryLog as _QL
-            _, lfc_log_id, lfc_code = query.data.split(":", 2)
+            parts = query.data.split(":", 2)
+            if len(parts) != 3:
+                return
+            _, lfc_log_id, lfc_code = parts
             if lfc_code in CAUSE_MAP:
                 async with async_session_maker() as session:
-                    log = await session.get(_QL, int(lfc_log_id))
-                    if log:
-                        log.failure_type = lfc_code
-                        await session.commit()
+                    try:
+                        log = await session.get(_QL, int(lfc_log_id))
+                        if log:
+                            log.failure_type = lfc_code
+                            await session.commit()
+                    except ValueError:
+                        return
             try:
                 await query.edit_message_reply_markup(reply_markup=None)
             except Exception:
