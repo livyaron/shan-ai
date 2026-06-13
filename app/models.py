@@ -238,6 +238,7 @@ class QueryLog(Base):
     llm_provider  = Column(String(50), nullable=True)   # "Groq" | "Gemma"
     is_fallback   = Column(Boolean, nullable=True)      # True if backup provider was used
     judge_verdict = Column(String(10), nullable=True)   # "PASS" | "PARTIAL" | "FAIL" — set by eval_judge_service
+    judged_against_gold = Column(Boolean, nullable=True)  # True=compared to real gold, False=LLM-guessed reference, None=not judged
 
     user = relationship("User")
 

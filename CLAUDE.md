@@ -29,6 +29,8 @@
   Railway: `docker exec shan-ai-postgres psql "$RAILWAY_DATABASE_URL" -c "ALTER TABLE decisions ADD COLUMN IF NOT EXISTS is_relevant BOOLEAN NOT NULL DEFAULT TRUE, ADD COLUMN IF NOT EXISTS irrelevant_reason TEXT, ADD COLUMN IF NOT EXISTS irrelevant_at TIMESTAMP, ADD COLUMN IF NOT EXISTS irrelevant_by_id INTEGER REFERENCES users(id);"` (URL in local `.env`, never commit it — repo is public)
 - **roleenum VIEWER:** DB enum may lack values added in code (`app/models.py` RoleEnum). After rebuild/fresh DB, run:
   `docker exec shan-ai-postgres psql -U shan_user -d shan_ai -c "ALTER TYPE roleenum ADD VALUE IF NOT EXISTS 'VIEWER';"`
+- **judged_against_gold:** After rebuild/fresh DB or Railway deploy, run on both:
+  `docker exec shan-ai-postgres psql -U shan_user -d shan_ai -c "ALTER TABLE query_logs ADD COLUMN IF NOT EXISTS judged_against_gold BOOLEAN;"`
 - **Polling Conflict:** Local Docker and Railway **cannot** run simultaneously. Stop local before Railway is live.
 - **No Data Loss:** NEVER run `docker-compose down -v` without explicit confirmation.
 - **Build Cycle:** After code changes, run `docker-compose restart fastapi`.
