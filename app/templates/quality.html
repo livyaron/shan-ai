@@ -30,8 +30,12 @@
     <div class="d-flex gap-2 align-items-center">
       <span id="bf-status" style="color:var(--text-2);font-size:.85rem;"></span>
       <button class="btn-cyan" onclick="startBackfill()">⚖️ שפוט 200 שאלות אחרונות</button>
+      <button class="btn-outline-dim" onclick="seedGold()">🌱 זריעת gold מ-DB</button>
+      <button class="btn-outline-dim" onclick="startRejudge()">♻️ שיפוט מחדש (gold)</button>
     </div>
   </div>
+
+  <div id="gold-cov" style="color:var(--text-2);font-size:.85rem;margin-bottom:1rem;"></div>
 
   <div class="row g-3">
     <div class="col-md-6"><div class="card p-3"><h6>מגמת הצלחה ב-eval</h6><canvas id="trend"></canvas></div></div>
@@ -56,6 +60,12 @@ async function load() {
   const res = await fetch("/dashboard/quality/data");
   if (!res.ok) return;
   const d = await res.json();
+
+  if (d.gold_coverage) {
+    const c = d.gold_coverage;
+    document.getElementById("gold-cov").textContent =
+      `מגובי-gold: ${c.gold_backed} | מנוחשים: ${c.guessed} | תשובות זהב בסט: ${c.gold_total}`;
+  }
 
   mkChart("trend", {type:"line", data:{labels:d.run_trend.map(r=>r.date),
     datasets:[{label:"% הצלחה", data:d.run_trend.map(r=>r.pass_rate), borderColor:"#00d4ff", tension:.3}]}});
@@ -95,6 +105,27 @@ async function load() {
 async function startBackfill() {
   await fetch("/dashboard/eval/backfill", {method:"POST"});
   pollBf();
+}
+
+async function seedGold() {
+  const btn = event.target; btn.disabled = true; btn.textContent = "🌱 זורע…";
+  const r = await fetch("/dashboard/eval/gold/seed-from-production", {method:"POST"});
+  const d = await r.json();
+  alert(`נזרעו ${d.seeded} תשובות זהב מ-DB. ${d.needs_manual} דורשות אישור ידני (curate / טלגרם).`);
+  btn.disabled = false; btn.textContent = "🌱 זריעת gold מ-DB";
+  load();
+}
+async function startRejudge() {
+  await fetch("/dashboard/eval/rejudge", {method:"POST"});
+  pollRejudge();
+}
+async function pollRejudge() {
+  const res = await fetch("/dashboard/eval/rejudge/status");
+  if (!res.ok) return;
+  const s = await res.json();
+  document.getElementById("bf-status").textContent =
+    s.running ? `שיפוט מחדש… ${s.done}/${s.total}` : (s.total ? `הסתיים: ${s.judged} עודכנו` : "");
+  if (s.running) setTimeout(pollRejudge, 2000); else if (s.total) load();
 }
 
 async function pollBf() {

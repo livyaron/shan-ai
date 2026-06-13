@@ -24,7 +24,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import QueryLog
-from app.services.gold_truth_service import propose_gold, compare_to_gold
+from app.services.gold_truth_service import propose_gold, compare_to_gold, get_gold
 from app.services.llm_router import llm_chat
 
 logger = logging.getLogger(__name__)
@@ -34,10 +34,15 @@ NO_INFO = "אין מידע"
 FAILURE_TYPES = ("WRONG_PROJECT", "MISSING_DATA", "HALLUCINATION", "UNSTABLE", "STRUCTURE", "REFUSED")  # UNSTABLE: set by eval loop only, never returned by the backfill LLM prompt
 
 _progress = {"running": False, "total": 0, "done": 0, "judged": 0, "errors": 0}
+_rejudge_progress = {"running": False, "total": 0, "done": 0, "judged": 0, "errors": 0}
 
 
 def get_progress() -> dict:
     return dict(_progress)
+
+
+def get_rejudge_progress() -> dict:
+    return dict(_rejudge_progress)
 
 
 def score_to_verdict(score: float) -> str:
@@ -86,25 +91,36 @@ def _is_no_info(text: str) -> bool:
     return NO_INFO in (text or "")
 
 
-async def judge_one(session: AsyncSession, log: QueryLog) -> tuple[str, str | None]:
-    """Judge a single QueryLog row. Returns (verdict, failure_type)."""
+async def judge_one(session: AsyncSession, log: QueryLog) -> tuple[str, str | None, bool]:
+    """Judge a single QueryLog row.
+
+    Returns (verdict, failure_type, gold_backed). gold_backed is True when the
+    comparison used a real human-approved gold answer (trustworthy), False when
+    it fell back to an LLM-guessed reference.
+    """
     answer = (log.ai_response or "").strip()
     if not answer:
-        return "FAIL", "REFUSED"
+        return "FAIL", "REFUSED", False
 
-    ref = await propose_gold(session, log.question)
-    reference = ref["answer"]
+    gold = await get_gold(session, log.question)
+    if gold is not None:
+        reference = gold.gold_answer
+        gold_backed = True
+    else:
+        ref = await propose_gold(session, log.question)
+        reference = ref["answer"]
+        gold_backed = False
 
     if _is_no_info(reference) and _is_no_info(answer):
-        return "PASS", None
+        return "PASS", None, gold_backed
 
     score = await compare_to_gold(log.question, answer, reference)
     verdict = score_to_verdict(score)
     if verdict == "PASS":
-        return verdict, None
+        return verdict, None, gold_backed
 
     failure = await _classify_failure(log.question, answer, reference)
-    return verdict, failure
+    return verdict, failure, gold_backed
 
 
 async def run_backfill(session: AsyncSession, limit: int = 200) -> dict:
@@ -122,10 +138,10 @@ async def run_backfill(session: AsyncSession, limit: int = 200) -> dict:
     try:
         for log in rows:
             try:
-                verdict, failure = await judge_one(session, log)
+                verdict, failure, gold_backed = await judge_one(session, log)
                 log.judge_verdict = verdict
-                if failure:
-                    log.failure_type = failure
+                log.failure_type = failure
+                log.judged_against_gold = gold_backed
                 await session.commit()
                 _progress["judged"] += 1
             except Exception as e:
@@ -143,4 +159,49 @@ async def run_backfill(session: AsyncSession, limit: int = 200) -> dict:
 
     stats = get_progress()
     logger.info(f"judge_backfill: finished {stats}")
+    return stats
+
+
+async def rejudge_gold_covered(session: AsyncSession, limit: int = 500) -> dict:
+    """Re-judge query_logs rows whose question now has a gold answer, OVERWRITING
+    the existing verdict. Unlike run_backfill this ignores judge_verdict (gold may
+    have arrived after the first judgement)."""
+    from app.models import EvalGoldAnswer
+    from app.services.gold_truth_service import question_hash
+
+    gold_hashes = set((await session.execute(
+        select(EvalGoldAnswer.question_hash)
+    )).scalars().all())
+
+    rows = (await session.execute(
+        select(QueryLog).where(QueryLog.ai_response.isnot(None))
+        .order_by(QueryLog.timestamp.desc()).limit(limit)
+    )).scalars().all()
+    covered = [r for r in rows if question_hash(r.question) in gold_hashes]
+
+    _rejudge_progress.update({"running": True, "total": len(covered), "done": 0, "judged": 0, "errors": 0})
+    try:
+        for log in covered:
+            try:
+                verdict, failure, gold_backed = await judge_one(session, log)
+                log.judge_verdict = verdict
+                log.failure_type = failure
+                log.judged_against_gold = gold_backed
+                await session.commit()
+                _rejudge_progress["judged"] += 1
+            except Exception as e:
+                await session.rollback()
+                _rejudge_progress["errors"] += 1
+                logger.warning(f"rejudge: row {log.id} failed: {e}")
+                await asyncio.sleep(2)
+                if not session.is_active:
+                    logger.error("rejudge: session no longer active, aborting")
+                    break
+            finally:
+                _rejudge_progress["done"] += 1
+    finally:
+        _rejudge_progress["running"] = False
+
+    stats = get_rejudge_progress()
+    logger.info(f"rejudge: finished {stats}")
     return stats

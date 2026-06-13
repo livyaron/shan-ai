@@ -279,6 +279,7 @@ async def gold_delete(
 
 _cycle_task: asyncio.Task | None = None
 _backfill_task: asyncio.Task | None = None
+_rejudge_task: asyncio.Task | None = None
 
 
 @router.post("/eval/run")
@@ -377,6 +378,40 @@ async def backfill_status(current_user: User = Depends(get_current_user)):
     return judge_backfill_service.get_progress()
 
 
+from app.services import gold_seed_service  # noqa: E402
+
+
+@router.post("/eval/gold/seed-from-production")
+async def seed_gold(
+    session: AsyncSession = Depends(get_db_session),
+    current_user: User = Depends(get_current_user),
+):
+    return await gold_seed_service.seed_from_production(session, user_id=current_user.id)
+
+
+@router.post("/eval/rejudge")
+async def start_rejudge(current_user: User = Depends(get_current_user)):
+    if judge_backfill_service.get_rejudge_progress()["running"]:
+        return {"status": "already_running"}
+
+    global _rejudge_task
+    if _rejudge_task is not None and not _rejudge_task.done():
+        return {"status": "already_running"}
+
+    async def _run():
+        from app.database import async_session_maker
+        async with async_session_maker() as s:
+            await judge_backfill_service.rejudge_gold_covered(s)
+
+    _rejudge_task = asyncio.create_task(_run())
+    return {"status": "started"}
+
+
+@router.get("/eval/rejudge/status")
+async def rejudge_status(current_user: User = Depends(get_current_user)):
+    return judge_backfill_service.get_rejudge_progress()
+
+
 # ───────────────────────── quality dashboard ─────────────────────────
 
 @router.get("/quality", response_class=HTMLResponse)
@@ -435,8 +470,17 @@ async def quality_data(
         )).scalars().all()
     ]
 
+    gold_total = (await session.execute(select(func.count()).select_from(EvalGoldAnswer))).scalar() or 0
+    gold_backed = (await session.execute(
+        select(func.count()).select_from(QueryLog).where(QueryLog.judged_against_gold.is_(True))
+    )).scalar() or 0
+    guessed = (await session.execute(
+        select(func.count()).select_from(QueryLog).where(QueryLog.judged_against_gold.is_(False))
+    )).scalar() or 0
+
     return {"run_trend": run_trend, "verdicts": verdicts, "failures": failures,
-            "feedback_weekly": fb_weekly, "worst": worst}
+            "feedback_weekly": fb_weekly, "worst": worst,
+            "gold_coverage": {"gold_backed": gold_backed, "guessed": guessed, "gold_total": gold_total}}
 
 
 # ───────────────────────── gold candidates ─────────────────────────
