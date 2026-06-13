@@ -41,19 +41,22 @@ async def groq_chat(
         kwargs["response_format"] = {"type": "json_object"}
 
     model_list = models or MODELS
+    MAX_ROUNDS = 3
     last_error = None
-    for i, model in enumerate(model_list):
-        try:
-            resp = await _client.chat.completions.create(model=model, **kwargs)
-            if i > 0:
-                logger.warning(f"Used fallback model [{i}] {model}")
-            return resp.choices[0].message.content.strip()
-        except RateLimitError as e:
-            last_error = e
-            logger.warning(f"Rate limit on {model}" + (", trying next..." if i < len(model_list) - 1 else ""))
-            if i < len(model_list) - 1:
-                await asyncio.sleep(1)
-        except Exception:
-            raise
-
+    for rnd in range(MAX_ROUNDS):
+        for i, model in enumerate(model_list):
+            try:
+                resp = await _client.chat.completions.create(model=model, **kwargs)
+                if i > 0 or rnd > 0:
+                    logger.warning(f"Used fallback model [round {rnd}, {i}] {model}")
+                return resp.choices[0].message.content.strip()
+            except RateLimitError as e:
+                last_error = e
+                logger.warning(f"Rate limit on {model} (round {rnd})")
+                if i < len(model_list) - 1:
+                    await asyncio.sleep(1)
+            except Exception:
+                raise
+        if rnd < MAX_ROUNDS - 1:
+            await asyncio.sleep(2 ** (rnd + 1))   # 2s, 4s between full-pass rounds
     raise last_error
