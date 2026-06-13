@@ -403,8 +403,8 @@ class TelegramPollingBot:
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
             text=("‏🥇 <b>בניית תשובת זהב</b>\n\n"
-                  f"‏<b>שאלה:</b> {cand['question']}\n\n"
-                  f"‏<b>הצעה:</b> {proposal['answer']}"),
+                  f"‏<b>שאלה:</b> {_html.escape(cand['question'])}\n\n"
+                  f"‏<b>הצעה:</b> {_html.escape(proposal['answer'])}"),
             parse_mode="HTML",
             reply_markup=gtg.gold_keyboard(cand["id"]),
         )
@@ -1096,6 +1096,10 @@ class TelegramPollingBot:
                 pass
 
             if g_action == "stop":
+                async with async_session_maker() as _s:
+                    _u = await _s.scalar(select(User).where(User.telegram_id == telegram_id))
+                if not gtg.is_manager(_u):
+                    return
                 _awaiting_gold_text.pop(telegram_id, None)
                 await context.bot.send_message(chat_id=update.effective_chat.id, text="‏⏹ הסתיים. תודה!")
                 return
@@ -1112,6 +1116,11 @@ class TelegramPollingBot:
                 except ValueError:
                     return
                 question = qlog.question if qlog else None
+
+                if question is None and g_action in ("approve", "edit", "skip"):
+                    await context.bot.send_message(chat_id=update.effective_chat.id,
+                                                   text="‏⚠️ השאלה לא נמצאה. שלח /gold להמשך.")
+                    return
 
                 if g_action == "approve" and question:
                     proposal = await propose_gold(session, question, use_llm=True)
@@ -1135,8 +1144,8 @@ class TelegramPollingBot:
             await context.bot.send_message(
                 chat_id=update.effective_chat.id,
                 text=("‏🥇 <b>בניית תשובת זהב</b>\n\n"
-                      f"‏<b>שאלה:</b> {cand['question']}\n\n"
-                      f"‏<b>הצעה:</b> {nxt['answer']}"),
+                      f"‏<b>שאלה:</b> {_html.escape(cand['question'])}\n\n"
+                      f"‏<b>הצעה:</b> {_html.escape(nxt['answer'])}"),
                 parse_mode="HTML",
                 reply_markup=gtg.gold_keyboard(cand["id"]),
             )
