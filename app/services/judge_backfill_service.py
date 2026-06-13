@@ -205,3 +205,50 @@ async def rejudge_gold_covered(session: AsyncSession, limit: int = 500) -> dict:
     stats = get_rejudge_progress()
     logger.info(f"rejudge: finished {stats}")
     return stats
+
+
+async def rejudge_distinct(session: AsyncSession) -> dict:
+    """Re-judge ONE representative (latest) row per distinct question, OVERWRITING
+    its verdict. Uses the shared _rejudge_progress so it shares the rejudge guard."""
+    from app.services.gold_truth_service import question_hash
+
+    rows = (await session.execute(
+        select(QueryLog).where(QueryLog.ai_response.isnot(None))
+        .order_by(QueryLog.timestamp.desc())
+    )).scalars().all()
+
+    reps = []
+    seen: set[str] = set()
+    for r in rows:
+        h = question_hash(r.question)
+        if h in seen:
+            continue
+        seen.add(h)
+        reps.append(r)
+
+    _rejudge_progress.update({"running": True, "total": len(reps), "done": 0, "judged": 0, "errors": 0})
+    try:
+        for log in reps:
+            try:
+                verdict, failure, gold_backed = await judge_one(session, log)
+                log.judge_verdict = verdict
+                log.failure_type = failure
+                log.judged_against_gold = gold_backed
+                await session.commit()
+                _rejudge_progress["judged"] += 1
+            except Exception as e:
+                await session.rollback()
+                _rejudge_progress["errors"] += 1
+                logger.warning(f"rejudge_distinct: row {log.id} failed: {e}")
+                await asyncio.sleep(2)
+                if not session.is_active:
+                    logger.error("rejudge_distinct: session no longer active, aborting")
+                    break
+            finally:
+                _rejudge_progress["done"] += 1
+    finally:
+        _rejudge_progress["running"] = False
+
+    stats = get_rejudge_progress()
+    logger.info(f"rejudge_distinct: finished {stats}")
+    return stats

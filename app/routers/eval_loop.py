@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import async_session_maker, get_db_session
 from app.models import EvalGoldAnswer, EvalRun, QueryLog, RepairProposal, SystemFlag, User
 from app.routers.login import get_current_user
+from app.services import distinct_eval_service
 from app.services import gold_truth_service as gts
 from app.services import judge_backfill_service
 from app.services.gold_truth_service import question_hash
@@ -535,3 +536,49 @@ async def gold_candidates(
         -d["count"],
     ))
     return {"candidates": out[:50]}
+
+
+# ───────────────────────── distinct question quality ─────────────────────────
+
+@router.get("/quality/distinct")
+async def quality_distinct(
+    session: AsyncSession = Depends(get_db_session),
+    current_user: User = Depends(get_current_user),
+):
+    reps = await distinct_eval_service.distinct_question_eval(session)
+    summary = distinct_eval_service.summarize(reps)
+
+    fail_counts: dict[str, int] = {}
+    for d in reps:
+        if d["verdict"] == "FAIL" and d["failure_type"]:
+            fail_counts[d["failure_type"]] = fail_counts.get(d["failure_type"], 0) + 1
+    failures = sorted(
+        [{"type": t, "count": c} for t, c in fail_counts.items()],
+        key=lambda x: x["count"], reverse=True,
+    )
+
+    most_asked = sorted(reps, key=lambda d: d["count"], reverse=True)[:15]
+    most_asked = [
+        {"question": d["question"], "count": d["count"],
+         "verdict": d["verdict"], "failure_type": d["failure_type"]}
+        for d in most_asked
+    ]
+
+    return {"summary": summary, "failures": failures, "most_asked": most_asked}
+
+
+@router.post("/eval/rejudge-distinct")
+async def start_rejudge_distinct(current_user: User = Depends(get_current_user)):
+    if judge_backfill_service.get_rejudge_progress()["running"]:
+        return {"status": "already_running"}
+
+    global _rejudge_task
+    if _rejudge_task is not None and not _rejudge_task.done():
+        return {"status": "already_running"}
+
+    async def _run():
+        async with async_session_maker() as s:
+            await judge_backfill_service.rejudge_distinct(s)
+
+    _rejudge_task = asyncio.create_task(_run())
+    return {"status": "started"}
