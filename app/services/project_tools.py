@@ -567,8 +567,9 @@ async def answer_project_query(
             elif len(matches) == 1:
                 data = matches[0]
                 user_data["last_project"] = data["project_identifier"]
-                current_project_id = data["project_identifier"]
-                context_str = json.dumps(data, ensure_ascii=False, indent=2)
+                answer = _format_project_card(data, 1, 1)
+                log_id = await _log_query(text, answer, intent, data["project_identifier"], session, user_id)
+                return answer, log_id
             else:
                 # 2–4 ambiguous matches → signal disambiguation to the caller
                 if 2 <= len(matches) <= 4:
