@@ -46,8 +46,8 @@ async def distinct_question_eval(session: AsyncSession) -> list[dict]:
     return reps
 
 
-async def distinct_summary(session: AsyncSession) -> dict:
-    reps = await _representatives(session)
+def summarize(reps: list[dict]) -> dict:
+    """Pure aggregation over an already-computed reps list (no DB access)."""
     total = len(reps)
     passed = sum(1 for d in reps if d["verdict"] == "PASS")
     failed = sum(1 for d in reps if d["verdict"] == "FAIL")
@@ -63,3 +63,8 @@ async def distinct_summary(session: AsyncSession) -> dict:
         "gold_backed": gold_backed,
         "pass_rate": pass_rate,
     }
+
+
+async def distinct_summary(session: AsyncSession) -> dict:
+    """Async wrapper kept for backward compatibility (existing callers/tests)."""
+    return summarize(await _representatives(session))

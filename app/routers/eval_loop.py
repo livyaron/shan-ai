@@ -546,7 +546,7 @@ async def quality_distinct(
     current_user: User = Depends(get_current_user),
 ):
     reps = await distinct_eval_service.distinct_question_eval(session)
-    summary = await distinct_eval_service.distinct_summary(session)
+    summary = distinct_eval_service.summarize(reps)
 
     fail_counts: dict[str, int] = {}
     for d in reps:
