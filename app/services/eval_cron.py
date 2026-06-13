@@ -54,12 +54,14 @@ def start_scheduler() -> None:
         CronTrigger(day_of_week="sun", hour=7, minute=0, timezone="Asia/Jerusalem"),
         id="weekly_eval_summary", replace_existing=True,
     )
+    sch.add_job(_batch_eval_run, "interval", hours=3, id="batch_eval", replace_existing=True)
     sch.start()
     _scheduler = sch
     logger.info("eval_cron: scheduler started (03:00 UTC nightly)")
     logger.info("eval_cron: weekly_report job registered (Thu 17:00 Asia/Jerusalem)")
     logger.info("eval_cron: project_report_cron job registered (every 15 min)")
     logger.info("eval_cron: weekly_eval_summary job registered (Sun 07:00 Asia/Jerusalem)")
+    logger.info("eval_cron: batch_eval job registered (every 3h)")
 
 
 def stop_scheduler() -> None:
@@ -83,6 +85,18 @@ async def _nightly_run() -> None:
             await run_cycle(s, user_id=None)
         except Exception as e:
             logger.exception(f"eval_cron nightly run failed: {e}")
+
+
+async def _batch_eval_run() -> None:
+    """Judge-only batch of gold questions (spaced to avoid Groq rate-limit bursts)."""
+    from app.database import async_session_maker
+    from app.services.per_question_loop_service import run_cycle
+
+    async with async_session_maker() as s:
+        try:
+            await run_cycle(s, user_id=None, repair=False, batch=8)
+        except Exception as e:
+            logger.exception(f"batch_eval run failed: {e}")
 
 
 async def _weekly_report_run() -> None:
