@@ -78,3 +78,26 @@ async def test_rejudge_only_touches_gold_covered(db_session):
     assert covered.judged_against_gold is True
     assert uncovered.judge_verdict == "FAIL"
     assert stats["judged"] == 1
+
+
+@pytest.mark.asyncio
+async def test_rejudge_distinct_judges_one_per_question(db_session):
+    from sqlalchemy import delete
+    from datetime import datetime, timedelta
+    await db_session.execute(delete(QueryLog))
+    await db_session.commit()
+
+    base = datetime(2026, 6, 1, 12, 0, 0)
+    db_session.add_all([
+        QueryLog(question="ש1", ai_response="a", judge_verdict="FAIL", timestamp=base),
+        QueryLog(question="ש1", ai_response="b", judge_verdict="FAIL", timestamp=base + timedelta(hours=1)),
+        QueryLog(question="ש2", ai_response="c", judge_verdict="FAIL", timestamp=base),
+    ])
+    await db_session.commit()
+
+    with patch.object(jbs, "judge_one",
+                      new=AsyncMock(return_value=("PASS", None, True))) as j:
+        stats = await jbs.rejudge_distinct(db_session)
+
+    assert j.await_count == 2
+    assert stats["judged"] == 2
