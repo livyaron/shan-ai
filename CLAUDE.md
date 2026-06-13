@@ -33,6 +33,8 @@
   `docker exec shan-ai-postgres psql -U shan_user -d shan_ai -c "ALTER TABLE query_logs ADD COLUMN IF NOT EXISTS judged_against_gold BOOLEAN;"`
 - **eval_runs.failed_questions:** After rebuild/fresh DB or Railway deploy:
   `ALTER TABLE eval_runs ADD COLUMN IF NOT EXISTS failed_questions JSON;` (run local + Railway)
+- **eval_gold_answers live cols:** After rebuild/Railway deploy:
+  `ALTER TABLE eval_gold_answers ADD COLUMN IF NOT EXISTS last_live_verdict VARCHAR(10), ADD COLUMN IF NOT EXISTS last_live_score DOUBLE PRECISION, ADD COLUMN IF NOT EXISTS last_live_at TIMESTAMP;` (run local + Railway)
 - **Polling Conflict:** Local Docker and Railway **cannot** run simultaneously. Stop local before Railway is live.
 - **No Data Loss:** NEVER run `docker-compose down -v` without explicit confirmation.
 - **Build Cycle:** After code changes, run `docker-compose restart fastapi`.
