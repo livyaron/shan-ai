@@ -32,6 +32,7 @@
       <button class="btn-cyan" onclick="startBackfill()">⚖️ שפוט 200 שאלות אחרונות</button>
       <button class="btn-outline-dim" onclick="seedGold()">🌱 זריעת gold מ-DB</button>
       <button class="btn-outline-dim" onclick="startRejudge()">♻️ שיפוט מחדש (gold)</button>
+      <button class="btn-outline-dim" onclick="liveMeasure()">📡 מדידה חיה (gold, judge-only)</button>
     </div>
   </div>
 
@@ -40,6 +41,11 @@
     <button class="btn-outline-dim" onclick="startRejudgeDistinct()">♻️ שיפוט מחדש (שאלות ייחודיות)</button>
     <span id="rjd-status" style="color:var(--text-2);font-size:.85rem;"></span>
   </div>
+  <div class="card p-3 mb-3">
+    <h6>שאלות שנכשלו במדידה החיה האחרונה</h6>
+    <ul id="live-failed" style="color:var(--text-2);font-size:.9rem;"></ul>
+  </div>
+
   <div class="card p-3 mb-3">
     <h6>שאלות נפוצות (לפי מספר חזרות)</h6>
     <table class="table table-sm mb-0"><thead><tr><th>שאלה</th><th>חזרות</th><th>פסק דין</th><th>כשל</th></tr></thead>
@@ -111,6 +117,22 @@ async function load() {
     worstEl.appendChild(tr);
   }
   if (!d.worst.length) worstEl.innerHTML = '<tr><td colspan="5" style="color:var(--text-2);text-align:center;">אין כשלים מתועדים</td></tr>';
+
+  const ul = document.getElementById("live-failed");
+  if (ul) {
+    ul.innerHTML = "";
+    for (const f of (d.live_failed || [])) {
+      const li = document.createElement("li");
+      li.textContent = `${f.question} (${f.score})`;
+      ul.appendChild(li);
+    }
+  }
+}
+
+async function liveMeasure() {
+  const r = await fetch("/dashboard/eval/run?repair=false", {method:"POST"});
+  if (r.status === 409) { alert("מדידה כבר רצה."); return; }
+  alert("מדידה חיה התחילה — עקוב/י בעמוד ה-Eval. רענן/י כאן בסיום.");
 }
 
 async function startBackfill() {
