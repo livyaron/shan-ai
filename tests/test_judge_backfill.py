@@ -51,7 +51,7 @@ async def test_backfill_skips_already_judged(db_session):
 
     with patch(
         "app.services.judge_backfill_service.judge_one",
-        new=AsyncMock(return_value=("FAIL", "MISSING_DATA")),
+        new=AsyncMock(return_value=("FAIL", "MISSING_DATA", False)),
     ) as mocked:
         stats = await run_backfill(db_session, limit=50)
 
@@ -60,3 +60,4 @@ async def test_backfill_skips_already_judged(db_session):
     await db_session.refresh(unjudged)
     assert unjudged.judge_verdict == "FAIL"
     assert unjudged.failure_type == "MISSING_DATA"
+    assert unjudged.judged_against_gold is False
