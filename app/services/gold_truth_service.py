@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import EvalGoldAnswer, Project
 from app.services.knowledge_service import normalize_hebrew
 from app.services.llm_router import llm_chat
+from app.services.project_tools import find_projects_by_identifier, _format_project_card
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +26,19 @@ _FIELD_KEYWORDS = {
     "estimated_finish_date": ["מתי יסתיים", "תאריך סיום", "סיום", "מועד סיום"],
     "dev_plan_date":         ["תכנון", "תאריך תכנון", "מתי מתוכנן"],
 }
+
+
+SHOWABLE_CARDS_MAX = 5
+_CARD_DIVIDER = "\n━━━━━━━━━━━━━━━━━━\n"
+
+
+def _format_narrowing(matches: list[dict]) -> str:
+    """Selection prompt for over-broad name matches — invite the user to narrow."""
+    listed = " · ".join(
+        f"{m.get('project_identifier', '')} — {m.get('name', '')}".strip(" —")
+        for m in matches[:10]
+    )
+    return f"{RTL}נמצאו {len(matches)} פרויקטים. צמצם/י את החיפוש: {listed}"
 
 
 def question_hash(q: str) -> str:
@@ -156,6 +170,31 @@ async def propose_gold(session: AsyncSession, question: str, *, use_llm: bool = 
                 "source": "db_lookup",
                 "target_project": project.project_identifier,
                 "target_field": field,
+            }
+
+    # No specific field asked — treat as a bare project-name lookup.
+    if not field:
+        matches = await find_projects_by_identifier((question or "").strip(), session)
+        if matches:
+            n = len(matches)
+            if n == 1:
+                proj = await session.get(Project, matches[0]["id"])
+                from app.services.projects_menu_service import build_project_card
+                answer = build_project_card(proj) if proj else _format_project_card(matches[0], 1, 1)
+                target = matches[0].get("project_identifier")
+            elif n <= SHOWABLE_CARDS_MAX:
+                answer = _CARD_DIVIDER.join(
+                    _format_project_card(p, i + 1, n) for i, p in enumerate(matches)
+                )
+                target = None
+            else:
+                answer = _format_narrowing(matches)
+                target = None
+            return {
+                "answer": answer,
+                "source": "db_lookup",
+                "target_project": target,
+                "target_field": None,
             }
 
     if not use_llm:
