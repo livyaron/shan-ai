@@ -402,6 +402,7 @@ class EvalRun(Base):
     n_proposals_applied    = Column(Integer, default=0)
     triggered_by_user_id   = Column(Integer, ForeignKey("users.id"), nullable=True)
     config_json            = Column(JSON, nullable=True)   # batch size, seed_failures flag, audit log array
+    failed_questions       = Column(JSON, nullable=True)   # [{"question","score"}] for FAIL rows in this run
 
     triggered_by = relationship("User")
 
