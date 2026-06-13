@@ -493,6 +493,9 @@ class EvalGoldAnswer(Base):
     approved_by_user_id  = Column(Integer, ForeignKey("users.id"), nullable=True)
     approved_at          = Column(DateTime, nullable=True)
     created_at           = Column(DateTime, default=datetime.utcnow)
+    last_live_verdict    = Column(String(10), nullable=True)   # PASS | FAIL
+    last_live_score      = Column(Float, nullable=True)
+    last_live_at         = Column(DateTime, nullable=True)
 
     approved_by = relationship("User")
 

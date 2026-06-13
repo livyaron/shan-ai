@@ -10,7 +10,7 @@ from dataclasses import dataclass, field, asdict
 from datetime import datetime
 from typing import Any, Callable, Awaitable
 
-from sqlalchemy import select
+from sqlalchemy import select, nulls_first
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import async_session_maker
@@ -731,6 +731,7 @@ async def run_cycle(
     max_repairs: int = 3,
     emit: EmitFn = lambda e: None,
     repair: bool = True,
+    batch: int = 0,
 ) -> dict:
     """Run the full per-question cycle. Creates an EvalRun row; partial-unique index
     on EvalRun.status='running' enforces single concurrent cycle."""
@@ -744,7 +745,16 @@ async def run_cycle(
     await session.commit()
     await session.refresh(eval_run)
 
-    gold_rows = (await session.execute(select(EvalGoldAnswer).order_by(EvalGoldAnswer.id))).scalars().all()
+    if batch and batch > 0:
+        gold_rows = (await session.execute(
+            select(EvalGoldAnswer).order_by(
+                nulls_first(EvalGoldAnswer.last_live_at.asc()), EvalGoldAnswer.id
+            ).limit(batch)
+        )).scalars().all()
+    else:
+        gold_rows = (await session.execute(
+            select(EvalGoldAnswer).order_by(EvalGoldAnswer.id)
+        )).scalars().all()
     gold_rows = list(gold_rows)
     eval_run.n_probes = len(gold_rows)
     await session.commit()
@@ -771,6 +781,10 @@ async def run_cycle(
             counts[r.status] = counts.get(r.status, 0) + 1
             for fix in r.applied_fixes:
                 applied_proposal_ids.append(fix["proposal_id"])
+            g.last_live_verdict = "PASS" if r.status in ("passed_first_try", "fixed") else "FAIL"
+            g.last_live_score = r.score_final
+            g.last_live_at = datetime.utcnow()
+            await session.commit()
             await asyncio.sleep(EVAL_PACE_SECONDS)
 
         eval_run.n_pass = counts["passed_first_try"] + counts["fixed"]

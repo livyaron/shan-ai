@@ -286,6 +286,7 @@ _rejudge_task: asyncio.Task | None = None
 @router.post("/eval/run")
 async def eval_run(
     repair: bool = True,
+    batch: int = 0,
     session: AsyncSession = Depends(get_db_session),
     current_user: User = Depends(get_current_user),
 ):
@@ -302,7 +303,7 @@ async def eval_run(
     async def _runner():
         async with async_session_maker() as own:
             try:
-                await run_cycle(own, user_id=user_id, emit=_emit_log, repair=repair)
+                await run_cycle(own, user_id=user_id, emit=_emit_log, repair=repair, batch=batch)
             except Exception as e:
                 logger.exception("eval cycle failed")
                 _emit_log({"type": "cycle_error", "error": str(e)})
@@ -485,10 +486,24 @@ async def quality_data(
     )).scalar_one_or_none()
     live_fail = (last_run.failed_questions or []) if last_run else []
 
+    from datetime import timedelta
+    gold_rows_all = (await session.execute(select(EvalGoldAnswer))).scalars().all()
+    checked_rows = [g for g in gold_rows_all if g.last_live_verdict]
+    cum_pass = sum(1 for g in checked_rows if g.last_live_verdict == "PASS")
+    cum_fail = sum(1 for g in checked_rows if g.last_live_verdict == "FAIL")
+    _cutoff = datetime.utcnow() - timedelta(hours=48)
+    cum_stale = sum(1 for g in checked_rows if g.last_live_at and g.last_live_at < _cutoff)
+    live_cumulative = {
+        "checked": len(checked_rows), "total": len(gold_rows_all),
+        "pass": cum_pass, "fail": cum_fail,
+        "pass_rate": round(cum_pass / len(checked_rows) * 100) if checked_rows else 0,
+        "stale": cum_stale,
+    }
+
     return {"run_trend": run_trend, "verdicts": verdicts, "failures": failures,
             "feedback_weekly": fb_weekly, "worst": worst,
             "gold_coverage": {"gold_backed": gold_backed, "guessed": guessed, "gold_total": gold_total},
-            "live_failed": live_fail}
+            "live_failed": live_fail, "live_cumulative": live_cumulative}
 
 
 # ───────────────────────── gold candidates ─────────────────────────

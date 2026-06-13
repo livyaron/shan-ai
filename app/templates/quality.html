@@ -37,6 +37,7 @@
   </div>
 
   <div id="distinct-headline" style="font-size:1.05rem;color:var(--cyan);margin-bottom:.5rem;"></div>
+  <div id="live-cum" style="font-size:1.05rem;color:var(--green);margin-bottom:.5rem;"></div>
   <div class="d-flex gap-2 align-items-center mb-3 flex-wrap">
     <button class="btn-outline-dim" onclick="startRejudgeDistinct()">♻️ שיפוט מחדש (שאלות ייחודיות)</button>
     <span id="rjd-status" style="color:var(--text-2);font-size:.85rem;"></span>
@@ -82,6 +83,13 @@ async function load() {
     const c = d.gold_coverage;
     document.getElementById("gold-cov").textContent =
       `מגובי-gold: ${c.gold_backed} | מנוחשים: ${c.guessed} | תשובות זהב בסט: ${c.gold_total}`;
+  }
+
+  if (d.live_cumulative) {
+    const c = d.live_cumulative;
+    document.getElementById("live-cum").textContent =
+      `מדידה חיה מצטברת: ${c.pass}/${c.checked} (${c.pass_rate}%) · כיסוי ${c.checked}/${c.total}` +
+      (c.stale ? ` · ${c.stale} ישנים` : "");
   }
 
   mkChart("trend", {type:"line", data:{labels:d.run_trend.map(r=>r.date),
