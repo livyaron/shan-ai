@@ -53,8 +53,22 @@ So 37% PASS / 63% FAIL is not credible; real pass-rate is higher and WRONG_PROJE
 - `quality_data` adds: `gold_coverage = {gold_backed: count(judged_against_gold=True), guessed: count(judged_against_gold=False)}` and total gold-set size.
 - Template shows a line: "X מתוך Y פסקי דין מגובי-gold (Z תשובות זהב בסט)" so the viewer knows how much of the pass-rate is trustworthy.
 
-### Human step (out of code scope)
-After §3 auto-seeds the DB-derivable questions, the user curates the LLM-needed questions ("needs_manual") via the existing curate UI to reach ≥50 gold answers, then triggers §4 re-judge.
+### 6. Telegram gold curation for managers — `telegram_polling.py`
+A second curation channel so managers approve gold from their phone, not only the web UI. Reuses the bot's existing inline-keyboard + awaiting-text state machine (same pattern as the 👎 feedback-text flow).
+
+- **Entry:** `/gold` command. Role-gated — only `DEPARTMENT_MANAGER` and above (reuse the role hierarchy / superior-lookup util). Non-managers get a polite refusal (RTL-prefixed).
+- **Queue:** the same "needs_manual" candidates §3 leaves behind — production questions that have no gold yet and no deterministic DB answer (so a human judgment is genuinely required), ordered by frequency desc. (DB-derivable questions are auto-seeded by §3 and never reach this queue.)
+- **Per question:** bot sends the question text + the LLM-proposed answer (`propose_gold(use_llm=True)`), with an inline keyboard:
+  - ✅ אשר → `save_gold(question, proposed_answer, source="telegram", user_id=manager)`, advance to next.
+  - ✏️ תקן → bot enters awaiting-text state for this manager+question (reuse the existing per-user awaiting map); the manager's next message is saved as the gold answer (`source="telegram"`), then advance.
+  - ⏭ דלג → advance without saving.
+  - ⏹ סיום → exit the flow.
+- **Callbacks:** new prefix `gold:` with 3-segment data `gold:<action>:<candidate_id>` (action ∈ approve/edit/skip/stop), parsed defensively like the `lfc:` branch (guard segment count + int conversion).
+- **Progress:** bot shows "X מתוך Y" so the manager sees how many remain toward the 50 target.
+- **No second bot/process:** implemented as a command in the existing polling bot (a separate bot would hit the documented single-poller conflict). All messages RTL-prefixed.
+
+### Human step
+After §3 auto-seeds the DB-derivable questions, managers curate the LLM-needed questions to reach ≥50 gold — via **either** the web curate UI (§ existing "מועמדים מהשטח") **or** the Telegram `/gold` flow (§6). Then trigger §4 re-judge.
 
 ## Data flow
 
@@ -62,7 +76,8 @@ After §3 auto-seeds the DB-derivable questions, the user curates the LLM-needed
 query_logs (200 judged, guessed references)
    │
    ├─ §3 seed-from-production ──► propose_gold(use_llm=False) ──► eval_gold_answers (db_lookup, auto)
-   │                                              └─ needs_manual ──► curate UI (human) ──► eval_gold_answers (manual)
+   │                                              └─ needs_manual ──┬─ web curate UI (human) ─┐
+   │                                                                └─ §6 Telegram /gold ─────┴─► eval_gold_answers (manual/telegram)
    │
    └─ §4 rejudge gold-covered ──► judge_one (gold hit) ──► overwrite judge_verdict + judged_against_gold=True
                                                                   └─► §5 dashboard shows trustworthy vs guessed split
@@ -77,6 +92,7 @@ query_logs (200 judged, guessed references)
 - `judge_one` gold-hit: with a seeded gold row, returns a gold-backed verdict and `judged_against_gold=True`; gold-miss returns `False`. (mock `compare_to_gold`/`propose_gold`.)
 - `rejudge_gold_covered`: only touches rows whose question has gold; overwrites an existing verdict; leaves non-covered rows untouched.
 - seed-from-production: DB-lookup proposals get saved with `source="db_lookup"`; LLM-needed questions are counted as `needs_manual`, not saved.
+- Telegram `/gold`: candidate keyboard built with `gold:<action>:<id>` callbacks; `approve` saves gold with `source="telegram"`; non-manager role is refused; malformed callback data is guarded. (Unit-test the keyboard builder + the role gate + the candidate-queue selection, mirroring `test_feedback_cause.py`.)
 - All existing eval/backfill tests stay green.
 
 ## Success criteria
