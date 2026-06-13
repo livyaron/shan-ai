@@ -84,7 +84,24 @@ async def find_projects_by_identifier(identifier: str, session: AsyncSession) ->
             Project.name.ilike(f"%{prefix}%")
         ).order_by(Project.name).limit(10)
         rows = (await session.execute(stmt2)).scalars().all()
-        return [_project_to_dict(p) for p in rows]
+        if rows:
+            return [_project_to_dict(p) for p in rows]
+
+    # ── Fallback: strip a leading location prefix and retry once ──
+    _LOCATION_PREFIXES = (
+        'תחמ"ש', 'תחמ״ש', 'תחמש', 'תחנת מיתוג', 'תחנת', 'תחנה', 'פרויקט', 'פרוייקט',
+    )
+    stripped = (identifier or "").strip().strip('"').strip()
+    for pref in _LOCATION_PREFIXES:
+        if stripped.startswith(pref):
+            remainder = stripped[len(pref):].strip().strip('"').strip()
+            if not remainder:
+                return []
+            stmt3 = select(Project).where(
+                Project.name.ilike(f"%{remainder}%")
+            ).order_by(Project.name).limit(10)
+            rows = (await session.execute(stmt3)).scalars().all()
+            return [_project_to_dict(p) for p in rows]
 
     return []
 
