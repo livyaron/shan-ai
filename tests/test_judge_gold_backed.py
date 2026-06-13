@@ -48,3 +48,33 @@ async def test_judge_one_empty_answer_is_refused_and_not_gold_backed():
     assert (verdict, failure) == ("FAIL", "REFUSED")
     assert gold_backed is False
     g.assert_not_awaited()
+
+
+from app.services.gold_truth_service import save_gold
+
+
+@pytest.mark.asyncio
+async def test_rejudge_only_touches_gold_covered(db_session):
+    from sqlalchemy import delete
+    await db_session.execute(delete(QueryLog))
+    await db_session.commit()
+
+    covered = QueryLog(question="מי המנהל של חולה?", ai_response="יעקבי, ניר", judge_verdict="FAIL")
+    uncovered = QueryLog(question="שאלה ללא זהב", ai_response="משהו", judge_verdict="FAIL")
+    db_session.add_all([covered, uncovered])
+    await db_session.commit()
+
+    await save_gold(db_session, question="מי המנהל של חולה?", gold_answer="יעקבי, ניר",
+                    user_id=None, source="db_lookup")
+
+    with patch.object(jbs, "judge_one",
+                      new=AsyncMock(return_value=("PASS", None, True))) as j:
+        stats = await jbs.rejudge_gold_covered(db_session, limit=100)
+
+    assert j.await_count == 1
+    await db_session.refresh(covered)
+    await db_session.refresh(uncovered)
+    assert covered.judge_verdict == "PASS"
+    assert covered.judged_against_gold is True
+    assert uncovered.judge_verdict == "FAIL"
+    assert stats["judged"] == 1

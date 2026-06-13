@@ -34,10 +34,15 @@ NO_INFO = "אין מידע"
 FAILURE_TYPES = ("WRONG_PROJECT", "MISSING_DATA", "HALLUCINATION", "UNSTABLE", "STRUCTURE", "REFUSED")  # UNSTABLE: set by eval loop only, never returned by the backfill LLM prompt
 
 _progress = {"running": False, "total": 0, "done": 0, "judged": 0, "errors": 0}
+_rejudge_progress = {"running": False, "total": 0, "done": 0, "judged": 0, "errors": 0}
 
 
 def get_progress() -> dict:
     return dict(_progress)
+
+
+def get_rejudge_progress() -> dict:
+    return dict(_rejudge_progress)
 
 
 def score_to_verdict(score: float) -> str:
@@ -154,4 +159,49 @@ async def run_backfill(session: AsyncSession, limit: int = 200) -> dict:
 
     stats = get_progress()
     logger.info(f"judge_backfill: finished {stats}")
+    return stats
+
+
+async def rejudge_gold_covered(session: AsyncSession, limit: int = 500) -> dict:
+    """Re-judge query_logs rows whose question now has a gold answer, OVERWRITING
+    the existing verdict. Unlike run_backfill this ignores judge_verdict (gold may
+    have arrived after the first judgement)."""
+    from app.models import EvalGoldAnswer
+    from app.services.gold_truth_service import question_hash
+
+    gold_hashes = set((await session.execute(
+        select(EvalGoldAnswer.question_hash)
+    )).scalars().all())
+
+    rows = (await session.execute(
+        select(QueryLog).where(QueryLog.ai_response.isnot(None))
+        .order_by(QueryLog.timestamp.desc()).limit(limit)
+    )).scalars().all()
+    covered = [r for r in rows if question_hash(r.question) in gold_hashes]
+
+    _rejudge_progress.update({"running": True, "total": len(covered), "done": 0, "judged": 0, "errors": 0})
+    try:
+        for log in covered:
+            try:
+                verdict, failure, gold_backed = await judge_one(session, log)
+                log.judge_verdict = verdict
+                log.failure_type = failure
+                log.judged_against_gold = gold_backed
+                await session.commit()
+                _rejudge_progress["judged"] += 1
+            except Exception as e:
+                await session.rollback()
+                _rejudge_progress["errors"] += 1
+                logger.warning(f"rejudge: row {log.id} failed: {e}")
+                await asyncio.sleep(2)
+                if not session.is_active:
+                    logger.error("rejudge: session no longer active, aborting")
+                    break
+            finally:
+                _rejudge_progress["done"] += 1
+    finally:
+        _rejudge_progress["running"] = False
+
+    stats = get_rejudge_progress()
+    logger.info(f"rejudge: finished {stats}")
     return stats
