@@ -774,6 +774,10 @@ async def run_cycle(
         eval_run.n_pass = counts["passed_first_try"] + counts["fixed"]
         eval_run.n_fail = counts["unfixable"] + counts["error"]
         eval_run.n_proposals_applied = len(applied_proposal_ids)
+        eval_run.failed_questions = [
+            {"question": r.question, "score": r.score_final}
+            for r in results if r.status in ("unfixable", "error")
+        ]
         if eval_run.status != "aborted":
             eval_run.status = "completed"
         eval_run.finished_at = datetime.utcnow()
