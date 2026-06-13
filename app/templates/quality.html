@@ -35,6 +35,17 @@
     </div>
   </div>
 
+  <div id="distinct-headline" style="font-size:1.05rem;color:var(--cyan);margin-bottom:.5rem;"></div>
+  <div class="d-flex gap-2 align-items-center mb-3 flex-wrap">
+    <button class="btn-outline-dim" onclick="startRejudgeDistinct()">♻️ שיפוט מחדש (שאלות ייחודיות)</button>
+    <span id="rjd-status" style="color:var(--text-2);font-size:.85rem;"></span>
+  </div>
+  <div class="card p-3 mb-3">
+    <h6>שאלות נפוצות (לפי מספר חזרות)</h6>
+    <table class="table table-sm mb-0"><thead><tr><th>שאלה</th><th>חזרות</th><th>פסק דין</th><th>כשל</th></tr></thead>
+    <tbody id="most-asked"></tbody></table>
+  </div>
+
   <div id="gold-cov" style="color:var(--text-2);font-size:.85rem;margin-bottom:1rem;"></div>
 
   <div class="row g-3">
@@ -137,7 +148,39 @@ async function pollBf() {
   if (s.running) setTimeout(pollBf, 2000); else if (s.total) load();
 }
 
-load(); pollBf();
+async function loadDistinct() {
+  const res = await fetch("/dashboard/quality/distinct");
+  if (!res.ok) return;
+  const d = await res.json();
+  const s = d.summary;
+  document.getElementById("distinct-headline").textContent =
+    `שאלות ייחודיות: ${s.distinct_total} | הצלחה: ${s.distinct_pass}/${s.distinct_pass + s.distinct_fail} (${s.pass_rate}%) | מגובי-gold: ${s.gold_backed}`;
+  const tb = document.getElementById("most-asked");
+  tb.innerHTML = "";
+  for (const m of d.most_asked) {
+    const tr = document.createElement("tr");
+    const t1 = document.createElement("td"); t1.textContent = m.question;
+    const t2 = document.createElement("td"); t2.textContent = m.count;
+    const t3 = document.createElement("td"); t3.textContent = m.verdict || "—";
+    const t4 = document.createElement("td"); t4.textContent = m.failure_type || "—";
+    tr.append(t1, t2, t3, t4);
+    tb.appendChild(tr);
+  }
+}
+async function startRejudgeDistinct() {
+  await fetch("/dashboard/eval/rejudge-distinct", {method:"POST"});
+  pollRejudgeDistinct();
+}
+async function pollRejudgeDistinct() {
+  const res = await fetch("/dashboard/eval/rejudge/status");
+  if (!res.ok) return;
+  const s = await res.json();
+  document.getElementById("rjd-status").textContent =
+    s.running ? `שיפוט מחדש… ${s.done}/${s.total}` : (s.total ? `הסתיים: ${s.judged} עודכנו` : "");
+  if (s.running) setTimeout(pollRejudgeDistinct, 2000); else if (s.total) { loadDistinct(); load(); }
+}
+
+load(); pollBf(); loadDistinct();
 </script>
 </body>
 </html>
