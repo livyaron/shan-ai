@@ -28,6 +28,7 @@ from app.services.llm_router import llm_chat
 
 logger = logging.getLogger(__name__)
 
+EVAL_PACE_SECONDS = 1.5
 
 EmitFn = Callable[[dict], Any]
 
@@ -770,6 +771,7 @@ async def run_cycle(
             counts[r.status] = counts.get(r.status, 0) + 1
             for fix in r.applied_fixes:
                 applied_proposal_ids.append(fix["proposal_id"])
+            await asyncio.sleep(EVAL_PACE_SECONDS)
 
         eval_run.n_pass = counts["passed_first_try"] + counts["fixed"]
         eval_run.n_fail = counts["unfixable"] + counts["error"]
