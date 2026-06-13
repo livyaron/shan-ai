@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Shan-AI — איכות תשובות AI</title>
+  <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <style>
+    :root { --bg-deep:#070b12; --bg-surface:#0c1220; --bg-card:#0f1826; --border:#1a2d47; --cyan:#00d4ff; --text-1:#e2e8f0; --text-2:#64748b; }
+    body { background:var(--bg-deep); color:var(--text-1); font-family:'Heebo',sans-serif; min-height:100vh; }
+    .navbar { background:var(--bg-surface); border-bottom:1px solid var(--border); padding:12px 24px; }
+    .page-title { color:var(--cyan); font-size:1.3rem; font-weight:700; }
+    .card { background:var(--bg-card); border:1px solid var(--border); border-radius:8px; }
+    .table { color:var(--text-1); }
+    .table th { color:var(--text-2); border-color:var(--border); font-size:.8rem; text-transform:uppercase; }
+    .table td { border-color:var(--border); vertical-align:middle; }
+    .btn-cyan { background:var(--cyan); color:#000; font-weight:600; border:none; border-radius:6px; padding:7px 20px; cursor:pointer; }
+    .btn-outline-dim { border:1px solid var(--border); color:var(--text-2); background:transparent; border-radius:6px; padding:6px 16px; text-decoration:none; display:inline-block; }
+    .btn-outline-dim:hover { color:var(--text-1); border-color:var(--cyan); }
+  </style>
+</head>
+<body>
+{% include "_navbar.html" %}
+
+<div class="container-fluid px-4 py-4">
+  <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+    <span class="page-title">🧪 איכות תשובות AI</span>
+    <div class="d-flex gap-2 align-items-center">
+      <span id="bf-status" style="color:var(--text-2);font-size:.85rem;"></span>
+      <button class="btn-cyan" onclick="startBackfill()">⚖️ שפוט 200 שאלות אחרונות</button>
+    </div>
+  </div>
+
+  <div class="row g-3">
+    <div class="col-md-6"><div class="card p-3"><h6>מגמת הצלחה ב-eval</h6><canvas id="trend"></canvas></div></div>
+    <div class="col-md-3"><div class="card p-3"><h6>פסקי דין (שופט)</h6><canvas id="verdicts"></canvas></div></div>
+    <div class="col-md-3"><div class="card p-3"><h6>סוגי כשל</h6><canvas id="failures"></canvas></div></div>
+    <div class="col-md-6"><div class="card p-3"><h6 id="fb-title">פידבק שבועי</h6><canvas id="fb"></canvas></div></div>
+    <div class="col-md-6"><div class="card p-3"><h6>שאלות שנכשלו (20 אחרונות)</h6>
+      <table class="table table-sm mb-0"><thead><tr><th>שאלה</th><th>תשובה</th><th>כשל</th><th>מתי</th><th></th></tr></thead>
+      <tbody id="worst"></tbody></table>
+    </div></div>
+  </div>
+</div>
+
+<script>
+const charts = {};
+function mkChart(id, cfg) {
+  if (charts[id]) charts[id].destroy();
+  charts[id] = new Chart(document.getElementById(id), cfg);
+}
+
+async function load() {
+  const res = await fetch("/dashboard/quality/data");
+  if (!res.ok) return;
+  const d = await res.json();
+
+  mkChart("trend", {type:"line", data:{labels:d.run_trend.map(r=>r.date),
+    datasets:[{label:"% הצלחה", data:d.run_trend.map(r=>r.pass_rate), borderColor:"#00d4ff", tension:.3}]}});
+
+  mkChart("verdicts", {type:"doughnut", data:{labels:Object.keys(d.verdicts),
+    datasets:[{data:Object.values(d.verdicts), backgroundColor:["#10b981","#f59e0b","#ef4444"]}]}});
+
+  mkChart("failures", {type:"bar", data:{labels:d.failures.map(f=>f.type),
+    datasets:[{label:"כשלים", data:d.failures.map(f=>f.count), backgroundColor:"#8b9cf4"}]}});
+
+  mkChart("fb", {type:"bar", data:{labels:d.feedback_weekly.map(w=>w.week),
+    datasets:[{label:"👍",data:d.feedback_weekly.map(w=>w.up),backgroundColor:"#10b981"},
+              {label:"👎",data:d.feedback_weekly.map(w=>w.down),backgroundColor:"#ef4444"}]},
+    options:{scales:{x:{stacked:true},y:{stacked:true}}}});
+
+  const rated = d.feedback_weekly.reduce((a,w)=>a+w.up+w.down,0);
+  const total = d.feedback_weekly.reduce((a,w)=>a+w.up+w.down+w.none,0);
+  document.getElementById("fb-title").textContent = `פידבק שבועי (דירוג: ${rated} מתוך ${total})`;
+
+  const worstEl = document.getElementById("worst");
+  worstEl.innerHTML = "";
+  for (const w of d.worst) {
+    const tr = document.createElement("tr");
+    const t1 = document.createElement("td"); t1.textContent = w.question;
+    const tA = document.createElement("td"); tA.textContent = w.answer || ""; tA.style.color = "var(--text-2)";
+    const t2 = document.createElement("td"); t2.textContent = w.failure_type || "—";
+    const t3 = document.createElement("td"); t3.textContent = w.ts;
+    const t4 = document.createElement("td");
+    const a = document.createElement("a"); a.href = "/dashboard/logs"; a.textContent = "לוג ↗"; a.style.color = "var(--cyan)";
+    t4.appendChild(a);
+    tr.append(t1, tA, t2, t3, t4);
+    worstEl.appendChild(tr);
+  }
+  if (!d.worst.length) worstEl.innerHTML = '<tr><td colspan="5" style="color:var(--text-2);text-align:center;">אין כשלים מתועדים</td></tr>';
+}
+
+async function startBackfill() {
+  await fetch("/dashboard/eval/backfill", {method:"POST"});
+  pollBf();
+}
+
+async function pollBf() {
+  const res = await fetch("/dashboard/eval/backfill/status");
+  if (!res.ok) return;
+  const s = await res.json();
+  document.getElementById("bf-status").textContent =
+    s.running ? `שופט… ${s.done}/${s.total}` : (s.total ? `הסתיים: ${s.judged} נשפטו, ${s.errors} שגיאות` : "");
+  if (s.running) setTimeout(pollBf, 2000); else if (s.total) load();
+}
+
+load(); pollBf();
+</script>
+</body>
+</html>

@@ -178,7 +178,7 @@
         </div>
 
         <div class="shan-nav-dd">
-            <button type="button" class="shan-nav-link{% if _path.startswith(('/dashboard/users', '/dashboard/learning', '/dashboard/logs', '/dashboard/llm-config', '/dashboard/raci-intelligence', '/dashboard/eval')) %} active{% endif %}">
+            <button type="button" class="shan-nav-link{% if _path.startswith(('/dashboard/users', '/dashboard/learning', '/dashboard/logs', '/dashboard/llm-config', '/dashboard/raci-intelligence', '/dashboard/eval', '/dashboard/quality')) %} active{% endif %}">
                 ⚙️ מערכת <span class="shan-nav-caret">▼</span>
             </button>
             <div class="shan-nav-dd-menu">
@@ -188,7 +188,8 @@
                 <a href="/dashboard/logs" class="shan-nav-link{% if _path.startswith('/dashboard/logs') %} active{% endif %}">📑 לוגים</a>
                 <a href="/dashboard/llm-config" class="shan-nav-link{% if _path.startswith('/dashboard/llm-config') %} active{% endif %}">🤖 מודל AI</a>
                 <a href="/dashboard/raci-intelligence" class="shan-nav-link{% if _path.startswith('/dashboard/raci-intelligence') %} active{% endif %}">🧩 RACI בינה</a>
-                <a href="/dashboard/eval" class="shan-nav-link{% if _path.startswith('/dashboard/eval') %} active{% endif %}">🧪 Eval</a>
+                <a href="/dashboard/eval" class="shan-nav-link{% if _path.startswith('/dashboard/eval') %} active{% endif %}">🛠 מחזור אבחון</a>
+                <a href="/dashboard/quality" class="shan-nav-link{% if _path.startswith('/dashboard/quality') %} active{% endif %}">🧪 איכות AI</a>
             </div>
         </div>
     </div>

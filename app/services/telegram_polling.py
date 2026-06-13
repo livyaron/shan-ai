@@ -105,6 +105,21 @@ def _feedback_keyboard(log_id: int) -> InlineKeyboardMarkup:
     ]])
 
 
+CAUSE_MAP = {
+    "WRONG_PROJECT": "פרויקט לא נכון",
+    "MISSING_DATA": "חסר מידע",
+    "HALLUCINATION": "תשובה שגויה",
+}
+
+
+def _cause_keyboard(log_id: int) -> InlineKeyboardMarkup:
+    """Follow-up after 👎: one tap classifies the failure cause."""
+    rows = [[InlineKeyboardButton(label, callback_data=f"lfc:{log_id}:{code}")]
+            for code, label in CAUSE_MAP.items()]
+    rows.append([InlineKeyboardButton("דלג", callback_data=f"lfc:{log_id}:SKIP")])
+    return InlineKeyboardMarkup(rows)
+
+
 class TelegramPollingBot:
     """Telegram bot that processes updates via webhook."""
 
@@ -1030,6 +1045,32 @@ class TelegramPollingBot:
             )
             return
 
+        # --- Query log failure cause (after 👎) ---
+        if query.data.startswith("lfc:"):
+            from app.models import QueryLog as _QL
+            parts = query.data.split(":", 2)
+            if len(parts) != 3:
+                return
+            _, lfc_log_id, lfc_code = parts
+            if lfc_code in CAUSE_MAP:
+                async with async_session_maker() as session:
+                    try:
+                        log = await session.get(_QL, int(lfc_log_id))
+                        if log:
+                            log.failure_type = lfc_code
+                            await session.commit()
+                    except ValueError:
+                        return
+            try:
+                await query.edit_message_reply_markup(reply_markup=None)
+            except Exception:
+                pass
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text="\u200Fתודה! זה עוזר לשפר את המערכת.",
+            )
+            return
+
         try:
             parts = data.split(":")
             action = parts[0]
@@ -1099,15 +1140,21 @@ class TelegramPollingBot:
                 if log:
                     log.user_feedback = 1 if action == "lfb_up" else -1
                     await session.commit()
-                emoji = "👍" if action == "lfb_up" else "👎"
                 try:
                     await query.edit_message_reply_markup(reply_markup=None)
                 except Exception:
                     pass
-                await context.bot.send_message(
-                    chat_id=update.effective_chat.id,
-                    text=f"\u200F{emoji} תודה! הפידבק נשמר.",
-                )
+                if action == "lfb_up":
+                    await context.bot.send_message(
+                        chat_id=update.effective_chat.id,
+                        text="\u200F👍 תודה! הפידבק נשמר.",
+                    )
+                else:
+                    await context.bot.send_message(
+                        chat_id=update.effective_chat.id,
+                        text="\u200F👎 נשמר. מה היה לא בסדר?",
+                        reply_markup=_cause_keyboard(decision_id),
+                    )
                 return
 
             # --- Decision feedback score (1-5 inline buttons) ---

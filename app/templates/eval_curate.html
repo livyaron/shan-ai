@@ -63,6 +63,21 @@
             <tr><td colspan="4" style="text-align:center; color: var(--text-2);">טוען…</td></tr>
         </tbody>
     </table>
+
+    <h2 style="color:var(--cyan);font-size:1.1rem;margin-top:2rem;">📥 מועמדים מהשטח (מ-query_logs)</h2>
+    <table>
+        <thead>
+            <tr>
+                <th style="width: 30%;">שאלה</th>
+                <th style="width: 40%;">תשובה אחרונה</th>
+                <th style="width: 15%;">אות</th>
+                <th style="width: 15%;">פעולות</th>
+            </tr>
+        </thead>
+        <tbody id="cand-rows">
+            <tr><td colspan="4" style="text-align:center; color: var(--text-2);">טוען…</td></tr>
+        </tbody>
+    </table>
 </div>
 
 <script>
@@ -88,6 +103,7 @@ function render(proposals) {
             <td>${badge(p.source)}</td>
             <td class="actions">
                 <button class="success" data-action="approve" data-idx="${idx}">${p.approved ? 'עדכון' : '✓ אישור'}</button>
+                ${!p.approved && p.source !== 'db_lookup' ? `<button data-action="llm" data-idx="${idx}">🪄 LLM</button>` : ''}
                 <button data-action="skip" data-idx="${idx}">דילוג</button>
                 ${p.approved ? `<button class="danger" data-action="delete" data-idx="${idx}">✗</button>` : ''}
             </td>
@@ -131,6 +147,27 @@ rowsEl.addEventListener("click", async (e) => {
         if (!confirm("למחוק תשובת זהב?")) return;
         await fetch(`/dashboard/eval/gold/${p.question_hash}`, {method: "DELETE"});
         await load();
+    } else if (btn.dataset.action === "llm") {
+        const ta = document.querySelector(`textarea[data-idx="${idx}"]`);
+        const orig = btn.textContent;
+        btn.disabled = true; btn.textContent = "⏳ חושב…";
+        try {
+            const r = await fetch("/dashboard/eval/gold/propose_one", {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({question: p.question}),
+            });
+            if (r.ok) {
+                const data = await r.json();
+                ta.value = data.answer || "";
+                p.proposed_answer = data.answer;
+                p.source = data.source;
+                p.target_project = data.target_project;
+                p.target_field = data.target_field;
+            }
+        } finally {
+            btn.disabled = false; btn.textContent = orig;
+        }
     } else if (btn.dataset.action === "skip") {
         btn.closest("tr").style.opacity = 0.4;
     }
@@ -145,6 +182,62 @@ document.getElementById("bulk-approve").onclick = async () => {
 document.getElementById("reload").onclick = load;
 
 load();
+
+async function loadCandidates() {
+    const res = await fetch("/dashboard/eval/gold/candidates");
+    if (!res.ok) {
+        document.getElementById("cand-rows").innerHTML =
+            '<tr><td colspan="4" style="text-align:center;color:var(--red);">שגיאה בטעינת מועמדים</td></tr>';
+        return;
+    }
+    const data = await res.json();
+    const tb = document.getElementById("cand-rows");
+    tb.innerHTML = "";
+    for (const c of data.candidates) {
+        const sig = c.user_feedback ? (c.user_feedback > 0 ? "👍" : "👎")
+                  : c.judge_verdict ? `${c.judge_verdict}${c.failure_type ? " · " + c.failure_type : ""}`
+                  : `×${c.count}`;
+        const tr = document.createElement("tr");
+        const tdQ = document.createElement("td"); tdQ.textContent = c.question;
+        const tdA = document.createElement("td"); tdA.style.color = "var(--text-2)"; tdA.textContent = (c.ai_response || "").slice(0, 160);
+        const tdS = document.createElement("td"); tdS.textContent = sig;
+        const tdAct = document.createElement("td"); tdAct.className = "actions";
+        const btn = document.createElement("button"); btn.textContent = "הצע תשובה";
+        btn.onclick = () => proposeFor(c.question);
+        tdAct.appendChild(btn);
+        tr.append(tdQ, tdA, tdS, tdAct);
+        tb.appendChild(tr);
+    }
+    if (!data.candidates.length) {
+        tb.innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--text-2);">אין מועמדים</td></tr>';
+    }
+}
+
+async function proposeFor(question) {
+    const res = await fetch(`/dashboard/eval/gold/proposals?question=${encodeURIComponent(question)}`);
+    const data = await res.json();
+    const p = (data.proposals || [])[0] || {};
+    const answer = prompt("‏אשר/ערוך תשובת זהב:", p.proposed_answer || "");
+    if (answer === null) return;
+    const saveRes = await fetch("/dashboard/eval/gold/save", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({
+            question: question,
+            gold_answer: answer,
+            target_project: p.target_project || null,
+            target_field: p.target_field || null,
+            source: p.source || "manual",
+        }),
+    });
+    if (!saveRes.ok) {
+        alert("‏שמירת תשובת הזהב נכשלה — נסה שוב.");
+        return;
+    }
+    loadCandidates();
+    await load();
+}
+loadCandidates();
 </script>
 </body>
 </html>

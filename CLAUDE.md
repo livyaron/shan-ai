@@ -42,3 +42,12 @@
 ## 6. Project Knowledge Map
 - **Knowledge Base:** Refer to `@docs/gotchas.md` for fixed bugs (e.g., Hebrew quote breaking JSON).
 - **Service Map:** Refer to `@docs/architecture.md` for `app/services/` responsibilities.
+
+## 7. IMPORTANT
+- **NEVER lie**
+- **NEVER guess**
+- **ALWAYS verify**
+
+## 8. superpowers
+- in every response, try to use supwerpowers skills if possible.
+
