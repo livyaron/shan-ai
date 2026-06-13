@@ -285,6 +285,7 @@ _rejudge_task: asyncio.Task | None = None
 
 @router.post("/eval/run")
 async def eval_run(
+    repair: bool = True,
     session: AsyncSession = Depends(get_db_session),
     current_user: User = Depends(get_current_user),
 ):
@@ -301,13 +302,13 @@ async def eval_run(
     async def _runner():
         async with async_session_maker() as own:
             try:
-                await run_cycle(own, user_id=user_id, emit=_emit_log)
+                await run_cycle(own, user_id=user_id, emit=_emit_log, repair=repair)
             except Exception as e:
                 logger.exception("eval cycle failed")
                 _emit_log({"type": "cycle_error", "error": str(e)})
 
     _cycle_task = asyncio.create_task(_runner())
-    _emit_log({"type": "cycle_triggered", "user_id": user_id})
+    _emit_log({"type": "cycle_triggered", "user_id": user_id, "repair": repair})
     return JSONResponse({"ok": True})
 
 
@@ -479,9 +480,15 @@ async def quality_data(
         select(func.count()).select_from(QueryLog).where(QueryLog.judged_against_gold.is_(False))
     )).scalar() or 0
 
+    last_run = (await session.execute(
+        select(EvalRun).where(EvalRun.status == "completed").order_by(EvalRun.id.desc()).limit(1)
+    )).scalar_one_or_none()
+    live_fail = (last_run.failed_questions or []) if last_run else []
+
     return {"run_trend": run_trend, "verdicts": verdicts, "failures": failures,
             "feedback_weekly": fb_weekly, "worst": worst,
-            "gold_coverage": {"gold_backed": gold_backed, "guessed": guessed, "gold_total": gold_total}}
+            "gold_coverage": {"gold_backed": gold_backed, "guessed": guessed, "gold_total": gold_total},
+            "live_failed": live_fail}
 
 
 # ───────────────────────── gold candidates ─────────────────────────
