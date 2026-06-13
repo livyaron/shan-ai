@@ -144,6 +144,7 @@ class TelegramPollingBot:
         self.application.add_handler(CommandHandler("menu", self.handle_menu))
         self.application.add_handler(CommandHandler("ask", self.handle_ask))
         self.application.add_handler(CommandHandler("report", self.handle_report))
+        self.application.add_handler(CommandHandler("gold", self.handle_gold))
         self.application.add_handler(CallbackQueryHandler(self.handle_callback))
         self.application.add_handler(
             MessageHandler(filters.Document.ALL, self.handle_document)
@@ -384,6 +385,30 @@ class TelegramPollingBot:
             )
         await send_report_to_user(context.bot, update.effective_chat.id, sections)
 
+    async def handle_gold(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """/gold — manager-only gold curation of ungolded production questions."""
+        from app.services import gold_telegram_service as gtg
+        from app.services.gold_truth_service import propose_gold
+        telegram_id = update.effective_user.id
+        async with async_session_maker() as session:
+            user = await session.scalar(select(User).where(User.telegram_id == telegram_id))
+            if not gtg.is_manager(user):
+                await update.message.reply_text("‏🔒 פקודה זו זמינה למנהלים בלבד.")
+                return
+            cand = await gtg.next_candidate(session, exclude_questions=set())
+            if not cand:
+                await update.message.reply_text("‏✅ אין שאלות הממתינות לתשובת זהב.")
+                return
+            proposal = await propose_gold(session, cand["question"], use_llm=True)
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=("‏🥇 <b>בניית תשובת זהב</b>\n\n"
+                  f"‏<b>שאלה:</b> {cand['question']}\n\n"
+                  f"‏<b>הצעה:</b> {proposal['answer']}"),
+            parse_mode="HTML",
+            reply_markup=gtg.gold_keyboard(cand["id"]),
+        )
+
     # ------------------------------------------------------------------
     # /ask command — knowledge base Q&A
     # ------------------------------------------------------------------
@@ -547,6 +572,16 @@ class TelegramPollingBot:
                     parse_mode="HTML",
                     reply_markup=build_feedback_results_keyboard(fb_decs, fb_back_pg, fb_tot),
                 )
+                return
+
+            from app.services.telegram_state import _awaiting_gold_text
+            if telegram_id in _awaiting_gold_text:
+                gold_state = _awaiting_gold_text.pop(telegram_id)
+                from app.services.gold_truth_service import save_gold
+                async with async_session_maker() as gs:
+                    await save_gold(gs, question=gold_state["question"], gold_answer=text.strip(),
+                                    user_id=user.id, source="telegram")
+                await update.message.reply_text("‏✅ תשובת הזהב נשמרה. שלח /gold להמשך.")
                 return
 
             # Check if user is providing feedback text (post-mortem) after a score
@@ -1042,6 +1077,68 @@ class TelegramPollingBot:
                 f"‏{answer}",
                 parse_mode="HTML",
                 reply_markup=_feedback_keyboard(log_id) if log_id else None,
+            )
+            return
+
+        # --- Manager gold curation (/gold) ---
+        if data.startswith("gold:"):
+            from app.services import gold_telegram_service as gtg
+            from app.services.gold_truth_service import save_gold, propose_gold
+            from app.services.telegram_state import _awaiting_gold_text
+            parts = data.split(":", 2)
+            if len(parts) != 3:
+                return
+            _, g_action, g_id = parts
+            telegram_id = update.effective_user.id
+            try:
+                await query.edit_message_reply_markup(reply_markup=None)
+            except Exception:
+                pass
+
+            if g_action == "stop":
+                _awaiting_gold_text.pop(telegram_id, None)
+                await context.bot.send_message(chat_id=update.effective_chat.id, text="‏⏹ הסתיים. תודה!")
+                return
+
+            async with async_session_maker() as session:
+                user = await session.scalar(select(User).where(User.telegram_id == telegram_id))
+                if not gtg.is_manager(user):
+                    await context.bot.send_message(chat_id=update.effective_chat.id,
+                                                   text="‏🔒 פקודה זו זמינה למנהלים בלבד.")
+                    return
+                from app.models import QueryLog as _QL_gold
+                try:
+                    qlog = await session.get(_QL_gold, int(g_id))
+                except ValueError:
+                    return
+                question = qlog.question if qlog else None
+
+                if g_action == "approve" and question:
+                    proposal = await propose_gold(session, question, use_llm=True)
+                    await save_gold(session, question=question, gold_answer=proposal["answer"],
+                                    user_id=user.id, source="telegram",
+                                    target_project=proposal.get("target_project"),
+                                    target_field=proposal.get("target_field"))
+                    await context.bot.send_message(chat_id=update.effective_chat.id, text="‏✅ נשמר כתשובת זהב.")
+                elif g_action == "edit" and question:
+                    _awaiting_gold_text[telegram_id] = {"question": question}
+                    await context.bot.send_message(chat_id=update.effective_chat.id,
+                                                   text="‏✏️ שלח/י את תשובת הזהב הנכונה כהודעה.")
+                    return
+
+                cand = await gtg.next_candidate(session, exclude_questions=set())
+                if not cand:
+                    await context.bot.send_message(chat_id=update.effective_chat.id,
+                                                   text="‏✅ אין עוד שאלות. תודה!")
+                    return
+                nxt = await propose_gold(session, cand["question"], use_llm=True)
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text=("‏🥇 <b>בניית תשובת זהב</b>\n\n"
+                      f"‏<b>שאלה:</b> {cand['question']}\n\n"
+                      f"‏<b>הצעה:</b> {nxt['answer']}"),
+                parse_mode="HTML",
+                reply_markup=gtg.gold_keyboard(cand["id"]),
             )
             return
 

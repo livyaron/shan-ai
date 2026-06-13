@@ -51,6 +51,9 @@ _awaiting_disambiguation: dict[int, list] = {}
 # { telegram_id (int): (decision_id, back_page) }  — rated via feedback menu, awaiting text note
 _awaiting_fb_menu_text: dict[int, tuple[int, int]] = {}
 
+# { telegram_id (int): {"question": str} }  — manager mid /gold edit
+_awaiting_gold_text: dict[int, dict] = {}
+
 
 from collections import deque
 import time as _time
