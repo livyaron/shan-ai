@@ -276,6 +276,27 @@ def _extract_dates(text: str) -> set[tuple[int, int, int]]:
     return out
 
 
+_PROJECT_ID_RE = re.compile(r"WB[A-Z]-?\d+(?:-\d+)*", re.IGNORECASE)
+
+
+def _project_ids(text: str) -> set[str]:
+    return {m.group(0).upper().replace(" ", "") for m in _PROJECT_ID_RE.finditer(text or "")}
+
+
+def _fact_based_check(ai_answer: str, gold_answer: str) -> float | None:
+    """Deterministic judge for gold naming project identifier(s).
+    1.0 if every gold id is in the answer; 0.0 if none; None (defer) if partial or no ids."""
+    gold_ids = _project_ids(gold_answer)
+    if not gold_ids:
+        return None
+    ans_ids = _project_ids(ai_answer)
+    if gold_ids <= ans_ids:
+        return 1.0
+    if not (gold_ids & ans_ids):
+        return 0.0
+    return None
+
+
 def _rule_check(ai_answer: str, gold_answer: str) -> float | None:
     a = normalize_hebrew(ai_answer).strip()
     g = normalize_hebrew(gold_answer).strip()
@@ -310,6 +331,11 @@ def _rule_check(ai_answer: str, gold_answer: str) -> float | None:
 
 async def compare_to_gold(question: str, ai_answer: str, gold_answer: str) -> float:
     """Return similarity score 0.0..1.0. Tries cheap rule check first, then LLM judge."""
+    # Deterministic fact-based pre-check: if gold names project id(s), judge by presence.
+    fb = _fact_based_check(ai_answer, gold_answer)
+    if fb is not None:
+        return fb
+
     # Phase 3: entity-token guard. If the question mentions a non-stop-word
     # token AND that token does NOT appear in ai_answer, treat as wrong entity
     # regardless of substring containment of the gold elsewhere.
