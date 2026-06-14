@@ -17,6 +17,17 @@ ROLE_HE = {
 }
 
 
+def _diff_outcome(suggested: list[dict], final: list[dict]) -> RACISuggestionStatusEnum:
+    """Compare suggested vs final RACI (order-independent). ACCEPTED if identical, else EDITED."""
+    def norm(items: list[dict]) -> set[tuple[int, str]]:
+        return {(int(i["user_id"]), str(i["role"]).upper()) for i in items}
+    return (
+        RACISuggestionStatusEnum.ACCEPTED
+        if norm(suggested or []) == norm(final or [])
+        else RACISuggestionStatusEnum.EDITED
+    )
+
+
 async def get_ai_raci_suggestions_from_text(problem_text: str) -> list[dict]:
     """
     Call AI and return RACI suggestions based on free-text problem description.
