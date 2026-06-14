@@ -50,3 +50,4 @@ async def test_record_raci_outcome_creates_edited_row(monkeypatch):
     assert suggestion.outcome == RACISuggestionStatusEnum.EDITED
     assert suggestion.final_assignments == [{"user_id": 1, "role": "C"}]
     assert suggestion.reason_analyzed is False
+    session.commit.assert_awaited_once()

@@ -827,8 +827,8 @@ async def record_raci_outcome(decision_id: int, final_items: list[dict]) -> None
     Creates the row if missing. Never raises."""
     from app.database import async_session_maker
     from datetime import datetime as _dt
-    norm_final = [{"user_id": int(i["user_id"]), "role": str(i["role"]).upper()} for i in final_items]
     try:
+        norm_final = [{"user_id": int(i["user_id"]), "role": str(i["role"]).upper()} for i in final_items]
         async with async_session_maker() as session:
             suggestion = await session.scalar(
                 select(RACISuggestion).where(RACISuggestion.decision_id == decision_id)
