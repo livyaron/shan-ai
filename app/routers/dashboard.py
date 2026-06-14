@@ -1879,6 +1879,14 @@ async def save_raci(
     await session.commit()
     logger.info(f"save_raci: new_assignments: {new_assignments}")
 
+    # Record this correction for learning (creates/updates RACISuggestion)
+    try:
+        from app.services.raci_service import record_raci_outcome
+        final_items = [{"user_id": uid, "role": role} for uid, role in new_assignments.items()]
+        await record_raci_outcome(decision_id, final_items)
+    except Exception as e:
+        logger.warning(f"save_raci: record_raci_outcome failed for decision {decision_id}: {e}")
+
     # Auto-approve if accountable is the submitter
     try:
         from app.services.raci_service import check_and_auto_approve

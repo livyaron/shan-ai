@@ -51,3 +51,11 @@ async def test_record_raci_outcome_creates_edited_row(monkeypatch):
     assert suggestion.final_assignments == [{"user_id": 1, "role": "C"}]
     assert suggestion.reason_analyzed is False
     session.commit.assert_awaited_once()
+
+
+def test_save_raci_records_outcome_source():
+    """save_raci must call record_raci_outcome with the new assignments."""
+    import inspect
+    from app.routers import dashboard
+    src = inspect.getsource(dashboard.save_raci)
+    assert "record_raci_outcome" in src, "save_raci must record the correction for learning"
