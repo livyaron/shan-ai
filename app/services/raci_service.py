@@ -821,42 +821,52 @@ async def _get_active_rules(session: AsyncSession) -> str:
         return ""
 
 
-async def mark_raci_accepted(decision_id: int) -> None:
-    """Mark a pending RACI suggestion as accepted (user approved as-is)."""
+async def record_raci_outcome(decision_id: int, final_items: list[dict]) -> None:
+    """Upsert the RACISuggestion outcome for a decision from the final assignments.
+    Sets ACCEPTED/EDITED via _diff_outcome, stores final_assignments, resets reason_analyzed.
+    Creates the row if missing. Never raises."""
     from app.database import async_session_maker
     from datetime import datetime as _dt
+    norm_final = [{"user_id": int(i["user_id"]), "role": str(i["role"]).upper()} for i in final_items]
     try:
         async with async_session_maker() as session:
             suggestion = await session.scalar(
                 select(RACISuggestion).where(RACISuggestion.decision_id == decision_id)
             )
-            if suggestion:
-                suggestion.outcome = RACISuggestionStatusEnum.ACCEPTED
-                suggestion.final_assignments = suggestion.suggested_assignments
-                suggestion.accepted_at = _dt.utcnow()
-                await session.commit()
-                logger.info(f"mark_raci_accepted: decision {decision_id} → ACCEPTED")
+            if not suggestion:
+                suggestion = RACISuggestion(
+                    decision_id=decision_id,
+                    suggested_assignments=norm_final,  # no prior proposal → treat final as suggestion
+                )
+                session.add(suggestion)
+            outcome = _diff_outcome(suggestion.suggested_assignments or norm_final, norm_final)
+            suggestion.outcome = outcome
+            suggestion.final_assignments = norm_final
+            suggestion.reason_analyzed = False
+            suggestion.accepted_at = _dt.utcnow()
+            await session.commit()
+            logger.info(f"record_raci_outcome: decision {decision_id} → {outcome.value} ({len(norm_final)} items)")
+    except Exception as e:
+        logger.warning(f"record_raci_outcome: failed for decision {decision_id}: {e}")
+
+
+async def mark_raci_accepted(decision_id: int) -> None:
+    """Mark a pending RACI suggestion as accepted (user approved as-is)."""
+    from app.database import async_session_maker
+    try:
+        async with async_session_maker() as session:
+            suggestion = await session.scalar(
+                select(RACISuggestion).where(RACISuggestion.decision_id == decision_id)
+            )
+            final = list(suggestion.suggested_assignments or []) if suggestion else []
+        await record_raci_outcome(decision_id, final)
     except Exception as e:
         logger.warning(f"mark_raci_accepted: failed for decision {decision_id}: {e}")
 
 
 async def mark_raci_edited(decision_id: int, final_items: list[dict]) -> None:
     """Mark a RACI suggestion as edited, storing the final assignments."""
-    from app.database import async_session_maker
-    from datetime import datetime as _dt
-    try:
-        async with async_session_maker() as session:
-            suggestion = await session.scalar(
-                select(RACISuggestion).where(RACISuggestion.decision_id == decision_id)
-            )
-            if suggestion:
-                suggestion.outcome = RACISuggestionStatusEnum.EDITED
-                suggestion.final_assignments = [{"user_id": i["user_id"], "role": i["role"]} for i in final_items]
-                suggestion.accepted_at = _dt.utcnow()
-                await session.commit()
-                logger.info(f"mark_raci_edited: decision {decision_id} → EDITED with {len(final_items)} items")
-    except Exception as e:
-        logger.warning(f"mark_raci_edited: failed for decision {decision_id}: {e}")
+    await record_raci_outcome(decision_id, final_items)
 
 
 async def propose_raci_to_submitter(
