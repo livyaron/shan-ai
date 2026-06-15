@@ -771,7 +771,7 @@ async def build_raci_context(decision, session: AsyncSession) -> tuple[str, dict
     return "\n\n".join(parts), meta
 
 
-async def _get_raci_few_shots(session: AsyncSession, limit: int = 4) -> str:
+async def _get_raci_few_shots(session: AsyncSession, limit: int = 8) -> str:
     """Return few-shot examples from recent accepted/edited RACI suggestions for prompt injection."""
     try:
         from sqlalchemy import select as _sel
@@ -784,6 +784,12 @@ async def _get_raci_few_shots(session: AsyncSession, limit: int = 4) -> str:
             .order_by(RACISuggestion.accepted_at.desc())
             .limit(limit)
         )).all()
+
+        # corrections (EDITED) carry more signal than approvals (ACCEPTED) — surface them first
+        rows = sorted(
+            rows,
+            key=lambda r: (0 if r[0].outcome == RACISuggestionStatusEnum.EDITED else 1),
+        )
 
         if not rows:
             return ""

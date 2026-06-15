@@ -105,3 +105,11 @@ def test_get_raci_patterns_uses_corrections_not_feedback_gate():
     src = inspect.getsource(lessons_service.get_raci_patterns)
     assert "RACISuggestion" in src
     assert "feedback_score >= 4" not in src.replace(" ", "").replace("\n", "") or "RACISuggestion" in src
+
+
+def test_few_shots_prioritizes_edited_and_raises_limit():
+    import inspect
+    from app.services import raci_service
+    src = inspect.getsource(raci_service._get_raci_few_shots)
+    assert "limit: int = 8" in src, "few-shot limit should be raised to 8"
+    assert "EDITED" in src
