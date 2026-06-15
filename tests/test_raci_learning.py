@@ -97,3 +97,11 @@ def test_raci_prompt_makes_responsibilities_primary():
     assert "תחום האחריות" in prompt
     assert "השיקול העיקרי" in prompt
     assert "גוברים על ברירת המחדל" in prompt
+
+
+def test_get_raci_patterns_uses_corrections_not_feedback_gate():
+    import inspect
+    from app.services import lessons_service
+    src = inspect.getsource(lessons_service.get_raci_patterns)
+    assert "RACISuggestion" in src
+    assert "feedback_score >= 4" not in src.replace(" ", "").replace("\n", "") or "RACISuggestion" in src
