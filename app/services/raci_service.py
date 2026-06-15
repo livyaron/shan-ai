@@ -182,13 +182,7 @@ async def assign_raci_from_ai(decision_id: int) -> None:
                 "critical": "קריטי", "uncertain": "לא ודאי"
             }.get(decision.type.value, decision.type.value)
 
-            # Fetch RACI patterns from successful past decisions
-            raci_patterns = ""
-            try:
-                from app.services.lessons_service import get_raci_patterns
-                raci_patterns = await get_raci_patterns(decision.type.value, session)
-            except Exception:
-                pass
+            context_text, _context_meta = await build_raci_context(decision, session)
 
             prompt = f"""אתה מומחה לניהול RACI בארגונים.
 
@@ -206,7 +200,7 @@ async def assign_raci_from_ai(decision_id: int) -> None:
 משתמשים זמינים:
 {chr(10).join(users_desc)}
 
-{raci_patterns}
+{context_text}
 
 הנחיות RACI:
 1. בחר Accountable מהדרגים הגבוהים — מנהל אגף או סגן מנהל אגף
@@ -580,15 +574,7 @@ async def generate_raci_for_decision(decision_id: int) -> tuple[list[dict], dict
                 "critical": "קריטי", "uncertain": "לא ודאי"
             }.get(decision.type.value, decision.type.value)
 
-            raci_patterns = ""
-            try:
-                from app.services.lessons_service import get_raci_patterns
-                raci_patterns = await get_raci_patterns(decision.type.value, session)
-            except Exception:
-                pass
-
-            few_shots = await _get_raci_few_shots(session)
-            active_rules = await _get_active_rules(session)
+            context_text, _context_meta = await build_raci_context(decision, session)
 
             prompt = f"""אתה מומחה לניהול RACI בארגונים.
 
@@ -606,9 +592,7 @@ async def generate_raci_for_decision(decision_id: int) -> tuple[list[dict], dict
 משתמשים זמינים:
 {chr(10).join(users_desc)}
 
-{raci_patterns}
-{few_shots}
-{active_rules}
+{context_text}
 
 הנחיות RACI:
 1. בחר Accountable מהדרגים הגבוהים — מנהל אגף או סגן מנהל אגף
@@ -753,6 +737,53 @@ async def save_pregenerated_raci(decision_id: int, valid_items: list[dict], pars
 
     except Exception as e:
         logger.error(f"save_pregenerated_raci failed for decision {decision_id}: {e}", exc_info=True)
+
+
+async def _count_corrections(session: AsyncSession) -> dict:
+    """Counts for the learning footprint: edited corrections, active rules, accepted suggestions."""
+    from sqlalchemy import func as _f
+    try:
+        edits = await session.scalar(
+            select(_f.count()).select_from(RACISuggestion)
+            .where(RACISuggestion.outcome == RACISuggestionStatusEnum.EDITED)
+        ) or 0
+        rules = await session.scalar(
+            select(_f.count()).select_from(RACIRule).where(RACIRule.is_active == True)
+        ) or 0
+        accepted = await session.scalar(
+            select(_f.count()).select_from(RACISuggestion)
+            .where(RACISuggestion.outcome == RACISuggestionStatusEnum.ACCEPTED)
+        ) or 0
+        return {"past_edits": int(edits), "rules": int(rules), "patterns": int(accepted)}
+    except Exception:
+        return {"past_edits": 0, "rules": 0, "patterns": 0}
+
+
+async def build_raci_context(decision, session: AsyncSession) -> tuple[str, dict]:
+    """Single learned-signal block (patterns + few-shots + active rules) for the RACI prompt.
+    Returns (context_text, context_meta). Used by both assignment paths."""
+    parts = []
+    try:
+        from app.services.lessons_service import get_raci_patterns
+        patterns = await get_raci_patterns(decision.type.value, session)
+        if patterns:
+            parts.append(patterns)
+    except Exception:
+        pass
+    try:
+        few_shots = await _get_raci_few_shots(session)
+        if few_shots:
+            parts.append(few_shots)
+    except Exception:
+        pass
+    try:
+        rules = await _get_active_rules(session)
+        if rules:
+            parts.append(rules)
+    except Exception:
+        pass
+    meta = await _count_corrections(session)
+    return "\n\n".join(parts), meta
 
 
 async def _get_raci_few_shots(session: AsyncSession, limit: int = 4) -> str:
