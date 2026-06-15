@@ -82,3 +82,18 @@ async def test_build_raci_context_returns_text_and_meta(monkeypatch):
     assert "כללים" in text and "דוגמאות" in text
     assert meta["past_edits"] == 4
     assert meta["rules"] == 3
+
+
+def test_raci_prompt_makes_responsibilities_primary():
+    from app.services.raci_service import _build_raci_prompt
+    prompt = _build_raci_prompt(
+        submitter_str="דנה | מהנדסת",
+        type_he="רגיל",
+        summary="תקלה במכרז ספקים",
+        action="לפרסם מכרז חדש",
+        users_desc="- ID=7 | דנה | תחום אחריות: מכרזים ורכש",
+        context_text="",
+    )
+    assert "תחום האחריות" in prompt
+    assert "השיקול העיקרי" in prompt
+    assert "גוברים על ברירת המחדל" in prompt

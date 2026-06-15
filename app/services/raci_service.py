@@ -52,7 +52,7 @@ async def get_ai_raci_suggestions_from_text(problem_text: str) -> list[dict]:
                 manager = all_users.get(u.manager_id)
                 manager_str = f", מנהל: {manager.username}" if manager else ""
                 hierarchy = f", רמה {u.hierarchy_level}" if u.hierarchy_level else ""
-                resp_str = f", תחום: {u.responsibilities}" if u.responsibilities else ""
+                resp_str = f" | תחום אחריות: {u.responsibilities}" if u.responsibilities else ""
                 users_desc.append(
                     f"- ID={u.id} | {u.username} | {u.job_title or role_he}{hierarchy}{manager_str}{resp_str}"
                 )
@@ -140,6 +140,49 @@ async def get_ai_raci_suggestions_from_text(problem_text: str) -> list[dict]:
         return []
 
 
+def _build_raci_prompt(submitter_str: str, type_he: str, summary: str, action: str,
+                       users_desc: str, context_text: str) -> str:
+    """Shared RACI prompt. תחום אחריות is the primary signal for R/C; rules/edits override defaults."""
+    return f"""אתה מומחה לניהול RACI בארגונים.
+
+הגדרות תפקידים:
+- R (Responsible) = האחראי לביצוע ההחלטה
+- A (Accountable) = בעל הסמכות הסופית — חייב להיות אחד בלבד, ורצוי מנהל בכיר
+- C (Consulted) = מייעץ — צריך להישאל לפני ביצוע
+- I (Informed) = מקבל עדכון בלבד לאחר הביצוע
+
+מגיש: {submitter_str}
+סוג החלטה: {type_he}
+סיכום: {summary}
+פעולה מומלצת: {action}
+
+משתמשים זמינים:
+{users_desc}
+
+{context_text}
+
+הנחיות RACI (לפי סדר חשיבות):
+1. בחר Responsible לפי ההתאמה בין הבעיה/הפעולה לבין תחום האחריות של המשתמש — זהו השיקול העיקרי, לא רק ההיררכיה.
+2. בחר Consulted לפי תחומי אחריות משיקים לבעיה (עד 3).
+3. בחר Accountable מהדרגים הגבוהים — מנהל אגף או סגן מנהל אגף.
+4. הוסף Informed לכל מי שצריך לדעת אך לא לפעול.
+5. לכל משתמש תפקיד אחד בלבד; חייב להיות בדיוק A אחד.
+6. כללים ותיקוני עבר גוברים על ברירת המחדל.
+7. בשדה reason ציין במפורש איזה תחום אחריות תאם לבחירה.
+
+הנחיות responsibility_updates:
+- אם הסיבה לבחירת משתמש מצביעה על תחום אחריות שאינו רשום — הוסף אותו.
+- כתוב ביטויים קצרים (2-5 מילים), בעברית.
+- אל תחזור על מה שכבר רשום.
+- אם אין מה להוסיף — השאר רשימה ריקה.
+
+החזר JSON בלבד:
+{{
+  "raci_distribution": [{{"user_id": מספר, "role": "R|A|C|I", "reason": "סיבה קצרה כולל תחום שתאם"}}],
+  "responsibility_updates": [{{"user_id": מספר, "learned": "תחום חדש שנלמד"}}]
+}}"""
+
+
 async def assign_raci_from_ai(decision_id: int) -> None:
     """
     Fetch decision + all users, ask Groq to assign RACI roles, validate per-item, save to DB.
@@ -169,7 +212,7 @@ async def assign_raci_from_ai(decision_id: int) -> None:
                 manager = all_users.get(u.manager_id)
                 manager_str = f", מנהל: {manager.username}" if manager else ""
                 hierarchy = f", רמה {u.hierarchy_level}" if u.hierarchy_level else ""
-                resp_str = f", תחום: {u.responsibilities}" if u.responsibilities else ""
+                resp_str = f" | תחום אחריות: {u.responsibilities}" if u.responsibilities else ""
                 users_desc.append(
                     f"- ID={u.id} | {u.username} | {u.job_title or role_he}{hierarchy}{manager_str}{resp_str}"
                 )
@@ -184,43 +227,14 @@ async def assign_raci_from_ai(decision_id: int) -> None:
 
             context_text, _context_meta = await build_raci_context(decision, session)
 
-            prompt = f"""אתה מומחה לניהול RACI בארגונים.
-
-הגדרות תפקידים:
-- R (Responsible) = האחראי לביצוע ההחלטה
-- A (Accountable) = בעל הסמכות הסופית — חייב להיות אחד בלבד, ורצוי מנהל בכיר
-- C (Consulted) = מייעץ — צריך להישאל לפני ביצוע
-- I (Informed) = מקבל עדכון בלבד לאחר הביצוע
-
-מגיש: {submitter_str}
-סוג החלטה: {type_he}
-סיכום: {decision.summary or '—'}
-פעולה מומלצת: {decision.recommended_action or '—'}
-
-משתמשים זמינים:
-{chr(10).join(users_desc)}
-
-{context_text}
-
-הנחיות RACI:
-1. בחר Accountable מהדרגים הגבוהים — מנהל אגף או סגן מנהל אגף
-2. בחר Responsible מהמבצעים הישירים
-3. הגבל Consulted ל-3 לכל היותר
-4. הוסף Informed לכל מי שצריך לדעת אבל לא לפעול
-5. לכל משתמש תפקיד אחד בלבד
-6. אם יש דפוסי RACI מוצלחים מהעבר — בכר אותם
-
-הנחיות responsibility_updates:
-- אם הסיבה לבחירת משתמש מצביעה על תחום אחריות שאינו רשום בשדה "תחום" שלו — הוסף אותו.
-- כתוב ביטויים קצרים (2-5 מילים), בעברית.
-- אל תחזור על מה שכבר רשום בשדה "תחום" של המשתמש.
-- אם אין מה להוסיף — השאר רשימה ריקה.
-
-החזר JSON בלבד:
-{{
-  "raci_distribution": [{{"user_id": מספר, "role": "R|A|C|I", "reason": "סיבה קצרה"}}],
-  "responsibility_updates": [{{"user_id": מספר, "learned": "תחום חדש שנלמד"}}]
-}}"""
+            prompt = _build_raci_prompt(
+                submitter_str=submitter_str,
+                type_he=type_he,
+                summary=decision.summary or "—",
+                action=decision.recommended_action or "—",
+                users_desc=chr(10).join(users_desc),
+                context_text=context_text,
+            )
 
             # 4. Call LLM
             from app.services.llm_router import llm_chat
@@ -562,7 +576,7 @@ async def generate_raci_for_decision(decision_id: int) -> tuple[list[dict], dict
                 manager = all_users.get(u.manager_id)
                 manager_str = f", מנהל: {manager.username}" if manager else ""
                 hierarchy = f", רמה {u.hierarchy_level}" if u.hierarchy_level else ""
-                resp_str = f", תחום: {u.responsibilities}" if u.responsibilities else ""
+                resp_str = f" | תחום אחריות: {u.responsibilities}" if u.responsibilities else ""
                 users_desc.append(
                     f"- ID={u.id} | {u.username} | {u.job_title or role_he}{hierarchy}{manager_str}{resp_str}"
                 )
@@ -576,43 +590,14 @@ async def generate_raci_for_decision(decision_id: int) -> tuple[list[dict], dict
 
             context_text, _context_meta = await build_raci_context(decision, session)
 
-            prompt = f"""אתה מומחה לניהול RACI בארגונים.
-
-הגדרות תפקידים:
-- R (Responsible) = האחראי לביצוע ההחלטה
-- A (Accountable) = בעל הסמכות הסופית — חייב להיות אחד בלבד, ורצוי מנהל בכיר
-- C (Consulted) = מייעץ — צריך להישאל לפני ביצוע
-- I (Informed) = מקבל עדכון בלבד לאחר הביצוע
-
-מגיש: {submitter_str}
-סוג החלטה: {type_he}
-סיכום: {decision.summary or '—'}
-פעולה מומלצת: {decision.recommended_action or '—'}
-
-משתמשים זמינים:
-{chr(10).join(users_desc)}
-
-{context_text}
-
-הנחיות RACI:
-1. בחר Accountable מהדרגים הגבוהים — מנהל אגף או סגן מנהל אגף
-2. בחר Responsible מהמבצעים הישירים
-3. הגבל Consulted ל-3 לכל היותר
-4. הוסף Informed לכל מי שצריך לדעת אבל לא לפעול
-5. לכל משתמש תפקיד אחד בלבד
-6. אם יש דפוסי RACI מוצלחים מהעבר — בכר אותם
-
-הנחיות responsibility_updates:
-- אם הסיבה לבחירת משתמש מצביעה על תחום אחריות שאינו רשום — הוסף אותו.
-- כתוב ביטויים קצרים (2-5 מילים), בעברית.
-- אל תחזור על מה שכבר רשום.
-- אם אין מה להוסיף — השאר רשימה ריקה.
-
-החזר JSON בלבד:
-{{
-  "raci_distribution": [{{"user_id": מספר, "role": "R|A|C|I", "reason": "סיבה קצרה"}}],
-  "responsibility_updates": [{{"user_id": מספר, "learned": "תחום חדש שנלמד"}}]
-}}"""
+            prompt = _build_raci_prompt(
+                submitter_str=submitter_str,
+                type_he=type_he,
+                summary=decision.summary or "—",
+                action=decision.recommended_action or "—",
+                users_desc=chr(10).join(users_desc),
+                context_text=context_text,
+            )
 
             from app.services.llm_router import llm_chat
             raw = await llm_chat(
