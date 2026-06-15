@@ -550,11 +550,11 @@ _pending_raci_suggestions: dict[int, dict] = {}
 # }
 
 
-async def generate_raci_for_decision(decision_id: int) -> tuple[list[dict], dict[int, str], dict]:
+async def generate_raci_for_decision(decision_id: int) -> tuple[list[dict], dict[int, str], dict, dict]:
     """
     Generate RACI suggestions for a decision WITHOUT saving to DB.
-    Returns (valid_items, user_names_by_id, parsed_llm_response).
-    Returns ([], {}, {}) on any failure.
+    Returns (valid_items, user_names_by_id, parsed_llm_response, context_meta).
+    Returns ([], {}, {}, {}) on any failure.
     """
     from app.database import async_session_maker
 
@@ -563,12 +563,12 @@ async def generate_raci_for_decision(decision_id: int) -> tuple[list[dict], dict
             decision = await session.get(Decision, decision_id)
             if not decision:
                 logger.warning(f"generate_raci_for_decision: decision {decision_id} not found")
-                return [], {}, {}
+                return [], {}, {}, {}
 
             all_users_q = await session.execute(select(User))
             all_users: dict[int, User] = {u.id: u for u in all_users_q.scalars().all()}
             if not all_users:
-                return [], {}, {}
+                return [], {}, {}, {}
 
             users_desc = []
             for u in all_users.values():
@@ -588,7 +588,7 @@ async def generate_raci_for_decision(decision_id: int) -> tuple[list[dict], dict
                 "critical": "קריטי", "uncertain": "לא ודאי"
             }.get(decision.type.value, decision.type.value)
 
-            context_text, _context_meta = await build_raci_context(decision, session)
+            context_text, context_meta = await build_raci_context(decision, session)
 
             prompt = _build_raci_prompt(
                 submitter_str=submitter_str,
@@ -614,7 +614,7 @@ async def generate_raci_for_decision(decision_id: int) -> tuple[list[dict], dict
                 end = raw.rfind("}") + 1
                 if start == -1 or end == 0:
                     logger.warning("generate_raci_for_decision: no JSON in response")
-                    return [], {}, {}
+                    return [], {}, {}, {}
                 parsed = json.loads(raw[start:end])
 
             raci_list = parsed.get("raci_distribution", [])
@@ -645,11 +645,11 @@ async def generate_raci_for_decision(decision_id: int) -> tuple[list[dict], dict
 
             user_names = {uid: u.username for uid, u in all_users.items()}
             logger.info(f"generate_raci_for_decision: {len(valid_items)} suggestions for decision {decision_id}")
-            return valid_items, user_names, parsed
+            return valid_items, user_names, parsed, context_meta
 
     except Exception as e:
         logger.error(f"generate_raci_for_decision failed: {e}", exc_info=True)
-        return [], {}, {}
+        return [], {}, {}, {}
 
 
 async def save_pregenerated_raci(decision_id: int, valid_items: list[dict], parsed: dict) -> None:
@@ -742,6 +742,16 @@ async def _count_corrections(session: AsyncSession) -> dict:
         return {"past_edits": int(edits), "rules": int(rules), "patterns": int(accepted)}
     except Exception:
         return {"past_edits": 0, "rules": 0, "patterns": 0}
+
+
+def _footprint_line(meta: dict) -> str:
+    """One-line learning footprint for the proposal; empty if nothing was learned yet."""
+    rules = meta.get("rules", 0)
+    edits = meta.get("past_edits", 0)
+    pats = meta.get("patterns", 0)
+    if not (rules or edits or pats):
+        return ""
+    return f"📚 התבסס על: {rules} כללים, {edits} תיקוני עבר, {pats} דוגמאות"
 
 
 async def build_raci_context(decision, session: AsyncSession) -> tuple[str, dict]:
@@ -904,7 +914,7 @@ async def propose_raci_to_submitter(
     import html as _html
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
-    valid_items, user_names, parsed = await generate_raci_for_decision(decision_id)
+    valid_items, user_names, parsed, context_meta = await generate_raci_for_decision(decision_id)
 
     if not valid_items:
         logger.warning(f"propose_raci_to_submitter: no suggestions for decision {decision_id}, falling back to auto-assign")
@@ -952,6 +962,9 @@ async def propose_raci_to_submitter(
         + "\n".join(lines)
         + "\n\n<i>אשר את חלוקת הצוות, או ערוך אותה בלוח הניהול.</i>"
     )
+    _fp = _footprint_line(context_meta)
+    if _fp:
+        msg += "\n\n<i>" + _fp + "</i>"
     keyboard = InlineKeyboardMarkup([[
         InlineKeyboardButton("✅ אשר RACI", callback_data=f"raci_approve:{decision_id}"),
         InlineKeyboardButton("✏️ ערוך", callback_data=f"raci_edit:{decision_id}"),

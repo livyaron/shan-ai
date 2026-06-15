@@ -113,3 +113,10 @@ def test_few_shots_prioritizes_edited_and_raises_limit():
     src = inspect.getsource(raci_service._get_raci_few_shots)
     assert "limit: int = 8" in src, "few-shot limit should be raised to 8"
     assert "EDITED" in src
+
+
+def test_footprint_line_formatter():
+    from app.services.raci_service import _footprint_line
+    assert _footprint_line({"rules": 3, "past_edits": 4, "patterns": 2}) == \
+        "📚 התבסס על: 3 כללים, 4 תיקוני עבר, 2 דוגמאות"
+    assert _footprint_line({"rules": 0, "past_edits": 0, "patterns": 0}) == ""
