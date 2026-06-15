@@ -149,54 +149,58 @@ def format_lessons_context(lessons: list[LessonLearned]) -> str:
 # ---------------------------------------------------------------------------
 
 async def get_raci_patterns(decision_type: str, session: AsyncSession) -> str:
-    """
-    Find which specific users (with their responsibilities) were assigned which RACI roles
-    in past high-feedback decisions of the same type.
-    Returns a formatted string for the RACI assignment prompt.
-    """
+    """Which users were assigned which RACI roles in past ACCEPTED/EDITED suggestions
+    for this decision type. Corrections are the primary signal (no feedback gate)."""
     try:
-        from app.models import DecisionRaciRole, Decision as _Decision, User as _User
-        from sqlalchemy import func as _func
+        from app.models import RACISuggestion, RACISuggestionStatusEnum, Decision as _Decision, User as _User
 
-        # Per-user counts: how many times each user was in each RACI role for this type (high feedback)
         rows = (await session.execute(
-            select(
-                DecisionRaciRole.role,
-                _User.id.label("user_id"),
-                _User.username,
-                _User.job_title,
-                _User.responsibilities,
-                _func.count().label("cnt"),
-            )
-            .join(_Decision, DecisionRaciRole.decision_id == _Decision.id)
-            .join(_User, DecisionRaciRole.user_id == _User.id)
+            select(RACISuggestion.final_assignments)
+            .join(_Decision, RACISuggestion.decision_id == _Decision.id)
             .where(_Decision.type == decision_type)
-            .where(_Decision.feedback_score >= 4)
-            .group_by(DecisionRaciRole.role, _User.id, _User.username, _User.job_title, _User.responsibilities)
-            .order_by(_func.count().desc())
-            .limit(20)
-        )).all()
+            .where(RACISuggestion.outcome.in_([
+                RACISuggestionStatusEnum.ACCEPTED, RACISuggestionStatusEnum.EDITED
+            ]))
+            .where(RACISuggestion.final_assignments.isnot(None))
+            .order_by(RACISuggestion.accepted_at.desc())
+            .limit(30)
+        )).scalars().all()
 
         if not rows:
             return ""
 
+        users_q = await session.execute(select(_User))
+        umap = {u.id: u for u in users_q.scalars().all()}
+
         RACI_HE = {"R": "ביצוע", "A": "סמכות", "C": "יועץ", "I": "לידיעה"}
+        counts: dict[tuple[str, int], int] = {}
+        for assignments in rows:
+            for item in (assignments or []):
+                try:
+                    key = (str(item["role"]).upper(), int(item["user_id"]))
+                except (KeyError, TypeError, ValueError):
+                    continue
+                counts[key] = counts.get(key, 0) + 1
+
+        if not counts:
+            return ""
 
         by_raci: dict[str, list[str]] = {}
-        for raci_role, user_id, username, job_title, responsibilities, cnt in rows:
-            role_val = raci_role.value if hasattr(raci_role, "value") else str(raci_role)
-            desc = username
-            if job_title:
-                desc += f" ({job_title})"
-            if responsibilities:
-                desc += f" — {responsibilities}"
-            label = f"{desc} [{cnt}×]"
-            by_raci.setdefault(role_val, []).append(label)
+        for (role_val, uid), cnt in sorted(counts.items(), key=lambda x: x[1], reverse=True):
+            u = umap.get(uid)
+            if not u:
+                continue
+            desc = u.username
+            if u.job_title:
+                desc += f" ({u.job_title})"
+            if u.responsibilities:
+                desc += f" — {u.responsibilities}"
+            by_raci.setdefault(role_val, []).append(f"{desc} [{cnt}×]")
 
-        lines = [f"דפוסי RACI מוצלחים עבור החלטות מסוג {decision_type} (פידבק ≥4):"]
-        for raci_role, labels in by_raci.items():
-            lines.append(f"  {raci_role} ({RACI_HE.get(raci_role, raci_role)}): {', '.join(labels[:3])}")
-        lines.append("→ כאשר משתמש עם תחום דומה קיים ברשימה — העדף אותו לאותו תפקיד RACI.")
+        lines = [f"דפוסי RACI מתיקוני העבר עבור החלטות מסוג {decision_type}:"]
+        for role_val, labels in by_raci.items():
+            lines.append(f"  {role_val} ({RACI_HE.get(role_val, role_val)}): {', '.join(labels[:3])}")
+        lines.append("→ כאשר משתמש עם תחום אחריות תואם קיים ברשימה — העדף אותו לאותו תפקיד RACI.")
         return "\n".join(lines)
 
     except Exception as e:

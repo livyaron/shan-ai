@@ -17,6 +17,17 @@ ROLE_HE = {
 }
 
 
+def _diff_outcome(suggested: list[dict], final: list[dict]) -> RACISuggestionStatusEnum:
+    """Compare suggested vs final RACI (order-independent). ACCEPTED if identical, else EDITED."""
+    def norm(items: list[dict]) -> set[tuple[int, str]]:
+        return {(int(i["user_id"]), str(i["role"]).upper()) for i in items}
+    return (
+        RACISuggestionStatusEnum.ACCEPTED
+        if norm(suggested or []) == norm(final or [])
+        else RACISuggestionStatusEnum.EDITED
+    )
+
+
 async def get_ai_raci_suggestions_from_text(problem_text: str) -> list[dict]:
     """
     Call AI and return RACI suggestions based on free-text problem description.
@@ -41,7 +52,7 @@ async def get_ai_raci_suggestions_from_text(problem_text: str) -> list[dict]:
                 manager = all_users.get(u.manager_id)
                 manager_str = f", מנהל: {manager.username}" if manager else ""
                 hierarchy = f", רמה {u.hierarchy_level}" if u.hierarchy_level else ""
-                resp_str = f", תחום: {u.responsibilities}" if u.responsibilities else ""
+                resp_str = f" | תחום אחריות: {u.responsibilities}" if u.responsibilities else ""
                 users_desc.append(
                     f"- ID={u.id} | {u.username} | {u.job_title or role_he}{hierarchy}{manager_str}{resp_str}"
                 )
@@ -129,6 +140,49 @@ async def get_ai_raci_suggestions_from_text(problem_text: str) -> list[dict]:
         return []
 
 
+def _build_raci_prompt(submitter_str: str, type_he: str, summary: str, action: str,
+                       users_desc: str, context_text: str) -> str:
+    """Shared RACI prompt. תחום אחריות is the primary signal for R/C; rules/edits override defaults."""
+    return f"""אתה מומחה לניהול RACI בארגונים.
+
+הגדרות תפקידים:
+- R (Responsible) = האחראי לביצוע ההחלטה
+- A (Accountable) = בעל הסמכות הסופית — חייב להיות אחד בלבד, ורצוי מנהל בכיר
+- C (Consulted) = מייעץ — צריך להישאל לפני ביצוע
+- I (Informed) = מקבל עדכון בלבד לאחר הביצוע
+
+מגיש: {submitter_str}
+סוג החלטה: {type_he}
+סיכום: {summary}
+פעולה מומלצת: {action}
+
+משתמשים זמינים:
+{users_desc}
+
+{context_text}
+
+הנחיות RACI (לפי סדר חשיבות):
+1. בחר Responsible לפי ההתאמה בין הבעיה/הפעולה לבין תחום האחריות של המשתמש — זהו השיקול העיקרי, לא רק ההיררכיה.
+2. בחר Consulted לפי תחומי אחריות משיקים לבעיה (עד 3).
+3. בחר Accountable מהדרגים הגבוהים — מנהל אגף או סגן מנהל אגף.
+4. הוסף Informed לכל מי שצריך לדעת אך לא לפעול.
+5. לכל משתמש תפקיד אחד בלבד; חייב להיות בדיוק A אחד.
+6. כללים ותיקוני עבר גוברים על ברירת המחדל.
+7. בשדה reason ציין במפורש איזה תחום אחריות תאם לבחירה.
+
+הנחיות responsibility_updates:
+- אם הסיבה לבחירת משתמש מצביעה על תחום אחריות שאינו רשום — הוסף אותו.
+- כתוב ביטויים קצרים (2-5 מילים), בעברית.
+- אל תחזור על מה שכבר רשום.
+- אם אין מה להוסיף — השאר רשימה ריקה.
+
+החזר JSON בלבד:
+{{
+  "raci_distribution": [{{"user_id": מספר, "role": "R|A|C|I", "reason": "סיבה קצרה כולל תחום שתאם"}}],
+  "responsibility_updates": [{{"user_id": מספר, "learned": "תחום חדש שנלמד"}}]
+}}"""
+
+
 async def assign_raci_from_ai(decision_id: int) -> None:
     """
     Fetch decision + all users, ask Groq to assign RACI roles, validate per-item, save to DB.
@@ -158,7 +212,7 @@ async def assign_raci_from_ai(decision_id: int) -> None:
                 manager = all_users.get(u.manager_id)
                 manager_str = f", מנהל: {manager.username}" if manager else ""
                 hierarchy = f", רמה {u.hierarchy_level}" if u.hierarchy_level else ""
-                resp_str = f", תחום: {u.responsibilities}" if u.responsibilities else ""
+                resp_str = f" | תחום אחריות: {u.responsibilities}" if u.responsibilities else ""
                 users_desc.append(
                     f"- ID={u.id} | {u.username} | {u.job_title or role_he}{hierarchy}{manager_str}{resp_str}"
                 )
@@ -171,51 +225,16 @@ async def assign_raci_from_ai(decision_id: int) -> None:
                 "critical": "קריטי", "uncertain": "לא ודאי"
             }.get(decision.type.value, decision.type.value)
 
-            # Fetch RACI patterns from successful past decisions
-            raci_patterns = ""
-            try:
-                from app.services.lessons_service import get_raci_patterns
-                raci_patterns = await get_raci_patterns(decision.type.value, session)
-            except Exception:
-                pass
+            context_text, _context_meta = await build_raci_context(decision, session)
 
-            prompt = f"""אתה מומחה לניהול RACI בארגונים.
-
-הגדרות תפקידים:
-- R (Responsible) = האחראי לביצוע ההחלטה
-- A (Accountable) = בעל הסמכות הסופית — חייב להיות אחד בלבד, ורצוי מנהל בכיר
-- C (Consulted) = מייעץ — צריך להישאל לפני ביצוע
-- I (Informed) = מקבל עדכון בלבד לאחר הביצוע
-
-מגיש: {submitter_str}
-סוג החלטה: {type_he}
-סיכום: {decision.summary or '—'}
-פעולה מומלצת: {decision.recommended_action or '—'}
-
-משתמשים זמינים:
-{chr(10).join(users_desc)}
-
-{raci_patterns}
-
-הנחיות RACI:
-1. בחר Accountable מהדרגים הגבוהים — מנהל אגף או סגן מנהל אגף
-2. בחר Responsible מהמבצעים הישירים
-3. הגבל Consulted ל-3 לכל היותר
-4. הוסף Informed לכל מי שצריך לדעת אבל לא לפעול
-5. לכל משתמש תפקיד אחד בלבד
-6. אם יש דפוסי RACI מוצלחים מהעבר — בכר אותם
-
-הנחיות responsibility_updates:
-- אם הסיבה לבחירת משתמש מצביעה על תחום אחריות שאינו רשום בשדה "תחום" שלו — הוסף אותו.
-- כתוב ביטויים קצרים (2-5 מילים), בעברית.
-- אל תחזור על מה שכבר רשום בשדה "תחום" של המשתמש.
-- אם אין מה להוסיף — השאר רשימה ריקה.
-
-החזר JSON בלבד:
-{{
-  "raci_distribution": [{{"user_id": מספר, "role": "R|A|C|I", "reason": "סיבה קצרה"}}],
-  "responsibility_updates": [{{"user_id": מספר, "learned": "תחום חדש שנלמד"}}]
-}}"""
+            prompt = _build_raci_prompt(
+                submitter_str=submitter_str,
+                type_he=type_he,
+                summary=decision.summary or "—",
+                action=decision.recommended_action or "—",
+                users_desc=chr(10).join(users_desc),
+                context_text=context_text,
+            )
 
             # 4. Call LLM
             from app.services.llm_router import llm_chat
@@ -531,11 +550,11 @@ _pending_raci_suggestions: dict[int, dict] = {}
 # }
 
 
-async def generate_raci_for_decision(decision_id: int) -> tuple[list[dict], dict[int, str], dict]:
+async def generate_raci_for_decision(decision_id: int) -> tuple[list[dict], dict[int, str], dict, dict]:
     """
     Generate RACI suggestions for a decision WITHOUT saving to DB.
-    Returns (valid_items, user_names_by_id, parsed_llm_response).
-    Returns ([], {}, {}) on any failure.
+    Returns (valid_items, user_names_by_id, parsed_llm_response, context_meta).
+    Returns ([], {}, {}, {}) on any failure.
     """
     from app.database import async_session_maker
 
@@ -544,12 +563,12 @@ async def generate_raci_for_decision(decision_id: int) -> tuple[list[dict], dict
             decision = await session.get(Decision, decision_id)
             if not decision:
                 logger.warning(f"generate_raci_for_decision: decision {decision_id} not found")
-                return [], {}, {}
+                return [], {}, {}, {}
 
             all_users_q = await session.execute(select(User))
             all_users: dict[int, User] = {u.id: u for u in all_users_q.scalars().all()}
             if not all_users:
-                return [], {}, {}
+                return [], {}, {}, {}
 
             users_desc = []
             for u in all_users.values():
@@ -557,7 +576,7 @@ async def generate_raci_for_decision(decision_id: int) -> tuple[list[dict], dict
                 manager = all_users.get(u.manager_id)
                 manager_str = f", מנהל: {manager.username}" if manager else ""
                 hierarchy = f", רמה {u.hierarchy_level}" if u.hierarchy_level else ""
-                resp_str = f", תחום: {u.responsibilities}" if u.responsibilities else ""
+                resp_str = f" | תחום אחריות: {u.responsibilities}" if u.responsibilities else ""
                 users_desc.append(
                     f"- ID={u.id} | {u.username} | {u.job_title or role_he}{hierarchy}{manager_str}{resp_str}"
                 )
@@ -569,55 +588,16 @@ async def generate_raci_for_decision(decision_id: int) -> tuple[list[dict], dict
                 "critical": "קריטי", "uncertain": "לא ודאי"
             }.get(decision.type.value, decision.type.value)
 
-            raci_patterns = ""
-            try:
-                from app.services.lessons_service import get_raci_patterns
-                raci_patterns = await get_raci_patterns(decision.type.value, session)
-            except Exception:
-                pass
+            context_text, context_meta = await build_raci_context(decision, session)
 
-            few_shots = await _get_raci_few_shots(session)
-            active_rules = await _get_active_rules(session)
-
-            prompt = f"""אתה מומחה לניהול RACI בארגונים.
-
-הגדרות תפקידים:
-- R (Responsible) = האחראי לביצוע ההחלטה
-- A (Accountable) = בעל הסמכות הסופית — חייב להיות אחד בלבד, ורצוי מנהל בכיר
-- C (Consulted) = מייעץ — צריך להישאל לפני ביצוע
-- I (Informed) = מקבל עדכון בלבד לאחר הביצוע
-
-מגיש: {submitter_str}
-סוג החלטה: {type_he}
-סיכום: {decision.summary or '—'}
-פעולה מומלצת: {decision.recommended_action or '—'}
-
-משתמשים זמינים:
-{chr(10).join(users_desc)}
-
-{raci_patterns}
-{few_shots}
-{active_rules}
-
-הנחיות RACI:
-1. בחר Accountable מהדרגים הגבוהים — מנהל אגף או סגן מנהל אגף
-2. בחר Responsible מהמבצעים הישירים
-3. הגבל Consulted ל-3 לכל היותר
-4. הוסף Informed לכל מי שצריך לדעת אבל לא לפעול
-5. לכל משתמש תפקיד אחד בלבד
-6. אם יש דפוסי RACI מוצלחים מהעבר — בכר אותם
-
-הנחיות responsibility_updates:
-- אם הסיבה לבחירת משתמש מצביעה על תחום אחריות שאינו רשום — הוסף אותו.
-- כתוב ביטויים קצרים (2-5 מילים), בעברית.
-- אל תחזור על מה שכבר רשום.
-- אם אין מה להוסיף — השאר רשימה ריקה.
-
-החזר JSON בלבד:
-{{
-  "raci_distribution": [{{"user_id": מספר, "role": "R|A|C|I", "reason": "סיבה קצרה"}}],
-  "responsibility_updates": [{{"user_id": מספר, "learned": "תחום חדש שנלמד"}}]
-}}"""
+            prompt = _build_raci_prompt(
+                submitter_str=submitter_str,
+                type_he=type_he,
+                summary=decision.summary or "—",
+                action=decision.recommended_action or "—",
+                users_desc=chr(10).join(users_desc),
+                context_text=context_text,
+            )
 
             from app.services.llm_router import llm_chat
             raw = await llm_chat(
@@ -634,7 +614,7 @@ async def generate_raci_for_decision(decision_id: int) -> tuple[list[dict], dict
                 end = raw.rfind("}") + 1
                 if start == -1 or end == 0:
                     logger.warning("generate_raci_for_decision: no JSON in response")
-                    return [], {}, {}
+                    return [], {}, {}, {}
                 parsed = json.loads(raw[start:end])
 
             raci_list = parsed.get("raci_distribution", [])
@@ -665,11 +645,11 @@ async def generate_raci_for_decision(decision_id: int) -> tuple[list[dict], dict
 
             user_names = {uid: u.username for uid, u in all_users.items()}
             logger.info(f"generate_raci_for_decision: {len(valid_items)} suggestions for decision {decision_id}")
-            return valid_items, user_names, parsed
+            return valid_items, user_names, parsed, context_meta
 
     except Exception as e:
         logger.error(f"generate_raci_for_decision failed: {e}", exc_info=True)
-        return [], {}, {}
+        return [], {}, {}, {}
 
 
 async def save_pregenerated_raci(decision_id: int, valid_items: list[dict], parsed: dict) -> None:
@@ -744,7 +724,64 @@ async def save_pregenerated_raci(decision_id: int, valid_items: list[dict], pars
         logger.error(f"save_pregenerated_raci failed for decision {decision_id}: {e}", exc_info=True)
 
 
-async def _get_raci_few_shots(session: AsyncSession, limit: int = 4) -> str:
+async def _count_corrections(session: AsyncSession) -> dict:
+    """Counts for the learning footprint: edited corrections, active rules, accepted suggestions."""
+    from sqlalchemy import func as _f
+    try:
+        edits = await session.scalar(
+            select(_f.count()).select_from(RACISuggestion)
+            .where(RACISuggestion.outcome == RACISuggestionStatusEnum.EDITED)
+        ) or 0
+        rules = await session.scalar(
+            select(_f.count()).select_from(RACIRule).where(RACIRule.is_active == True)
+        ) or 0
+        accepted = await session.scalar(
+            select(_f.count()).select_from(RACISuggestion)
+            .where(RACISuggestion.outcome == RACISuggestionStatusEnum.ACCEPTED)
+        ) or 0
+        return {"past_edits": int(edits), "rules": int(rules), "patterns": int(accepted)}
+    except Exception:
+        return {"past_edits": 0, "rules": 0, "patterns": 0}
+
+
+def _footprint_line(meta: dict) -> str:
+    """One-line learning footprint for the proposal; empty if nothing was learned yet."""
+    rules = meta.get("rules", 0)
+    edits = meta.get("past_edits", 0)
+    pats = meta.get("patterns", 0)
+    if not (rules or edits or pats):
+        return ""
+    return f"📚 התבסס על: {rules} כללים, {edits} תיקוני עבר, {pats} דוגמאות"
+
+
+async def build_raci_context(decision, session: AsyncSession) -> tuple[str, dict]:
+    """Single learned-signal block (patterns + few-shots + active rules) for the RACI prompt.
+    Returns (context_text, context_meta). Used by both assignment paths."""
+    parts = []
+    try:
+        from app.services.lessons_service import get_raci_patterns
+        patterns = await get_raci_patterns(decision.type.value, session)
+        if patterns:
+            parts.append(patterns)
+    except Exception:
+        pass
+    try:
+        few_shots = await _get_raci_few_shots(session)
+        if few_shots:
+            parts.append(few_shots)
+    except Exception:
+        pass
+    try:
+        rules = await _get_active_rules(session)
+        if rules:
+            parts.append(rules)
+    except Exception:
+        pass
+    meta = await _count_corrections(session)
+    return "\n\n".join(parts), meta
+
+
+async def _get_raci_few_shots(session: AsyncSession, limit: int = 8) -> str:
     """Return few-shot examples from recent accepted/edited RACI suggestions for prompt injection."""
     try:
         from sqlalchemy import select as _sel
@@ -757,6 +794,12 @@ async def _get_raci_few_shots(session: AsyncSession, limit: int = 4) -> str:
             .order_by(RACISuggestion.accepted_at.desc())
             .limit(limit)
         )).all()
+
+        # corrections (EDITED) carry more signal than approvals (ACCEPTED) — surface them first
+        rows = sorted(
+            rows,
+            key=lambda r: (0 if r[0].outcome == RACISuggestionStatusEnum.EDITED else 1),
+        )
 
         if not rows:
             return ""
@@ -810,42 +853,52 @@ async def _get_active_rules(session: AsyncSession) -> str:
         return ""
 
 
+async def record_raci_outcome(decision_id: int, final_items: list[dict]) -> None:
+    """Upsert the RACISuggestion outcome for a decision from the final assignments.
+    Sets ACCEPTED/EDITED via _diff_outcome, stores final_assignments, resets reason_analyzed.
+    Creates the row if missing. Never raises."""
+    from app.database import async_session_maker
+    from datetime import datetime as _dt
+    try:
+        norm_final = [{"user_id": int(i["user_id"]), "role": str(i["role"]).upper()} for i in final_items]
+        async with async_session_maker() as session:
+            suggestion = await session.scalar(
+                select(RACISuggestion).where(RACISuggestion.decision_id == decision_id)
+            )
+            if not suggestion:
+                suggestion = RACISuggestion(
+                    decision_id=decision_id,
+                    suggested_assignments=norm_final,  # no prior proposal → treat final as suggestion
+                )
+                session.add(suggestion)
+            outcome = _diff_outcome(suggestion.suggested_assignments or norm_final, norm_final)
+            suggestion.outcome = outcome
+            suggestion.final_assignments = norm_final
+            suggestion.reason_analyzed = False
+            suggestion.accepted_at = _dt.utcnow()
+            await session.commit()
+            logger.info(f"record_raci_outcome: decision {decision_id} → {outcome.value} ({len(norm_final)} items)")
+    except Exception as e:
+        logger.warning(f"record_raci_outcome: failed for decision {decision_id}: {e}")
+
+
 async def mark_raci_accepted(decision_id: int) -> None:
     """Mark a pending RACI suggestion as accepted (user approved as-is)."""
     from app.database import async_session_maker
-    from datetime import datetime as _dt
     try:
         async with async_session_maker() as session:
             suggestion = await session.scalar(
                 select(RACISuggestion).where(RACISuggestion.decision_id == decision_id)
             )
-            if suggestion:
-                suggestion.outcome = RACISuggestionStatusEnum.ACCEPTED
-                suggestion.final_assignments = suggestion.suggested_assignments
-                suggestion.accepted_at = _dt.utcnow()
-                await session.commit()
-                logger.info(f"mark_raci_accepted: decision {decision_id} → ACCEPTED")
+            final = list(suggestion.suggested_assignments or []) if suggestion else []
+        await record_raci_outcome(decision_id, final)
     except Exception as e:
         logger.warning(f"mark_raci_accepted: failed for decision {decision_id}: {e}")
 
 
 async def mark_raci_edited(decision_id: int, final_items: list[dict]) -> None:
     """Mark a RACI suggestion as edited, storing the final assignments."""
-    from app.database import async_session_maker
-    from datetime import datetime as _dt
-    try:
-        async with async_session_maker() as session:
-            suggestion = await session.scalar(
-                select(RACISuggestion).where(RACISuggestion.decision_id == decision_id)
-            )
-            if suggestion:
-                suggestion.outcome = RACISuggestionStatusEnum.EDITED
-                suggestion.final_assignments = [{"user_id": i["user_id"], "role": i["role"]} for i in final_items]
-                suggestion.accepted_at = _dt.utcnow()
-                await session.commit()
-                logger.info(f"mark_raci_edited: decision {decision_id} → EDITED with {len(final_items)} items")
-    except Exception as e:
-        logger.warning(f"mark_raci_edited: failed for decision {decision_id}: {e}")
+    await record_raci_outcome(decision_id, final_items)
 
 
 async def propose_raci_to_submitter(
@@ -861,7 +914,7 @@ async def propose_raci_to_submitter(
     import html as _html
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
-    valid_items, user_names, parsed = await generate_raci_for_decision(decision_id)
+    valid_items, user_names, parsed, context_meta = await generate_raci_for_decision(decision_id)
 
     if not valid_items:
         logger.warning(f"propose_raci_to_submitter: no suggestions for decision {decision_id}, falling back to auto-assign")
@@ -909,6 +962,9 @@ async def propose_raci_to_submitter(
         + "\n".join(lines)
         + "\n\n<i>אשר את חלוקת הצוות, או ערוך אותה בלוח הניהול.</i>"
     )
+    _fp = _footprint_line(context_meta)
+    if _fp:
+        msg += "\n\n<i>" + _fp + "</i>"
     keyboard = InlineKeyboardMarkup([[
         InlineKeyboardButton("✅ אשר RACI", callback_data=f"raci_approve:{decision_id}"),
         InlineKeyboardButton("✏️ ערוך", callback_data=f"raci_edit:{decision_id}"),
