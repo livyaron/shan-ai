@@ -10,10 +10,14 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
+# gemini-2.5-flash first: it honors responseMimeType (real enforced JSON mode) and
+# does NOT leak chain-of-thought, unlike the gemma-4 models which emit a reasoning
+# preamble that breaks JSON parsing. gemma-4 kept as text/backup.
+# (gemini-2.0-flash omitted — free-tier quota is 0 on this key → 429.)
 GEMMA_MODELS = [
-    "gemma-4-31b-it",          # best quality
+    "gemini-2.5-flash",        # clean JSON, no thinking leak
+    "gemma-4-31b-it",          # backup
     "gemma-4-26b-a4b-it",      # MoE variant, separate quota
-    "gemma-3-27b-it",          # fallback
 ]
 
 _BASE = "https://generativelanguage.googleapis.com/v1beta/models"
@@ -39,10 +43,45 @@ def _to_google_format(messages: list) -> tuple[str | None, list]:
 
 
 def _strip_json_fences(text: str) -> str:
-    """Remove markdown code fences so JSON can be parsed cleanly."""
+    """Extract a clean JSON value from a model response.
+
+    Handles markdown code fences AND a chain-of-thought preamble (the gemma-4
+    models leak reasoning lines before the JSON). Slices from the first '{' or
+    '[' to its matching closing bracket so leading/trailing prose is dropped.
+    """
     text = re.sub(r"^```(?:json)?\s*\n?", "", text, flags=re.IGNORECASE | re.MULTILINE)
     text = re.sub(r"\n?```\s*$", "", text, flags=re.MULTILINE)
-    return text.strip()
+    text = text.strip()
+
+    # Find the first JSON opener and slice to its matching close (ignoring
+    # brackets inside strings) — strips any thinking preamble/trailing text.
+    start = min((i for i in (text.find("{"), text.find("[")) if i != -1), default=-1)
+    if start == -1:
+        return text
+    opener = text[start]
+    closer = "}" if opener == "{" else "]"
+    depth = 0
+    in_str = False
+    esc = False
+    for i in range(start, len(text)):
+        c = text[i]
+        if in_str:
+            if esc:
+                esc = False
+            elif c == "\\":
+                esc = True
+            elif c == '"':
+                in_str = False
+        else:
+            if c == '"':
+                in_str = True
+            elif c == opener:
+                depth += 1
+            elif c == closer:
+                depth -= 1
+                if depth == 0:
+                    return text[start:i + 1]
+    return text[start:]  # unbalanced — return best effort
 
 
 def _strip_thinking(text: str) -> str:
@@ -88,12 +127,16 @@ async def gemma_chat(
         )
         system_text = f"{system_text}\n\n{json_instruction}" if system_text else json_instruction
 
+    gen_config: dict = {
+        "maxOutputTokens": max_tokens,
+        "temperature": temperature,
+    }
+    if json_mode:
+        # Enforced JSON mode (honored by gemini models; ignored harmlessly by gemma).
+        gen_config["responseMimeType"] = "application/json"
     payload: dict = {
         "contents": contents,
-        "generationConfig": {
-            "maxOutputTokens": max_tokens,
-            "temperature": temperature,
-        },
+        "generationConfig": gen_config,
     }
     if system_text:
         payload["system_instruction"] = {"parts": [{"text": system_text}]}
