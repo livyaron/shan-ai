@@ -1762,7 +1762,10 @@ async def _get_learned_instructions(session: AsyncSession) -> list[str]:
         row = await session.scalar(
             select(QuerySynonym).where(QuerySynonym.original == "__global_instructions__")
         )
-        return row.synonyms if row and row.synonyms else []
+        # Cap at 6 — the full list (16+) bloats the system prompt and eats per-minute
+        # token budget. Most-recent first (newest learnings carry the most signal).
+        instructions = row.synonyms if row and row.synonyms else []
+        return instructions[-6:]
     except Exception as e:
         logger.warning(f"_get_learned_instructions failed: {e}")
         return []
@@ -2181,10 +2184,11 @@ async def answer_with_full_context(
 
     combined = "\n\n".join(parts)
 
-    # Groq free tier: 12,000 tokens per request.
-    # Hebrew text ≈ 0.85 tokens/char (much denser than English).
-    # Budget: 12,000 - 2,000 (output) - 1,200 (system prompt) = 8,800 tokens → ~10,350 chars.
-    MAX_CONTEXT_CHARS = 10_000
+    # Groq free tier TPM: 70b=12,000, scout=30,000. Hebrew ≈ 0.85 tokens/char.
+    # Keep context well under 70b's 12k so the request still fits when prior calls
+    # in the same minute have eaten part of the per-minute budget (burst protection).
+    # Budget: ~6,000 ctx tokens + 2,000 output + 1,200 system ≈ 9,200 → fits 70b, big headroom on scout.
+    MAX_CONTEXT_CHARS = 6_000
     if len(combined) > MAX_CONTEXT_CHARS:
         combined = combined[:MAX_CONTEXT_CHARS] + "\n\n[...ההקשר קוצר בשל מגבלת טוקנים]"
         logger.warning(f"⚠️ Context truncated to {MAX_CONTEXT_CHARS} chars to stay within Groq token limit")

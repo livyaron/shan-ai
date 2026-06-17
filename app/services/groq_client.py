@@ -7,11 +7,14 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-# Tried in order — each has a separate rate-limit bucket on Groq
+# Tried in order — each has a separate rate-limit bucket on Groq.
+# 8b dropped from default chain: its free-tier TPM is only 6,000, smaller than a
+# typical RAG/decision request (~8.5k tokens) — it 429s every time and just burns
+# a fallback round. 70b (12k TPM) and scout (30k TPM) both fit the request.
+# Callers needing a tiny+fast model can still pass models=["llama-3.1-8b-instant"].
 MODELS = [
-    "llama-3.3-70b-versatile",                    # best quality
-    "meta-llama/llama-4-scout-17b-16e-instruct",  # separate quota
-    "llama-3.1-8b-instant",                       # fast, separate quota
+    "llama-3.3-70b-versatile",                    # best quality, 12k TPM — fits big context
+    "meta-llama/llama-4-scout-17b-16e-instruct",  # 30k TPM — most headroom under burst
     # qwen/qwen3-32b removed — thinking mode leaks chain-of-thought into answers
 ]
 
