@@ -174,9 +174,12 @@ async def gemma_chat(
                         await asyncio.sleep(1)
                 else:
                     raise
-            except (KeyError, IndexError) as e:
+            except (KeyError, IndexError, ValueError) as e:
+                # ValueError = empty response (model returned nothing usable).
+                # Treat like a transient failure and try the next model instead of
+                # aborting the whole chain — an empty gemma-26b shouldn't kill fallback.
                 last_error = e
-                logger.warning(f"gemma_chat: unexpected response from {model}: {e}")
+                logger.warning(f"gemma_chat: unexpected/empty response from {model}: {e}")
                 if i < len(model_list) - 1:
                     await asyncio.sleep(1)
 

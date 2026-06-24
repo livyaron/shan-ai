@@ -54,7 +54,10 @@ def start_scheduler() -> None:
         CronTrigger(day_of_week="sun", hour=7, minute=0, timezone="Asia/Jerusalem"),
         id="weekly_eval_summary", replace_existing=True,
     )
-    sch.add_job(_batch_eval_run, "interval", hours=3, id="batch_eval", replace_existing=True)
+    # 6h (was 3h): batch eval is the biggest periodic Groq consumer (8 questions ×
+    # multi-call pipeline × runs/day). Halving frequency keeps the daily TPD budget
+    # available for interactive decisions; full gold refresh ~2 days, fine on free tier.
+    sch.add_job(_batch_eval_run, "interval", hours=6, id="batch_eval", replace_existing=True)
     sch.start()
     _scheduler = sch
     logger.info("eval_cron: scheduler started (03:00 UTC nightly)")

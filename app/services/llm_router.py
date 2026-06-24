@@ -20,6 +20,27 @@ def get_last_llm_meta() -> tuple[str, bool]:
     """Return (provider_name, is_fallback) for the most recent llm_chat call in this task."""
     return _ctx_provider.get(), _ctx_is_fallback.get()
 
+
+def is_overload_error(exc: BaseException | None) -> bool:
+    """True if an exception (or its cause chain) is an LLM rate-limit / quota exhaustion.
+
+    Used to show users a 'system busy, try in a minute' message instead of a generic
+    error when ALL providers are rate-limited (Groq daily TPD + Gemma quota both hit).
+    """
+    seen: set[int] = set()
+    cur: BaseException | None = exc
+    while cur is not None and id(cur) not in seen:
+        seen.add(id(cur))
+        name = type(cur).__name__
+        if name in ("RateLimitError",):
+            return True
+        msg = str(cur).lower()
+        if "429" in msg or "rate limit" in msg or "rate_limit" in msg or "quota" in msg \
+                or "too many requests" in msg or "resource_exhausted" in msg:
+            return True
+        cur = cur.__cause__ or cur.__context__
+    return False
+
 # In-memory cache: {usage_name: (provider, fallback, timestamp)}
 _cache: dict[str, tuple[str, bool, float]] = {}
 CACHE_TTL = 30  # seconds

@@ -854,6 +854,14 @@ class TelegramPollingBot:
                 logger.info(f"Classification verdict for user {telegram_id}: {verdict}")
             except Exception as e:
                 logger.error(f"Classification failed: {e}", exc_info=True)
+                from app.services.llm_router import is_overload_error
+                if is_overload_error(e):
+                    await update.message.reply_text(
+                        "‏⏳ המערכת עמוסה כרגע (מכסת ה-AI היומית נוצלה). "
+                        "ההודעה לא נשמרה — נסה שוב בעוד מספר דקות.",
+                        parse_mode="HTML",
+                    )
+                    return
                 await update.message.reply_text(
                     "\u200F⚠️ שגיאה בניתוח הטקסט. נסה שוב.",
                     parse_mode="HTML",
@@ -911,6 +919,14 @@ class TelegramPollingBot:
                 pre_result = await decision_svc.analyze_only(user, text, conversation_context=conv_ctx)
             except Exception as _err:
                 logger.error(f"analyze_only failed: {_err}", exc_info=True)
+                from app.services.llm_router import is_overload_error
+                if is_overload_error(_err):
+                    await update.message.reply_text(
+                        "‏⏳ המערכת עמוסה כרגע (מכסת ה-AI היומית נוצלה). "
+                        "ההחלטה לא נשמרה — נסה שוב בעוד מספר דקות.",
+                        parse_mode="HTML",
+                    )
+                    return
                 await update.message.reply_text(
                     "‏⚠️ שגיאה בניתוח. נסה שוב.", parse_mode="HTML"
                 )

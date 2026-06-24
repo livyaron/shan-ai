@@ -8,13 +8,16 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 
 # Tried in order — each has a separate rate-limit bucket on Groq.
-# 8b dropped from default chain: its free-tier TPM is only 6,000, smaller than a
-# typical RAG/decision request (~8.5k tokens) — it 429s every time and just burns
-# a fallback round. 70b (12k TPM) and scout (30k TPM) both fit the request.
+# scout FIRST: its 30k TPM fits a typical RAG/decision request (~8.5k tokens) in one
+# shot. 70b's 12k TPM 429s on big context almost every time, then falls to scout
+# anyway — so leading with 70b doubled token spend per call (a 429'd request still
+# counts against the daily TPD budget). scout-first halves that waste. 70b kept as a
+# quality backup for the rare call small enough to fit its bucket.
+# 8b dropped: free-tier TPM only 6,000 — too small, 429s every time.
 # Callers needing a tiny+fast model can still pass models=["llama-3.1-8b-instant"].
 MODELS = [
-    "llama-3.3-70b-versatile",                    # best quality, 12k TPM — fits big context
-    "meta-llama/llama-4-scout-17b-16e-instruct",  # 30k TPM — most headroom under burst
+    "meta-llama/llama-4-scout-17b-16e-instruct",  # 30k TPM — most headroom, fits big context
+    "llama-3.3-70b-versatile",                    # higher quality, 12k TPM — backup
     # qwen/qwen3-32b removed — thinking mode leaks chain-of-thought into answers
 ]
 
