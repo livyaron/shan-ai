@@ -10,14 +10,16 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-# gemini-2.5-flash first: it honors responseMimeType (real enforced JSON mode) and
-# does NOT leak chain-of-thought, unlike the gemma-4 models which emit a reasoning
-# preamble that breaks JSON parsing. gemma-4 kept as text/backup.
-# (gemini-2.0-flash omitted — free-tier quota is 0 on this key → 429.)
+# gemma-4 models FIRST: they actually work on this free-tier key. gemini-2.5-flash
+# (and 2.0) return 429 "exceeded your current quota" — free tier ceiling is exhausted/
+# zero — so leading with it just burned a fallback round and risked an empty result.
+# gemma-4 leak a chain-of-thought preamble, but _strip_thinking / _strip_json_fences
+# handle it (needs a real max_tokens budget, not a tiny one, or CoT eats the answer).
+# gemini-2.5-flash kept LAST as an opportunistic clean-JSON path if quota ever frees up.
 GEMMA_MODELS = [
-    "gemini-2.5-flash",        # clean JSON, no thinking leak
-    "gemma-4-31b-it",          # backup
-    "gemma-4-26b-a4b-it",      # MoE variant, separate quota
+    "gemma-4-31b-it",          # works on free tier; larger/better of the two
+    "gemma-4-26b-a4b-it",      # MoE variant, separate quota — works on free tier
+    "gemini-2.5-flash",        # clean JSON when available, but usually 429 on free tier
 ]
 
 _BASE = "https://generativelanguage.googleapis.com/v1beta/models"
