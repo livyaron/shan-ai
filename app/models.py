@@ -621,3 +621,24 @@ class ReportHistory(Base):
     sent_via     = Column(String(32), nullable=True)  # "telegram" | "dashboard" | "cron"
 
     user = relationship("User", foreign_keys=[user_id])
+
+
+class PendingDecision(Base):
+    """A decision the user submitted that could not be analyzed at submit time
+    (all LLM providers rate-limited / quota-exhausted). Queued here and retried by
+    a background worker so nothing the user typed is ever lost. On success the worker
+    pushes the AI preview back to the user via Telegram for approval as usual."""
+    __tablename__ = "pending_decisions"
+
+    id              = Column(Integer, primary_key=True)
+    user_id         = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    telegram_id     = Column(BigInteger, nullable=False, index=True)  # chat to push preview back to
+    raw_text        = Column(Text, nullable=False)
+    conv_ctx        = Column(JSON, nullable=True)                     # conversation context snapshot
+    attempts        = Column(Integer, default=0)
+    status          = Column(String(20), default="queued", index=True)  # queued | done | failed
+    created_at      = Column(DateTime, default=datetime.utcnow, index=True)
+    last_attempt_at = Column(DateTime, nullable=True)
+    processed_at    = Column(DateTime, nullable=True)
+
+    user = relationship("User")

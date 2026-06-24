@@ -856,9 +856,12 @@ class TelegramPollingBot:
                 logger.error(f"Classification failed: {e}", exc_info=True)
                 from app.services.llm_router import is_overload_error
                 if is_overload_error(e):
+                    from app.services.pending_queue_service import enqueue
+                    await enqueue(session, user=user, telegram_id=telegram_id,
+                                  raw_text=text, conv_ctx=conv_ctx)
                     await update.message.reply_text(
-                        "‏⏳ המערכת עמוסה כרגע (מכסת ה-AI היומית נוצלה). "
-                        "ההודעה לא נשמרה — נסה שוב בעוד מספר דקות.",
+                        "‏⏳ המערכת עמוסה כרגע. ההודעה נשמרה ותנותח "
+                        "אוטומטית כשהמערכת תתפנה — אשלח לך את הניתוח לאישור. אין צורך לשלוח שוב.",
                         parse_mode="HTML",
                     )
                     return
@@ -921,9 +924,12 @@ class TelegramPollingBot:
                 logger.error(f"analyze_only failed: {_err}", exc_info=True)
                 from app.services.llm_router import is_overload_error
                 if is_overload_error(_err):
+                    from app.services.pending_queue_service import enqueue
+                    await enqueue(session, user=user, telegram_id=telegram_id,
+                                  raw_text=text, conv_ctx=conv_ctx)
                     await update.message.reply_text(
-                        "‏⏳ המערכת עמוסה כרגע (מכסת ה-AI היומית נוצלה). "
-                        "ההחלטה לא נשמרה — נסה שוב בעוד מספר דקות.",
+                        "‏⏳ המערכת עמוסה כרגע. ההחלטה נשמרה ותנותח "
+                        "אוטומטית כשהמערכת תתפנה — אשלח לך את הניתוח לאישור. אין צורך לשלוח שוב.",
                         parse_mode="HTML",
                     )
                     return

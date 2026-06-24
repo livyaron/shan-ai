@@ -58,6 +58,9 @@ def start_scheduler() -> None:
     # multi-call pipeline × runs/day). Halving frequency keeps the daily TPD budget
     # available for interactive decisions; full gold refresh ~2 days, fine on free tier.
     sch.add_job(_batch_eval_run, "interval", hours=6, id="batch_eval", replace_existing=True)
+    # Retry decisions that were queued when all LLM providers were exhausted.
+    sch.add_job(_pending_queue_run, "interval", minutes=5,
+                id="pending_queue", replace_existing=True)
     sch.start()
     _scheduler = sch
     logger.info("eval_cron: scheduler started (03:00 UTC nightly)")
@@ -100,6 +103,15 @@ async def _batch_eval_run() -> None:
             await run_cycle(s, user_id=None, repair=False, batch=8)
         except Exception as e:
             logger.exception(f"batch_eval run failed: {e}")
+
+
+async def _pending_queue_run() -> None:
+    """Retry decisions queued during LLM provider exhaustion (every 5 min)."""
+    from app.services.pending_queue_service import process_pending_queue
+    try:
+        await process_pending_queue()
+    except Exception as e:
+        logger.exception(f"pending_queue run failed: {e}")
 
 
 async def _weekly_report_run() -> None:
