@@ -300,7 +300,7 @@ async def sync_projects_file(file_path: str, sheet_name: str | None = None) -> d
     sheet_name: specific sheet to read (detected by process_master_file); None = first sheet.
     Returns result dict: {"processed": N, "created": N, "updated": N, "errors": [...]}
     """
-    result = {"processed": 0, "created": 0, "updated": 0, "errors": []}
+    result = {"processed": 0, "created": 0, "updated": 0, "errors": [], "identifiers": []}
 
     # 1. Read file in executor thread (pandas is synchronous/blocking)
     loop = asyncio.get_event_loop()
@@ -367,6 +367,7 @@ async def sync_projects_file(file_path: str, sheet_name: str | None = None) -> d
                 existing = (await session.execute(stmt)).scalars().first()
 
                 result["processed"] += 1
+                result["identifiers"].append(ident)
 
                 if existing:
                     # Only update fields that actually changed
@@ -382,6 +383,10 @@ async def sync_projects_file(file_path: str, sheet_name: str | None = None) -> d
                             changed = True
                             if attr == "weekly_report":
                                 weekly_changed = True
+                    if not existing.is_active:
+                        # Project reappeared in the master file — reactivate
+                        existing.is_active = True
+                        changed = True
                     if weekly_changed:
                         # Clear stale brief so generate_all_briefs regenerates it
                         existing.weekly_report_brief = None

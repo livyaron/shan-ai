@@ -610,6 +610,33 @@ def _normalize_date(val) -> str:
     return val_str
 
 
+async def delete_old_masters(session: AsyncSession, exclude_file_id: int | None = None) -> int:
+    """Delete previous master files entirely (rows + chunks + disk file).
+
+    A demoted master must not stay in the knowledge base: cross-link retrieval
+    searches all non-master files, so its stale project chunks would keep
+    feeding outdated statuses/dates into answers.
+    """
+    from sqlalchemy import delete as _delete
+
+    stmt = select(KnowledgeFile).where(KnowledgeFile.is_master.is_(True))
+    if exclude_file_id is not None:
+        stmt = stmt.where(KnowledgeFile.id != exclude_file_id)
+    old_masters = list((await session.execute(stmt)).scalars().all())
+    if not old_masters:
+        return 0
+    old_ids = [f.id for f in old_masters]
+    await session.execute(_delete(KnowledgeChunk).where(KnowledgeChunk.file_id.in_(old_ids)))
+    for old in old_masters:
+        try:
+            Path(old.file_path).unlink(missing_ok=True)
+        except Exception:
+            pass
+        await session.delete(old)
+    logger.info(f"delete_old_masters: removed previous master file(s): {old_ids}")
+    return len(old_masters)
+
+
 async def process_master_file(file_id: int) -> None:
     """Master ETL: specialized processing for the is_master XLSX file.
 
@@ -793,6 +820,7 @@ async def process_master_file(file_id: int) -> None:
             try:
                 from app.services.project_sync import sync_projects_file
                 total = {"processed": 0, "created": 0, "updated": 0, "errors": []}
+                synced_idents: set[str] = set()
                 for sn in xls.sheet_names:
                     try:
                         sr = await sync_projects_file(str(path), sheet_name=sn)
@@ -800,6 +828,7 @@ async def process_master_file(file_id: int) -> None:
                         total["created"] += sr["created"]
                         total["updated"] += sr["updated"]
                         total["errors"].extend(sr["errors"])
+                        synced_idents.update(sr.get("identifiers", []))
                     except Exception as sheet_err:
                         logger.warning(f"process_master_file {file_id}: sheet '{sn}' sync failed: {sheet_err}")
                 if total["errors"]:
@@ -813,6 +842,27 @@ async def process_master_file(file_id: int) -> None:
                     f"{total['updated']} updated, "
                     f"{len(total['errors'])} errors"
                 )
+
+                # Master file is the full project inventory — deactivate active
+                # projects that no longer appear in it. Guard: skip when the
+                # parse yields suspiciously few identifiers, so a broken upload
+                # can't wipe the whole projects table.
+                if len(synced_idents) >= 50:
+                    from sqlalchemy import update as _sa_update
+                    from app.models import Project
+                    res = await session.execute(
+                        _sa_update(Project)
+                        .where(Project.is_active.is_(True),
+                               Project.project_identifier.notin_(synced_idents))
+                        .values(is_active=False)
+                        .execution_options(synchronize_session=False)
+                    )
+                    await session.commit()
+                    if res.rowcount:
+                        logger.info(
+                            f"process_master_file {file_id}: deactivated "
+                            f"{res.rowcount} projects absent from master"
+                        )
             except Exception as sync_err:
                 logger.warning(f"process_master_file {file_id}: project sync failed (non-fatal): {sync_err}")
 

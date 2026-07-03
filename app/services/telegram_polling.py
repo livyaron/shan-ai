@@ -1226,12 +1226,12 @@ class TelegramPollingBot:
                 file_id = decision_id  # reusing variable — it's the knowledge file id
                 _awaiting_master_confirm.pop(telegram_id, None)
                 from app.models import KnowledgeFile as _KF
-                from sqlalchemy import update as _sa_update
 
                 if action == "master_yes":
                     async with async_session_maker() as db:
-                        # Unset any existing master
-                        await db.execute(_sa_update(_KF).values(is_master=False))
+                        # Delete any previous master entirely (stale chunks pollute retrieval)
+                        from app.services.knowledge_service import delete_old_masters
+                        await delete_old_masters(db, exclude_file_id=file_id)
                         kf = await db.get(_KF, file_id)
                         if kf:
                             kf.is_master = True

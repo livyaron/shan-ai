@@ -89,9 +89,10 @@ async def upload_file(
     make_master = is_master.lower() == "true" and ext == "xlsx"
 
     if make_master:
-        # Unset any existing master before setting the new one
-        from sqlalchemy import update as _update
-        await session.execute(_update(KnowledgeFile).values(is_master=False))
+        # Delete any previous master entirely — its stale chunks stay reachable
+        # via cross-link retrieval and would pollute answers with old data
+        from app.services.knowledge_service import delete_old_masters
+        await delete_old_masters(session)
 
     kf = KnowledgeFile(
         original_name=file.filename,
@@ -129,9 +130,7 @@ async def set_master_file(
     session: AsyncSession = Depends(get_db_session),
     current_user: User = Depends(get_current_user),
 ):
-    """Unset any existing master, mark this file as master, trigger master ETL."""
-    from sqlalchemy import update as _update
-
+    """Delete any previous master, mark this file as master, trigger master ETL."""
     kf = await session.get(KnowledgeFile, file_id)
     if not kf:
         raise HTTPException(status_code=404, detail="קובץ לא נמצא")
@@ -141,8 +140,9 @@ async def set_master_file(
             status_code=303,
         )
 
-    # Unset all existing masters atomically
-    await session.execute(_update(KnowledgeFile).values(is_master=False))
+    # Delete previous masters entirely (stale chunks pollute retrieval)
+    from app.services.knowledge_service import delete_old_masters
+    await delete_old_masters(session, exclude_file_id=file_id)
 
     kf.is_master = True
     kf.status = "processing"
