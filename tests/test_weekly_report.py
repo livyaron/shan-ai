@@ -3,6 +3,22 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
 
+async def _make_user(db_session, user_id: int, username: str):
+    """Insert a real User row so ReportHistory FK constraints are satisfied."""
+    from app.models import User, RoleEnum
+
+    user = User(
+        id=user_id,
+        telegram_id=7_000_000_000 + user_id,
+        username=username,
+        role=RoleEnum.PROJECT_MANAGER,
+        manager_id=None,
+    )
+    db_session.add(user)
+    await db_session.flush()
+    return user
+
+
 # ── Task 1 ──────────────────────────────────────────────────────────────────
 
 def test_report_history_model_importable():
@@ -19,13 +35,8 @@ def test_report_history_model_importable():
 async def test_generate_report_returns_sections_dict(db_session):
     """generate_report_for_user returns a dict with 5 keys."""
     from app.services.weekly_report_service import generate_report_for_user
-    from app.models import User, RoleEnum
 
-    user = MagicMock(spec=User)
-    user.id = 99991
-    user.username = "test_gen"
-    user.role = RoleEnum.PROJECT_MANAGER
-    user.manager_id = None
+    user = await _make_user(db_session, 99991, "test_gen")
 
     fake_json = (
         '{"prologue":"פתיח","decisions":"החלטות",'
@@ -47,21 +58,17 @@ async def test_generate_report_returns_sections_dict(db_session):
 async def test_generate_report_saves_history_row(db_session):
     """generate_report_for_user persists a ReportHistory row."""
     from app.services.weekly_report_service import generate_report_for_user
-    from app.models import User, RoleEnum, ReportHistory
+    from app.models import ReportHistory
     from sqlalchemy import select
 
-    user = MagicMock(spec=User)
-    user.id = 99992
-    user.username = "test_save"
-    user.role = RoleEnum.PROJECT_MANAGER
-    user.manager_id = None
+    user = await _make_user(db_session, 99992, "test_save")
 
     fake_json = (
         '{"prologue":"p","decisions":"d","projects":"pr","summary":"s","delta":null}'
     )
     with patch("app.services.weekly_report_service.llm_chat",
                new_callable=AsyncMock, return_value=fake_json):
-        await generate_report_for_user(user, db_session, triggered_by_id=1, sent_via="dashboard")
+        await generate_report_for_user(user, db_session, triggered_by_id=user.id, sent_via="dashboard")
 
     row = await db_session.scalar(
         select(ReportHistory).where(ReportHistory.user_id == 99992)
@@ -75,13 +82,8 @@ async def test_generate_report_saves_history_row(db_session):
 async def test_generate_report_fallback_on_llm_error(db_session):
     """When LLM raises, sections has a non-empty prologue and others are None."""
     from app.services.weekly_report_service import generate_report_for_user
-    from app.models import User, RoleEnum
 
-    user = MagicMock(spec=User)
-    user.id = 99993
-    user.username = "test_fallback"
-    user.role = RoleEnum.PROJECT_MANAGER
-    user.manager_id = None
+    user = await _make_user(db_session, 99993, "test_fallback")
 
     with patch("app.services.weekly_report_service.llm_chat",
                new_callable=AsyncMock, side_effect=Exception("timeout")):

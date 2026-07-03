@@ -10,12 +10,10 @@ from app.services import knowledge_service as _ks
 
 
 @pytest.mark.asyncio
-async def test_route_writes_trace_for_project_alias_branch(db_session):
+async def test_route_writes_trace_for_project_alias_branch(db_session, seeded_project_id):
     """When alias-resolve path fires + answer_project_query returns a log_id,
     the trace row links the alias's project."""
-    pid = (await db_session.execute(text(
-        "SELECT id FROM projects LIMIT 1"
-    ))).scalar()
+    pid = seeded_project_id
 
     from app.services.knowledge_service import normalize_hebrew
     alias = ProjectAlias(

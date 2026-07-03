@@ -13,14 +13,15 @@ import json
 import logging
 from datetime import datetime, timedelta
 
-from sqlalchemy import select, desc, or_
+from sqlalchemy import select, desc, or_, and_, func, case as sa_case
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
     User, Decision, RoleEnum, DecisionStatusEnum, DecisionTypeEnum,
     DecisionDistribution, DistributionTypeEnum, DistributionStatusEnum,
-    ReportHistory,
+    ReportHistory, Project,
 )
+from app.services.projects_menu_service import TYPE_ORDER
 import app.database as _app_database
 from app.services.llm_router import llm_chat
 
@@ -36,6 +37,7 @@ _ROLE_LABELS = {
 _SECTION_HEADERS = [
     ("prologue",  "📊 פתיח"),
     ("decisions", "📋 החלטות השבוע"),
+    ("projects",  "🏗️ פרויקטים"),
     ("summary",   "✅ סיכום ומסקנות"),
     ("delta",     "📈 שינויים מהדוח הקודם"),
 ]
@@ -50,6 +52,10 @@ _REPORT_PROMPT = """\
 החלטות (7 ימים אחרונים): {decisions_json}
 החלטות קריטיות/לא-ודאות: {critical_urgent_json}
 אישורים ממתינים שלך: {pending_json}
+פרויקטים באיחור: {projects_behind_json}
+פרויקטים בסיכון: {projects_at_risk_json}
+פרויקטים לטיפול: {handle_json}
+סיכום לפי סוג פרויקט: {type_summary_json}
 {delta_section}
 --- הנחיות לפלט ---
 
@@ -61,20 +67,26 @@ decisions (80-120 מילה):
 אחר כך: ספירה לפי סוג, אחוז אישורים, רשימה קצרה של אישורים ממתינים.
 דגל ⚠️ אם נפח חריג.
 
+projects (80-120 מילה):
+פתח בסיכום לפי סוג (הקמה/הרחבה/שוש/ניידות): פעילים, באיחור, בסיכון.
+אחר כך פרויקטים באיחור (🔴 קריטי מעל 30 יום, 🟡 באיחור), כל אחד בשורה.
+סיים בפרויקטים לטיפול. אם אין נתוני פרויקטים — null.
+
 summary (60-80 מילה):
 3 משימות לשבוע הבא בפורמט: "• [פעולה ספציפית] — [מתי]".
 הישג בולט אחד. סיכון מרכזי אחד. משפט עידוד קצר.
 
 delta: {has_delta} — אם "true":
-פתח ב"מאז הדוח הקודם:". מגמת החלטות (↑↓%). שינויים בסוג/סטטוס החלטות. פסקה רציפה, ללא bullet points.
+פתח ב"מאז הדוח הקודם:". מגמת החלטות (↑↓%). שינויים בשלבי פרויקטים, פרויקטים שנכנסו/יצאו מאיחור. פסקה רציפה, ללא bullet points.
 אם "false": null.
 
 --- פורמט תשובה (JSON בלבד, ללא טקסט לפני ואחרי) ---
-{{"prologue":"...","decisions":"...","summary":"...","delta":"..."}}"""
+{{"prologue":"...","decisions":"...","projects":"...","summary":"...","delta":"..."}}"""
 
 _FALLBACK_SECTIONS = {
     "prologue":  "‏⚠️ שגיאה בייצור הדוח. נסה שוב מאוחר יותר.",
     "decisions": None,
+    "projects":  None,
     "summary":   None,
     "delta":     None,
 }
@@ -161,6 +173,10 @@ async def generate_report_for_user(
             raw["decisions"].get("critical_urgent", []), ensure_ascii=False
         ),
         pending_json=json.dumps(raw["pending_approvals"][:5], ensure_ascii=False),
+        projects_behind_json=json.dumps(raw.get("projects_behind", []), ensure_ascii=False),
+        projects_at_risk_json=json.dumps(raw.get("projects_at_risk", []), ensure_ascii=False),
+        handle_json=json.dumps(raw.get("handle_projects", []), ensure_ascii=False),
+        type_summary_json=json.dumps(raw.get("type_summary", {}), ensure_ascii=False),
         delta_section=delta_section_text,
         has_delta=has_delta,
     )
@@ -184,6 +200,7 @@ async def generate_report_for_user(
         sections = {
             "prologue":  str(parsed.get("prologue") or ""),
             "decisions": parsed.get("decisions") or None,
+            "projects":  parsed.get("projects") or None,
             "summary":   parsed.get("summary") or None,
             "delta":     parsed.get("delta") or None,
         }
@@ -247,13 +264,25 @@ async def send_weekly_reports_cron(bot) -> None:
 
 async def _gather_raw_data(user: User, session: AsyncSession) -> dict:
     since = datetime.utcnow() - timedelta(days=7)
+    today = datetime.utcnow().date()
 
     decisions = await _decisions_summary(user, session, since)
     pending   = await _pending_approvals(user, session)
+    projects_behind  = await _projects_behind_schedule(user, session, today)
+    projects_at_risk = await _risky_projects(user, session)
+    handle_projects  = await _handle_projects(user, session)
+    type_summary     = await _project_type_summary(user, session)
+    stage_map, name_map = await _project_stage_map(user, session)
 
     return {
         "decisions":         decisions,
         "pending_approvals": pending,
+        "projects_behind":   projects_behind,
+        "projects_at_risk":  projects_at_risk,
+        "handle_projects":   handle_projects,
+        "type_summary":      type_summary,
+        "stage_map":         stage_map,
+        "name_map":          name_map,
     }
 
 
@@ -484,6 +513,33 @@ def _compute_delta(current: dict, prev: dict) -> dict:
     curr_total = c_dec.get("total", 0)
     prev_total = p_dec.get("total", 0)
 
+    # Stage transitions — name resolved from current name_map, falling back to
+    # the previous one (old rows may predate name_map) and finally the id.
+    c_stage = current.get("stage_map") or {}
+    p_stage = prev.get("stage_map") or {}
+    curr_names = current.get("name_map") or {}
+    prev_names = prev.get("name_map") or {}
+    stage_changes = [
+        {
+            "id":   pid,
+            "name": curr_names.get(pid) or prev_names.get(pid) or pid,
+            "from": p_stage[pid],
+            "to":   c_stage[pid],
+        }
+        for pid, stage in c_stage.items()
+        if pid in p_stage and p_stage[pid] != stage
+    ]
+
+    # Projects that entered / left the behind-schedule list, keyed by label.
+    c_behind = {e.get("project"): e for e in (current.get("projects_behind") or []) if e.get("project")}
+    p_behind = {e.get("project"): e for e in (prev.get("projects_behind") or []) if e.get("project")}
+    overdue_entered = [
+        {"name": name, "days_behind": entry.get("days_behind")}
+        for name, entry in c_behind.items()
+        if name not in p_behind
+    ]
+    overdue_resolved = [name for name in p_behind if name not in c_behind]
+
     return {
         "decisions_change":         curr_total - prev_total,
         "prev_decisions_total":     prev_total,
@@ -494,4 +550,7 @@ def _compute_delta(current: dict, prev: dict) -> dict:
             len(current.get("pending_approvals", [])) -
             len(prev.get("pending_approvals", []))
         ),
+        "stage_changes":            stage_changes,
+        "overdue_entered":          overdue_entered,
+        "overdue_resolved":         overdue_resolved,
     }

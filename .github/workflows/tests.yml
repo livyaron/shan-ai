@@ -1,0 +1,65 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: shan_user
+          POSTGRES_PASSWORD: shan_pass
+          POSTGRES_DB: shan_ai
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U shan_user -d shan_ai"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql+asyncpg://shan_user:shan_pass@localhost:5432/shan_ai
+      GROQ_API_KEY: ci-test
+      TELEGRAM_BOT_TOKEN: ci-test
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        # moviepy is excluded: it fails to build on CI runners and
+        # video_report_service imports it lazily with a graceful fallback.
+        run: |
+          grep -v "^moviepy" requirements.txt > /tmp/requirements-ci.txt
+          pip install -r /tmp/requirements-ci.txt pytest pytest-asyncio pytest-cov
+
+      - name: Create pgvector extension and schema
+        run: |
+          python - <<'EOF'
+          import asyncio
+          from sqlalchemy import text
+
+          from app.database import engine
+          from app.models import Base
+
+          async def main():
+              async with engine.begin() as conn:
+                  await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+                  await conn.run_sync(Base.metadata.create_all)
+              await engine.dispose()
+
+          asyncio.run(main())
+          EOF
+
+      - name: Run tests
+        run: python -m pytest -q --cov=app --cov-report=term

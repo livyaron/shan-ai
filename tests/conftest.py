@@ -110,6 +110,20 @@ async def db_session(_test_engine, monkeypatch) -> AsyncSession:
 
 
 @pytest_asyncio.fixture
+async def seeded_project_id(db_session) -> int:
+    """Insert a minimal active project and return its id. Tests must not rely
+    on pre-existing rows in the dev database (fresh DBs have none)."""
+    from sqlalchemy import text as _text
+    row = await db_session.execute(_text(
+        "INSERT INTO projects (project_identifier, name, is_active, last_updated) "
+        "VALUES ('TEST-SEED-PROJ', 'פרויקט בדיקה', true, now()) "
+        "ON CONFLICT (project_identifier) DO UPDATE SET is_active = true "
+        "RETURNING id"
+    ))
+    return row.scalar()
+
+
+@pytest_asyncio.fixture
 async def mock_llm_chat():
     """Patch app.services.llm_router.llm_chat with a programmable async mock."""
     async def _default(*args, **kwargs):

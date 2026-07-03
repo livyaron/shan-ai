@@ -15,9 +15,15 @@ async def test_gather_report_data_returns_required_keys():
     session = AsyncMock()
     mock_scalar_result = MagicMock()
     mock_scalar_result.scalar.return_value = None
+    mock_trends_result = MagicMock()
+    mock_trends_result.all.return_value = []
     mock_one_result = MagicMock()
     mock_one_result.one.return_value = (0, 0, 0)
-    session.execute = AsyncMock(side_effect=[mock_scalar_result, mock_one_result])
+    mock_projects_result = MagicMock()
+    mock_projects_result.scalars.return_value.all.return_value = []
+    session.execute = AsyncMock(side_effect=[
+        mock_scalar_result, mock_trends_result, mock_one_result, mock_projects_result,
+    ])
 
     with patch("app.services.project_report_service.get_overview_stats") as mock_ov, \
          patch("app.services.project_report_service.get_risk_table") as mock_rt:
@@ -48,9 +54,15 @@ async def test_gather_report_data_limits_risk_register():
     session = AsyncMock()
     mock_scalar_result = MagicMock()
     mock_scalar_result.scalar.return_value = None
+    mock_trends_result = MagicMock()
+    mock_trends_result.all.return_value = []
     mock_one_result = MagicMock()
     mock_one_result.one.return_value = (0, 0, 0)
-    session.execute = AsyncMock(side_effect=[mock_scalar_result, mock_one_result])
+    mock_projects_result = MagicMock()
+    mock_projects_result.scalars.return_value.all.return_value = []
+    session.execute = AsyncMock(side_effect=[
+        mock_scalar_result, mock_trends_result, mock_one_result, mock_projects_result,
+    ])
 
     big_risk_table = [{"project_id": i, "name": f"p{i}", "risk_score": 90 - i, "main_reason": ""} for i in range(20)]
 
@@ -85,12 +97,14 @@ async def test_generate_report_html_returns_html_string():
     }
 
     with patch("app.services.project_report_service.llm_chat") as mock_llm:
+        # Realistic LLM output: multi-line JSON with raw Hebrew (the narrative
+        # extractor splits values on newline-separated key boundaries).
         mock_llm.return_value = json.dumps({
             "executive_narrative": "המצב הכולל דורש תשומת לב.",
             "portfolio_narrative": "פרויקטי הקמה מובילים בסיכון.",
             "risk_narrative": "פרויקט א נמצא בסיכון גבוה.",
             "action_narrative": "יש לטפל בפרויקט א בדחיפות.",
-        })
+        }, ensure_ascii=False, indent=2)
         html = await generate_report_html(sample_data)
 
     assert html.startswith("<!DOCTYPE html")

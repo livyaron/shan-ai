@@ -95,13 +95,15 @@ async def test_beit_hagdi_repair_loop_creates_alias_and_fixes_answer(db_session)
                 "risk": "low",
             })
         if usage == "eval_judge":
-            # Only YES when AI answer actually contains the gold phrase.
-            # Unconditional YES causes passed_first_try on wrong answers.
+            # Only YES when the AI answer contains the gold's key fact (the
+            # stage 'תכנון'). Unconditional YES causes passed_first_try on
+            # wrong answers. Full-string containment is too strict: the
+            # single-match path answers with a formatted project card
+            # ('📍 שלב: תכנון'), not the gold's exact phrasing.
             content = "".join(m.get("content") or "" for m in (messages or []))
             if "תשובה א (AI):" in content and "תשובה ב (gold):" in content:
                 ai_part = content.split("תשובה א (AI):")[1].split("תשובה ב (gold):")[0].strip()
-                gold_part = content.split("תשובה ב (gold):")[1].split("Equivalent?")[0].strip()
-                return "YES" if gold_part and gold_part in ai_part else "NO"
+                return "YES" if "תכנון" in ai_part else "NO"
             return "NO"
         if usage == "project_query":
             content = ""

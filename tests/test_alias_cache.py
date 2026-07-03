@@ -7,12 +7,12 @@ from app.services import knowledge_service as ks
 
 
 @pytest.mark.asyncio
-async def test_aliases_loaded_into_cache(db_session):
-    # Seed one alias row pointing to whatever project exists
+async def test_aliases_loaded_into_cache(db_session, seeded_project_id):
+    # Seed one alias row pointing to the seeded project
     await db_session.execute(text(
         "INSERT INTO project_aliases (project_id, alias_text, normalized_alias, source) "
-        "SELECT id, 'בית הגדי', 'בית הגדי', 'manual' FROM projects LIMIT 1"
-    ))
+        "VALUES (:pid, 'בית הגדי', 'בית הגדי', 'manual')"
+    ), {"pid": seeded_project_id})
     await db_session.execute(text(
         "INSERT INTO intent_overrides (question_pattern_hash, forced_intent, forced_param, source) "
         "VALUES ('abc123', 'by_identifier', 'בית הגדי', 'manual')"

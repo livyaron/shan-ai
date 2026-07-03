@@ -35,11 +35,9 @@ async def test_get_rules_page_returns_html(db_session):
 
 
 @pytest.mark.asyncio
-async def test_create_project_alias(db_session):
+async def test_create_project_alias(db_session, seeded_project_id):
     await _seed_admin(db_session)
-    pid = (await db_session.execute(text(
-        "SELECT id FROM projects LIMIT 1"
-    ))).scalar()
+    pid = seeded_project_id
 
     async def fake_user():
         return User(id=2001, telegram_id=900002001, username="admin_t",
@@ -63,11 +61,9 @@ async def test_create_project_alias(db_session):
 
 
 @pytest.mark.asyncio
-async def test_delete_project_alias(db_session):
+async def test_delete_project_alias(db_session, seeded_project_id):
     await _seed_admin(db_session)
-    pid = (await db_session.execute(text(
-        "SELECT id FROM projects LIMIT 1"
-    ))).scalar()
+    pid = seeded_project_id
     from app.services.knowledge_service import normalize_hebrew
     db_session.add(ProjectAlias(
         project_id=pid, alias_text="TestAlias-Del",

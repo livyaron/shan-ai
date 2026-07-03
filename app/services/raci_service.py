@@ -781,7 +781,7 @@ async def build_raci_context(decision, session: AsyncSession) -> tuple[str, dict
     return "\n\n".join(parts), meta
 
 
-async def _get_raci_few_shots(session: AsyncSession, limit: int = 4) -> str:
+async def _get_raci_few_shots(session: AsyncSession, limit: int = 8) -> str:
     """Return few-shot examples from recent accepted/edited RACI suggestions for prompt injection."""
     try:
         from sqlalchemy import select as _sel

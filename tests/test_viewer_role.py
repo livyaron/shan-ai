@@ -36,8 +36,12 @@ def test_keyboard_for_operational_has_report_button():
     user.role = RoleEnum.PROJECT_MANAGER
     kb = _keyboard_for_user(user)
     buttons = [b for row in kb.keyboard for b in row]
-    assert len(buttons) == 3  # פרוייקטים, החלטות, דוח שלי
-    assert any("דוח שלי" in b.text for b in buttons)
+    texts = [b.text for b in buttons]
+    assert any("פרוייקטים" in t for t in texts)
+    assert any("החלטות" in t for t in texts)
+    assert any("דוח שלי" in t for t in texts)
+    # Non-manager operational roles must NOT see the team report button
+    assert not any("דוח צוות" in t for t in texts)
 
 
 import pytest

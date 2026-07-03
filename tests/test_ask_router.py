@@ -152,14 +152,12 @@ async def test_route_intent_override_skips_llm_intent_detection(db_session):
 
 
 @pytest.mark.asyncio
-async def test_route_project_alias_bypasses_intent_detection(db_session):
+async def test_route_project_alias_bypasses_intent_detection(db_session, seeded_project_id):
     """When an alias matches the question, route() must skip LLM intent detection
     and call answer_project_query with precomputed_intent=by_identifier and
     precomputed_param=project_alias_id=<pid>. find_projects_by_identifier then
     extracts the pid from the param directly."""
-    proj_id = (await db_session.execute(_sql_text(
-        "SELECT id FROM projects LIMIT 1"
-    ))).scalar()
+    proj_id = seeded_project_id
     await db_session.execute(_sql_text(
         "INSERT INTO project_aliases (project_id, alias_text, normalized_alias, source) "
         "VALUES (:pid, 'בית הגדי טסט', 'בית הגדי טסט', 'manual')"

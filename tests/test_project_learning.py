@@ -37,7 +37,13 @@ def test_no_dates_gives_zero_schedule_signals():
         prior_finish_dates=[],
         today=date(2026, 5, 30),
     )
-    assert result["score"] == 0
+    # Schedule-derived signals must all be zero when no dates exist.
+    # (Total score is NOT zero — missing risks/to_handle/weekly_report data
+    # carries a deliberate "absence of data is suspicious" penalty.)
+    assert result["breakdown"]["velocity"] == 0
+    assert result["breakdown"]["overdue"] == 0
+    assert result["breakdown"]["buffer"] == 0
+    assert result["days_overdue"] is None
     assert result["reliable"] is True
 
 
