@@ -38,6 +38,14 @@ router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 templates = Jinja2Templates(directory="app/templates")
 
 
+def _admin_guard(user: User) -> RedirectResponse | None:
+    """User-management endpoints are admin-only. Returns a redirect for
+    non-admins, None when allowed."""
+    if not user.is_admin:
+        return RedirectResponse("/dashboard/users?error=נדרשות+הרשאות+מנהל", status_code=303)
+    return None
+
+
 def _can_edit(decision: Decision, user: User) -> bool:
     """Check if user can edit decision's content (summary, action, type)."""
     return user.is_admin or decision.submitter_id == user.id
@@ -306,6 +314,9 @@ async def create_user(
 ):
     from app.utils.auth import get_default_password_hash
 
+    if (guard := _admin_guard(current_user)) is not None:
+        return guard
+
     # Check duplicate username
     existing = await session.scalar(select(User).where(User.username == username))
     if existing:
@@ -339,6 +350,9 @@ async def toggle_admin(
     session: AsyncSession = Depends(get_db_session),
     current_user: User = Depends(get_current_user),
 ):
+    if (guard := _admin_guard(current_user)) is not None:
+        return guard
+
     user = await session.get(User, user_id)
     if not user:
         return RedirectResponse("/dashboard/users?error=משתמש+לא+נמצא", status_code=303)
@@ -385,6 +399,9 @@ async def set_role(
     session: AsyncSession = Depends(get_db_session),
     current_user: User = Depends(get_current_user),
 ):
+    if (guard := _admin_guard(current_user)) is not None:
+        return guard
+
     user = await session.get(User, user_id)
     if user:
         user.role = RoleEnum(role)
@@ -400,6 +417,9 @@ async def delete_user(
     session: AsyncSession = Depends(get_db_session),
     current_user: User = Depends(get_current_user),
 ):
+    if (guard := _admin_guard(current_user)) is not None:
+        return guard
+
     user = await session.get(User, user_id)
     if user:
         # Nullify nullable FKs pointing to this user
@@ -434,6 +454,9 @@ async def regen_code(
     session: AsyncSession = Depends(get_db_session),
     current_user: User = Depends(get_current_user),
 ):
+    if (guard := _admin_guard(current_user)) is not None:
+        return guard
+
     user = await session.get(User, user_id)
     if user:
         for _ in range(10):

@@ -195,10 +195,22 @@ def _expand_hebrew_abbrevs(text: str) -> str:
 
     Effective dict = static HEBREW_ABBREVS | DB-backed cache | shadow override.
     Caller must have awaited _ensure_eval_caches(session) earlier in the async task.
+
+    Replacement is whole-token only: single-letter entries (e.g. 'פ', 'מ')
+    must not rewrite characters inside other words — plain str.replace here
+    garbled every Hebrew question ('פרויקט' → 'מנהל פרויקטרויקט').
     """
     effective = {**HEBREW_ABBREVS, **_DB_ABBREVS_CACHE, **_shadow_abbrevs.get()}
-    for abbrev, full in effective.items():
-        text = text.replace(abbrev, full)
+    # Longest first so a longer abbreviation wins over a prefix of itself.
+    for abbrev, full in sorted(effective.items(), key=lambda kv: -len(kv[0])):
+        if not abbrev:
+            continue
+        pattern = (
+            "(?<![֐-׿a-zA-Z0-9])"
+            + re.escape(abbrev)
+            + "(?![֐-׿a-zA-Z0-9])"
+        )
+        text = re.sub(pattern, full, text)
     return text
 
 # ─── Weekly Report Column Mapping ───
