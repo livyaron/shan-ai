@@ -2,7 +2,10 @@
 import pytest
 from datetime import date, datetime, timedelta
 from app.models import ProjectSnapshot
-from app.services.project_learning_service import compute_risk_score
+from app.services.project_learning_service import (
+    compute_risk_score, is_presumed_completed, _stage_intervals,
+    MISSING_RISKS_PTS, MISSING_TO_HANDLE_PTS, MISSING_WEEKLY_PTS,
+)
 
 
 def test_project_snapshot_has_required_columns():
@@ -37,7 +40,11 @@ def test_no_dates_gives_zero_schedule_signals():
         prior_finish_dates=[],
         today=date(2026, 5, 30),
     )
-    assert result["score"] == 0
+    # Schedule signals are zero; only missing-data penalties remain
+    assert result["breakdown"]["velocity"] == 0
+    assert result["breakdown"]["overdue"] == 0
+    assert result["breakdown"]["buffer"] == 0
+    assert result["score"] == MISSING_RISKS_PTS + MISSING_TO_HANDLE_PTS + MISSING_WEEKLY_PTS
     assert result["reliable"] is True
 
 
@@ -111,6 +118,109 @@ def test_score_capped_at_100():
         today=today,
     )
     assert result["score"] <= 100
+
+
+# ── Presumed-completed ("not closed in systems") ─────────────────────────────
+
+def test_is_presumed_completed_siyum_past_finish():
+    today = date(2026, 5, 30)
+    assert is_presumed_completed("סיום", today - timedelta(days=30), today) is True
+
+
+def test_is_presumed_completed_whitespace_stage():
+    today = date(2026, 5, 30)
+    assert is_presumed_completed("סיום ", today - timedelta(days=30), today) is True
+
+
+def test_is_presumed_completed_future_finish_is_false():
+    today = date(2026, 5, 30)
+    assert is_presumed_completed("סיום", today + timedelta(days=30), today) is False
+
+
+def test_is_presumed_completed_no_finish_date_is_false():
+    assert is_presumed_completed("סיום", None, date(2026, 5, 30)) is False
+
+
+def test_is_presumed_completed_other_stage_is_false():
+    today = date(2026, 5, 30)
+    assert is_presumed_completed("השלמות", today - timedelta(days=30), today) is False
+    assert is_presumed_completed("ביצוע", today - timedelta(days=30), today) is False
+    assert is_presumed_completed(None, today - timedelta(days=30), today) is False
+
+
+def test_presumed_completed_skips_missing_data_penalties():
+    today = date(2026, 5, 30)
+    result = compute_risk_score(
+        stage="סיום",
+        estimated_finish_date=today - timedelta(days=90),
+        dev_plan_date=None,
+        risks=None,
+        to_handle=None,
+        last_updated=None,
+        today=today,
+    )
+    assert result["presumed_completed"] is True
+    # Only the overdue signal (× stage multiplier) remains — no +25 missing penalties
+    assert result["score"] == int(result["breakdown"]["overdue"] * 0.7)
+
+
+def test_same_project_in_bitzua_gets_penalties():
+    today = date(2026, 5, 30)
+    result = compute_risk_score(
+        stage="ביצוע",
+        estimated_finish_date=today - timedelta(days=90),
+        dev_plan_date=None,
+        risks=None,
+        to_handle=None,
+        last_updated=None,
+        today=today,
+    )
+    assert result["presumed_completed"] is False
+    expected_missing = MISSING_RISKS_PTS + MISSING_TO_HANDLE_PTS + MISSING_WEEKLY_PTS
+    assert result["score"] == int(result["breakdown"]["overdue"] * 1.3) + expected_missing
+
+
+# ── Stage-duration intervals ──────────────────────────────────────────────────
+
+def test_stage_intervals_empty_and_single_run():
+    assert _stage_intervals([]) == []
+    d = date(2026, 1, 1)
+    history = [(d + timedelta(days=7 * i), "תכנון") for i in range(5)]
+    assert _stage_intervals(history) == []  # single run is left-censored + open
+
+
+def test_stage_intervals_one_transition_excluded():
+    d = date(2026, 1, 1)
+    history = [
+        (d, "תכנון"), (d + timedelta(days=7), "תכנון"),
+        (d + timedelta(days=14), "ביצוע"), (d + timedelta(days=21), "ביצוע"),
+    ]
+    # first run left-censored, second run still open → no completed intervals
+    assert _stage_intervals(history) == []
+
+
+def test_stage_intervals_completed_middle_run():
+    d = date(2026, 1, 1)
+    history = [
+        (d, "תכנון"),
+        (d + timedelta(days=7), "ביצוע"),
+        (d + timedelta(days=14), "ביצוע"),
+        (d + timedelta(days=28), "ביצוע"),
+        (d + timedelta(days=35), "השלמות"),
+    ]
+    assert _stage_intervals(history) == [("ביצוע", 21)]
+
+
+def test_stage_intervals_skips_blank_stages():
+    d = date(2026, 1, 1)
+    history = [
+        (d, "תכנון"),
+        (d + timedelta(days=7), None),
+        (d + timedelta(days=14), "ביצוע"),
+        (d + timedelta(days=21), "ביצוע"),
+        (d + timedelta(days=28), "השלמות"),
+    ]
+    assert _stage_intervals(history) == [("ביצוע", 7)]
 
 
 from app.services.project_learning_service import predict_next_score

@@ -1,6 +1,7 @@
 """Project learning service — risk scoring, snapshots, insight queries."""
 import math
 import logging
+import statistics
 from math import ceil
 from datetime import date, datetime
 from typing import Optional
@@ -29,6 +30,17 @@ STAGE_TO_HANDLE_DIVISOR = {
     "סיום":    2.0,
 }
 
+# Score thresholds — single source of truth (also rendered in the report methodology page)
+AT_RISK_THRESHOLD     = 70
+AMBER_THRESHOLD       = 40
+ACTION_ITEM_THRESHOLD = 60
+ACTION_HIGH_THRESHOLD = 80
+
+# Missing-data penalties
+MISSING_RISKS_PTS     = 12
+MISSING_TO_HANDLE_PTS = 8
+MISSING_WEEKLY_PTS    = 5
+
 SEVERE_KEYWORDS = [
     "תקוע", "מעוכב", "חסם", "הקפאה", "ביטול",
     "אין תקציב", "חריגה", "ללא היתר", "חח״י לא אישרה",
@@ -46,6 +58,19 @@ _MAIN_REASON_MAP = {
     "to_handle": "פריטי לטיפול",
     "staleness": "עדכון ישן",
 }
+
+
+def is_presumed_completed(
+    stage: Optional[str],
+    estimated_finish_date: Optional[date],
+    today: Optional[date] = None,
+) -> bool:
+    """סיום stage + finish date in the past → completed in the field, not closed in systems."""
+    return (
+        (stage or "").strip() == "סיום"
+        and estimated_finish_date is not None
+        and estimated_finish_date < (today or date.today())
+    )
 
 
 # ── Signal helpers ────────────────────────────────────────────────────────────
@@ -137,6 +162,8 @@ def compute_risk_score(
     if prior_finish_dates is None:
         prior_finish_dates = []
 
+    presumed = is_presumed_completed(stage, estimated_finish_date, today)
+
     vel  = _velocity_pts(prior_finish_dates, estimated_finish_date)
     over = _overdue_pts(estimated_finish_date, today)
     buf  = _buffer_pts(dev_plan_date, estimated_finish_date, today)
@@ -148,14 +175,16 @@ def compute_risk_score(
     handle = _to_handle_pts(to_handle, stage)
     stale, unreliable = _staleness_pts(last_updated)
 
-    # Missing-data penalties: absence of data is suspicious, not clean
+    # Missing-data penalties: absence of data is suspicious, not clean —
+    # except for presumed-completed projects, where empty fields are expected
     missing = 0
-    if not risks or len(risks.strip()) < 10:
-        missing += 12
-    if not to_handle or len(to_handle.strip()) < 10:
-        missing += 8
-    if not weekly_report or len(weekly_report.strip()) < 20:
-        missing += 5
+    if not presumed:
+        if not risks or len(risks.strip()) < 10:
+            missing += MISSING_RISKS_PTS
+        if not to_handle or len(to_handle.strip()) < 10:
+            missing += MISSING_TO_HANDLE_PTS
+        if not weekly_report or len(weekly_report.strip()) < 20:
+            missing += MISSING_WEEKLY_PTS
 
     score = min(schedule_pts + kw + handle + stale + missing, 100)
 
@@ -181,11 +210,12 @@ def compute_risk_score(
             main_reason = f"{days_overdue} ימי איחור"
 
     return {
-        "score":        score,
-        "reliable":     not unreliable,
-        "breakdown":    breakdown,
-        "main_reason":  main_reason,
-        "days_overdue": days_overdue,
+        "score":              score,
+        "reliable":           not unreliable,
+        "breakdown":          breakdown,
+        "main_reason":        main_reason,
+        "days_overdue":       days_overdue,
+        "presumed_completed": presumed,
     }
 
 
@@ -294,7 +324,7 @@ async def get_overview_stats(session: AsyncSession) -> dict:
     )).scalars().all()
 
     type_counts: dict = {t: {"active": 0, "delayed": 0, "at_risk": 0} for t in TYPE_ORDER}
-    total_active = total_delayed = total_at_risk = 0
+    total_active = total_delayed = total_at_risk = total_not_closed = 0
 
     for proj in projects:
         result = compute_risk_score(
@@ -306,6 +336,9 @@ async def get_overview_stats(session: AsyncSession) -> dict:
             last_updated=proj.last_updated,
             today=today,
         )
+        if result["presumed_completed"]:
+            total_not_closed += 1
+            continue
         days_over = result["days_overdue"]
         risk = result["score"]
 
@@ -315,14 +348,23 @@ async def get_overview_stats(session: AsyncSession) -> dict:
         if days_over and days_over > 0:
             bucket["delayed"] += 1
             total_delayed += 1
-        if risk >= 70:
+        if risk >= AT_RISK_THRESHOLD:
             bucket["at_risk"] += 1
             total_at_risk += 1
 
-    # Trend from snapshots (historical — empty until snapshots accumulate)
+    # Trend from snapshots (historical — empty until snapshots accumulate).
+    # Excludes presumed-completed rows (סיום + finish date before the snapshot);
+    # coalesce keeps rows where estimated_finish_date is NULL.
+    _not_presumed = ~func.coalesce(
+        and_(
+            ProjectSnapshot.stage == "סיום",
+            ProjectSnapshot.estimated_finish_date < ProjectSnapshot.snapshot_date,
+        ),
+        False,
+    )
     trend_rows = (await session.execute(
         select(ProjectSnapshot.snapshot_date, func.count().label("cnt"))
-        .where(ProjectSnapshot.days_overdue > 0, ProjectSnapshot.is_active == True)
+        .where(ProjectSnapshot.days_overdue > 0, ProjectSnapshot.is_active == True, _not_presumed)
         .group_by(ProjectSnapshot.snapshot_date)
         .order_by(desc(ProjectSnapshot.snapshot_date))
         .limit(8)
@@ -339,11 +381,13 @@ async def get_overview_stats(session: AsyncSession) -> dict:
     risk_rows = await _raw_risk_rows(session)
     entering_count = sum(
         1 for _, _, sparkline, predicted in risk_rows
-        if predicted is not None and (sparkline[-1] if sparkline else 0) < 70 and predicted >= 70
+        if predicted is not None
+        and (sparkline[-1] if sparkline else 0) < AT_RISK_THRESHOLD
+        and predicted >= AT_RISK_THRESHOLD
     )
 
     return {
-        "totals":             {"active": total_active, "delayed": total_delayed, "at_risk": total_at_risk, "entering_next_week": entering_count},
+        "totals":             {"active": total_active, "delayed": total_delayed, "at_risk": total_at_risk, "entering_next_week": entering_count, "not_closed": total_not_closed},
         "type_counts":        type_counts,
         "delay_trend":        delay_trend,
         "stage_distribution": stage_dist,
@@ -388,6 +432,10 @@ async def _raw_risk_rows(session: AsyncSession) -> list:
             weekly_report=proj.weekly_report,
             prior_finish_dates=prior_finish_dates,
         )
+        # Presumed-completed projects belong in the "not closed in systems"
+        # category, not the risk register / forecast
+        if score_result["presumed_completed"]:
+            continue
         # Blend: if stored snapshot score is available, use the higher of the two
         # (prevents stale snapshots masking current deterioration)
         if stored_score is not None:
@@ -406,7 +454,7 @@ async def get_risk_table(session: AsyncSession) -> list[dict]:
     out = []
     for proj, score_result, sparkline, predicted in raw:
         current = score_result["score"]
-        entering = (predicted is not None and current < 70 and predicted >= 70)
+        entering = (predicted is not None and current < AT_RISK_THRESHOLD and predicted >= AT_RISK_THRESHOLD)
         out.append({
             "project_id":          proj.id,
             "name":                proj.name or proj.project_identifier,
@@ -423,6 +471,116 @@ async def get_risk_table(session: AsyncSession) -> list[dict]:
             "weekly_report_brief": proj.weekly_report_brief or "",
         })
     return out
+
+
+# ── Stage-duration analytics ─────────────────────────────────────────────────
+
+def _stage_intervals(history: list[tuple[date, Optional[str]]]) -> list[tuple[str, int]]:
+    """
+    Ascending (snapshot_date, stage) rows → completed (stage, duration_days) intervals.
+    Skips None/blank stages. The FIRST run is left-censored (true start unknown)
+    and the LAST run is still open — both are excluded from completed intervals.
+    """
+    runs: list[tuple[str, date, date]] = []  # (stage, start, end)
+    for snap_date, stage in history:
+        stage = (stage or "").strip()
+        if not stage:
+            continue
+        if runs and runs[-1][0] == stage:
+            runs[-1] = (stage, runs[-1][1], snap_date)
+        else:
+            runs.append((stage, snap_date, snap_date))
+    # Drop left-censored first run and open last run
+    completed = runs[1:-1] if len(runs) >= 3 else []
+    return [(stage, max((end - start).days, 1)) for stage, start, end in completed]
+
+
+def _current_stage_run_start(history: list[tuple[date, Optional[str]]], current_stage: str) -> Optional[date]:
+    """Start date of the latest contiguous run of current_stage (lower bound if left-censored)."""
+    start: Optional[date] = None
+    for snap_date, stage in history:
+        if (stage or "").strip() == current_stage:
+            if start is None:
+                start = snap_date
+        else:
+            start = None
+    return start
+
+
+async def get_stage_duration_stats(
+    session: AsyncSession, today: Optional[date] = None, min_obs: int = 3,
+) -> dict:
+    """
+    Historical average/median days per stage per project type (from snapshot
+    history), plus current projects exceeding the average for their (type, stage).
+    """
+    if today is None:
+        today = date.today()
+
+    snap_rows = (await session.execute(
+        select(ProjectSnapshot.project_id, ProjectSnapshot.snapshot_date, ProjectSnapshot.stage)
+        .order_by(ProjectSnapshot.project_id, ProjectSnapshot.snapshot_date)
+    )).all()
+
+    history_by_project: dict[int, list[tuple[date, Optional[str]]]] = {}
+    for pid, snap_date, stage in snap_rows:
+        history_by_project.setdefault(pid, []).append((snap_date, stage))
+
+    projects = (await session.execute(
+        select(Project).where(Project.is_active == True)
+    )).scalars().all()
+    type_by_project = {p.id: (p.project_type or "אחר") for p in projects}
+
+    # Completed intervals aggregated by (type, stage)
+    durations: dict[tuple[str, str], list[int]] = {}
+    for pid, history in history_by_project.items():
+        ptype = type_by_project.get(pid)
+        if ptype is None:
+            continue  # inactive project — skip
+        for stage, days in _stage_intervals(history):
+            durations.setdefault((ptype, stage), []).append(days)
+
+    matrix: dict[str, dict[str, dict]] = {}
+    for (ptype, stage), vals in durations.items():
+        if len(vals) < min_obs:
+            continue
+        matrix.setdefault(ptype, {})[stage] = {
+            "avg_days":    round(statistics.mean(vals)),
+            "median_days": round(statistics.median(vals)),
+            "n":           len(vals),
+        }
+
+    # Current projects exceeding the historical average for their (type, stage)
+    exceeding = []
+    for proj in projects:
+        stage = (proj.stage or "").strip()
+        if not stage or stage == "סיום":
+            continue
+        if is_presumed_completed(proj.stage, proj.estimated_finish_date, today):
+            continue
+        ptype = proj.project_type or "אחר"
+        cell = matrix.get(ptype, {}).get(stage)
+        if not cell or cell["avg_days"] <= 0:
+            continue
+        run_start = _current_stage_run_start(history_by_project.get(proj.id, []), stage)
+        if run_start is None:
+            continue
+        days_in_stage = (today - run_start).days
+        if days_in_stage > cell["avg_days"]:
+            exceeding.append({
+                "project_id":    proj.id,
+                "name":          proj.name or proj.project_identifier,
+                "identifier":    proj.project_identifier,
+                "type":          ptype,
+                "stage":         stage,
+                "manager":       proj.manager or "—",
+                "days_in_stage": days_in_stage,
+                "avg_days":      cell["avg_days"],
+                "pct_over":      round((days_in_stage / cell["avg_days"] - 1) * 100),
+            })
+    exceeding.sort(key=lambda r: r["pct_over"], reverse=True)
+
+    return {"matrix": matrix, "exceeding": exceeding, "min_obs": min_obs}
 
 
 async def get_project_detail(project_id: int, session: AsyncSession) -> Optional[dict]:

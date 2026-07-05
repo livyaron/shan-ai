@@ -7,12 +7,17 @@ from sqlalchemy import select, func, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
-    User, Project, ProjectSnapshot, Decision,
+    User, Project, Decision,
     ProjectReport, RoleEnum, DecisionTypeEnum, DecisionStatusEnum,
 )
 from app.services.project_learning_service import (
-    get_overview_stats, get_risk_table, compute_risk_score,
+    get_overview_stats, get_risk_table, compute_risk_score, get_stage_duration_stats,
+    STAGE_MULTIPLIER, AT_RISK_THRESHOLD, AMBER_THRESHOLD,
+    ACTION_ITEM_THRESHOLD, ACTION_HIGH_THRESHOLD,
+    MISSING_RISKS_PTS, MISSING_TO_HANDLE_PTS, MISSING_WEEKLY_PTS,
+    _overdue_pts,
 )
+from app.services.projects_menu_service import TYPE_ORDER
 from app.services.llm_router import llm_chat
 
 logger = logging.getLogger(__name__)
@@ -37,6 +42,11 @@ def _compute_insights(data: dict) -> list:
 
     def _suf(n): return "ים" if n != 1 else ""
 
+    # Data-quality evidence — used to qualify positive insights only when
+    # there is a concrete signal of missing data (not by default)
+    silent = sum(1 for r in rr if not r.get("weekly_report_brief") and r.get("risk_score", 0) < 35)
+    data_quality_issue = silent >= 3 or len(sp) >= 5
+
     # 1. Portfolio risk drift
     rd = wd.get("avg_risk", 0)
     if rd >= 5:
@@ -48,9 +58,12 @@ def _compute_insights(data: dict) -> list:
             "headline": f"ציון הסיכון הממוצע עלה ב-{rd} נקודות ({wd.get('prv_avg_risk','?')} ← {wd.get('cur_avg_risk','?')})",
             "action": "עקוב אחר המגמה בשבוע הבא"})
     elif rd <= -5:
+        action = "שמרו על המגמה — המשיכו בעדכונים שבועיים סדירים"
+        if data_quality_issue:
+            action = f"שיפור בכפוף להסתייגות: {silent} פרויקטים ללא דיווח שבועי — ודאו שהירידה אינה נובעת מנתונים חסרים"
         insights.append({"sev": "info", "icon": "🟢",
-            "headline": f"ציון הסיכון הממוצע ירד ב-{abs(rd)} נקודות — שיפור לכאורה",
-            "action": "וודא שהשיפור אינו תוצאה של נתונים חסרים"})
+            "headline": f"ציון הסיכון הממוצע ירד ב-{abs(rd)} נקודות ({wd.get('prv_avg_risk','?')} ← {wd.get('cur_avg_risk','?')}) — שיפור בתיק",
+            "action": action})
 
     # 2. New entries into risk zone
     new_risk = epd.get("entering_risk_zone", [])
@@ -59,6 +72,12 @@ def _compute_insights(data: dict) -> list:
         insights.append({"sev": "critical", "icon": "🔴",
             "headline": f"{len(new_risk)} פרויקט{_suf(len(new_risk))} צפוי{_suf(len(new_risk))} לחצות סף סיכון בשבוע הקרוב",
             "action": f"התערבות מונעת: {names}"})
+
+    # 2b. Stability is success — no new at-risk projects and no worsening
+    if "cur_avg_risk" in wd and wd.get("at_risk_count", 0) <= 0 and not new_risk and rd <= 0:
+        insights.append({"sev": "info", "icon": "🟢",
+            "headline": "אין פרויקטים חדשים בסיכון גבוה השבוע — יציבות בתיק הפרויקטים",
+            "action": "ציינו זאת לחיוב בפני מנהלי הפרויקטים והמשיכו במעקב השוטף"})
 
     # 3. Rising trend — 3 consecutive weeks worsening
     rising = epd.get("rising_trend", [])
@@ -98,12 +117,26 @@ def _compute_insights(data: dict) -> list:
             "headline": f"{len(sp)} פרויקטים לא עודכנו מעל 14 יום — הציון שלהם אינו מהימן",
             "action": f"הישן ביותר: {w['name']} ({w.get('days_stale',0)} ימים) — שלח תזכורת עדכון"})
 
-    # 8. Missing data (low scores from silence, not from health)
-    silent = sum(1 for r in rr if not r.get("weekly_report_brief") and r.get("risk_score", 0) < 35)
+    # 8. Missing data (evidence-based: low score together with no weekly brief)
     if silent >= 3:
         insights.append({"sev": "warning", "icon": "🟡",
-            "headline": f"{silent} פרויקטים עם ציון נמוך שעשוי לשקף חוסר נתונים — לא בהכרח מצב טוב",
+            "headline": f"{silent} פרויקטים עם ציון נמוך ללא דיווח שבועי — ייתכן שהציון משקף חוסר נתונים ולא מצב תקין",
             "action": "בקש דיווח שבועי מהאחראים"})
+
+    # 9. Completed projects never closed in the source systems
+    nc = data.get("not_closed", [])
+    if nc:
+        insights.append({"sev": "warning", "icon": "🗂️",
+            "headline": f"{len(nc)} פרויקט{_suf(len(nc))} בשלב סיום שלא נסגר{_suf(len(nc))} במערכות — הוחרג{_suf(len(nc))} ממדדי הסיכון",
+            "action": "סגור את הפרויקטים במערכות המקור כדי לשמור על דיוק הנתונים"})
+
+    # 10. Projects exceeding the historical stage duration for their type
+    ex = data.get("stage_durations", {}).get("exceeding", [])
+    if ex:
+        w = ex[0]
+        insights.append({"sev": "warning", "icon": "🟡",
+            "headline": f"{len(ex)} פרויקט{_suf(len(ex))} שוה{'ים' if len(ex) != 1 else 'ה'} בשלב הנוכחי מעבר לממוצע ההיסטורי לסוגם",
+            "action": f"החורג ביותר: {w['name']} — {w['days_in_stage']} ימים בשלב {w['stage']} (ממוצע: {w['avg_days']})"})
 
     order = {"critical": 0, "warning": 1, "info": 2}
     insights.sort(key=lambda x: order.get(x["sev"], 3))
@@ -128,21 +161,17 @@ async def gather_report_data(user: User, session: AsyncSession) -> dict:
         else:
             rag_by_type[t] = "GREEN"
 
-    # Avg risk score
-    avg_risk_row = (await session.execute(
-        select(func.avg(ProjectSnapshot.risk_score))
-        .where(ProjectSnapshot.is_active == True, ProjectSnapshot.risk_score.isnot(None))
-    )).scalar()
-    avg_risk = round(float(avg_risk_row or 0))
-
-    # Portfolio trends: last 52 snapshot dates aggregated
-    trends_raw = (await session.execute(text("""
+    # Portfolio trends: last 52 snapshot dates aggregated.
+    # Presumed-completed rows (סיום + finish date before the snapshot) are
+    # excluded; COALESCE keeps rows with NULL estimated_finish_date.
+    trends_raw = (await session.execute(text(f"""
         SELECT snapshot_date,
                ROUND(AVG(risk_score))::int AS avg_risk,
                COUNT(*) FILTER (WHERE days_overdue > 0) AS delayed_count,
-               COUNT(*) FILTER (WHERE risk_score >= 70) AS at_risk_count
+               COUNT(*) FILTER (WHERE risk_score >= {AT_RISK_THRESHOLD}) AS at_risk_count
         FROM project_snapshots
         WHERE is_active = TRUE AND risk_score IS NOT NULL
+          AND NOT COALESCE(stage = 'סיום' AND estimated_finish_date < snapshot_date, FALSE)
         GROUP BY snapshot_date
         ORDER BY snapshot_date DESC
         LIMIT 52
@@ -193,12 +222,12 @@ async def gather_report_data(user: User, session: AsyncSession) -> dict:
     approval_rate = round((dec_row[2] / total_dec * 100) if total_dec else 0)
 
     # Action items from high-risk projects
-    delayed = [r for r in risk_rows if r.get("risk_score", 0) >= 60][:5]
+    delayed = [r for r in risk_rows if r.get("risk_score", 0) >= ACTION_ITEM_THRESHOLD][:5]
     action_items = [
         {
             "item":        f"טיפול בפרויקט {r['name']} — ציון סיכון {r['risk_score']}",
             "owner":       r.get("stage", "—"),
-            "priority":    "HIGH" if r["risk_score"] >= 80 else "MEDIUM",
+            "priority":    "HIGH" if r["risk_score"] >= ACTION_HIGH_THRESHOLD else "MEDIUM",
             "main_reason": r.get("main_reason", ""),
         }
         for r in delayed
@@ -214,6 +243,8 @@ async def gather_report_data(user: User, session: AsyncSession) -> dict:
     delayed_detail = []
     stale_projects = []
     to_handle_items = []
+    not_closed = []
+    active_scores = []
     by_type_detail: dict = {}
 
     for proj in all_projects:
@@ -231,6 +262,21 @@ async def gather_report_data(user: User, session: AsyncSession) -> dict:
         days_over = score_res["days_overdue"] or 0
 
         ptype = proj.project_type or "אחר"
+
+        # Completed in the field but never closed in the source systems —
+        # excluded from all risk/delay metrics, listed in their own section
+        if score_res["presumed_completed"]:
+            not_closed.append({
+                "name":                  proj.name or proj.project_identifier,
+                "identifier":            proj.project_identifier,
+                "type":                  ptype,
+                "manager":               proj.manager or "—",
+                "estimated_finish_date": str(proj.estimated_finish_date),
+                "days_since_finish":     (today - proj.estimated_finish_date).days,
+            })
+            continue
+
+        active_scores.append(score)
         if ptype not in by_type_detail:
             by_type_detail[ptype] = []
 
@@ -282,8 +328,16 @@ async def gather_report_data(user: User, session: AsyncSession) -> dict:
     delayed_detail.sort(key=lambda r: r["days_overdue"], reverse=True)
     stale_projects.sort(key=lambda r: r["days_stale"], reverse=True)
     to_handle_items.sort(key=lambda r: r["risk_score"], reverse=True)
+    not_closed.sort(key=lambda r: r["days_since_finish"], reverse=True)
     for rows in by_type_detail.values():
         rows.sort(key=lambda r: r["risk_score"], reverse=True)
+
+    # Avg risk = live mean of current active project scores,
+    # excluding not-closed projects (matches the methodology page definition)
+    avg_risk = round(sum(active_scores) / len(active_scores)) if active_scores else 0
+
+    # Stage-duration analytics: historical avg per (type, stage) + exceeding projects
+    stage_durations = await get_stage_duration_stats(session, today=today)
 
     # Epilogue: projects with rising risk trend (last 3 snapshots all increasing)
     rising_trend = []
@@ -314,6 +368,7 @@ async def gather_report_data(user: User, session: AsyncSession) -> dict:
             "total_delayed":      totals.get("delayed", 0),
             "total_at_risk":      totals.get("at_risk", 0),
             "entering_next_week": totals.get("entering_next_week", 0),
+            "not_closed_count":   len(not_closed),
             "avg_risk_score":     avg_risk,
             "rag_by_type":        rag_by_type,
             "decisions_30d":      total_dec,
@@ -333,6 +388,8 @@ async def gather_report_data(user: User, session: AsyncSession) -> dict:
         "delayed_detail":  delayed_detail[:25],
         "stale_projects":  stale_projects[:20],
         "to_handle_items": to_handle_items[:30],
+        "not_closed":      not_closed[:30],
+        "stage_durations": stage_durations,
         "by_type_detail":  by_type_detail,
         "trends":          trends_list,
         "weekly_delta":    weekly_delta,
@@ -347,9 +404,11 @@ async def gather_report_data(user: User, session: AsyncSession) -> dict:
 
 
 _REPORT_PROMPT = """\
-אתה אנליסט תשתיות חשמל. המשימה שלך: לזהות מה לא בסדר, לא לתאר מה עובד.
-אל תרכך בעיות. אם מגמה שלילית — אמור זאת ישירות.
-אם הנתונים נראים טובים מדי — ציין זאת כסיכון בפני עצמו.
+אתה אנליסט תשתיות חשמל. דווח על מצב התיק במדויק וללא הטיה לאף כיוון.
+בעיות ומגמות שליליות — אמור ישירות, ללא ריכוך.
+שיפורים ומגמות חיוביות — דווח אותם כהישג של הצוות. אל תטיל ספק בשיפור,
+אלא אם מדדי איכות הנתונים (data_quality) מצביעים על נתונים חסרים — ורק אז ציין הסתייגות מפורשת ומנומקת.
+פרויקטים שלא נסגרו במערכות (not_closed_count) אינם פרויקטים בסיכון — הם הסתיימו בפועל וממתינים לסגירה מנהלתית.
 כתוב בעברית. החזר JSON בלבד, ללא טקסט לפני ואחרי.
 חשוב ביותר: אל תשתמש במרכאות כפולות (\") בתוך הערכים עצמם — השתמש בגרש בודד (׳) בלבד עבור קיצורים.
 
@@ -399,6 +458,18 @@ async def generate_report_html(data: dict) -> str:
             "finishing_60d_count": len(data.get("finishing_60", [])),
             "delayed_count":       len(data.get("delayed_detail", [])),
             "stale_count":         len(data.get("stale_projects", [])),
+            "data_quality": {
+                "stale_count":            len(data.get("stale_projects", [])),
+                "missing_weekly_reports": sum(1 for r in data["risk_register"] if not r.get("weekly_report_brief")),
+                "not_closed_count":       len(data.get("not_closed", [])),
+            },
+            "stage_exceeding": {
+                "count": len(data.get("stage_durations", {}).get("exceeding", [])),
+                "top": [
+                    {"name": r["name"], "stage": r["stage"], "days_in_stage": r["days_in_stage"], "avg_days": r["avg_days"]}
+                    for r in data.get("stage_durations", {}).get("exceeding", [])[:3]
+                ],
+            },
             "top_delayed": [
                 {"name": r["name"], "days_overdue": r["days_overdue"], "main_reason": r["main_reason"]}
                 for r in data.get("delayed_detail", [])[:5]
@@ -461,9 +532,9 @@ def _rag_badge(status: str) -> str:
 
 
 def _score_color(score: int) -> str:
-    if score >= 70:
+    if score >= AT_RISK_THRESHOLD:
         return "#ef4444"
-    if score >= 40:
+    if score >= AMBER_THRESHOLD:
         return "#f59e0b"
     return "#10b981"
 
@@ -506,6 +577,82 @@ def _project_row(r: dict, show_type: bool = True) -> str:
     return f"<tr>{cols}</tr>"
 
 
+def _methodology_html(page_no: int, total: int, generated_at: str) -> str:
+    """Methodology appendix — all values interpolated from the scoring constants
+    and functions so the page can never drift from the actual formula."""
+    today = date.today()
+    overdue_rows = "".join(
+        f'<tr><td>{n} ימים</td><td style="color:var(--red);font-weight:700;">{_overdue_pts(today - timedelta(days=n), today)} נק׳</td></tr>'
+        for n in (7, 30, 90)
+    )
+    stage_rows = "".join(
+        f'<tr><td>{stage}</td><td style="font-weight:700;">×{mult}</td></tr>'
+        for stage, mult in STAGE_MULTIPLIER.items()
+    )
+    return f"""
+<!-- PAGE {page_no}: METHODOLOGY APPENDIX -->
+<div class="page">
+  <div class="page-header">
+    <div class="page-title">📖 נספח: מתודולוגיית חישוב הסיכון</div>
+    <div class="page-meta">עמוד {page_no} מתוך {total} | {generated_at}</div>
+  </div>
+  <div class="narrative">
+    ציון הסיכון של כל פרויקט הוא סכום של שישה אותות (0-100). אותות לוח-הזמנים
+    (הידרדרות תאריך סיום, איחור, צריכת מרווח) מוכפלים במכפיל לפי שלב הפרויקט.
+  </div>
+  <h3>רכיבי הציון</h3>
+  <table>
+    <thead><tr><th>אות</th><th>טווח</th><th>הסבר</th></tr></thead>
+    <tbody>
+      <tr><td>הידרדרות תאריך סיום</td><td>0-25</td><td>כמה נדחה תאריך הסיום המשוער מאז תמונת המצב הקודמת</td></tr>
+      <tr><td>ימי איחור</td><td>0-40</td><td>עקומה לוגריתמית על ימי איחור מעבר לתאריך הסיום המשוער (ראו דוגמאות)</td></tr>
+      <tr><td>צריכת מרווח תכנון</td><td>0-15</td><td>אחוז המרווח שנוצל בין תאריך תכנית הפיתוח לתאריך הסיום (מעל 60% / 80%)</td></tr>
+      <tr><td>מילות מפתח בסיכונים</td><td>0-15</td><td>מילים חמורות (תקוע, חסם...) +3 כל אחת; מתונות (עיכוב, ממתין...) +1</td></tr>
+      <tr><td>פריטים לטיפול</td><td>0-10</td><td>מספר הפריטים הפתוחים, מנורמל לפי דחיפות השלב</td></tr>
+      <tr><td>עדכניות נתונים</td><td>0-5</td><td>ימים מאז העדכון האחרון (מעל 21 יום — הציון מסומן כלא מהימן)</td></tr>
+    </tbody>
+  </table>
+  <div style="display:flex;gap:24px;flex-wrap:wrap;">
+    <div style="flex:1;min-width:260px;">
+      <h3>דוגמאות לניקוד איחור (עקומה לוגריתמית)</h3>
+      <table>
+        <thead><tr><th>ימי איחור</th><th>נקודות</th></tr></thead>
+        <tbody>{overdue_rows}</tbody>
+      </table>
+    </div>
+    <div style="flex:1;min-width:260px;">
+      <h3>מכפיל לפי שלב (על אותות לוח-הזמנים)</h3>
+      <table>
+        <thead><tr><th>שלב</th><th>מכפיל</th></tr></thead>
+        <tbody>{stage_rows}</tbody>
+      </table>
+    </div>
+  </div>
+  <h3>קנסות נתונים חסרים</h3>
+  <div class="narrative">
+    היעדר נתונים אינו סימן למצב תקין: סיכונים ריקים +{MISSING_RISKS_PTS} נק׳,
+    פריטים לטיפול ריקים +{MISSING_TO_HANDLE_PTS} נק׳, דוח שבועי חסר +{MISSING_WEEKLY_PTS} נק׳.
+    <strong>קנסות אלה אינם חלים על פרויקטים שלא נסגרו במערכות</strong> (שלב סיום עם תאריך סיום שחלף).
+  </div>
+  <h3>ספים</h3>
+  <table>
+    <thead><tr><th>סף</th><th>משמעות</th></tr></thead>
+    <tbody>
+      <tr><td style="color:var(--red);font-weight:700;">≥{AT_RISK_THRESHOLD}</td><td>סיכון גבוה — נכלל במונה "פרויקטים בסיכון"</td></tr>
+      <tr><td style="color:var(--amber);font-weight:700;">≥{AMBER_THRESHOLD}</td><td>אזהרה (צבע כתום בטבלאות)</td></tr>
+      <tr><td style="font-weight:700;">≥{ACTION_ITEM_THRESHOLD}</td><td>נכלל בעמוד "פעולות נדרשות" (≥{ACTION_HIGH_THRESHOLD} — עדיפות גבוהה)</td></tr>
+    </tbody>
+  </table>
+  <h3>ציון ממוצע לתיק</h3>
+  <div class="narrative">
+    ממוצע ציוני הסיכון של כל הפרויקטים הפעילים נכון להיום,
+    <strong>למעט פרויקטים שלא נסגרו במערכות</strong>. פרויקט "לא נסגר במערכות"
+    מוגדר: שלב סיום ותאריך סיום משוער שכבר חלף — פרויקט שהסתיים בפועל אך לא נסגר במערכות המקור.
+  </div>
+</div>
+"""
+
+
 def _render_html(data: dict, narratives: dict) -> str:
     meta = data["meta"]
     es   = data["executive_summary"]
@@ -523,6 +670,10 @@ def _render_html(data: dict, narratives: dict) -> str:
     tr   = data.get("trends", [])
     epd  = data.get("epilogue_data", {})
     ins  = data.get("insights", [])
+    nc   = data.get("not_closed", [])
+    sd   = data.get("stage_durations", {})
+
+    _tot = 16  # total numbered content pages (prologue is unnumbered)
 
     risk_history    = [t["avg_risk"]      for t in tr]
     delayed_history = [t["delayed_count"] for t in tr]
@@ -681,6 +832,56 @@ def _render_html(data: dict, narratives: dict) -> str:
         for r in sp
     ) or "<tr><td colspan='6' style='color:var(--text-2);text-align:center;'>כל הפרויקטים עודכנו לאחרונה</td></tr>"
 
+    # Page 8: completed but not closed in source systems
+    not_closed_rows = "".join(
+        f'<tr>'
+        f'<td><strong>{r["name"]}</strong>'
+        f'<span style="color:#64748b;font-size:.75rem;margin-right:4px;">{r["identifier"]}</span></td>'
+        f'<td style="color:#94a3b8;">{r["type"]}</td>'
+        f'<td style="color:#94a3b8;">{r["manager"]}</td>'
+        f'<td style="color:#94a3b8;">{r["estimated_finish_date"]}</td>'
+        f'<td style="color:#f59e0b;font-weight:700;">{r["days_since_finish"]}</td>'
+        f'</tr>'
+        for r in nc
+    ) or "<tr><td colspan='5' style='color:var(--text-2);text-align:center;'>אין פרויקטים שלא נסגרו — כל פרויקטי הסיום מעודכנים</td></tr>"
+
+    # Page 12: stage-duration matrix + exceeding projects
+    sd_matrix = sd.get("matrix", {})
+    sd_stages = ["תכנון", "ביצוע", "השלמות", "סיום"]
+    sd_types  = [t for t in TYPE_ORDER if t in sd_matrix] + [t for t in sd_matrix if t not in TYPE_ORDER]
+    _no_data_cell = '<td style="color:var(--text-2);font-size:.78rem;">אין מספיק נתונים</td>'
+
+    def _sd_cell(ptype: str, stage: str) -> str:
+        cell = sd_matrix.get(ptype, {}).get(stage)
+        if not cell:
+            return _no_data_cell
+        return (f'<td>ממוצע <strong>{cell["avg_days"]}</strong> י׳ / חציון {cell["median_days"]} י׳ '
+                f'<span style="color:var(--text-2);font-size:.75rem;">(n={cell["n"]})</span></td>')
+
+    sd_matrix_rows = "".join(
+        f'<tr><td style="font-weight:700;">{ptype}</td>' + "".join(_sd_cell(ptype, s) for s in sd_stages) + '</tr>'
+        for ptype in sd_types
+    )
+    sd_matrix_html = (
+        '<table><thead><tr><th>סוג פרויקט</th>' + "".join(f'<th>{s}</th>' for s in sd_stages) + '</tr></thead>'
+        f'<tbody>{sd_matrix_rows}</tbody></table>'
+        if sd_matrix_rows else
+        '<div style="color:var(--text-2);padding:12px 0;">אין מספיק היסטוריית תמונות מצב — הניתוח יופיע לאחר צבירת נתונים.</div>'
+    )
+
+    sd_exceeding_rows = "".join(
+        f'<tr>'
+        f'<td><strong>{r["name"]}</strong>'
+        f'<span style="color:#64748b;font-size:.75rem;margin-right:4px;">{r["identifier"]}</span></td>'
+        f'<td style="color:#94a3b8;">{r["type"]}</td>'
+        f'<td style="color:#94a3b8;">{r["stage"]}</td>'
+        f'<td style="color:#f59e0b;font-weight:700;">{r["days_in_stage"]}</td>'
+        f'<td style="color:#94a3b8;">{r["avg_days"]}</td>'
+        f'<td style="color:#ef4444;font-weight:700;">+{r["pct_over"]}%</td>'
+        f'</tr>'
+        for r in sd.get("exceeding", [])[:20]
+    ) or "<tr><td colspan='6' style='color:var(--text-2);text-align:center;'>אין פרויקטים החורגים מהממוצע ההיסטורי</td></tr>"
+
     CSS = """
   :root{--bg:#070b12;--bg-c:#0f1826;--border:#1a2d47;--cyan:#00d4ff;--text:#e2e8f0;--text-2:#64748b;--red:#ef4444;--amber:#f59e0b;--green:#10b981;}
   *{box-sizing:border-box;margin:0;padding:0;}
@@ -744,7 +945,7 @@ def _render_html(data: dict, narratives: dict) -> str:
 <div class="page">
   <div class="page-header">
     <div class="page-title">📊 דוח פרויקטים — סיכום מנהלים</div>
-    <div class="page-meta">עמוד 1 מתוך 12 | {meta["generated_at"]} | {meta["username"]} | {meta["role"]}</div>
+    <div class="page-meta">עמוד 1 מתוך {_tot} | {meta["generated_at"]} | {meta["username"]} | {meta["role"]}</div>
   </div>
   <div class="kpi-grid">
     <div class="kpi"><div class="kpi-val">{es["total_active"]}</div><div class="kpi-label">פרויקטים פעילים</div></div>
@@ -766,7 +967,7 @@ def _render_html(data: dict, narratives: dict) -> str:
 <div class="page">
   <div class="page-header">
     <div class="page-title">🏗️ בריאות תיק הפרויקטים</div>
-    <div class="page-meta">עמוד 2 מתוך 12 | {meta["generated_at"]}</div>
+    <div class="page-meta">עמוד 2 מתוך {_tot} | {meta["generated_at"]}</div>
   </div>
   <div class="narrative">{narratives.get("portfolio_narrative","")}</div>
   <h3>מגמת איחורים — שבועות אחרונים</h3>
@@ -783,7 +984,7 @@ def _render_html(data: dict, narratives: dict) -> str:
 <div class="page">
   <div class="page-header">
     <div class="page-title">📈 מגמות — שינויים לאורך זמן</div>
-    <div class="page-meta">עמוד 3 מתוך 12 | {meta["generated_at"]}</div>
+    <div class="page-meta">עמוד 3 מתוך {_tot} | {meta["generated_at"]}</div>
   </div>
   <h3>שינוי שבועי (השבוע מול שבוע שעבר)</h3>
   <table style="margin-bottom:24px;">
@@ -831,7 +1032,7 @@ def _render_html(data: dict, narratives: dict) -> str:
 <div class="page">
   <div class="page-header">
     <div class="page-title">⚠️ רישום סיכונים — 10 פרויקטים מובילים</div>
-    <div class="page-meta">עמוד 4 מתוך 12 | {meta["generated_at"]}</div>
+    <div class="page-meta">עמוד 4 מתוך {_tot} | {meta["generated_at"]}</div>
   </div>
   <div class="narrative">{narratives.get("risk_narrative","")}</div>
   <table>
@@ -844,7 +1045,7 @@ def _render_html(data: dict, narratives: dict) -> str:
 <div class="page">
   <div class="page-header">
     <div class="page-title">✅ פעולות נדרשות</div>
-    <div class="page-meta">עמוד 5 מתוך 12 | {meta["generated_at"]}</div>
+    <div class="page-meta">עמוד 5 מתוך {_tot} | {meta["generated_at"]}</div>
   </div>
   <div class="narrative">{narratives.get("action_narrative","")}</div>
   <table>
@@ -857,7 +1058,7 @@ def _render_html(data: dict, narratives: dict) -> str:
 <div class="page">
   <div class="page-header">
     <div class="page-title">🏁 פרויקטים המסתיימים ב-90 הימים הקרובים ({finishing_count})</div>
-    <div class="page-meta">עמוד 6 מתוך 12 | {meta["generated_at"]}</div>
+    <div class="page-meta">עמוד 6 מתוך {_tot} | {meta["generated_at"]}</div>
   </div>
   <div class="narrative">{narratives.get("finishing_narrative","")}</div>
   {finishing_html}
@@ -867,7 +1068,7 @@ def _render_html(data: dict, narratives: dict) -> str:
 <div class="page">
   <div class="page-header">
     <div class="page-title">🔴 פרויקטים באיחור — ניתוח מעמיק ({len(dd)})</div>
-    <div class="page-meta">עמוד 7 מתוך 12 | {meta["generated_at"]}</div>
+    <div class="page-meta">עמוד 7 מתוך {_tot} | {meta["generated_at"]}</div>
   </div>
   <div class="narrative">{narratives.get("delay_narrative","")}</div>
   <table>
@@ -876,20 +1077,36 @@ def _render_html(data: dict, narratives: dict) -> str:
   </table>
 </div>
 
-<!-- PAGE 8: BY-TYPE ANALYSIS -->
+<!-- PAGE 8: NOT CLOSED IN SYSTEMS -->
+<div class="page">
+  <div class="page-header">
+    <div class="page-title">🗂️ פרויקטים שלא נסגרו במערכות ({len(nc)})</div>
+    <div class="page-meta">עמוד 8 מתוך {_tot} | {meta["generated_at"]}</div>
+  </div>
+  <div style="padding:10px 14px;background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.25);border-radius:6px;font-size:.82rem;color:#f59e0b;margin-bottom:16px;">
+    פרויקטים בשלב ׳סיום׳ שתאריך הסיום שלהם חלף — ככל הנראה הסתיימו בפועל אך לא נסגרו במערכות המקור.
+    פרויקטים אלה <strong>אינם נכללים</strong> במדדי הסיכון, האיחור והציון הממוצע. מומלץ לסגור אותם במערכות המקור.
+  </div>
+  <table>
+    <thead><tr><th>פרויקט</th><th>סוג</th><th>מנהל</th><th>תאריך סיום</th><th>ימים מאז הסיום</th></tr></thead>
+    <tbody>{not_closed_rows}</tbody>
+  </table>
+</div>
+
+<!-- PAGE 9: BY-TYPE ANALYSIS -->
 <div class="page">
   <div class="page-header">
     <div class="page-title">📂 ניתוח לפי סוג פרויקט</div>
-    <div class="page-meta">עמוד 8 מתוך 12 | {meta["generated_at"]}</div>
+    <div class="page-meta">עמוד 9 מתוך {_tot} | {meta["generated_at"]}</div>
   </div>
   {by_type_html or '<div style="color:var(--text-2);">אין נתונים</div>'}
 </div>
 
-<!-- PAGE 9: TO-HANDLE ITEMS -->
+<!-- PAGE 10: TO-HANDLE ITEMS -->
 <div class="page">
   <div class="page-header">
     <div class="page-title">📋 פריטים לטיפול מפרויקטים בסיכון (ציון ≥50)</div>
-    <div class="page-meta">עמוד 9 מתוך 12 | {meta["generated_at"]}</div>
+    <div class="page-meta">עמוד 10 מתוך {_tot} | {meta["generated_at"]}</div>
   </div>
   <table>
     <thead><tr><th>פרויקט</th><th>סוג</th><th>ציון</th><th>פריט לטיפול</th></tr></thead>
@@ -897,14 +1114,14 @@ def _render_html(data: dict, narratives: dict) -> str:
   </table>
 </div>
 
-<!-- PAGE 10: RISK FORECAST -->
+<!-- PAGE 11: RISK FORECAST -->
 <div class="page">
   <div class="page-header">
     <div class="page-title">🔮 תחזית סיכונים — צפויים להיכנס לאזור סיכון</div>
-    <div class="page-meta">עמוד 10 מתוך 12 | {meta["generated_at"]}</div>
+    <div class="page-meta">עמוד 11 מתוך {_tot} | {meta["generated_at"]}</div>
   </div>
   <div style="padding:10px 14px;background:rgba(167,139,250,.08);border:1px solid rgba(167,139,250,.25);border-radius:6px;font-size:.82rem;color:#a78bfa;margin-bottom:16px;">
-    פרויקטים אלה נמצאים כיום מתחת לסף סיכון גבוה (70), אך מגמת הציון צפויה להחצות את הסף בשבוע הקרוב.
+    פרויקטים אלה נמצאים כיום מתחת לסף סיכון גבוה ({AT_RISK_THRESHOLD}), אך מגמת הציון צפויה להחצות את הסף בשבוע הקרוב.
   </div>
   <table>
     <thead><tr><th>פרויקט</th><th>סוג</th><th>שלב</th><th>ציון נוכחי</th><th>סיבה</th></tr></thead>
@@ -912,11 +1129,29 @@ def _render_html(data: dict, narratives: dict) -> str:
   </table>
 </div>
 
-<!-- PAGE 11: DATA QUALITY / STALE -->
+<!-- PAGE 12: STAGE DURATIONS -->
+<div class="page">
+  <div class="page-header">
+    <div class="page-title">⏱️ משך שלבים — ניתוח היסטורי לפי סוג פרויקט</div>
+    <div class="page-meta">עמוד 12 מתוך {_tot} | {meta["generated_at"]}</div>
+  </div>
+  <div style="padding:10px 14px;background:rgba(0,212,255,.06);border:1px solid rgba(0,212,255,.2);border-radius:6px;font-size:.82rem;color:var(--text-2);margin-bottom:16px;">
+    משך שהות ממוצע בכל שלב, מחושב מהיסטוריית תמונות המצב (רזולוציה שבועית, עד שנה אחורה).
+    מוצגים רק תאים עם {sd.get("min_obs", 3)} תצפיות לפחות.
+  </div>
+  {sd_matrix_html}
+  <h3>פרויקטים החורגים מהממוצע ההיסטורי לשלבם ({len(sd.get("exceeding", []))})</h3>
+  <table>
+    <thead><tr><th>פרויקט</th><th>סוג</th><th>שלב</th><th>ימים בשלב</th><th>ממוצע היסטורי</th><th>חריגה</th></tr></thead>
+    <tbody>{sd_exceeding_rows}</tbody>
+  </table>
+</div>
+
+<!-- PAGE 13: DATA QUALITY / STALE -->
 <div class="page">
   <div class="page-header">
     <div class="page-title">📅 איכות נתונים — פרויקטים לא מעודכנים (&gt;14 ימים)</div>
-    <div class="page-meta">עמוד 11 מתוך 12 | {meta["generated_at"]}</div>
+    <div class="page-meta">עמוד 13 מתוך {_tot} | {meta["generated_at"]}</div>
   </div>
   <div style="padding:10px 14px;background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.25);border-radius:6px;font-size:.82rem;color:#f59e0b;margin-bottom:16px;">
     פרויקטים שלא עודכנו מעל 14 ימים — הציון שלהם עלול להיות לא מדויק. נדרש עדכון.
@@ -930,11 +1165,11 @@ def _render_html(data: dict, narratives: dict) -> str:
   </div>
 </div>
 
-<!-- PAGE 12: EPILOGUE -->
+<!-- PAGE 14: EPILOGUE -->
 <div class="page" style="border-color:rgba(167,139,250,.3);background:rgba(167,139,250,.03);">
   <div class="page-header" style="border-color:#a78bfa;">
     <div class="page-title" style="color:#a78bfa;">🔮 מה לעקוב בשבוע הבא</div>
-    <div class="page-meta">עמוד 12 מתוך 13 | {meta["generated_at"]}</div>
+    <div class="page-meta">עמוד 14 מתוך {_tot} | {meta["generated_at"]}</div>
   </div>
   <div style="font-size:.95rem;line-height:2;color:#e2e8f0;padding:16px 20px;border-right:4px solid #a78bfa;background:rgba(167,139,250,.06);border-radius:4px;margin-bottom:20px;">
     {narratives.get("epilogue_narrative","—")}
@@ -949,11 +1184,11 @@ def _render_html(data: dict, narratives: dict) -> str:
   ) or "<div style='color:var(--text-2);padding:8px;font-size:.85rem;'>אין פרויקטים במגמת עלייה מתמשכת</div>"}
 </div>
 
-<!-- PAGE 13: INSIGHTS -->
+<!-- PAGE 15: INSIGHTS -->
 <div class="page" style="border-color:rgba(0,212,255,.35);">
   <div class="page-header">
     <div class="page-title" style="color:var(--cyan);">💡 תובנות מפתח — ממצאים מנוהלים לפעולה</div>
-    <div class="page-meta">עמוד 13 מתוך 13 | {meta["generated_at"]}</div>
+    <div class="page-meta">עמוד 15 מתוך {_tot} | {meta["generated_at"]}</div>
   </div>
   {"".join(
       f'<div style="display:flex;gap:14px;align-items:flex-start;padding:14px 16px;margin-bottom:10px;'
@@ -969,6 +1204,7 @@ def _render_html(data: dict, narratives: dict) -> str:
   ) or "<div style='color:var(--text-2);padding:16px;'>אין תובנות מספיקות עדיין — נדרש צבירת נתונים נוספת.</div>"}
 </div>
 
+{_methodology_html(16, _tot, meta["generated_at"])}
 </body>
 </html>"""
 

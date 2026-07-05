@@ -5,6 +5,23 @@ from app.services.project_report_service import gather_report_data
 from app.models import RoleEnum
 
 
+_EMPTY_STAGE_DURATIONS = {"matrix": {}, "exceeding": [], "min_obs": 3}
+
+
+def _mock_session():
+    """Session mock matching gather_report_data's execute order:
+    trends SQL (.all), decisions (.one), active projects (.scalars().all)."""
+    session = AsyncMock()
+    trends_res = MagicMock()
+    trends_res.all.return_value = []
+    dec_res = MagicMock()
+    dec_res.one.return_value = (0, 0, 0)
+    proj_res = MagicMock()
+    proj_res.scalars.return_value.all.return_value = []
+    session.execute = AsyncMock(side_effect=[trends_res, dec_res, proj_res])
+    return session
+
+
 @pytest.mark.asyncio
 async def test_gather_report_data_returns_required_keys():
     user = MagicMock()
@@ -12,17 +29,14 @@ async def test_gather_report_data_returns_required_keys():
     user.username = "test"
     user.role = RoleEnum.DIVISION_MANAGER
 
-    session = AsyncMock()
-    mock_scalar_result = MagicMock()
-    mock_scalar_result.scalar.return_value = None
-    mock_one_result = MagicMock()
-    mock_one_result.one.return_value = (0, 0, 0)
-    session.execute = AsyncMock(side_effect=[mock_scalar_result, mock_one_result])
+    session = _mock_session()
 
     with patch("app.services.project_report_service.get_overview_stats") as mock_ov, \
-         patch("app.services.project_report_service.get_risk_table") as mock_rt:
+         patch("app.services.project_report_service.get_risk_table") as mock_rt, \
+         patch("app.services.project_report_service.get_stage_duration_stats",
+               new=AsyncMock(return_value=_EMPTY_STAGE_DURATIONS)):
         mock_ov.return_value = {
-            "totals": {"active": 10, "delayed": 2, "at_risk": 1, "entering_next_week": 0},
+            "totals": {"active": 10, "delayed": 2, "at_risk": 1, "entering_next_week": 0, "not_closed": 0},
             "type_counts": {},
             "delay_trend": [],
             "stage_distribution": {},
@@ -35,6 +49,9 @@ async def test_gather_report_data_returns_required_keys():
     assert "portfolio_health" in result
     assert "risk_register" in result
     assert "meta" in result
+    assert "not_closed" in result
+    assert "stage_durations" in result
+    assert "not_closed_count" in result["executive_summary"]
     assert result["meta"]["username"] == "test"
 
 
@@ -45,17 +62,14 @@ async def test_gather_report_data_limits_risk_register():
     user.username = "x"
     user.role = RoleEnum.DIVISION_MANAGER
 
-    session = AsyncMock()
-    mock_scalar_result = MagicMock()
-    mock_scalar_result.scalar.return_value = None
-    mock_one_result = MagicMock()
-    mock_one_result.one.return_value = (0, 0, 0)
-    session.execute = AsyncMock(side_effect=[mock_scalar_result, mock_one_result])
+    session = _mock_session()
 
     big_risk_table = [{"project_id": i, "name": f"p{i}", "risk_score": 90 - i, "main_reason": ""} for i in range(20)]
 
     with patch("app.services.project_report_service.get_overview_stats") as mock_ov, \
-         patch("app.services.project_report_service.get_risk_table") as mock_rt:
+         patch("app.services.project_report_service.get_risk_table") as mock_rt, \
+         patch("app.services.project_report_service.get_stage_duration_stats",
+               new=AsyncMock(return_value=_EMPTY_STAGE_DURATIONS)):
         mock_ov.return_value = {"totals": {}, "type_counts": {}, "delay_trend": [], "stage_distribution": {}}
         mock_rt.return_value = big_risk_table
 
@@ -90,10 +104,14 @@ async def test_generate_report_html_returns_html_string():
             "portfolio_narrative": "פרויקטי הקמה מובילים בסיכון.",
             "risk_narrative": "פרויקט א נמצא בסיכון גבוה.",
             "action_narrative": "יש לטפל בפרויקט א בדחיפות.",
-        })
+        }, ensure_ascii=False)
         html = await generate_report_html(sample_data)
 
     assert html.startswith("<!DOCTYPE html")
     assert "דוח פרויקטים" in html
     assert "המצב הכולל" in html
     assert "פרויקט א" in html
+    # New pages: not-closed category + methodology appendix
+    assert "שלא נסגרו במערכות" in html
+    assert "מתודולוגיית" in html
+    assert "משך שלבים" in html
