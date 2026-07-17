@@ -350,6 +350,7 @@ class TelegramPollingBot:
 
     async def handle_missions(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """/missions — open the operations room (חדר מבצעים)."""
+        from app.models import RoleEnum
         from app.services.missions_menu_service import get_menu_keyboard, get_menu_text, get_board_counts
         telegram_id = update.effective_user.id
         async with async_session_maker() as session:
@@ -1026,6 +1027,7 @@ class TelegramPollingBot:
 
         # Operations room (חדר מבצעים)
         if data.startswith("om:"):
+            from app.models import RoleEnum
             async with async_session_maker() as _om_session:
                 _om_user = await _om_session.scalar(select(User).where(User.telegram_id == telegram_id))
             if not _om_user or not _om_user.role:
