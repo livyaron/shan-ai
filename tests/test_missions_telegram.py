@@ -144,6 +144,77 @@ async def test_wizard_button_steps_advance_state():
         _missions_create_state.pop(tid, None)
 
 
+def test_war_room_poster_assets_exist():
+    from app.services.telegram_polling import _WAR_ROOM_POSTERS
+    names = {p.name for p in _WAR_ROOM_POSTERS}
+    assert names == {
+        "poster_bunker.jpg", "poster_keepcalm.jpg",
+        "poster_wecandoit.jpg", "poster_radar.jpg",
+    }
+    for p in _WAR_ROOM_POSTERS:
+        assert 0 < p.stat().st_size < 400_000
+
+
+@pytest.mark.asyncio
+async def test_missions_entry_sends_poster_then_menu():
+    from app.services.telegram_polling import TelegramPollingBot, _poster_file_id_cache
+    from app.services import telegram_polling as tp
+
+    bot = TelegramPollingBot()
+    manager = MagicMock()
+    manager.role = RoleEnum.PROJECT_MANAGER
+    manager.id = 7
+
+    update = MagicMock()
+    update.effective_user.id = 888
+    update.message = AsyncMock()
+    context = MagicMock()
+
+    _poster_file_id_cache.clear()
+    with patch("app.services.telegram_polling.async_session_maker") as mock_sm:
+        session = AsyncMock()
+        session.scalar = AsyncMock(return_value=manager)
+        # get_board_counts runs two queries: execute (grouped counts) + scalar (overdue)
+        exec_result = MagicMock()
+        exec_result.all.return_value = []
+        session.execute = AsyncMock(return_value=exec_result)
+        session.scalar = AsyncMock(side_effect=[manager, 0])
+        _mock_session_maker(mock_sm, session)
+        await bot.handle_missions(update, context)
+
+    update.message.reply_photo.assert_called_once()
+    update.message.reply_text.assert_called_once()  # menu still sent after poster
+    _poster_file_id_cache.clear()  # don't leak mock file_ids into other tests
+
+
+@pytest.mark.asyncio
+async def test_poster_failure_does_not_block_menu():
+    from app.services.telegram_polling import TelegramPollingBot, _poster_file_id_cache
+
+    bot = TelegramPollingBot()
+    manager = MagicMock()
+    manager.role = RoleEnum.PROJECT_MANAGER
+    manager.id = 7
+
+    update = MagicMock()
+    update.effective_user.id = 889
+    update.message = AsyncMock()
+    update.message.reply_photo = AsyncMock(side_effect=Exception("boom"))
+    context = MagicMock()
+
+    _poster_file_id_cache.clear()
+    with patch("app.services.telegram_polling.async_session_maker") as mock_sm:
+        session = AsyncMock()
+        exec_result = MagicMock()
+        exec_result.all.return_value = []
+        session.execute = AsyncMock(return_value=exec_result)
+        session.scalar = AsyncMock(side_effect=[manager, 0])
+        _mock_session_maker(mock_sm, session)
+        await bot.handle_missions(update, context)
+
+    update.message.reply_text.assert_called_once()
+
+
 @pytest.mark.asyncio
 async def test_missions_command_blocks_viewer():
     """Regression: /missions raised NameError before the RoleEnum import fix."""
