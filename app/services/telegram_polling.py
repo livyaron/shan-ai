@@ -2,7 +2,9 @@
 
 import html as _html
 import logging
+import random
 import re
+from pathlib import Path
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 
@@ -55,6 +57,12 @@ def _keyboard_for_user(user) -> ReplyKeyboardMarkup:
     return _main_reply_keyboard(user)
 
 _VIEWER_DECISIONS_BLOCKED = "‏🔒 גישה לתפריט ההחלטות אינה זמינה למשתמשי צפייה."
+
+# War-room entry posters — a random one is sent on each entry to the operations room.
+# Telegram file_ids are cached after the first upload so subsequent sends are instant.
+_WAR_ROOM_POSTER_DIR = Path("static/war_room")
+_WAR_ROOM_POSTERS: list[Path] = sorted(_WAR_ROOM_POSTER_DIR.glob("*.jpg"))
+_poster_file_id_cache: dict[str, str] = {}
 
 def _mgr_approval_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([[
@@ -348,6 +356,23 @@ class TelegramPollingBot:
             reply_markup=get_menu_keyboard(),
         )
 
+    async def _send_war_room_poster(self, message) -> None:
+        """Send a random war-room poster. Never raises — a poster is decoration."""
+        try:
+            if not _WAR_ROOM_POSTERS:
+                return
+            poster = random.choice(_WAR_ROOM_POSTERS)
+            cached_id = _poster_file_id_cache.get(poster.name)
+            if cached_id:
+                await message.reply_photo(cached_id)
+                return
+            with open(poster, "rb") as fh:
+                sent = await message.reply_photo(fh)
+            if sent and sent.photo:
+                _poster_file_id_cache[poster.name] = sent.photo[-1].file_id
+        except Exception as e:
+            logger.warning(f"war-room poster send failed: {e}")
+
     async def handle_missions(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """/missions — open the operations room (חדר מבצעים)."""
         from app.models import RoleEnum
@@ -365,6 +390,7 @@ class TelegramPollingBot:
                 )
                 return
             counts, overdue = await get_board_counts(session)
+        await self._send_war_room_poster(update.message)
         await update.message.reply_text(
             get_menu_text(counts, overdue),
             parse_mode="HTML",
@@ -787,6 +813,7 @@ class TelegramPollingBot:
                     )
                     async with async_session_maker() as _om_s:
                         _om_counts, _om_late = await om_get_board_counts(_om_s)
+                    await self._send_war_room_poster(update.message)
                     await update.message.reply_text(
                         om_get_menu_text(_om_counts, _om_late),
                         parse_mode="HTML",
