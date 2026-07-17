@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>חדר מבצעים — SHAN-AI</title>
+<link href="https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg-deep:#070b12; --bg-card:#0f1826; --border:#1a2d47; --border-hi:#1e3a5f;
+  --cyan:#00d4ff; --purple:#8b9cf4; --green:#10b981; --red:#ef4444; --amber:#f59e0b;
+  --text-1:#e2e8f0; --text-2:#64748b;
+  --mono:'IBM Plex Mono',monospace; --ui:'Heebo',sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg-deep);color:var(--text-1);font-family:var(--ui);min-height:100vh}
+.wr-wrap{max-width:1500px;margin:0 auto;padding:24px 20px 60px}
+.wr-header{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:20px}
+.wr-title{font-size:1.6rem;font-weight:800;letter-spacing:.5px}
+.wr-title .dot{color:var(--cyan)}
+.wr-sub{color:var(--text-2);font-size:.85rem;font-family:var(--mono)}
+
+/* stat row */
+.wr-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px}
+.wr-stat{background:var(--bg-card);border:1px solid var(--border);border-radius:10px;padding:14px 16px}
+.wr-stat .num{font-family:var(--mono);font-size:1.7rem;font-weight:600;line-height:1.1}
+.wr-stat .lbl{color:var(--text-2);font-size:.8rem;margin-top:2px}
+.wr-stat.c-cyan .num{color:var(--cyan)} .wr-stat.c-red .num{color:var(--red)}
+.wr-stat.c-amber .num{color:var(--amber)} .wr-stat.c-green .num{color:var(--green)}
+
+/* filter bar */
+.wr-filters{display:flex;flex-wrap:wrap;gap:10px;align-items:center;background:var(--bg-card);
+  border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:20px}
+.wr-filters select,.wr-filters input[type=text]{background:var(--bg-deep);color:var(--text-1);
+  border:1px solid var(--border-hi);border-radius:8px;padding:7px 10px;font-family:var(--ui);font-size:.9rem}
+.wr-btn{border:1px solid var(--border-hi);background:var(--bg-deep);color:var(--text-1);border-radius:8px;
+  padding:7px 14px;font-family:var(--ui);font-size:.9rem;cursor:pointer;text-decoration:none;display:inline-block}
+.wr-btn:hover{border-color:var(--cyan);color:var(--cyan)}
+.wr-btn.primary{background:var(--cyan);color:#04121a;font-weight:700;border-color:var(--cyan)}
+.wr-btn.primary:hover{filter:brightness(1.15);color:#04121a}
+
+/* 2×2 quadrant grid */
+.wr-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.wr-quad{background:var(--bg-card);border:1px solid var(--border);border-radius:12px;display:flex;flex-direction:column;min-height:220px}
+.wr-quad-head{padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:baseline;gap:8px}
+.wr-quad-head .qname{font-weight:700;font-size:1.05rem}
+.wr-quad-head .qaxis{color:var(--text-2);font-size:.78rem;font-family:var(--mono)}
+.wr-quad-head .qcount{margin-inline-start:auto;font-family:var(--mono);color:var(--text-2)}
+.wr-quad.q-do{border-color:#5c1e1e}.wr-quad.q-do .wr-quad-head{border-bottom-color:#5c1e1e}
+.wr-quad.q-plan{border-color:var(--border-hi)}
+.wr-quad-body{padding:12px;overflow-y:auto;max-height:70vh;display:flex;flex-direction:column;gap:10px}
+.wr-empty{color:var(--text-2);font-size:.85rem;text-align:center;padding:20px 0}
+
+/* mission card */
+.wr-card{background:var(--bg-deep);border:1px solid var(--border);border-radius:10px;padding:12px 14px}
+.wr-card.overdue{border-color:var(--red)}
+.wr-card .m-title{font-weight:600;unicode-bidi:isolate}
+.wr-card .m-desc{color:var(--text-2);font-size:.85rem;margin-top:4px;unicode-bidi:isolate}
+.wr-card .m-meta{display:flex;flex-wrap:wrap;gap:10px;margin-top:8px;font-size:.8rem;color:var(--text-2);font-family:var(--mono)}
+.wr-card .m-meta .late{color:var(--red);font-weight:600}
+.wr-chip{display:inline-block;border:1px solid var(--border-hi);border-radius:20px;padding:1px 10px;font-size:.75rem}
+.wr-chip.st-open{color:var(--text-1)} .wr-chip.st-in_progress{color:var(--cyan);border-color:var(--cyan)}
+.wr-chip.st-done{color:var(--green);border-color:var(--green)} .wr-chip.st-cancelled{color:var(--text-2)}
+.m-actions{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+.m-actions .wr-btn{padding:4px 10px;font-size:.8rem}
+.m-edit{margin-top:8px}
+.m-edit summary{cursor:pointer;color:var(--text-2);font-size:.8rem;user-select:none}
+.m-edit-row{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;align-items:center}
+.m-edit-row select,.m-edit-row input[type=date]{background:var(--bg-card);color:var(--text-1);
+  border:1px solid var(--border-hi);border-radius:8px;padding:4px 8px;font-size:.8rem;font-family:var(--ui)}
+
+/* create dialog */
+dialog#createDlg{background:var(--bg-card);color:var(--text-1);border:1px solid var(--border-hi);
+  border-radius:14px;padding:24px;width:min(480px,92vw)}
+dialog#createDlg::backdrop{background:rgba(3,6,12,.75)}
+#createDlg h3{margin-bottom:14px}
+#createDlg label{display:block;font-size:.85rem;color:var(--text-2);margin:10px 0 4px}
+#createDlg input,#createDlg textarea,#createDlg select{width:100%;background:var(--bg-deep);color:var(--text-1);
+  border:1px solid var(--border-hi);border-radius:8px;padding:8px 10px;font-family:var(--ui);font-size:.9rem}
+#createDlg .dlg-actions{display:flex;gap:10px;justify-content:flex-start;margin-top:18px}
+
+/* toast */
+.wr-toast{position:fixed;bottom:24px;inset-inline-start:24px;background:var(--bg-card);border:1px solid var(--green);
+  color:var(--text-1);border-radius:10px;padding:12px 18px;z-index:50;box-shadow:0 8px 30px rgba(0,0,0,.5)}
+
+@media (max-width:900px){
+  .wr-grid{grid-template-columns:1fr}
+  .wr-stats{grid-template-columns:repeat(2,1fr)}
+  .wr-quad-body{max-height:none}
+}
+</style>
+</head>
+<body>
+{% include "_navbar.html" %}
+<div class="wr-wrap">
+
+  <div class="wr-header">
+    <div>
+      <div class="wr-title">🎯 חדר מבצעים <span class="dot">/</span> WAR ROOM</div>
+      <div class="wr-sub">משימות דחופות · חשובות · לוח מצב משותף</div>
+    </div>
+    {% if not is_viewer %}
+    <button class="wr-btn primary" onclick="document.getElementById('createDlg').showModal()">➕ משימה חדשה</button>
+    {% endif %}
+  </div>
+
+  <div class="wr-stats">
+    <div class="wr-stat c-cyan"><div class="num">{{ stats.open }}</div><div class="lbl">משימות פתוחות</div></div>
+    <div class="wr-stat c-red"><div class="num">{{ stats.do_now }}</div><div class="lbl">🔥 בצע עכשיו</div></div>
+    <div class="wr-stat c-amber"><div class="num">{{ stats.overdue }}</div><div class="lbl">⚠️ באיחור</div></div>
+    <div class="wr-stat c-green"><div class="num">{{ stats.done_week }}</div><div class="lbl">✅ הושלמו השבוע</div></div>
+  </div>
+
+  <form class="wr-filters" method="GET" action="/dashboard/war-room">
+    <select name="owner">
+      <option value="">כל האחראים</option>
+      {% for u in users %}
+      <option value="{{ u.id }}" {% if filters.owner == u.id %}selected{% endif %}>{{ u.username }}</option>
+      {% endfor %}
+    </select>
+    <select name="status">
+      <option value="active" {% if filters.status == 'active' %}selected{% endif %}>פעילות</option>
+      <option value="done" {% if filters.status == 'done' %}selected{% endif %}>הושלמו</option>
+      <option value="cancelled" {% if filters.status == 'cancelled' %}selected{% endif %}>בוטלו</option>
+    </select>
+    <input type="text" name="q" placeholder="חיפוש חופשי…" value="{{ filters.q }}">
+    <button class="wr-btn" type="submit">🔍 סנן</button>
+    <a class="wr-btn" href="/dashboard/war-room">איפוס</a>
+  </form>
+
+  <div class="wr-grid">
+    {% for qkey, qemoji, qverb, qaxis in quadrant_defs %}
+    <div class="wr-quad q-{{ qkey }}">
+      <div class="wr-quad-head">
+        <span class="qname">{{ qemoji }} {{ qverb }}</span>
+        <span class="qaxis">{{ qaxis }}</span>
+        <span class="qcount">{{ quadrants[qkey]|length }}</span>
+      </div>
+      <div class="wr-quad-body">
+        {% if not quadrants[qkey] %}
+        <div class="wr-empty">אין משימות ברביע זה</div>
+        {% endif %}
+        {% for m in quadrants[qkey] %}
+        {% set late = m.due_date and m.status in ('open','in_progress') and m.due_date < today %}
+        <div class="wr-card{% if late %} overdue{% endif %}">
+          <div class="m-title" dir="auto">{{ m.title }}</div>
+          {% if m.description %}<div class="m-desc" dir="auto">{{ m.description }}</div>{% endif %}
+          <div class="m-meta">
+            <span class="wr-chip st-{{ m.status }}">{{ status_labels.get(m.status, m.status) }}</span>
+            <span>👤 {{ m.owner.username if m.owner else '—' }}</span>
+            {% if m.due_date %}
+            <span{% if late %} class="late"{% endif %}>📅 {{ m.due_date.strftime('%d/%m/%Y') }}{% if late %} ⚠️{% endif %}</span>
+            {% endif %}
+            <span>נפתחה ע"י {{ m.created_by.username if m.created_by else '—' }}</span>
+          </div>
+          {% if not is_viewer %}
+          <div class="m-actions">
+            {% if m.status == 'open' %}
+            <button class="wr-btn" onclick="act({{ m.id }}, 'start')">▶️ התחל</button>
+            <button class="wr-btn" onclick="act({{ m.id }}, 'done')">✅ בוצע</button>
+            <button class="wr-btn" onclick="act({{ m.id }}, 'cancel')">🚫 בטל</button>
+            {% elif m.status == 'in_progress' %}
+            <button class="wr-btn" onclick="act({{ m.id }}, 'done')">✅ בוצע</button>
+            <button class="wr-btn" onclick="act({{ m.id }}, 'cancel')">🚫 בטל</button>
+            {% else %}
+            <button class="wr-btn" onclick="act({{ m.id }}, 'reopen')">↩️ פתח מחדש</button>
+            {% endif %}
+          </div>
+          {% if m.status in ('open','in_progress') %}
+          <details class="m-edit">
+            <summary>עריכה: רביע · אחראי · תאריך</summary>
+            <div class="m-edit-row">
+              <select id="quad-{{ m.id }}">
+                {% for k2, e2, v2, a2 in quadrant_defs %}
+                <option value="{{ k2 }}" {% if k2 == qkey %}selected{% endif %}>{{ e2 }} {{ v2 }}</option>
+                {% endfor %}
+              </select>
+              <button class="wr-btn" onclick="move({{ m.id }})">🔀 העבר</button>
+            </div>
+            <div class="m-edit-row">
+              <select id="own-{{ m.id }}">
+                {% for u in users %}
+                <option value="{{ u.id }}" {% if u.id == m.owner_id %}selected{% endif %}>{{ u.username }}</option>
+                {% endfor %}
+              </select>
+              <button class="wr-btn" onclick="assign({{ m.id }})">👤 הקצה</button>
+            </div>
+            <div class="m-edit-row">
+              <input type="date" id="due-{{ m.id }}" value="{{ m.due_date.isoformat() if m.due_date else '' }}">
+              <button class="wr-btn" onclick="setDue({{ m.id }})">📅 עדכן</button>
+            </div>
+          </details>
+          {% endif %}
+          {% endif %}
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+
+{% if not is_viewer %}
+<dialog id="createDlg">
+  <h3>➕ משימה חדשה</h3>
+  <form method="POST" action="/dashboard/war-room/create">
+    <label>כותרת *</label>
+    <input name="title" required maxlength="255" dir="auto">
+    <label>תיאור</label>
+    <textarea name="description" rows="3" dir="auto"></textarea>
+    <label>רביע (דחיפות × חשיבות)</label>
+    <select name="quadrant">
+      {% for k2, e2, v2, a2 in quadrant_defs %}
+      <option value="{{ k2 }}">{{ e2 }} {{ v2 }} — {{ a2 }}</option>
+      {% endfor %}
+    </select>
+    <label>אחראי</label>
+    <select name="owner_id">
+      {% for u in users %}
+      <option value="{{ u.id }}" {% if u.id == current_user.id %}selected{% endif %}>{{ u.username }}</option>
+      {% endfor %}
+    </select>
+    <label>תאריך יעד</label>
+    <input type="date" name="due_date">
+    <div class="dlg-actions">
+      <button class="wr-btn primary" type="submit">✅ שמור</button>
+      <button class="wr-btn" type="button" onclick="document.getElementById('createDlg').close()">ביטול</button>
+    </div>
+  </form>
+</dialog>
+{% endif %}
+
+{% if msg %}<div class="wr-toast" id="toast">{{ msg }}</div>{% endif %}
+
+<script>
+async function post(url, data){
+  const body = new FormData();
+  for (const [k, v] of Object.entries(data)) body.append(k, v);
+  const res = await fetch(url, {method:'POST', body});
+  let payload = {};
+  try { payload = await res.json(); } catch(e) {}
+  if (!res.ok){ alert(payload.detail || payload.message || 'שגיאה'); return false; }
+  return true;
+}
+async function act(id, action){
+  if (action === 'cancel' && !confirm('לבטל את המשימה?')) return;
+  if (await post(`/dashboard/war-room/${id}/status`, {action})) location.reload();
+}
+async function move(id){
+  const quadrant = document.getElementById(`quad-${id}`).value;
+  if (await post(`/dashboard/war-room/${id}/move`, {quadrant})) location.reload();
+}
+async function assign(id){
+  const owner_id = document.getElementById(`own-${id}`).value;
+  if (await post(`/dashboard/war-room/${id}/assign`, {owner_id})) location.reload();
+}
+async function setDue(id){
+  const due_date = document.getElementById(`due-${id}`).value;
+  if (await post(`/dashboard/war-room/${id}/due`, {due_date})) location.reload();
+}
+const toast = document.getElementById('toast');
+if (toast) setTimeout(() => toast.remove(), 3500);
+</script>
+</body>
+</html>

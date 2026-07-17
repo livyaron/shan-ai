@@ -97,3 +97,14 @@ def clear_context(telegram_id: int) -> None:
 
 # { telegram_id (int): [user_id, ...] }  — subordinate list for team-report selection
 _awaiting_team_report: dict[int, list[int]] = {}
+
+# { telegram_id (int): wizard state dict }  — operations-room mission creation
+# value: { "step": "title"|"desc"|"quadrant"|"owner"|"due"|"due_text"|"confirm",
+#          "title", "description", "quadrant", "owner_id", "owner_name",
+#          "due_date", "owner_ids": [user_id, ...] }
+_missions_create_state: dict[int, dict] = {}
+
+# { telegram_id (int): edit state dict }  — reassign / custom due date on an existing mission
+# value: { "mission_id": int, "mode": "own"|"due_text", "owner_ids": [user_id, ...],
+#          "origin": str, "page": int }
+_missions_edit_state: dict[int, dict] = {}

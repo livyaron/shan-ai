@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, or_, exists, update, delete, desc
 
 from app.database import get_db_session
-from app.models import Decision, User, DecisionTypeEnum, DecisionStatusEnum, RoleEnum, DecisionDistribution, DistributionTypeEnum, DistributionStatusEnum, DecisionFeedback, DecisionRaciRole, RaciRoleEnum, LessonLearned, Message, KnowledgeFile, QueryLog, RACISuggestion, RACISuggestionStatusEnum, RACIRule, ReportHistory
+from app.models import Decision, User, DecisionTypeEnum, DecisionStatusEnum, RoleEnum, DecisionDistribution, DistributionTypeEnum, DistributionStatusEnum, DecisionFeedback, DecisionRaciRole, RaciRoleEnum, LessonLearned, Message, KnowledgeFile, QueryLog, RACISuggestion, RACISuggestionStatusEnum, RACIRule, ReportHistory, Mission
 from app.routers.login import get_current_user
 
 logger = logging.getLogger(__name__)
@@ -406,6 +406,9 @@ async def delete_user(
         await session.execute(update(User).where(User.manager_id == user_id).values(manager_id=None))
         await session.execute(update(KnowledgeFile).where(KnowledgeFile.uploader_id == user_id).values(uploader_id=None))
         await session.execute(update(QueryLog).where(QueryLog.user_id == user_id).values(user_id=None))
+        await session.execute(update(Mission).where(Mission.created_by_id == user_id).values(created_by_id=None))
+        # owner_id is NOT NULL — reassign the deleted user's missions to the deleting admin
+        await session.execute(update(Mission).where(Mission.owner_id == user_id).values(owner_id=current_user.id))
 
         # Delete non-nullable FK records referencing this user
         await session.execute(delete(DecisionFeedback).where(DecisionFeedback.user_id == user_id))

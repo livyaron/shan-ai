@@ -35,6 +35,7 @@
   `ALTER TABLE eval_runs ADD COLUMN IF NOT EXISTS failed_questions JSON;` (run local + Railway)
 - **eval_gold_answers live cols:** After rebuild/Railway deploy:
   `ALTER TABLE eval_gold_answers ADD COLUMN IF NOT EXISTS last_live_verdict VARCHAR(10), ADD COLUMN IF NOT EXISTS last_live_score DOUBLE PRECISION, ADD COLUMN IF NOT EXISTS last_live_at TIMESTAMP;` (run local + Railway)
+- **missions table (חדר מבצעים):** auto-creates at startup via `Base.metadata.create_all` — no manual SQL needed on fresh deploys. **Future** columns need `ALTER TABLE missions ADD COLUMN IF NOT EXISTS ...` on BOTH local and Railway. `status` is intentionally VARCHAR — never convert to a PG enum. Warning: a forgotten local Docker container running while Railway is live will **double-send** the 07:00 missions digest and overdue alerts (outbound sends work from both instances even though polling conflicts). User deletion reassigns the deleted user's missions to the deleting admin.
 - **Polling Conflict:** Local Docker and Railway **cannot** run simultaneously. Stop local before Railway is live.
 - **No Data Loss:** NEVER run `docker-compose down -v` without explicit confirmation.
 - **Build Cycle:** After code changes, run `docker-compose restart fastapi`.

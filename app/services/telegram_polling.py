@@ -34,9 +34,9 @@ def _main_reply_keyboard(user=None) -> ReplyKeyboardMarkup:
     manager_roles = {RoleEnum.DEPARTMENT_MANAGER, RoleEnum.DEPUTY_DIVISION_MANAGER, RoleEnum.DIVISION_MANAGER}
     rows = [["📁 פרוייקטים", "📋 החלטות", "📊 דוח שלי"]]
     if user and user.role in manager_roles:
-        rows.append(["👥 דוח צוות", "📊 דוח פרויקטים"])
+        rows.append(["🎯 חדר מבצעים", "👥 דוח צוות", "📊 דוח פרויקטים"])
     else:
-        rows.append(["📊 דוח פרויקטים"])
+        rows.append(["🎯 חדר מבצעים", "📊 דוח פרויקטים"])
     return ReplyKeyboardMarkup(rows, resize_keyboard=True, is_persistent=True)
 
 
@@ -141,6 +141,7 @@ class TelegramPollingBot:
         self.application.add_handler(CommandHandler("status", self.handle_status))
         self.application.add_handler(CommandHandler("decisions", self.handle_decisions))
         self.application.add_handler(CommandHandler("projects", self.handle_projects))
+        self.application.add_handler(CommandHandler("missions", self.handle_missions))
         self.application.add_handler(CommandHandler("menu", self.handle_menu))
         self.application.add_handler(CommandHandler("ask", self.handle_ask))
         self.application.add_handler(CommandHandler("report", self.handle_report))
@@ -347,6 +348,27 @@ class TelegramPollingBot:
             reply_markup=get_menu_keyboard(),
         )
 
+    async def handle_missions(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """/missions — open the operations room (חדר מבצעים)."""
+        from app.services.missions_menu_service import get_menu_keyboard, get_menu_text, get_board_counts
+        telegram_id = update.effective_user.id
+        async with async_session_maker() as session:
+            user = await session.scalar(select(User).where(User.telegram_id == telegram_id))
+            if not user or not user.role:
+                await update.message.reply_text("‏⏳ יש להירשם תחילה. השתמש ב-/register")
+                return
+            if user.role == RoleEnum.VIEWER:
+                await update.message.reply_text(
+                    "‏🔒 גישה לחדר המבצעים אינה זמינה למשתמשי צפייה.",
+                    reply_markup=_viewer_reply_keyboard(),
+                )
+                return
+            counts, overdue = await get_board_counts(session)
+        await update.message.reply_text(
+            get_menu_text(counts, overdue),
+            parse_mode="HTML",
+            reply_markup=get_menu_keyboard(counts),
+        )
 
     async def handle_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """/menu — re-send the persistent reply keyboard."""
@@ -584,6 +606,12 @@ class TelegramPollingBot:
                 await update.message.reply_text("‏✅ תשובת הזהב נשמרה. שלח /gold להמשך.")
                 return
 
+            # Operations room — mission wizard / edit flows awaiting text
+            from app.services.telegram_state import _missions_create_state, _missions_edit_state
+            if telegram_id in _missions_create_state or telegram_id in _missions_edit_state:
+                await self._handle_missions_text(update, context, user, text)
+                return
+
             # Check if user is providing feedback text (post-mortem) after a score
             awaiting_fb = feedback_service.get_awaiting_feedback()
             if telegram_id in awaiting_fb:
@@ -744,6 +772,24 @@ class TelegramPollingBot:
                         pm_get_menu_text(_pm_total),
                         parse_mode="HTML",
                         reply_markup=pm_get_menu_keyboard(),
+                    )
+                return
+
+            # Operations room keyword shortcut. Bare "משימות" must match by
+            # equality — containment would hijack questions like "מה המשימות בפרויקט X?"
+            if "חדר מבצעים" in text.strip() or text.strip() == "משימות":
+                if user.role:
+                    from app.services.missions_menu_service import (
+                        get_menu_keyboard as om_get_menu_keyboard,
+                        get_menu_text as om_get_menu_text,
+                        get_board_counts as om_get_board_counts,
+                    )
+                    async with async_session_maker() as _om_s:
+                        _om_counts, _om_late = await om_get_board_counts(_om_s)
+                    await update.message.reply_text(
+                        om_get_menu_text(_om_counts, _om_late),
+                        parse_mode="HTML",
+                        reply_markup=om_get_menu_keyboard(_om_counts),
                     )
                 return
 
@@ -976,6 +1022,21 @@ class TelegramPollingBot:
                 _pm_user = await _pm_session.scalar(select(User).where(User.telegram_id == telegram_id))
             if _pm_user:
                 await self._handle_projects_menu(query, context, data, telegram_id, _pm_user)
+            return
+
+        # Operations room (חדר מבצעים)
+        if data.startswith("om:"):
+            async with async_session_maker() as _om_session:
+                _om_user = await _om_session.scalar(select(User).where(User.telegram_id == telegram_id))
+            if not _om_user or not _om_user.role:
+                return
+            if _om_user.role == RoleEnum.VIEWER:
+                await context.bot.send_message(
+                    chat_id=telegram_id,
+                    text="‏🔒 גישה לחדר המבצעים אינה זמינה למשתמשי צפייה.",
+                )
+                return
+            await self._handle_missions_menu(query, context, data, telegram_id, _om_user)
             return
 
         # Team report — manager selected a recipient
@@ -2084,6 +2145,471 @@ class TelegramPollingBot:
                     reply_markup=build_custom_results_keyboard(decisions, page, total),
                 )
                 return
+
+    # ------------------------------------------------------------------
+    # Operations room (חדר מבצעים) — callback router + wizard text steps
+    # ------------------------------------------------------------------
+
+    _MISSION_LIST_TITLES = {
+        "my":   "👤 המשימות שלי",
+        "late": "⚠️ משימות באיחור",
+        "hist": "✅ משימות שהושלמו",
+    }
+
+    async def _render_missions_menu(self, query) -> None:
+        from app.services.missions_menu_service import get_menu_keyboard, get_menu_text, get_board_counts
+        async with async_session_maker() as session:
+            counts, overdue = await get_board_counts(session)
+        await query.edit_message_text(
+            get_menu_text(counts, overdue), parse_mode="HTML",
+            reply_markup=get_menu_keyboard(counts),
+        )
+
+    async def _render_missions_list(self, query, origin: str, page: int, user) -> None:
+        from app.services import missions_menu_service as oms
+        async with async_session_maker() as session:
+            if origin == "hist":
+                missions, total = await oms.get_done_history(session, page=page)
+                title = self._MISSION_LIST_TITLES["hist"]
+            elif origin == "my":
+                missions, total = await oms.query_missions(session, owner_id=user.id, page=page)
+                title = self._MISSION_LIST_TITLES["my"]
+            elif origin == "late":
+                missions, total = await oms.query_missions(session, only_overdue=True, page=page)
+                title = self._MISSION_LIST_TITLES["late"]
+            elif origin.startswith("q"):
+                quad = origin[1:]
+                missions, total = await oms.query_missions(session, quadrant=quad, page=page)
+                title = oms.quadrant_label(quad, with_axis=True)
+            else:
+                return
+        await query.edit_message_text(
+            oms.format_results_message(title, missions, total, page),
+            parse_mode="HTML",
+            reply_markup=oms.build_results_keyboard(
+                origin, page, total, missions, with_done_shortcut=(origin == "my"),
+            ),
+        )
+
+    async def _render_mission_card(self, query, mission_id: int, origin: str, page: int) -> None:
+        from app.services import missions_menu_service as oms
+        async with async_session_maker() as session:
+            m = await oms.get_mission(session, mission_id)
+            if not m:
+                await query.edit_message_text("‏❌ המשימה לא נמצאה.")
+                return
+            text = oms.build_mission_card(m)
+            kb = oms.build_mission_card_keyboard(m, origin, page)
+        await query.edit_message_text(text, parse_mode="HTML", reply_markup=kb)
+
+    async def _notify_mission_owner(self, bot, session, mission, actor_user) -> None:
+        """Tell the owner they got a mission — skipped when the actor owns it."""
+        if mission.owner_id == actor_user.id:
+            return
+        owner = await session.get(User, mission.owner_id)
+        if not owner or not owner.telegram_id:
+            return
+        from app.services.missions_menu_service import quadrant_label, quadrant_key, format_due
+        try:
+            await bot.send_message(
+                chat_id=owner.telegram_id,
+                text=(
+                    f"‏🎯 <b>משימה חדשה הוקצתה לך</b>\n"
+                    f"<b>{_html.escape(mission.title or '')}</b>\n"
+                    f"{quadrant_label(quadrant_key(mission), with_axis=True)}\n"
+                    f"📅 יעד: {format_due(mission.due_date)}\n"
+                    f"<i>הוקצתה ע\"י {_html.escape(actor_user.username or '')}</i>"
+                ),
+                parse_mode="HTML",
+            )
+        except Exception as e:
+            logger.warning(f"missions: owner notification failed: {e}")
+
+    async def _handle_missions_menu(
+        self, query, context, data: str, telegram_id: int, user,
+    ) -> None:
+        from app.services import missions_menu_service as oms
+        from app.services.telegram_state import _missions_create_state, _missions_edit_state
+
+        if data == "om:noop":
+            return
+
+        if data == "om:menu":
+            _missions_create_state.pop(telegram_id, None)
+            _missions_edit_state.pop(telegram_id, None)
+            await self._render_missions_menu(query)
+            return
+
+        # ── Creation wizard ────────────────────────────────────────────
+        if data == "om:new":
+            _missions_create_state[telegram_id] = {"step": "title"}
+            await query.edit_message_text(
+                "‏➕ <b>משימה חדשה</b>  (שלב 1/5)\n\nשלח את <b>כותרת</b> המשימה:",
+                parse_mode="HTML", reply_markup=oms.build_cancel_keyboard(),
+            )
+            return
+
+        if data == "om:c:abort":
+            _missions_create_state.pop(telegram_id, None)
+            _missions_edit_state.pop(telegram_id, None)
+            await self._render_missions_menu(query)
+            return
+
+        if data.startswith("om:c:"):
+            state = _missions_create_state.get(telegram_id)
+            if state is None:
+                await query.edit_message_text(
+                    "‏⌛ הפעולה הזו כבר לא פעילה. פתח שוב את חדר המבצעים.",
+                )
+                return
+            parts = data.split(":")
+            action = parts[2]
+
+            if action == "skipdesc":
+                state["step"] = "quadrant"
+                await query.edit_message_text(
+                    oms.format_create_progress(state) + "\n\n(שלב 3/5) בחר <b>רביע</b>:",
+                    parse_mode="HTML", reply_markup=oms.build_quadrant_pick_keyboard("om:c:qd"),
+                )
+                return
+
+            if action == "qd" and len(parts) > 3:
+                state["quadrant"] = parts[3]
+                state["step"] = "owner"
+                async with async_session_maker() as session:
+                    users = await oms.list_assignable_users(session, exclude_id=user.id)
+                state["owner_ids"] = [u.id for u in users]
+                state["owner_names"] = [u.username or f"#{u.id}" for u in users]
+                await query.edit_message_text(
+                    oms.format_create_progress(state) + "\n\n(שלב 4/5) בחר <b>אחראי</b>:",
+                    parse_mode="HTML",
+                    reply_markup=oms.build_owner_pick_keyboard(users, "om:c:own"),
+                )
+                return
+
+            if action == "own" and len(parts) > 3:
+                token = parts[3]
+                if token == "me":
+                    state["owner_id"] = user.id
+                    state["owner_name"] = user.username or "אני"
+                else:
+                    try:
+                        idx = int(token)
+                        state["owner_id"] = state["owner_ids"][idx]
+                        state["owner_name"] = state["owner_names"][idx]
+                    except (ValueError, IndexError, KeyError):
+                        return
+                state["step"] = "due"
+                await query.edit_message_text(
+                    oms.format_create_progress(state) + "\n\n(שלב 5/5) בחר <b>תאריך יעד</b>:",
+                    parse_mode="HTML", reply_markup=oms.build_due_pick_keyboard("om:c:due"),
+                )
+                return
+
+            if action == "due" and len(parts) > 3:
+                key = parts[3]
+                if key == "custom":
+                    state["step"] = "due_text"
+                    await query.edit_message_text(
+                        oms.format_create_progress(state)
+                        + "\n\nשלח תאריך בפורמט <b>DD/MM</b> או <b>DD/MM/YYYY</b>:",
+                        parse_mode="HTML", reply_markup=oms.build_cancel_keyboard(),
+                    )
+                    return
+                handled, due = oms.resolve_due_quick_pick(key)
+                if not handled:
+                    return
+                state["due_date"] = due
+                state["step"] = "confirm"
+                await query.edit_message_text(
+                    oms.format_create_progress(state) + "\n\nלשמור את המשימה?",
+                    parse_mode="HTML", reply_markup=oms.build_confirm_keyboard(),
+                )
+                return
+
+            if action == "save":
+                if state.get("step") != "confirm" or not state.get("title"):
+                    return
+                urg, imp = oms.quadrant_flags(state.get("quadrant", "backlog"))
+                async with async_session_maker() as session:
+                    m = await oms.create_mission(
+                        session,
+                        title=state["title"],
+                        description=state.get("description"),
+                        is_urgent=urg,
+                        is_important=imp,
+                        owner_id=state.get("owner_id", user.id),
+                        created_by_id=user.id,
+                        due_date=state.get("due_date"),
+                    )
+                    await self._notify_mission_owner(context.bot, session, m, user)
+                    m = await oms.get_mission(session, m.id)
+                    card = oms.build_mission_card(m)
+                    kb = oms.build_mission_card_keyboard(m, f"q{oms.quadrant_key(m)}", 0)
+                _missions_create_state.pop(telegram_id, None)
+                await query.edit_message_text(
+                    "‏✅ המשימה נשמרה!\n\n" + card, parse_mode="HTML", reply_markup=kb,
+                )
+                return
+            return
+
+        # ── Detail card ────────────────────────────────────────────────
+        if data.startswith("om:d:"):
+            _missions_edit_state.pop(telegram_id, None)
+            parts = data.split(":")
+            try:
+                mission_id = int(parts[2])
+                origin = parts[3] if len(parts) > 3 else "my"
+                page = int(parts[4]) if len(parts) > 4 else 0
+            except (ValueError, IndexError):
+                return
+            await self._render_mission_card(query, mission_id, origin, page)
+            return
+
+        # ── Card actions: om:a:{action}:{id}:{origin}:{page} ─────────
+        if data.startswith("om:a:"):
+            parts = data.split(":")
+            try:
+                action = parts[2]
+                mission_id = int(parts[3])
+                origin = parts[4] if len(parts) > 4 else "my"
+                page = int(parts[5]) if len(parts) > 5 else 0
+            except (ValueError, IndexError):
+                return
+
+            if action in ("start", "done", "reopen", "cancel"):
+                new_status = {
+                    "start": oms.MissionStatusEnum.IN_PROGRESS.value,
+                    "done": oms.MissionStatusEnum.DONE.value,
+                    "reopen": oms.MissionStatusEnum.OPEN.value,
+                    "cancel": oms.MissionStatusEnum.CANCELLED.value,
+                }[action]
+                async with async_session_maker() as session:
+                    m = await oms.get_mission(session, mission_id)
+                    if m:
+                        await oms.set_status(session, m, new_status)
+                await self._render_mission_card(query, mission_id, origin, page)
+                return
+
+            tail = f"{mission_id}:{origin}:{page}"
+            back_to_card = f"om:d:{tail}"
+            if action == "quad":
+                await query.edit_message_reply_markup(
+                    reply_markup=oms.build_quadrant_pick_keyboard(f"om:e:qd:{tail}", abort_cd=back_to_card)
+                )
+                return
+            if action == "own":
+                async with async_session_maker() as session:
+                    users = await oms.list_assignable_users(session, exclude_id=user.id)
+                _missions_edit_state[telegram_id] = {
+                    "mission_id": mission_id,
+                    "owner_ids": [u.id for u in users],
+                    "origin": origin, "page": page,
+                }
+                await query.edit_message_reply_markup(
+                    reply_markup=oms.build_owner_pick_keyboard(users, f"om:e:own:{tail}", abort_cd=back_to_card)
+                )
+                return
+            if action == "due":
+                await query.edit_message_reply_markup(
+                    reply_markup=oms.build_due_pick_keyboard(f"om:e:due:{tail}", abort_cd=back_to_card)
+                )
+                return
+            return
+
+        # ── Edit-picker values: om:e:{kind}:{id}:{origin}:{page}:{val} ─
+        if data.startswith("om:e:"):
+            parts = data.split(":")
+            try:
+                kind = parts[2]
+                mission_id = int(parts[3])
+                origin, page = parts[4], int(parts[5])
+                value = parts[6]
+            except (ValueError, IndexError):
+                return
+            async with async_session_maker() as session:
+                m = await oms.get_mission(session, mission_id)
+                if not m:
+                    await query.edit_message_text("‏❌ המשימה לא נמצאה.")
+                    return
+                if kind == "qd":
+                    await oms.update_mission(session, m, quadrant=value)
+                elif kind == "own":
+                    if value == "me":
+                        new_owner_id = user.id
+                    else:
+                        edit_state = _missions_edit_state.get(telegram_id) or {}
+                        try:
+                            new_owner_id = edit_state["owner_ids"][int(value)]
+                        except (ValueError, IndexError, KeyError):
+                            await query.edit_message_text("‏⌛ הבחירה כבר לא פעילה. פתח את המשימה מחדש.")
+                            return
+                    await oms.update_mission(session, m, owner_id=new_owner_id)
+                    await self._notify_mission_owner(context.bot, session, m, user)
+                elif kind == "due":
+                    if value == "custom":
+                        _missions_edit_state[telegram_id] = {
+                            "mission_id": mission_id, "mode": "due_text",
+                            "origin": origin, "page": page,
+                        }
+                        await query.edit_message_text(
+                            "‏📅 שלח תאריך יעד בפורמט <b>DD/MM</b> או <b>DD/MM/YYYY</b>:",
+                            parse_mode="HTML", reply_markup=oms.build_cancel_keyboard(),
+                        )
+                        return
+                    handled, due = oms.resolve_due_quick_pick(value)
+                    if handled:
+                        await oms.update_mission(session, m, due_date=due)
+            _missions_edit_state.pop(telegram_id, None)
+            await self._render_mission_card(query, mission_id, origin, page)
+            return
+
+        # ── List ✅ shortcut: om:ld:{id}:{origin}:{page} ───────────────
+        if data.startswith("om:ld:"):
+            parts = data.split(":")
+            try:
+                mission_id = int(parts[2])
+                origin = parts[3] if len(parts) > 3 else "my"
+                page = int(parts[4]) if len(parts) > 4 else 0
+            except (ValueError, IndexError):
+                return
+            async with async_session_maker() as session:
+                m = await oms.get_mission(session, mission_id)
+                if m:
+                    await oms.set_status(session, m, oms.MissionStatusEnum.DONE.value)
+            await self._render_missions_list(query, origin, page, user)
+            return
+
+        # ── Digest ✔️: om:dg:done:{id} — keep the digest message intact ─
+        if data.startswith("om:dg:done:"):
+            try:
+                mission_id = int(data.rsplit(":", 1)[1])
+            except ValueError:
+                return
+            async with async_session_maker() as session:
+                m = await oms.get_mission(session, mission_id)
+                if not m:
+                    return
+                await oms.set_status(session, m, oms.MissionStatusEnum.DONE.value)
+                title = m.title or ""
+            # Drop just this button row so the rest of the digest stays actionable
+            try:
+                old_kb = query.message.reply_markup.inline_keyboard if query.message and query.message.reply_markup else []
+                new_rows = [
+                    row for row in old_kb
+                    if not any(btn.callback_data == data for btn in row)
+                ]
+                await query.edit_message_reply_markup(
+                    reply_markup=InlineKeyboardMarkup(new_rows) if new_rows else None
+                )
+            except Exception:
+                pass
+            await context.bot.send_message(
+                chat_id=telegram_id,
+                text=f"‏✅ המשימה “{_html.escape(title)}” סומנה כבוצעה.",
+                parse_mode="HTML",
+            )
+            return
+
+        # ── Lists: om:{origin}:{page} ──────────────────────────────────
+        parts = data.split(":")
+        if len(parts) == 3:
+            origin = parts[1]
+            try:
+                page = int(parts[2])
+            except ValueError:
+                return
+            if origin in ("my", "late", "hist") or origin.startswith("q"):
+                await self._render_missions_list(query, origin, page, user)
+            return
+
+    async def _handle_missions_text(self, update, context, user, text: str) -> None:
+        """Text steps of the mission wizard / edit flows."""
+        from app.services import missions_menu_service as oms
+        from app.services.telegram_state import _missions_create_state, _missions_edit_state
+        telegram_id = update.effective_user.id
+        stripped = text.strip()
+
+        # Reply-keyboard taps mid-flow must not be swallowed as free text
+        _KB_LABELS = {
+            "📁 פרוייקטים", "📋 החלטות", "📊 דוח שלי",
+            "🎯 חדר מבצעים", "👥 דוח צוות", "📊 דוח פרויקטים",
+        }
+        if stripped in _KB_LABELS:
+            await update.message.reply_text(
+                "‏✋ אתה באמצע פעולה בחדר המבצעים. שלח טקסט להמשך, או בטל:",
+                reply_markup=oms.build_cancel_keyboard(),
+            )
+            return
+
+        # Edit flow: custom due date on an existing mission
+        edit_state = _missions_edit_state.get(telegram_id)
+        if edit_state and edit_state.get("mode") == "due_text":
+            due = oms.parse_due_date_text(stripped)
+            if due is None:
+                await update.message.reply_text(
+                    "‏❌ תאריך לא תקין. שלח בפורמט DD/MM או DD/MM/YYYY:",
+                    reply_markup=oms.build_cancel_keyboard(),
+                )
+                return
+            async with async_session_maker() as session:
+                m = await oms.get_mission(session, edit_state["mission_id"])
+                if m:
+                    await oms.update_mission(session, m, due_date=due)
+                    m = await oms.get_mission(session, m.id)
+                    card = oms.build_mission_card(m)
+                    kb = oms.build_mission_card_keyboard(
+                        m, edit_state.get("origin", "my"), edit_state.get("page", 0),
+                    )
+            _missions_edit_state.pop(telegram_id, None)
+            if m:
+                await update.message.reply_text(card, parse_mode="HTML", reply_markup=kb)
+            return
+
+        # Creation wizard text steps
+        state = _missions_create_state.get(telegram_id)
+        if state is None:
+            _missions_edit_state.pop(telegram_id, None)
+            return
+
+        step = state.get("step")
+        if step == "title":
+            state["title"] = stripped[:255]
+            state["step"] = "desc"
+            await update.message.reply_text(
+                oms.format_create_progress(state)
+                + "\n\n(שלב 2/5) שלח <b>תיאור</b> למשימה, או דלג:",
+                parse_mode="HTML", reply_markup=oms.build_skip_desc_keyboard(),
+            )
+            return
+        if step == "desc":
+            state["description"] = stripped[:2000]
+            state["step"] = "quadrant"
+            await update.message.reply_text(
+                oms.format_create_progress(state) + "\n\n(שלב 3/5) בחר <b>רביע</b>:",
+                parse_mode="HTML", reply_markup=oms.build_quadrant_pick_keyboard("om:c:qd"),
+            )
+            return
+        if step == "due_text":
+            due = oms.parse_due_date_text(stripped)
+            if due is None:
+                await update.message.reply_text(
+                    "‏❌ תאריך לא תקין. שלח בפורמט DD/MM או DD/MM/YYYY:",
+                    reply_markup=oms.build_cancel_keyboard(),
+                )
+                return
+            state["due_date"] = due
+            state["step"] = "confirm"
+            await update.message.reply_text(
+                oms.format_create_progress(state) + "\n\nלשמור את המשימה?",
+                parse_mode="HTML", reply_markup=oms.build_confirm_keyboard(),
+            )
+            return
+        # Button-driven step — nudge instead of swallowing the text
+        await update.message.reply_text(
+            "‏☝️ בחר אחת מהאפשרויות בכפתורים למעלה, או בטל:",
+            reply_markup=oms.build_cancel_keyboard(),
+        )
 
     async def _handle_projects_menu(
         self, query, context, data: str, telegram_id: int, user,

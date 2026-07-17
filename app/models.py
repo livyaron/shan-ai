@@ -381,6 +381,38 @@ class ProjectReportSchedule(Base):
     created_by = relationship("User", foreign_keys=[created_by_id])
 
 
+class MissionStatusEnum(str, enum.Enum):
+    # Stored as VARCHAR (not PG enum) — see CLAUDE.md §4; never convert to a PG enum.
+    OPEN = "open"
+    IN_PROGRESS = "in_progress"
+    DONE = "done"
+    CANCELLED = "cancelled"
+
+
+class Mission(Base):
+    """Operations-room mission (חדר מבצעים) — Eisenhower urgent×important board."""
+    __tablename__ = "missions"
+
+    id              = Column(Integer, primary_key=True, index=True)
+    title           = Column(String(255), nullable=False)
+    description     = Column(Text, nullable=True)
+    is_urgent       = Column(Boolean, nullable=False, default=False, server_default="false")
+    is_important    = Column(Boolean, nullable=False, default=False, server_default="false")
+    status          = Column(String(20), nullable=False, default="open", server_default="open")
+    owner_id        = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    created_by_id   = Column(Integer, ForeignKey("users.id"), nullable=True)
+    due_date        = Column(Date, nullable=True)   # Israel-local calendar day
+    overdue_notified_at = Column(DateTime, nullable=True)   # set only after a successful alert send
+    created_at      = Column(DateTime, default=datetime.utcnow)
+    updated_at      = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    completed_at    = Column(DateTime, nullable=True)
+
+    owner      = relationship("User", foreign_keys=[owner_id])
+    created_by = relationship("User", foreign_keys=[created_by_id])
+
+    __table_args__ = (Index("ix_missions_status_due", "status", "due_date"),)
+
+
 # =============================================================================
 # Eval & Self-Repair Loop tables
 # =============================================================================
