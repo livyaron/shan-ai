@@ -61,12 +61,22 @@ def start_scheduler() -> None:
     # Retry decisions that were queued when all LLM providers were exhausted.
     sch.add_job(_pending_queue_run, "interval", minutes=5,
                 id="pending_queue", replace_existing=True)
+    # Operations room: morning digest (work week only) + overdue alerts.
+    sch.add_job(
+        _missions_daily_digest,
+        CronTrigger(day_of_week="sun-thu", hour=7, minute=0, timezone="Asia/Jerusalem"),
+        id="missions_daily_digest", replace_existing=True,
+    )
+    sch.add_job(_missions_overdue_check, "interval", minutes=30,
+                id="missions_overdue_check", replace_existing=True)
     sch.start()
     _scheduler = sch
     logger.info("eval_cron: scheduler started (03:00 UTC nightly)")
     logger.info("eval_cron: weekly_report job registered (Thu 17:00 Asia/Jerusalem)")
     logger.info("eval_cron: project_report_cron job registered (every 15 min)")
     logger.info("eval_cron: weekly_eval_summary job registered (Sun 07:00 Asia/Jerusalem)")
+    logger.info("eval_cron: missions_daily_digest job registered (Sun-Thu 07:00 Asia/Jerusalem)")
+    logger.info("eval_cron: missions_overdue_check job registered (every 30 min, sends 07-20 IL)")
     logger.info("eval_cron: batch_eval job registered (every 3h)")
 
 
@@ -112,6 +122,88 @@ async def _pending_queue_run() -> None:
         await process_pending_queue()
     except Exception as e:
         logger.exception(f"pending_queue run failed: {e}")
+
+
+async def _missions_daily_digest() -> None:
+    """Operations room morning digest — per-owner active missions (Sun-Thu 07:00 IL)."""
+    from app.database import async_session_maker
+    from app.models import User, RoleEnum
+    from app.services.telegram_polling import telegram_bot
+    from app.services import missions_menu_service as oms
+
+    bot = (telegram_bot.application.bot
+           if telegram_bot.application and telegram_bot.application.bot else None)
+    if bot is None:
+        logger.warning("missions_daily_digest: bot not available, skipping")
+        return
+
+    manager_roles = {RoleEnum.DEPARTMENT_MANAGER, RoleEnum.DEPUTY_DIVISION_MANAGER, RoleEnum.DIVISION_MANAGER}
+    async with async_session_maker() as session:
+        counts, board_overdue = await oms.get_board_counts(session)
+        board_open = sum(counts.values())
+        owner_ids = await oms.get_users_with_active_missions(session)
+        for owner_id in owner_ids:
+            try:
+                owner = await session.get(User, owner_id)
+                if not owner or not owner.telegram_id:
+                    continue
+                missions, _total = await oms.query_missions(session, owner_id=owner_id, page=0)
+                if not missions:
+                    continue
+                totals = (board_open, board_overdue) if owner.role in manager_roles else None
+                await bot.send_message(
+                    chat_id=owner.telegram_id,
+                    text=oms.format_digest(missions, board_totals=totals),
+                    parse_mode="HTML",
+                    reply_markup=oms.build_digest_keyboard(missions),
+                )
+            except Exception as e:
+                logger.error(f"missions_daily_digest: send failed for user {owner_id}: {e}")
+
+
+async def _missions_overdue_check() -> None:
+    """Alert owners of newly-overdue missions (every 30 min, sends only 07:00-20:00 IL, Sun-Thu)."""
+    from zoneinfo import ZoneInfo
+    from datetime import datetime as _dt
+    from app.database import async_session_maker
+    from app.services.telegram_polling import telegram_bot
+    from app.services import missions_menu_service as oms
+
+    now_il = _dt.now(tz=ZoneInfo("Asia/Jerusalem"))
+    if not (7 <= now_il.hour < 20):
+        return
+    if now_il.weekday() in (4, 5):  # Friday, Saturday
+        return
+
+    bot = (telegram_bot.application.bot
+           if telegram_bot.application and telegram_bot.application.bot else None)
+    if bot is None:
+        return
+
+    async with async_session_maker() as session:
+        missions = await oms.query_overdue_unnotified(session)
+        for m in missions:
+            try:
+                owner = m.owner
+                if not owner or not owner.telegram_id:
+                    continue
+                import html as _html
+                fire = "🔥 " if (m.is_urgent and m.is_important) else ""
+                await bot.send_message(
+                    chat_id=owner.telegram_id,
+                    text=(
+                        f"‏{fire}⚠️ <b>משימה באיחור</b>\n"
+                        f"<b>{_html.escape(m.title or '')}</b>\n"
+                        f"📅 תאריך היעד היה {oms.format_due(m.due_date)}.\n"
+                        f"עדכן סטטוס או תאריך בחדר המבצעים — /missions"
+                    ),
+                    parse_mode="HTML",
+                )
+                # Mark as notified only after a successful send so failures retry
+                m.overdue_notified_at = _dt.utcnow()
+                await session.commit()
+            except Exception as e:
+                logger.error(f"missions_overdue_check: alert failed for mission {m.id}: {e}")
 
 
 async def _weekly_report_run() -> None:

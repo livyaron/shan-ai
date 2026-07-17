@@ -36,8 +36,9 @@ def test_keyboard_for_operational_has_report_button():
     user.role = RoleEnum.PROJECT_MANAGER
     kb = _keyboard_for_user(user)
     buttons = [b for row in kb.keyboard for b in row]
-    assert len(buttons) == 3  # פרוייקטים, החלטות, דוח שלי
+    assert len(buttons) == 5  # פרוייקטים, החלטות, דוח שלי, חדר מבצעים, דוח פרויקטים
     assert any("דוח שלי" in b.text for b in buttons)
+    assert any("חדר מבצעים" in b.text for b in buttons)
 
 
 import pytest
