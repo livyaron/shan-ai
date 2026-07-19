@@ -22,23 +22,22 @@
     3. Ask Opus: "Review @PLAN.md for logical fallacies and edge cases."
 
 ## 4. Critical Operational Guardrails
-- **The "BIGINT" Fix:** After any Docker rebuild, MUST run:
-  `docker exec shan-ai-postgres psql -U shan_user -d shan_ai -c "ALTER TABLE users ALTER COLUMN telegram_id TYPE BIGINT;"`
-- **is_relevant columns:** After any Docker rebuild OR Railway deploy with new schema, run on BOTH local and Railway DB:
-  Local: `docker exec shan-ai-postgres psql -U shan_user -d shan_ai -c "ALTER TABLE decisions ADD COLUMN IF NOT EXISTS is_relevant BOOLEAN NOT NULL DEFAULT TRUE, ADD COLUMN IF NOT EXISTS irrelevant_reason TEXT, ADD COLUMN IF NOT EXISTS irrelevant_at TIMESTAMP, ADD COLUMN IF NOT EXISTS irrelevant_by_id INTEGER REFERENCES users(id);"`
-  Railway: `docker exec shan-ai-postgres psql "$RAILWAY_DATABASE_URL" -c "ALTER TABLE decisions ADD COLUMN IF NOT EXISTS is_relevant BOOLEAN NOT NULL DEFAULT TRUE, ADD COLUMN IF NOT EXISTS irrelevant_reason TEXT, ADD COLUMN IF NOT EXISTS irrelevant_at TIMESTAMP, ADD COLUMN IF NOT EXISTS irrelevant_by_id INTEGER REFERENCES users(id);"` (URL in local `.env`, never commit it — repo is public)
-- **roleenum VIEWER:** DB enum may lack values added in code (`app/models.py` RoleEnum). After rebuild/fresh DB, run:
-  `docker exec shan-ai-postgres psql -U shan_user -d shan_ai -c "ALTER TYPE roleenum ADD VALUE IF NOT EXISTS 'VIEWER';"`
-- **judged_against_gold:** After rebuild/fresh DB or Railway deploy, run on both:
-  `docker exec shan-ai-postgres psql -U shan_user -d shan_ai -c "ALTER TABLE query_logs ADD COLUMN IF NOT EXISTS judged_against_gold BOOLEAN;"`
-- **eval_runs.failed_questions:** After rebuild/fresh DB or Railway deploy:
-  `ALTER TABLE eval_runs ADD COLUMN IF NOT EXISTS failed_questions JSON;` (run local + Railway)
-- **eval_gold_answers live cols:** After rebuild/Railway deploy:
-  `ALTER TABLE eval_gold_answers ADD COLUMN IF NOT EXISTS last_live_verdict VARCHAR(10), ADD COLUMN IF NOT EXISTS last_live_score DOUBLE PRECISION, ADD COLUMN IF NOT EXISTS last_live_at TIMESTAMP;` (run local + Railway)
-- **missions table (חדר מבצעים):** auto-creates at startup via `Base.metadata.create_all` — no manual SQL needed on fresh deploys. **Future** columns need `ALTER TABLE missions ADD COLUMN IF NOT EXISTS ...` on BOTH local and Railway. `status` is intentionally VARCHAR — never convert to a PG enum. Warning: a forgotten local Docker container running while Railway is live will **double-send** the 07:00 missions digest and overdue alerts (outbound sends work from both instances even though polling conflicts). User deletion reassigns the deleted user's missions to the deleting admin.
-- **Polling Conflict:** Local Docker and Railway **cannot** run simultaneously. Stop local before Railway is live.
-- **No Data Loss:** NEVER run `docker-compose down -v` without explicit confirmation.
-- **Build Cycle:** After code changes, run `docker-compose restart fastapi`.
+- **Deployment is Railway-ONLY.** The local Docker stack is retired. All DB commands run against the Railway DB: `psql "$RAILWAY_DATABASE_URL" -c "..."` (URL in local `.env`, never commit it — repo is public). Never start a local Docker instance while Railway is live — it steals Telegram polling AND double-sends the 07:00 missions digest and overdue alerts.
+- **The "BIGINT" Fix:** After a fresh DB, MUST run:
+  `psql "$RAILWAY_DATABASE_URL" -c "ALTER TABLE users ALTER COLUMN telegram_id TYPE BIGINT;"`
+- **is_relevant columns:** After a Railway deploy with new schema / fresh DB:
+  `psql "$RAILWAY_DATABASE_URL" -c "ALTER TABLE decisions ADD COLUMN IF NOT EXISTS is_relevant BOOLEAN NOT NULL DEFAULT TRUE, ADD COLUMN IF NOT EXISTS irrelevant_reason TEXT, ADD COLUMN IF NOT EXISTS irrelevant_at TIMESTAMP, ADD COLUMN IF NOT EXISTS irrelevant_by_id INTEGER REFERENCES users(id);"`
+- **roleenum VIEWER:** DB enum may lack values added in code (`app/models.py` RoleEnum). After fresh DB, run:
+  `psql "$RAILWAY_DATABASE_URL" -c "ALTER TYPE roleenum ADD VALUE IF NOT EXISTS 'VIEWER';"`
+- **judged_against_gold:** After fresh DB / deploy with new schema:
+  `psql "$RAILWAY_DATABASE_URL" -c "ALTER TABLE query_logs ADD COLUMN IF NOT EXISTS judged_against_gold BOOLEAN;"`
+- **eval_runs.failed_questions:** After fresh DB / deploy with new schema:
+  `ALTER TABLE eval_runs ADD COLUMN IF NOT EXISTS failed_questions JSON;` (Railway DB)
+- **eval_gold_answers live cols:** After fresh DB / deploy with new schema:
+  `ALTER TABLE eval_gold_answers ADD COLUMN IF NOT EXISTS last_live_verdict VARCHAR(10), ADD COLUMN IF NOT EXISTS last_live_score DOUBLE PRECISION, ADD COLUMN IF NOT EXISTS last_live_at TIMESTAMP;` (Railway DB)
+- **missions table (חדר מבצעים):** auto-creates at startup via `Base.metadata.create_all` — no manual SQL needed on fresh deploys. **Future** columns need `ALTER TABLE missions ADD COLUMN IF NOT EXISTS ...` on the Railway DB. `status` is intentionally VARCHAR — never convert to a PG enum. User deletion reassigns the deleted user's missions to the deleting admin.
+- **No Data Loss:** NEVER run destructive SQL (DROP/TRUNCATE/DELETE without WHERE) or delete the Railway Postgres volume without explicit confirmation.
+- **Build Cycle:** Push to the deploy branch — Railway auto-builds from `Dockerfile` per `railway.toml`. No local restart step.
 
 ## 5. Development Standards (Hebrew & Logic)
 - **Hebrew RTL:** Prefix ALL bot messages with `\u200F` (RTL Mark).
