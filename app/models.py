@@ -655,6 +655,38 @@ class ReportHistory(Base):
     user = relationship("User", foreign_keys=[user_id])
 
 
+class MemoryNote(Base):
+    """Organizational memory note — the second brain's spine table.
+
+    Facts taught by users ("זכור ש..."), extracted from project-snapshot diffs,
+    or (future) auto-extracted from messages. Retrieved by ask_router and
+    injected into every answer path. `status` is VARCHAR — never a PG enum.
+    Canonical retrieval predicate: status='active' AND superseded_by_id IS NULL
+    AND (valid_until IS NULL OR valid_until > now()).
+    """
+    __tablename__ = "memory_notes"
+
+    id               = Column(Integer, primary_key=True, index=True)
+    content          = Column(Text, nullable=False)
+    embedding        = Column(Vector(384), nullable=True)
+    created_by_id    = Column(Integer, ForeignKey("users.id"), nullable=True)
+    project_id       = Column(Integer, ForeignKey("projects.id", ondelete="SET NULL"),
+                              nullable=True, index=True)
+    tags             = Column(JSON, nullable=True)          # e.g. {"field": "manager"} for snapshot diffs
+    status           = Column(String(20), nullable=False, default="active",
+                              server_default="active", index=True)   # active | pending | rejected
+    source           = Column(String(32), nullable=False, default="user_taught",
+                              server_default="user_taught")  # user_taught | snapshot_diff | auto_extracted
+    superseded_by_id = Column(Integer, ForeignKey("memory_notes.id"), nullable=True)
+    valid_until      = Column(DateTime, nullable=True)
+    created_at       = Column(DateTime, default=datetime.utcnow, index=True)
+    updated_at       = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    created_by    = relationship("User")
+    project       = relationship("Project")
+    superseded_by = relationship("MemoryNote", remote_side="MemoryNote.id", uselist=False)
+
+
 class PendingDecision(Base):
     """A decision the user submitted that could not be analyzed at submit time
     (all LLM providers rate-limited / quota-exhausted). Queued here and retried by

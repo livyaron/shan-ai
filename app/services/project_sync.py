@@ -14,6 +14,7 @@ from sqlalchemy import select
 
 from app.database import async_session_maker
 from app.models import Project
+from app.services import memory_service
 from app.services.llm_router import llm_chat
 from app.services.project_learning_service import save_snapshot
 
@@ -301,6 +302,7 @@ async def sync_projects_file(file_path: str, sheet_name: str | None = None) -> d
     Returns result dict: {"processed": N, "created": N, "updated": N, "errors": [...]}
     """
     result = {"processed": 0, "created": 0, "updated": 0, "errors": [], "identifiers": []}
+    change_facts: list[dict] = []   # second-brain temporal facts (Option G)
 
     # 1. Read file in executor thread (pandas is synchronous/blocking)
     loop = asyncio.get_event_loop()
@@ -383,6 +385,17 @@ async def sync_projects_file(file_path: str, sheet_name: str | None = None) -> d
                             changed = True
                             if attr == "weekly_report":
                                 weekly_changed = True
+                            # Second brain (Option G): tracked field changes become
+                            # temporal memory facts — deterministic, no LLM
+                            if attr in memory_service.TRACKED_PROJECT_FIELDS and old_norm is not None:
+                                change_facts.append({
+                                    "project_id": existing.id,
+                                    "identifier": ident,
+                                    "name": fields.get("name") or existing.name or ident,
+                                    "field": attr,
+                                    "old": old_norm,
+                                    "new": new_norm,
+                                })
                     if not existing.is_active:
                         # Project reappeared in the master file — reactivate
                         existing.is_active = True
@@ -428,6 +441,10 @@ async def sync_projects_file(file_path: str, sheet_name: str | None = None) -> d
         f"{result['created']} created, {result['updated']} updated, "
         f"{len(result['errors'])} errors"
     )
+
+    # Second brain: write snapshot-diff memory facts (deterministic, no LLM)
+    if change_facts:
+        asyncio.create_task(memory_service.record_project_changes(change_facts))
 
     # Spawn brief generation as a background task (don't wait for it)
     asyncio.create_task(generate_all_briefs())

@@ -137,7 +137,7 @@ async def test_route_intent_override_skips_llm_intent_detection(db_session):
 
     captured = {}
 
-    async def fake_apq(text_, sess, user_data, *, user_id, precomputed_intent=None, precomputed_param=None):
+    async def fake_apq(text_, sess, user_data, *, user_id, precomputed_intent=None, precomputed_param=None, memory_context=""):
         captured["intent"] = precomputed_intent
         captured["param"] = precomputed_param
         return ("ok", 1)
@@ -170,7 +170,7 @@ async def test_route_project_alias_bypasses_intent_detection(db_session):
 
     captured = {}
 
-    async def fake_apq(text_, sess, user_data, *, user_id, precomputed_intent=None, precomputed_param=None):
+    async def fake_apq(text_, sess, user_data, *, user_id, precomputed_intent=None, precomputed_param=None, memory_context=""):
         captured["intent"] = precomputed_intent
         captured["param"] = precomputed_param
         return ("ok", 1)

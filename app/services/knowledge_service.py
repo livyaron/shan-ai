@@ -1941,6 +1941,7 @@ async def answer_with_full_context(
     user_id: int,
     log_to_db: bool = True,
     conversation_context: list[dict] | None = None,
+    memory_context: str | None = None,
 ) -> dict:
     """Search knowledge base + decisions, then answer with two-step retrieval.
 
@@ -2187,6 +2188,16 @@ async def answer_with_full_context(
 
     decisions_ctx = await get_decisions_context(session, user_id)
 
+    # Second brain — memory_context is None when called directly (not via
+    # ask_router, which retrieves once and passes the formatted block).
+    if memory_context is None:
+        try:
+            from app.services import memory_service
+            _mem_notes = await memory_service.get_relevant_memories(original_question, session)
+            memory_context = memory_service.format_memory_context(_mem_notes)
+        except Exception:
+            memory_context = ""
+
     # Build file-name map and apply file-priority sorting before formatting.
     # Files with 'עדכני' or 'Final' in their name are treated as authoritative;
     # their chunks are surfaced first so the LLM sees the freshest data.
@@ -2206,6 +2217,10 @@ async def answer_with_full_context(
         chunks = sorted(chunks, key=_priority_score)  # priority files first
 
     parts = []
+    # Memory block goes FIRST — truncation below is a tail slice, so anything
+    # appended after the chunk context would be cut off in most real answers.
+    if memory_context:
+        parts.append(memory_context)
     if chunks:
         parts.append(format_knowledge_context(chunks, compact=full_list, file_name_map=file_name_map))
     if decisions_ctx:
@@ -2271,6 +2286,8 @@ async def answer_with_full_context(
 
     # Build a short sources line
     source_parts = []
+    if memory_context:
+        source_parts.append("🧠 זיכרון ארגוני")
     if decisions_ctx:
         source_parts.append("📋 מסד ההחלטות")
     if file_names:
@@ -2279,6 +2296,8 @@ async def answer_with_full_context(
 
     # Step 4: Log query to DB (skipped when log_to_db=False, e.g. eval-verifier shadow runs)
     sources_payload = [{"file": name} for name in file_names]
+    if memory_context:
+        sources_payload.append({"source": "memory_notes"})
     if decisions_ctx:
         sources_payload.append({"source": "decisions_db"})
     log_id = None
