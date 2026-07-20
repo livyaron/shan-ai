@@ -5,6 +5,8 @@
 **Goal:** Give the bot deep, growing, persistent knowledge about the projects (electrical substation infrastructure), beyond what file uploads and formal decisions capture today.
 
 > **Council review (2026-07-19):** this doc was reviewed by three independent reviewer agents — architect (design vs. actual code), ops pragmatist (deploy/cost/failure modes), product critic (user value). Verdict: **3/3 approve with changes.** All findings are folded into this revision; the notable ones are marked ⚖️ inline.
+>
+> **Implementation status (2026-07-20):** Phases 0, 1a (A+F), 1b (E), 1c (G), 2 (B), and Option D are **implemented** — see `memory_service.py`, `dossier_service.py`, `extraction_service.py`, `session_summary_service.py`, `job_guard.py`. Option C (entity graph) remains deferred per its evidence gate: build only when `query_logs` show cross-cutting questions the flat layers keep failing.
 
 ---
 

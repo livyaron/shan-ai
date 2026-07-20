@@ -73,6 +73,19 @@ def start_scheduler() -> None:
     # hash-gated — protects the Groq TPD budget; see dossier_service).
     sch.add_job(_dossier_drip, "interval", minutes=15,
                 id="dossier_drip", replace_existing=True)
+    # Second brain phase 3: nightly fact extraction + pending expiry.
+    # 01:15 UTC — away from the 03:00 eval nightly and the 6h batch-eval slots.
+    sch.add_job(_memory_extraction_run, CronTrigger(hour=1, minute=15),
+                id="memory_extraction", replace_existing=True)
+    # Second brain phase 3: weekly batched review digest for admins.
+    sch.add_job(
+        _memory_weekly_digest,
+        CronTrigger(day_of_week="sun", hour=7, minute=30, timezone="Asia/Jerusalem"),
+        id="memory_weekly_digest", replace_existing=True,
+    )
+    # Second brain (Option D): nightly rolling conversation summaries.
+    sch.add_job(_session_summaries_run, CronTrigger(hour=0, minute=45),
+                id="session_summaries", replace_existing=True)
     sch.start()
     _scheduler = sch
     logger.info("eval_cron: scheduler started (03:00 UTC nightly)")
@@ -135,6 +148,33 @@ async def _dossier_drip() -> None:
         await process_dirty_dossiers()
     except Exception as e:
         logger.exception(f"dossier_drip run failed: {e}")
+
+
+async def _memory_extraction_run() -> None:
+    """Nightly auto-extraction of durable facts from recent messages (01:15 UTC)."""
+    from app.services.extraction_service import run_extraction
+    try:
+        await run_extraction()
+    except Exception as e:
+        logger.exception(f"memory_extraction run failed: {e}")
+
+
+async def _memory_weekly_digest() -> None:
+    """Weekly admin digest of auto-extracted facts (Sun 07:30 IL)."""
+    from app.services.extraction_service import send_weekly_digest
+    try:
+        await send_weekly_digest()
+    except Exception as e:
+        logger.exception(f"memory_weekly_digest run failed: {e}")
+
+
+async def _session_summaries_run() -> None:
+    """Nightly rolling conversation summaries (00:45 UTC)."""
+    from app.services.session_summary_service import run_daily_summaries
+    try:
+        await run_daily_summaries()
+    except Exception as e:
+        logger.exception(f"session_summaries run failed: {e}")
 
 
 async def _missions_daily_digest() -> None:

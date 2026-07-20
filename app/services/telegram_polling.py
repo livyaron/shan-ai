@@ -796,6 +796,17 @@ class TelegramPollingBot:
 
             # Load conversation context (after role check so roleless users don't accumulate context)
             conv_ctx = get_context(telegram_id)
+            if not conv_ctx:
+                # Fresh session — seed with the rolling cross-session summary
+                # (second brain, Option D). Non-fatal on any failure.
+                try:
+                    from app.services.session_summary_service import get_summary
+                    _sess_summary = await get_summary(user.id, session)
+                    if _sess_summary:
+                        conv_ctx = [{"role": "assistant",
+                                     "content": f"סיכום שיחות קודמות: {_sess_summary}"}]
+                except Exception:
+                    pass
             append_context(telegram_id, "user", text)
 
             # Show typing indicator for all role-bearing users (including VIEWER)
@@ -1675,6 +1686,19 @@ class TelegramPollingBot:
                     ]]),
                 )
                 await self._notify_admins_new_memory(approver, note)
+                return
+
+            # --- Second brain: approve a pending auto-extracted fact ---
+            if action == "mem_appr":
+                from app.services.extraction_service import approve_pending
+                from app.models import RoleEnum as _RE_mem
+                if approver.role == _RE_mem.VIEWER:
+                    return
+                ok = await approve_pending(session, decision_id)
+                await context.bot.send_message(
+                    chat_id=telegram_id,
+                    text="‏🧠 ✅ העובדה אושרה ופעילה." if ok else "‏ℹ️ העובדה כבר טופלה.",
+                )
                 return
 
             # --- Second brain: forget a memory note ---
