@@ -282,6 +282,7 @@ async def startup():
         await telegram_bot.start()
 
         use_polling = settings.USE_POLLING or (
+            not settings.RAILWAY_PUBLIC_DOMAIN and
             not settings.TELEGRAM_WEBHOOK_URL and
             any(h in (settings.BASE_URL or "") for h in ["localhost", "127.0.0.1", "0.0.0.0"])
         )

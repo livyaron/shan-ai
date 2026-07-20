@@ -266,7 +266,7 @@ class TelegramPollingBot:
             }
             role_label = ROLE_LABELS.get(user.role.value, user.role.value) if user.role else "—"
             from app.config import settings as _settings
-            profile_link = f"{_settings.BASE_URL}/profile/{user.profile_token}" if user.profile_token else None
+            profile_link = f"{_settings.public_base_url}/profile/{user.profile_token}" if user.profile_token else None
             profile_line = f'\n\n🔗 <a href="{profile_link}">עדכן את הפרופיל שלך</a>' if profile_link else ""
             await update.message.reply_text(
                 f"\u200F✅ <b>ברוך הבא, {_html.escape(user.username)}!</b>\n\n"
@@ -3163,15 +3163,13 @@ class TelegramPollingBot:
 
     async def set_webhook(self):
         """Register the webhook URL with Telegram."""
-        webhook_url = (
-            settings.TELEGRAM_WEBHOOK_URL
-            or f"{settings.BASE_URL}/telegram/webhook"
-        )
+        webhook_url = settings.effective_webhook_url
         try:
             await self.application.bot.set_webhook(
                 url=webhook_url,
                 secret_token=settings.WEBHOOK_SECRET_TOKEN or None,
                 allowed_updates=["message", "callback_query", "edited_message"],
+                drop_pending_updates=True,
             )
             logger.info(f"Telegram webhook set to: {webhook_url}")
         except Exception as e:
