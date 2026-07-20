@@ -99,6 +99,19 @@ async def route(
             sources_text="📌 תשובה מאושרת",
         ), ["correction_pin"])
 
+    # Second brain — retrieve memory context ONCE, inject into every path below
+    # (project, decision, RAG). Non-fatal: failure degrades to "no memories".
+    memory_context = ""
+    memory_rule_ids: list[str] = []
+    try:
+        from app.services import memory_service
+        _mem_notes = await memory_service.get_relevant_memories(question, session)
+        if _mem_notes:
+            memory_context = memory_service.format_memory_context(_mem_notes)
+            memory_rule_ids = [f"memory_note:{n.id}" for n in _mem_notes]
+    except Exception:
+        logger.warning("memory retrieval failed", exc_info=True)
+
     # 0a. Intent override (hash-keyed; exact match on normalized question)
     intent_overrides = {**ks._DB_INTENT_OVERRIDES_CACHE, **ks._shadow_intent_overrides.get()}
     pinned = intent_overrides.get(q_hash)
@@ -108,6 +121,7 @@ async def route(
             user_id=user_id,
             precomputed_intent=pinned["forced_intent"],
             precomputed_param=pinned["forced_param"],
+            memory_context=memory_context,
         )
         return await _finish(AnswerResult(
             answer=answer,
@@ -120,7 +134,7 @@ async def route(
             has_decisions=False,
             file_names=[],
             sources_text="📂 מסד הפרויקטים",
-        ), ["intent_override"])
+        ), ["intent_override"] + memory_rule_ids)
 
     # 0b. Project alias resolve — bypass LLM intent detection, call
     # answer_project_query with precomputed by_identifier+project_alias_id hint.
@@ -137,6 +151,7 @@ async def route(
                     user_id=user_id,
                     precomputed_intent="by_identifier",
                     precomputed_param=hint_param,
+                    memory_context=memory_context,
                 )
                 return await _finish(AnswerResult(
                     answer=answer,
@@ -149,14 +164,15 @@ async def route(
                     has_decisions=False,
                     file_names=[],
                     sources_text="📂 מסד הפרויקטים",
-                ), [f"project_alias:project={project_id}"])
+                ), [f"project_alias:project={project_id}"] + memory_rule_ids)
     # ── End pre-rules ─────────────────────────────────────────────────────
 
     # 1. Decision history queries
     if any(kw in question for kw in _DECISION_KEYWORDS):
         decisions_ctx = await ks.get_decisions_context(session, user_id)
-        if decisions_ctx:
-            answer = await ks.answer_decisions_question(question, decisions_ctx)
+        if decisions_ctx or memory_context:
+            combined_ctx = "\n\n".join(p for p in (memory_context, decisions_ctx) if p)
+            answer = await ks.answer_decisions_question(question, combined_ctx)
         else:
             answer = "לא נמצאו החלטות עבורך במסד הנתונים."
         log_id = await _log_query(session, question, answer,
@@ -172,7 +188,7 @@ async def route(
             has_decisions=bool(decisions_ctx),
             file_names=[],
             sources_text="📋 מסד ההחלטות" if decisions_ctx else "",
-        ), [])
+        ), memory_rule_ids)
 
     # 2. Project queries
     if _is_project_query(question):
@@ -180,6 +196,7 @@ async def route(
             import json as _json
             answer, log_id = await project_tools.answer_project_query(
                 question, session, {}, user_id=user_id,
+                memory_context=memory_context,
             )
             if isinstance(answer, str) and answer.startswith("__DISAMBIG__:"):
                 candidates = _json.loads(answer[len("__DISAMBIG__:"):])
@@ -206,14 +223,15 @@ async def route(
                 has_decisions=False,
                 file_names=[],
                 sources_text="📂 מסד הפרויקטים",
-            ), [])
+            ), memory_rule_ids)
         except Exception:
             logger.warning("project_tools failed, falling through to RAG", exc_info=True)
 
-    # 3. Default RAG
+    # 3. Default RAG — memory block is prepended inside (survives truncation)
     result = await ks.answer_with_full_context(
         question, session, user_id, log_to_db=log_to_db,
         conversation_context=conversation_context,
+        memory_context=memory_context,
     )
     return await _finish(AnswerResult(
         answer=result.get("answer", ""),
@@ -226,7 +244,7 @@ async def route(
         has_decisions=bool(result.get("has_decisions")),
         file_names=list(result.get("file_names", []) or []),
         sources_text=result.get("sources_text", "") or "",
-    ), [])
+    ), memory_rule_ids)
 
 
 async def _log_query(

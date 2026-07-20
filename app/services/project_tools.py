@@ -500,6 +500,7 @@ async def answer_project_query(
     user_id: Optional[int] = None,
     precomputed_intent: Optional[str] = None,
     precomputed_param: Optional[str] = None,
+    memory_context: str = "",
 ) -> tuple[str, Optional[int]]:
     """
     Main function: detect intent, fetch data, and generate Hebrew summary via AI.
@@ -568,6 +569,12 @@ async def answer_project_query(
                 data = matches[0]
                 user_data["last_project"] = data["project_identifier"]
                 answer = _format_project_card(data, 1, 1)
+                if memory_context:
+                    # Direct card (no LLM) — surface the taught facts under it,
+                    # without the LLM-prompt header line
+                    import html as _html_mod
+                    facts = memory_context.split("\n", 1)[1] if "\n" in memory_context else memory_context
+                    answer += "\n\n🧠 <b>מהזיכרון הארגוני:</b>\n" + _html_mod.escape(facts)
                 log_id = await _log_query(text, answer, intent, data["project_identifier"], session, user_id)
                 return answer, log_id
             else:
@@ -753,6 +760,19 @@ async def answer_project_query(
             + format_rules
             + instructions_addon
         )
+
+        if memory_context:
+            context_str = f"{context_str}\n\n{memory_context}"
+
+        # A resolved single project gets its living dossier as extra background
+        if current_project_id:
+            try:
+                from app.services.dossier_service import get_dossier_text_by_identifier
+                dossier = await get_dossier_text_by_identifier(current_project_id, session)
+                if dossier:
+                    context_str = f"{context_str}\n\nתיק הפרויקט (רקע מצטבר):\n{dossier}"
+            except Exception:
+                logger.warning("dossier injection failed", exc_info=True)
 
         summary = await llm_chat(
             "project_query",

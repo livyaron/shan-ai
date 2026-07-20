@@ -592,6 +592,109 @@ class TelegramPollingBot:
     # Message handler — routes through Claude if user has a role
     # ------------------------------------------------------------------
 
+    # ------------------------------------------------------------------
+    # Second brain — explicit memory capture & recall
+    # ------------------------------------------------------------------
+
+    async def _handle_remember(self, update: Update, session, user, content: str):
+        """Save a user-taught fact ("זכור ש...") with high-confidence project linking."""
+        from app.services import memory_service
+        try:
+            project_id, project_label = await memory_service.link_project(content, session)
+            note = await memory_service.save_memory(
+                session, content=content, user_id=user.id, project_id=project_id,
+            )
+        except Exception:
+            logger.error("remember: save failed", exc_info=True)
+            await update.message.reply_text("‏⚠️ לא הצלחתי לשמור את העובדה. נסה שוב.")
+            return
+        reply = f"‏🧠 <b>נשמר בזיכרון הארגוני:</b>\n{_html.escape(note.content)}"
+        if project_label:
+            reply += f"\n📁 שויך לפרויקט: {_html.escape(project_label)}"
+        kb = InlineKeyboardMarkup([[
+            InlineKeyboardButton("↩️ שכח את זה", callback_data=f"mem_forget:{note.id}"),
+        ]])
+        await update.message.reply_text(reply, parse_mode="HTML", reply_markup=kb)
+        await self._notify_admins_new_memory(user, note)
+
+    async def _notify_admins_new_memory(self, author, note):
+        """Lightweight audit: tell admins a fact was taught. Best-effort."""
+        try:
+            async with async_session_maker() as s:
+                admins = (await s.execute(
+                    select(User).where(User.is_admin.is_(True), User.telegram_id.isnot(None))
+                )).scalars().all()
+            for admin in admins:
+                if admin.id == author.id:
+                    continue
+                try:
+                    await self.application.bot.send_message(
+                        chat_id=admin.telegram_id,
+                        text=(f"‏🧠 עובדה חדשה בזיכרון הארגוני (מאת {author.username}):\n"
+                              f"{note.content[:300]}"),
+                    )
+                except Exception:
+                    pass
+        except Exception:
+            logger.warning("memory admin notify failed", exc_info=True)
+
+    async def _handle_memory_list(self, update: Update, session, user, text: str):
+        """Answer "מה אתה זוכר [על X]" with the stored facts + forget buttons."""
+        from app.services import memory_service
+        topic = memory_service.extract_recall_topic(text)
+        notes = await memory_service.list_memories(session, topic=topic)
+        if not notes:
+            scope = f" על ״{topic}״" if topic else ""
+            await update.message.reply_text(
+                f"‏🧠 אין עדיין עובדות בזיכרון{scope}.\n"
+                "אפשר ללמד אותי: <i>זכור ש...</i>", parse_mode="HTML",
+            )
+            return
+        lines = await memory_service.describe_notes(notes, session)
+        header = f"‏🧠 <b>מה שאני זוכר{' על ״' + _html.escape(topic) + '״' if topic else ''}:</b>"
+        body = "\n".join(f"{i}. {_html.escape(line)}" for i, line in enumerate(lines, 1))
+        buttons = [
+            [InlineKeyboardButton(f"🗑 שכח {i}", callback_data=f"mem_forget:{n.id}")]
+            for i, n in enumerate(notes[:6], 1)
+        ]
+        await update.message.reply_text(
+            f"{header}\n{body}", parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(buttons) if buttons else None,
+        )
+
+    async def _handle_dossier_request(self, update: Update, session, user, name: str):
+        """Send the living project dossier for "תיק פרויקט X"."""
+        from app.services import dossier_service
+        from app.services.project_tools import find_projects_by_identifier
+        if not name:
+            await update.message.reply_text(
+                "‏📁 כתוב: <i>תיק פרויקט &lt;שם&gt;</i> — למשל: תיק פרויקט חדרה",
+                parse_mode="HTML",
+            )
+            return
+        matches = await find_projects_by_identifier(name, session)
+        if not matches:
+            await update.message.reply_text(f"‏⚠️ לא נמצא פרויקט בשם ״{name}״.")
+            return
+        if len(matches) > 1:
+            names = "\n".join(f"• {m['name'] or m['project_identifier']}" for m in matches[:6])
+            await update.message.reply_text(
+                f"‏🔍 נמצאו כמה פרויקטים — דייק את השם:\n{names}")
+            return
+        project = matches[0]
+        content = await dossier_service.get_dossier_text(project["id"], session)
+        if content:
+            await update.message.reply_text(
+                f"‏📁 <b>תיק פרויקט {_html.escape(project['name'] or project['project_identifier'])}:</b>\n\n"
+                f"{_html.escape(content)}",
+                parse_mode="HTML",
+            )
+        else:
+            await dossier_service.mark_dirty([project["id"]])
+            await update.message.reply_text(
+                "‏⏳ התיק עדיין לא הוכן — סומן להכנה ויהיה זמין בדקות הקרובות. נסה שוב מאוחר יותר.",
+            )
+
     async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle regular text messages — pass through decision engine if role assigned."""
         telegram_id = update.effective_user.id
@@ -704,6 +807,25 @@ class TelegramPollingBot:
             from app.models import RoleEnum as _RE
             if user.role == _RE.VIEWER:
                 await self._handle_viewer_message(update, context, user, text.strip())
+                return
+
+            # Second brain — must run BEFORE keyword shortcuts and LLM routing:
+            # a fact like "זכור שההחלטות..." must not be hijacked by the
+            # "החלטות" menu shortcut or fall into the decision-confirm flow.
+            from app.services import memory_service as _mem_svc
+            _mem_content = _mem_svc.extract_remember_content(text)
+            if _mem_content is not None:
+                await self._handle_remember(update, session, user, _mem_content)
+                return
+            if _mem_svc.is_recall_query(text):
+                await self._handle_memory_list(update, session, user, text)
+                return
+
+            # Second brain phase 2 — "תיק פרויקט X" returns the living dossier
+            from app.services import dossier_service as _dossier_svc
+            _dossier_req = _dossier_svc.extract_dossier_request(text)
+            if _dossier_req is not None:
+                await self._handle_dossier_request(update, session, user, _dossier_req)
                 return
 
             # Report shortcut — "📊 דוח שלי"
@@ -945,10 +1067,13 @@ class TelegramPollingBot:
                 )
                 return
 
-            _dec_confirm_kb = InlineKeyboardMarkup([[
-                InlineKeyboardButton("✅ כן, זו החלטה", callback_data="dec_conf_y:0"),
-                InlineKeyboardButton("❌ לא", callback_data="dec_conf_n:0"),
-            ]])
+            _dec_confirm_kb = InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton("✅ כן, זו החלטה", callback_data="dec_conf_y:0"),
+                    InlineKeyboardButton("❌ לא", callback_data="dec_conf_n:0"),
+                ],
+                [InlineKeyboardButton("🧠 שמור כעובדה", callback_data="dec_conf_m:0")],
+            ])
 
             if verdict == "NOT_DECISION":
                 ai_reply = classify_result.get("reply", "")
@@ -1516,6 +1641,51 @@ class TelegramPollingBot:
                 await query.edit_message_text(
                     "\u200F✅ <b>RACI אושר ונשמר.</b>\nהצוות יקבל הודעות בהתאם לתפקידיהם.",
                     parse_mode="HTML",
+                )
+                return
+
+            # --- Second brain: save the pending message as a fact (🧠 button) ---
+            if action == "dec_conf_m":
+                original_text = _awaiting_decision_confirm.pop(telegram_id, None)
+                if not original_text:
+                    await query.edit_message_text("‏⚠️ פג תוקף הבקשה. שלח את העובדה מחדש עם ״זכור ש...״.")
+                    return
+                from app.services import memory_service as _mem_svc
+                from app.models import RoleEnum as _RE_mem
+                if approver.role == _RE_mem.VIEWER:
+                    await query.edit_message_text("‏🔒 שמירת עובדות אינה זמינה למשתמשי צפייה.")
+                    return
+                content = _mem_svc.extract_remember_content(original_text) or original_text
+                try:
+                    project_id, project_label = await _mem_svc.link_project(content, session)
+                    note = await _mem_svc.save_memory(
+                        session, content=content, user_id=approver.id, project_id=project_id,
+                    )
+                except Exception:
+                    logger.error("dec_conf_m: save failed", exc_info=True)
+                    await query.edit_message_text("‏⚠️ לא הצלחתי לשמור את העובדה. נסה שוב.")
+                    return
+                msg = f"‏🧠 <b>נשמר בזיכרון הארגוני:</b>\n{_html.escape(note.content)}"
+                if project_label:
+                    msg += f"\n📁 שויך לפרויקט: {_html.escape(project_label)}"
+                await query.edit_message_text(
+                    msg, parse_mode="HTML",
+                    reply_markup=InlineKeyboardMarkup([[
+                        InlineKeyboardButton("↩️ שכח את זה", callback_data=f"mem_forget:{note.id}"),
+                    ]]),
+                )
+                await self._notify_admins_new_memory(approver, note)
+                return
+
+            # --- Second brain: forget a memory note ---
+            if action == "mem_forget":
+                from app.services import memory_service as _mem_svc
+                from app.models import RoleEnum as _RE_mem
+                if approver.role == _RE_mem.VIEWER:
+                    return
+                ok = await _mem_svc.forget_memory(session, decision_id, approver.id)
+                await query.edit_message_text(
+                    "‏🧠 העובדה נמחקה מהזיכרון הארגוני." if ok else "‏⚠️ העובדה לא נמצאה או שכבר נמחקה.",
                 )
                 return
 

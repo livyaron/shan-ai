@@ -2,9 +2,38 @@
 
 import json
 import logging
+import re
 from app.services.llm_router import llm_chat
 
 logger = logging.getLogger(__name__)
+
+
+def _strip_md_fences(raw: str) -> str:
+    """Strip a ```/```json markdown fence if the model wrapped its JSON in one."""
+    raw = (raw or "").strip()
+    if raw.startswith("```"):
+        raw = raw.split("```")[1]
+        if raw.startswith("json"):
+            raw = raw[4:]
+        raw = raw.strip()
+    return raw
+
+
+def _extract_json(raw: str) -> dict:
+    """Parse a JSON object out of an LLM reply.
+
+    Tries direct loads, then the outermost {...} substring (fallback providers
+    sometimes add prose around the object). Raises json.JSONDecodeError /
+    ValueError when no object can be recovered.
+    """
+    raw = _strip_md_fences(raw)
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        start, end = raw.find("{"), raw.rfind("}") + 1
+        if start == -1 or end == 0:
+            raise
+        return json.loads(raw[start:end])
 
 SYSTEM_PROMPT = """אתה מנוע בינה מלאכותית לניהול החלטות עבור מערכת Shan-AI — פלטפורמה ארגונית לניהול החלטות טכניות באגף תשתיות חשמל, טרנספורמטורים ותחנות משנה בקנה מידה גדול.
 
@@ -92,18 +121,36 @@ class ClaudeService:
     async def classify(self, text: str) -> dict:
         """Pre-classify text: DECISION | NOT_DECISION | UNCLEAR.
         Returns dict with keys: verdict, reply (opt), clarifying_question (opt).
+
+        Never raises on a malformed LLM reply — a decision the user typed must
+        not be lost to a parsing error. Recovery order: fence-strip + direct
+        loads → {...} substring → regex verdict scan → default DECISION (the
+        analyze step previews to the user for approval anyway).
         """
+        # Straight quotes in user text leak into the JSON reply and break it
+        # (same gotcha analyze() already guards against).
+        clean_text = text.replace('"', '״').replace("'", "׳")
         raw = await llm_chat(
             "decision_analysis",
             messages=[
                 {"role": "system", "content": CLASSIFY_PROMPT},
-                {"role": "user", "content": text},
+                {"role": "user", "content": clean_text},
             ],
             max_tokens=200,
             temperature=0.1,
             json_mode=True,
         )
-        return json.loads(raw)
+        try:
+            parsed = _extract_json(raw)
+            if parsed.get("verdict") in ("DECISION", "NOT_DECISION", "UNCLEAR"):
+                return parsed
+            logger.warning(f"classify: missing/invalid verdict in reply: {raw[:200]!r}")
+        except (json.JSONDecodeError, ValueError):
+            logger.warning(f"classify: unparseable LLM reply: {raw[:200]!r}")
+
+        m = re.search(r"NOT_DECISION|UNCLEAR|DECISION", raw or "")
+        verdict = m.group(0) if m else "DECISION"
+        return {"verdict": verdict}
 
     async def analyze(self, problem: str, user_role: str, past_context: str = "",
                       conversation_context: list[dict] | None = None) -> dict:
@@ -149,14 +196,7 @@ class ClaudeService:
         )
         logger.info(f"תגובת Groq: {raw[:200]}")
 
-        # Strip markdown code fences if present
-        if raw.startswith("```"):
-            raw = raw.split("```")[1]
-            if raw.startswith("json"):
-                raw = raw[4:]
-            raw = raw.strip()
-
-        decision = json.loads(raw)
+        decision = _extract_json(raw)
         self._validate(decision)
         return decision
 
