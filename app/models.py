@@ -687,6 +687,41 @@ class MemoryNote(Base):
     superseded_by = relationship("MemoryNote", remote_side="MemoryNote.id", uselist=False)
 
 
+class JobRun(Base):
+    """Single-run claim rows for background jobs (second brain phase 0 guard).
+
+    A job claims (job_name, run_key) via INSERT ... ON CONFLICT DO NOTHING before
+    doing work — a second instance (redeploy overlap, accidental extra process)
+    loses the claim and skips. run_key is typically the date for daily jobs.
+    """
+    __tablename__ = "job_runs"
+
+    id         = Column(Integer, primary_key=True)
+    job_name   = Column(String(64), nullable=False)
+    run_key    = Column(String(32), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (UniqueConstraint("job_name", "run_key"),)
+
+
+class ConversationSummary(Base):
+    """Rolling per-user conversation summary (second brain, Option D).
+
+    Regenerated nightly from the user's recent messages + query_logs answers;
+    injected as conversation context when a fresh session starts, so the bot
+    has continuity across days.
+    """
+    __tablename__ = "conversation_summaries"
+
+    id         = Column(Integer, primary_key=True)
+    user_id    = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"),
+                        unique=True, nullable=False, index=True)
+    summary    = Column(Text, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    user = relationship("User")
+
+
 class ProjectDossier(Base):
     """Living per-project brief (second brain phase 2).
 
