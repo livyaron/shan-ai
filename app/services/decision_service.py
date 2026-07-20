@@ -16,6 +16,12 @@ from app.services.decisions_menu_service import get_menu_shortcut_keyboard
 
 logger = logging.getLogger(__name__)
 
+# Strong references to fire-and-forget tasks scheduled without a PTB Application
+# (e.g. dashboard path). The event loop only keeps weak refs, so without this the
+# RACI-proposal task can be garbage-collected before it runs — the submitter then
+# gets no RACI step. See https://docs.python.org/3/library/asyncio-task.html#asyncio.create_task
+_bg_tasks: set = set()
+
 # Role hierarchy: each role's immediate superior
 SUPERIOR_ROLE = {
     RoleEnum.PROJECT_MANAGER: RoleEnum.DEPARTMENT_MANAGER,
@@ -37,6 +43,22 @@ class DecisionService:
         self.session = session
         self.application = application
         self.claude = ClaudeService()
+
+    def _schedule_bg(self, coro) -> None:
+        """Schedule a background task so it survives to completion.
+
+        Prefers the PTB Application task manager (tracks the task and logs
+        exceptions). Falls back to asyncio.create_task with a strong reference
+        held in _bg_tasks — the event loop only keeps a weak reference, so a
+        bare create_task can be GC'd mid-flight (dropping the RACI proposal).
+        """
+        if self.application is not None:
+            self.application.create_task(coro)
+            return
+        import asyncio
+        task = asyncio.create_task(coro)
+        _bg_tasks.add(task)
+        task.add_done_callback(_bg_tasks.discard)
 
     async def analyze_only(self, user: User, text: str,
                            conversation_context: list[dict] | None = None) -> dict:
@@ -190,9 +212,8 @@ class DecisionService:
         # --- Propose RACI to submitter for approval (background) ---
         if result["type"] != "CRITICAL":
             try:
-                import asyncio
                 from app.services.raci_service import propose_raci_to_submitter
-                asyncio.get_event_loop().create_task(
+                self._schedule_bg(
                     propose_raci_to_submitter(decision.id, user.telegram_id, is_critical=False)
                 )
             except Exception as e:
@@ -280,7 +301,6 @@ class DecisionService:
     # ------------------------------------------------------------------
 
     async def _handle_critical(self, submitter: User, decision: Decision, result: dict) -> str:
-        import asyncio
         from app.services.raci_service import propose_raci_to_submitter
 
         e = self._e
@@ -291,7 +311,7 @@ class DecisionService:
             decision.status = DecisionStatusEnum.APPROVED
             decision.completed_at = datetime.utcnow()
             await self.session.commit()
-            asyncio.get_event_loop().create_task(
+            self._schedule_bg(
                 propose_raci_to_submitter(decision.id, submitter.telegram_id, is_critical=False)
             )
             return (
@@ -302,7 +322,7 @@ class DecisionService:
             )
 
         # Propose RACI in background; after submitter approves RACI, the accountable gets the approval request
-        asyncio.get_event_loop().create_task(
+        self._schedule_bg(
             propose_raci_to_submitter(decision.id, submitter.telegram_id, is_critical=True)
         )
         return (
