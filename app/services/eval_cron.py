@@ -69,6 +69,10 @@ def start_scheduler() -> None:
     )
     sch.add_job(_missions_overdue_check, "interval", minutes=30,
                 id="missions_overdue_check", replace_existing=True)
+    # Second brain: drip-regenerate dirty project dossiers (K per cycle,
+    # hash-gated — protects the Groq TPD budget; see dossier_service).
+    sch.add_job(_dossier_drip, "interval", minutes=15,
+                id="dossier_drip", replace_existing=True)
     sch.start()
     _scheduler = sch
     logger.info("eval_cron: scheduler started (03:00 UTC nightly)")
@@ -122,6 +126,15 @@ async def _pending_queue_run() -> None:
         await process_pending_queue()
     except Exception as e:
         logger.exception(f"pending_queue run failed: {e}")
+
+
+async def _dossier_drip() -> None:
+    """Regenerate a small batch of dirty project dossiers (every 15 min)."""
+    from app.services.dossier_service import process_dirty_dossiers
+    try:
+        await process_dirty_dossiers()
+    except Exception as e:
+        logger.exception(f"dossier_drip run failed: {e}")
 
 
 async def _missions_daily_digest() -> None:

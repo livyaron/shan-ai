@@ -303,6 +303,7 @@ async def sync_projects_file(file_path: str, sheet_name: str | None = None) -> d
     """
     result = {"processed": 0, "created": 0, "updated": 0, "errors": [], "identifiers": []}
     change_facts: list[dict] = []   # second-brain temporal facts (Option G)
+    dirty_project_ids: list[int] = []   # dossiers to re-drip after this sync
 
     # 1. Read file in executor thread (pandas is synchronous/blocking)
     loop = asyncio.get_event_loop()
@@ -406,6 +407,7 @@ async def sync_projects_file(file_path: str, sheet_name: str | None = None) -> d
                     if changed:
                         existing.last_updated = datetime.utcnow()
                         result["updated"] += 1
+                        dirty_project_ids.append(existing.id)
                     # else: no-op — last_updated stays as-is
                 else:
                     # Create new
@@ -415,6 +417,8 @@ async def sync_projects_file(file_path: str, sheet_name: str | None = None) -> d
 
                 # Commit per row — progress is saved immediately
                 await session.commit()
+                if not existing:
+                    dirty_project_ids.append(project.id)
 
                 # Save daily snapshot for learning / risk tracking
                 _snap_target = existing if existing is not None else project
@@ -445,6 +449,11 @@ async def sync_projects_file(file_path: str, sheet_name: str | None = None) -> d
     # Second brain: write snapshot-diff memory facts (deterministic, no LLM)
     if change_facts:
         asyncio.create_task(memory_service.record_project_changes(change_facts))
+
+    # Second brain: mark changed/new projects' dossiers for drip regeneration
+    if dirty_project_ids:
+        from app.services.dossier_service import mark_dirty
+        asyncio.create_task(mark_dirty(dirty_project_ids))
 
     # Spawn brief generation as a background task (don't wait for it)
     asyncio.create_task(generate_all_briefs())

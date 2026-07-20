@@ -764,6 +764,16 @@ async def answer_project_query(
         if memory_context:
             context_str = f"{context_str}\n\n{memory_context}"
 
+        # A resolved single project gets its living dossier as extra background
+        if current_project_id:
+            try:
+                from app.services.dossier_service import get_dossier_text_by_identifier
+                dossier = await get_dossier_text_by_identifier(current_project_id, session)
+                if dossier:
+                    context_str = f"{context_str}\n\nתיק הפרויקט (רקע מצטבר):\n{dossier}"
+            except Exception:
+                logger.warning("dossier injection failed", exc_info=True)
+
         summary = await llm_chat(
             "project_query",
             messages=[

@@ -153,6 +153,15 @@ async def save_memory(
     await session.commit()
     await session.refresh(note)
     logger.info(f"save_memory: #{note.id} source={source} project={project_id}: {content[:80]}")
+
+    # A project-linked fact makes that project's dossier stale (phase 2)
+    if project_id is not None:
+        try:
+            from app.services.dossier_service import mark_dirty
+            await mark_dirty([project_id])
+        except Exception as e:
+            logger.warning(f"save_memory: dossier mark_dirty failed: {e}")
+
     return note
 
 

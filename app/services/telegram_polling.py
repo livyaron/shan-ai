@@ -662,6 +662,39 @@ class TelegramPollingBot:
             reply_markup=InlineKeyboardMarkup(buttons) if buttons else None,
         )
 
+    async def _handle_dossier_request(self, update: Update, session, user, name: str):
+        """Send the living project dossier for "תיק פרויקט X"."""
+        from app.services import dossier_service
+        from app.services.project_tools import find_projects_by_identifier
+        if not name:
+            await update.message.reply_text(
+                "‏📁 כתוב: <i>תיק פרויקט &lt;שם&gt;</i> — למשל: תיק פרויקט חדרה",
+                parse_mode="HTML",
+            )
+            return
+        matches = await find_projects_by_identifier(name, session)
+        if not matches:
+            await update.message.reply_text(f"‏⚠️ לא נמצא פרויקט בשם ״{name}״.")
+            return
+        if len(matches) > 1:
+            names = "\n".join(f"• {m['name'] or m['project_identifier']}" for m in matches[:6])
+            await update.message.reply_text(
+                f"‏🔍 נמצאו כמה פרויקטים — דייק את השם:\n{names}")
+            return
+        project = matches[0]
+        content = await dossier_service.get_dossier_text(project["id"], session)
+        if content:
+            await update.message.reply_text(
+                f"‏📁 <b>תיק פרויקט {_html.escape(project['name'] or project['project_identifier'])}:</b>\n\n"
+                f"{_html.escape(content)}",
+                parse_mode="HTML",
+            )
+        else:
+            await dossier_service.mark_dirty([project["id"]])
+            await update.message.reply_text(
+                "‏⏳ התיק עדיין לא הוכן — סומן להכנה ויהיה זמין בדקות הקרובות. נסה שוב מאוחר יותר.",
+            )
+
     async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle regular text messages — pass through decision engine if role assigned."""
         telegram_id = update.effective_user.id
@@ -786,6 +819,13 @@ class TelegramPollingBot:
                 return
             if _mem_svc.is_recall_query(text):
                 await self._handle_memory_list(update, session, user, text)
+                return
+
+            # Second brain phase 2 — "תיק פרויקט X" returns the living dossier
+            from app.services import dossier_service as _dossier_svc
+            _dossier_req = _dossier_svc.extract_dossier_request(text)
+            if _dossier_req is not None:
+                await self._handle_dossier_request(update, session, user, _dossier_req)
                 return
 
             # Report shortcut — "📊 דוח שלי"
