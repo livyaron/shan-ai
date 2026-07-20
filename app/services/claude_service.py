@@ -19,12 +19,49 @@ def _strip_md_fences(raw: str) -> str:
     return raw
 
 
+def _repair_unescaped_quotes(raw: str) -> str:
+    """Escape stray double-quotes inside JSON string values.
+
+    The known gotcha: the model echoes quoted Hebrew (e.g. שנאי "ישן") inside a
+    value, producing invalid JSON. A quote inside a string is treated as closing
+    only when the next non-space char is structural (, : } ]) — otherwise it is
+    escaped. Heuristic, but covers the observed failure shape.
+    """
+    out: list[str] = []
+    in_str = False
+    i, n = 0, len(raw)
+    while i < n:
+        c = raw[i]
+        if not in_str:
+            if c == '"':
+                in_str = True
+            out.append(c)
+        elif c == "\\" and i + 1 < n:
+            out.append(c)
+            out.append(raw[i + 1])
+            i += 2
+            continue
+        elif c == '"':
+            j = i + 1
+            while j < n and raw[j] in " \t\r\n":
+                j += 1
+            if j >= n or raw[j] in ",:}]":
+                in_str = False
+                out.append(c)
+            else:
+                out.append('\\"')
+        else:
+            out.append(c)
+        i += 1
+    return "".join(out)
+
+
 def _extract_json(raw: str) -> dict:
     """Parse a JSON object out of an LLM reply.
 
     Tries direct loads, then the outermost {...} substring (fallback providers
-    sometimes add prose around the object). Raises json.JSONDecodeError /
-    ValueError when no object can be recovered.
+    sometimes add prose around the object), then an unescaped-quote repair pass.
+    Raises json.JSONDecodeError / ValueError when no object can be recovered.
     """
     raw = _strip_md_fences(raw)
     try:
@@ -33,7 +70,11 @@ def _extract_json(raw: str) -> dict:
         start, end = raw.find("{"), raw.rfind("}") + 1
         if start == -1 or end == 0:
             raise
-        return json.loads(raw[start:end])
+        sub = raw[start:end]
+        try:
+            return json.loads(sub)
+        except json.JSONDecodeError:
+            return json.loads(_repair_unescaped_quotes(sub))
 
 SYSTEM_PROMPT = """אתה מנוע בינה מלאכותית לניהול החלטות עבור מערכת Shan-AI — פלטפורמה ארגונית לניהול החלטות טכניות באגף תשתיות חשמל, טרנספורמטורים ותחנות משנה בקנה מידה גדול.
 
@@ -186,19 +227,31 @@ class ClaudeService:
 
         logger.info(f"שולח ל-LLM: {problem[:80]}...")
 
-        raw = await llm_chat(
-            "decision_analysis",
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": user_message},
-            ],
-            temperature=0.2,
-        )
-        logger.info(f"תגובת Groq: {raw[:200]}")
-
-        decision = _extract_json(raw)
-        self._validate(decision)
-        return decision
+        messages = [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": user_message},
+        ]
+        last_exc: Exception | None = None
+        for attempt in (1, 2):
+            raw = await llm_chat("decision_analysis", messages=messages, temperature=0.2)
+            logger.info(f"תגובת Groq: {raw[:200]}")
+            try:
+                decision = _extract_json(raw)
+                self._validate(decision)
+                return decision
+            except (json.JSONDecodeError, ValueError) as e:
+                last_exc = e
+                logger.warning(f"analyze: bad JSON on attempt {attempt}: {e} | raw={raw[:200]!r}")
+                if attempt == 1:
+                    # One retry with an explicit format nudge — costs a call
+                    # only on the failure path.
+                    messages = messages + [
+                        {"role": "assistant", "content": raw[:1000]},
+                        {"role": "user", "content":
+                            "התגובה לא הייתה JSON תקין. החזר אך ורק אובייקט JSON תקין "
+                            "לפי המבנה שהוגדר, ללא טקסט נוסף וללא מרכאות כפולות בתוך ערכים."},
+                    ]
+        raise last_exc
 
     def _validate(self, decision: dict):
         required = {"type", "summary", "recommended_action",

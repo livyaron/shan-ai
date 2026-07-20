@@ -89,8 +89,12 @@ def _build_preview_text(result: dict) -> str:
     t = (result.get("type") or "").upper()
     type_label = type_map.get(t, t or "—")
     approval = "כן" if result.get("requires_approval") else "לא"
+    degraded_note = (
+        "\n⚠️ <i>הניתוח האוטומטי נכשל — ההחלטה סווגה כ״לא ודאי״ לבדיקה ידנית.</i>\n"
+        if result.get("degraded") else ""
+    )
     return (
-        f"‏\U0001f50d <b>ניתוח ראשוני — לפני תיעוד</b>\n\n"
+        f"‏\U0001f50d <b>ניתוח ראשוני — לפני תיעוד</b>\n{degraded_note}\n"
         f"<b>סוג:</b> {type_label}\n"
         f"<b>סיכום:</b> {e(result.get('summary') or '—')}\n"
         f"<b>פעולה מומלצת:</b> {e(result.get('recommended_action') or '—')}\n"

@@ -40,10 +40,20 @@ class DecisionService:
 
     async def analyze_only(self, user: User, text: str,
                            conversation_context: list[dict] | None = None) -> dict:
-        """Run RAG + Groq analysis WITHOUT storing to DB. Returns result dict."""
+        """Run RAG + Groq analysis WITHOUT storing to DB. Returns result dict.
+
+        A typed decision must never be lost: context gathering is non-fatal, and
+        a non-overload analysis failure degrades to a minimal UNCERTAIN result
+        (manual review) instead of raising. Overload errors still propagate so
+        the caller can enqueue to pending_decisions.
+        """
         role_str = user.role.value if user.role else "unknown"
-        similar = await embedding_service.get_similar_decisions(self.session, text)
-        past_context = embedding_service.format_past_context(similar)
+        similar, past_context = [], ""
+        try:
+            similar = await embedding_service.get_similar_decisions(self.session, text)
+            past_context = embedding_service.format_past_context(similar)
+        except Exception as e:
+            logger.warning(f"similar-decisions context failed (analyze_only): {e}")
         lessons_context = risk_context = calib_context = ""
         try:
             from app.services.lessons_service import (
@@ -65,8 +75,25 @@ class DecisionService:
         combined_context = "\n\n".join(filter(None, [
             past_context, lessons_context, risk_context, calib_context
         ]))
-        return await self.claude.analyze(text, role_str, combined_context,
-                                         conversation_context=conversation_context)
+        try:
+            return await self.claude.analyze(text, role_str, combined_context,
+                                             conversation_context=conversation_context)
+        except Exception as e:
+            from app.services.llm_router import is_overload_error
+            if is_overload_error(e):
+                raise   # caller enqueues to pending_decisions ("system busy")
+            logger.error(f"analyze_only: analysis failed, degrading to UNCERTAIN: {e}",
+                         exc_info=True)
+            return {
+                "type": "UNCERTAIN",
+                "summary": text[:200],
+                "recommended_action": "נדרשת בחינה ידנית — הניתוח האוטומטי נכשל.",
+                "requires_approval": True,
+                "self_critique": {"assumptions": [], "risks": []},
+                "measurability": "NOT_MEASURABLE",
+                "suggested_raci": {"R": [], "A": None, "C": [], "I": [], "reason": ""},
+                "degraded": True,
+            }
 
     async def process(self, user: User, text: str, force_approval: bool = False, pre_result: dict | None = None) -> str:
         """
@@ -81,8 +108,12 @@ class DecisionService:
             result = pre_result
         else:
             # --- 1. Fetch similar past decisions + lessons for context (RAG) ---
-            similar = await embedding_service.get_similar_decisions(self.session, text)
-            past_context = embedding_service.format_past_context(similar)
+            similar, past_context = [], ""
+            try:
+                similar = await embedding_service.get_similar_decisions(self.session, text)
+                past_context = embedding_service.format_past_context(similar)
+            except Exception as e:
+                logger.warning(f"similar-decisions context failed (process): {e}")
             if past_context:
                 logger.info(f"Found {len(similar)} similar past decisions")
 
