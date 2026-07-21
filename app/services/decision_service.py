@@ -1,5 +1,6 @@
 """Decision routing service - stores decisions and routes them per the spec."""
 
+import asyncio
 import json
 import logging
 import html
@@ -15,6 +16,28 @@ from app.services import embedding_service
 from app.services.decisions_menu_service import get_menu_shortcut_keyboard
 
 logger = logging.getLogger(__name__)
+
+# Fire-and-forget background tasks (e.g. the RACI proposal) must be strong-
+# referenced. asyncio.get_event_loop().create_task() leaves the loop holding
+# only a WEAK reference, so a GC cycle during the multi-second RACI LLM call
+# could collect the task mid-flight and the proposal would silently never send.
+# Keeping the Task in this set until it finishes prevents that.
+_background_tasks: set[asyncio.Task] = set()
+
+
+def _spawn_background(coro, *, label: str) -> None:
+    """Schedule a fire-and-forget coroutine with a strong ref + error logging."""
+    task = asyncio.ensure_future(coro)
+    _background_tasks.add(task)
+
+    def _done(t: asyncio.Task) -> None:
+        _background_tasks.discard(t)
+        if not t.cancelled():
+            exc = t.exception()
+            if exc is not None:
+                logger.error(f"background task {label} failed: {exc}", exc_info=exc)
+
+    task.add_done_callback(_done)
 
 # Role hierarchy: each role's immediate superior
 SUPERIOR_ROLE = {
@@ -190,10 +213,10 @@ class DecisionService:
         # --- Propose RACI to submitter for approval (background) ---
         if result["type"] != "CRITICAL":
             try:
-                import asyncio
                 from app.services.raci_service import propose_raci_to_submitter
-                asyncio.get_event_loop().create_task(
-                    propose_raci_to_submitter(decision.id, user.telegram_id, is_critical=False)
+                _spawn_background(
+                    propose_raci_to_submitter(decision.id, user.telegram_id, is_critical=False),
+                    label=f"raci_propose#{decision.id}",
                 )
             except Exception as e:
                 logger.warning(f"RACI proposal task could not be scheduled for decision #{decision.id}: {e}")
@@ -280,7 +303,6 @@ class DecisionService:
     # ------------------------------------------------------------------
 
     async def _handle_critical(self, submitter: User, decision: Decision, result: dict) -> str:
-        import asyncio
         from app.services.raci_service import propose_raci_to_submitter
 
         e = self._e
@@ -291,8 +313,9 @@ class DecisionService:
             decision.status = DecisionStatusEnum.APPROVED
             decision.completed_at = datetime.utcnow()
             await self.session.commit()
-            asyncio.get_event_loop().create_task(
-                propose_raci_to_submitter(decision.id, submitter.telegram_id, is_critical=False)
+            _spawn_background(
+                propose_raci_to_submitter(decision.id, submitter.telegram_id, is_critical=False),
+                label=f"raci_propose#{decision.id}",
             )
             return (
                 f"‏\U0001f6a8 <b>החלטה #{decision.id} — קריטי</b>\n\n"
@@ -302,8 +325,9 @@ class DecisionService:
             )
 
         # Propose RACI in background; after submitter approves RACI, the accountable gets the approval request
-        asyncio.get_event_loop().create_task(
-            propose_raci_to_submitter(decision.id, submitter.telegram_id, is_critical=True)
+        _spawn_background(
+            propose_raci_to_submitter(decision.id, submitter.telegram_id, is_critical=True),
+            label=f"raci_propose#{decision.id}",
         )
         return (
             f"‏\U0001f6a8 <b>החלטה #{decision.id} — קריטי</b>\n\n"
