@@ -901,6 +901,51 @@ async def mark_raci_edited(decision_id: int, final_items: list[dict]) -> None:
     await record_raci_outcome(decision_id, final_items)
 
 
+async def _fallback_raci_items(decision_id: int) -> tuple[list[dict], dict[int, str]]:
+    """Deterministic RACI for when the LLM returns nothing.
+
+    Guarantees the RACI procedure still reaches the user: submitter = R and a
+    senior as A (submitter's manager, else a division/deputy manager). If no
+    distinct accountable exists, the submitter is assigned A alone. Never raises.
+    """
+    from app.database import async_session_maker
+
+    try:
+        async with async_session_maker() as session:
+            decision = await session.get(Decision, decision_id)
+            if not decision:
+                return [], {}
+            users = {u.id: u for u in (await session.execute(select(User))).scalars().all()}
+            if not users:
+                return [], {}
+
+            submitter = users.get(decision.submitter_id)
+            accountable = users.get(submitter.manager_id) if submitter else None
+            if accountable is None:
+                accountable = next(
+                    (u for u in users.values()
+                     if u.role and u.role.value in ("division_manager", "deputy_division_manager")
+                     and (submitter is None or u.id != submitter.id)),
+                    None,
+                )
+
+            items: list[dict] = []
+            if submitter and accountable and accountable.id != submitter.id:
+                items.append({"user_id": submitter.id, "role": "R", "reason": "מגיש ההחלטה"})
+                items.append({"user_id": accountable.id, "role": "A", "reason": "בעל סמכות מאשר"})
+            elif submitter:
+                items.append({"user_id": submitter.id, "role": "A", "reason": "מגיש ובעל סמכות"})
+            elif accountable:
+                items.append({"user_id": accountable.id, "role": "A", "reason": "בעל סמכות"})
+
+            user_names = {uid: u.username for uid, u in users.items()}
+            logger.info(f"_fallback_raci_items: built {len(items)} default items for decision {decision_id}")
+            return items, user_names
+    except Exception as e:
+        logger.error(f"_fallback_raci_items failed for decision {decision_id}: {e}", exc_info=True)
+        return [], {}
+
+
 async def propose_raci_to_submitter(
     decision_id: int,
     submitter_telegram_id: int,
@@ -909,15 +954,36 @@ async def propose_raci_to_submitter(
     """
     Generate RACI suggestions and send a Telegram proposal to the submitter.
     The submitter approves or edits before RACI is committed.
-    Falls back to silent auto-assign if generation or send fails.
+
+    When the LLM yields no usable RACI we DO NOT fall back to the silent
+    auto-assign (which never messages the user and looks like "RACI didn't
+    run"). Instead we build a deterministic default and still send the
+    proposal, so the RACI procedure always reaches the submitter.
     """
     import html as _html
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
+    logger.info(
+        f"propose_raci_to_submitter: start decision={decision_id} "
+        f"submitter_tg={submitter_telegram_id} critical={is_critical}"
+    )
+
     valid_items, user_names, parsed, context_meta = await generate_raci_for_decision(decision_id)
 
     if not valid_items:
-        logger.warning(f"propose_raci_to_submitter: no suggestions for decision {decision_id}, falling back to auto-assign")
+        logger.warning(
+            f"propose_raci_to_submitter: LLM produced no RACI for decision {decision_id}; "
+            f"using deterministic fallback so the proposal still reaches the user"
+        )
+        valid_items, user_names = await _fallback_raci_items(decision_id)
+        parsed = parsed or {}
+        context_meta = context_meta or {}
+
+    if not valid_items:
+        logger.error(
+            f"propose_raci_to_submitter: no RACI possible for decision {decision_id} "
+            f"(no users in system?); silent auto-assign"
+        )
         await assign_raci_from_ai(decision_id)
         return
 
