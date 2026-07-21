@@ -38,6 +38,7 @@
 - **missions table (חדר מבצעים):** auto-creates at startup via `Base.metadata.create_all` — no manual SQL needed on fresh deploys. **Future** columns need `ALTER TABLE missions ADD COLUMN IF NOT EXISTS ...` on the Railway DB. `status` is intentionally VARCHAR — never convert to a PG enum. User deletion reassigns the deleted user's missions to the deleting admin.
 - **No Data Loss:** NEVER run destructive SQL (DROP/TRUNCATE/DELETE without WHERE) or delete the Railway Postgres volume without explicit confirmation.
 - **Build Cycle:** Push to the deploy branch — Railway auto-builds from `Dockerfile` per `railway.toml`. No local restart step.
+- **Always merge to master after building:** once a change builds clean on its feature branch (compiles / tests pass), merge it to `master` and push so Railway deploys. Standing authorization — no need to ask each time.
 
 ## 5. Development Standards (Hebrew & Logic)
 - **Hebrew RTL:** Prefix ALL bot messages with `\u200F` (RTL Mark).
