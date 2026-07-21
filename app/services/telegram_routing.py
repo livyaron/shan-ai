@@ -45,6 +45,18 @@ _DECISION_PREFIXES = (
     "נבצע", "נפעיל", "נסגור", "נעדכן", "נשנה", "נדחה",
 )
 
+# Passive/impersonal future verbs that mark a standing directive or policy
+# ("from now on, in every X, Y will be performed"). These read like a נוהל so
+# the LLM router tends to mis-file them as "knowledge"; a declaration that
+# establishes a procedure is a decision, not a question about one.
+_STANDING_DIRECTIVE_VERBS = (
+    "תבוצע", "יבוצע", "יבוצעו", "תבוצענה",
+    "ייערך", "תיערך", "ייערכו",
+    "יוקם", "תוקם", "יוקמו",
+    "יתקיים", "תתקיים", "יתקיימו",
+    "יידרש", "תידרש", "יחויב", "תחויב",
+)
+
 _BARE_NAME_SKIP = frozenset({
     "כן", "לא", "אישור", "ביטול", "תודה", "טוב", "בסדר", "ok", "yes", "no",
     "שלום", "היי", "הי",
@@ -60,10 +72,10 @@ _ROUTING_PROMPT = """\
 route:
 - "project"   — שאלה על פרויקט/ים: סטטוס, תאריכים, מנהל, סיכונים, ספירה, עדכון שבועי
 - "knowledge" — שאלה על נהלים, מסמכים, מידע כללי (לא פרויקט ספציפי)
-- "decision"  — תיאור בעיה הדורשת ניתוח או פעולה; כולל הצהרה עתידית ("תהיה", "יהיה", "נבצע", "החלטנו") גם אם מזכירה שם תחנה/פרויקט
+- "decision"  — תיאור בעיה הדורשת ניתוח או פעולה; כולל הצהרה עתידית ("תהיה", "יהיה", "נבצע", "תבוצע", "יבוצע", "ייערך", "יוקם", "החלטנו") גם אם מזכירה שם תחנה/פרויקט; כולל קביעת נוהל/מדיניות קבועה ("בכל X תבוצע Y", "מעכשיו כל ...")
 - null        — כל השאר: ברכה, בדיחה, שיחה כללית, מילה בודדת שאינה שם פרויקט
 
-חשוב: אם המשפט הוא הצהרה/פקודה/תיאור מה יקרה (לא שאלה) — route="decision", גם אם מוזכר שם פרויקט.
+חשוב: אם המשפט הוא הצהרה/פקודה/תיאור מה יקרה או קביעת נוהל קבוע (לא שאלה) — route="decision", גם אם מוזכר שם פרויקט או שנשמע כמו נוהל. "knowledge" הוא רק לשאלה על נוהל קיים, לא לקביעת נוהל חדש.
 
 intent (רק כש-route="project", אחרת "general"):
 - "by_identifier" — שאלה על פרויקט אחד לפי שם/מזהה (param = שם/מזהה)
@@ -97,6 +109,8 @@ intent (רק כש-route="project", אחרת "general"):
 "יש לסגור את פרויקט X"                  → {"route":"decision","intent":"general","param":null}
 "נדרש לעדכן את תהליך העבודה"            → {"route":"decision","intent":"general","param":null}
 "צריך לעצור את הבנייה בשל בטיחות"      → {"route":"decision","intent":"general","param":null}
+"בכל תהליך תכנון היתר תבוצע פגישת התנעה עם המועצה וסיור בשטח" → {"route":"decision","intent":"general","param":null}
+"מעכשיו כל פרויקט חדש יעבור בדיקת בטיחות" → {"route":"decision","intent":"general","param":null}
 "בדיחה"                                  → {"route":null,"intent":null,"param":null}
 "שלום"                                   → {"route":null,"intent":null,"param":null}
 "תודה"                                   → {"route":null,"intent":null,"param":null}
@@ -187,6 +201,15 @@ async def _ai_route_message(text: str, conversation_context: list[dict] | None =
     t = text.strip()
     if not t.endswith("?") and any(t.startswith(p) for p in _DECISION_PREFIXES):
         logger.info(f"_ai_route_message: decision_prefix shortcut for: {t[:60]!r}")
+        return {"route": "decision", "intent": "general", "param": None}
+
+    # Standing-directive shortcut: a non-question that sets a policy ("בכל X
+    # תבוצע Y") uses a passive-future verb the LLM router misreads as a נוהל
+    # question. Skip when it opens like a question so "מתי תבוצע?" is untouched.
+    if (not t.endswith("?")
+            and not any(t.startswith(q) for q in _QUESTION_PREFIXES)
+            and any(v in t for v in _STANDING_DIRECTIVE_VERBS)):
+        logger.info(f"_ai_route_message: standing_directive shortcut for: {t[:60]!r}")
         return {"route": "decision", "intent": "general", "param": None}
 
     from app.services.llm_router import llm_chat
