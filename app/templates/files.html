@@ -325,6 +325,8 @@
                                     {% endif %}
                                 </td>
                                 <td>
+                                    <a href="/dashboard/files/{{ f.id }}/details"
+                                       class="btn btn-sm btn-outline-info me-1" title="צפייה ועריכה">✏️</a>
                                     <a href="/dashboard/files/{{ f.id }}/view" target="_blank"
                                        class="btn btn-sm btn-outline-secondary me-1" title="פתח קובץ">👁️</a>
                                     {% if f.is_master %}

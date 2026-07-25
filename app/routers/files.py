@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.database import get_db_session
-from app.models import KnowledgeFile, User
+from app.models import KnowledgeFile, KnowledgeChunk, User
 from app.routers.login import get_current_user
 from app.routers.dashboard import _pending_approvals_count
 
@@ -244,6 +244,181 @@ async def view_file(
         media_type=mime,
         filename=kf.original_name,
         content_disposition_type=disposition,
+    )
+
+
+@router.get("/{file_id}/details", response_class=HTMLResponse)
+async def file_details(
+    file_id: int,
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+    current_user: User = Depends(get_current_user),
+    msg: str = None,
+    error: str = None,
+):
+    """Detail page: metadata, extracted content chunks, edit/replace/delete controls."""
+    kf = await session.get(KnowledgeFile, file_id)
+    if not kf:
+        raise HTTPException(status_code=404, detail="קובץ לא נמצא")
+
+    uploader_name = None
+    if kf.uploader_id:
+        uploader = await session.get(User, kf.uploader_id)
+        uploader_name = uploader.username if uploader else None
+
+    chunk_rows = (await session.execute(
+        select(KnowledgeChunk)
+        .where(KnowledgeChunk.file_id == file_id)
+        .order_by(KnowledgeChunk.chunk_idx.asc())
+    )).scalars().all()
+    chunks = [{"idx": c.chunk_idx, "content": c.content or ""} for c in chunk_rows]
+
+    file_exists = Path(kf.file_path).exists() if kf.file_path else False
+
+    file_info = {
+        "id": kf.id,
+        "original_name": kf.original_name,
+        "file_type": kf.file_type,
+        "file_size": kf.file_size,
+        "uploader_name": uploader_name or "—",
+        "summary": kf.summary or "",
+        "chunk_count": kf.chunk_count,
+        "status": kf.status,
+        "is_master": kf.is_master,
+        "created_at": kf.created_at.strftime("%d/%m/%Y %H:%M") if kf.created_at else "—",
+        "file_exists": file_exists,
+    }
+    pending_approvals = await _pending_approvals_count(current_user.id, session)
+    return templates.TemplateResponse("file_detail.html", {
+        "request": request,
+        "current_user": current_user,
+        "file": file_info,
+        "chunks": chunks,
+        "msg": msg,
+        "error": error,
+        "pending_approvals": pending_approvals,
+    })
+
+
+@router.post("/{file_id}/edit")
+async def edit_file(
+    file_id: int,
+    original_name: str = Form(...),
+    summary: str = Form(""),
+    session: AsyncSession = Depends(get_db_session),
+    current_user: User = Depends(get_current_user),
+):
+    """Update editable metadata: display name and summary."""
+    kf = await session.get(KnowledgeFile, file_id)
+    if not kf:
+        raise HTTPException(status_code=404, detail="קובץ לא נמצא")
+
+    new_name = (original_name or "").strip()
+    if new_name:
+        kf.original_name = new_name
+    kf.summary = (summary or "").strip() or None
+    await session.commit()
+
+    return RedirectResponse(
+        f"/dashboard/files/{file_id}/details?msg=פרטי+הקובץ+עודכנו+בהצלחה",
+        status_code=303,
+    )
+
+
+@router.post("/{file_id}/replace")
+async def replace_file(
+    file_id: int,
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    session: AsyncSession = Depends(get_db_session),
+    current_user: User = Depends(get_current_user),
+):
+    """Replace the stored file with a new upload and re-run extraction/embedding."""
+    kf = await session.get(KnowledgeFile, file_id)
+    if not kf:
+        raise HTTPException(status_code=404, detail="קובץ לא נמצא")
+
+    ext = _ext(file.filename or "")
+    if ext not in ALLOWED_EXTENSIONS:
+        return RedirectResponse(
+            f"/dashboard/files/{file_id}/details?error=סוג+קובץ+לא+נתמך.+מותר:+PDF,+DOCX,+XLSX",
+            status_code=303,
+        )
+
+    # Remove old stored file from disk
+    if kf.file_path:
+        try:
+            Path(kf.file_path).unlink(missing_ok=True)
+        except Exception:
+            pass
+
+    # Write the new file to disk
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    safe_name = f"{uuid.uuid4().hex}_{file.filename}"
+    new_path = UPLOAD_DIR / safe_name
+    contents = await file.read()
+    new_path.write_bytes(contents)
+
+    # Clear old chunks — process_file/process_master_file append, they don't replace
+    from sqlalchemy import delete as _delete
+    await session.execute(_delete(KnowledgeChunk).where(KnowledgeChunk.file_id == file_id))
+
+    # Update the record to point at the new file and reset processing state
+    kf.original_name = file.filename
+    kf.file_path = str(new_path)
+    kf.file_type = ext
+    kf.file_size = len(contents)
+    kf.chunk_count = 0
+    kf.summary = None
+    kf.status = "processing"
+    # A non-xlsx replacement can no longer be a master file
+    if kf.is_master and ext != "xlsx":
+        kf.is_master = False
+    await session.commit()
+
+    if kf.is_master:
+        from app.services.knowledge_service import process_master_file
+        background_tasks.add_task(process_master_file, kf.id)
+    else:
+        from app.services.knowledge_service import process_file
+        background_tasks.add_task(process_file, kf.id)
+
+    return RedirectResponse(
+        f"/dashboard/files/{file_id}/details?msg=הקובץ+הוחלף+ומעובד+מחדש.+יופיע+כ%22מוכן%22+בעוד+מספר+שניות.",
+        status_code=303,
+    )
+
+
+@router.post("/{file_id}/reprocess")
+async def reprocess_file(
+    file_id: int,
+    background_tasks: BackgroundTasks,
+    session: AsyncSession = Depends(get_db_session),
+    current_user: User = Depends(get_current_user),
+):
+    """Re-run extraction/embedding on the existing stored file (no new upload)."""
+    kf = await session.get(KnowledgeFile, file_id)
+    if not kf:
+        raise HTTPException(status_code=404, detail="קובץ לא נמצא")
+    if not kf.file_path or not Path(kf.file_path).exists():
+        return RedirectResponse(
+            f"/dashboard/files/{file_id}/details?error=הקובץ+המקורי+לא+נמצא+בדיסק.+יש+להחליף+אותו.",
+            status_code=303,
+        )
+
+    kf.status = "processing"
+    await session.commit()
+
+    if kf.is_master:
+        from app.services.knowledge_service import process_master_file
+        background_tasks.add_task(process_master_file, kf.id)
+    else:
+        from app.services.knowledge_service import reprocess_file_with_context
+        background_tasks.add_task(reprocess_file_with_context, kf.id)
+
+    return RedirectResponse(
+        f"/dashboard/files/{file_id}/details?msg=הקובץ+נשלח+לעיבוד+מחדש.",
+        status_code=303,
     )
 
 
