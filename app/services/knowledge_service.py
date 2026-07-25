@@ -610,31 +610,31 @@ def _normalize_date(val) -> str:
     return val_str
 
 
-async def delete_old_masters(session: AsyncSession, exclude_file_id: int | None = None) -> int:
-    """Delete previous master files entirely (rows + chunks + disk file).
+async def archive_old_masters(session: AsyncSession, exclude_file_id: int | None = None) -> int:
+    """Archive previous master versions instead of deleting them.
 
-    A demoted master must not stay in the knowledge base: cross-link retrieval
-    searches all non-master files, so its stale project chunks would keep
-    feeding outdated statuses/dates into answers.
+    Old master versions are kept in full (row + chunks + disk file) so project
+    reports and depth analysis can look at historical states. To keep them out
+    of Q&A answers, they are flagged status="archived": every answer-retrieval
+    path filters status=="ready", so archived versions are excluded from the
+    anchor, cross-link and hybrid search — only the current master answers.
     """
-    from sqlalchemy import delete as _delete
+    from sqlalchemy import update as _update
 
-    stmt = select(KnowledgeFile).where(KnowledgeFile.is_master.is_(True))
+    stmt = (
+        _update(KnowledgeFile)
+        .where(KnowledgeFile.is_master.is_(True))
+        .where(KnowledgeFile.status == "ready")
+    )
     if exclude_file_id is not None:
         stmt = stmt.where(KnowledgeFile.id != exclude_file_id)
-    old_masters = list((await session.execute(stmt)).scalars().all())
-    if not old_masters:
-        return 0
-    old_ids = [f.id for f in old_masters]
-    await session.execute(_delete(KnowledgeChunk).where(KnowledgeChunk.file_id.in_(old_ids)))
-    for old in old_masters:
-        try:
-            Path(old.file_path).unlink(missing_ok=True)
-        except Exception:
-            pass
-        await session.delete(old)
-    logger.info(f"delete_old_masters: removed previous master file(s): {old_ids}")
-    return len(old_masters)
+    stmt = stmt.values(status="archived").execution_options(synchronize_session=False)
+    res = await session.execute(stmt)
+    await session.commit()
+    n = res.rowcount or 0
+    if n:
+        logger.info(f"archive_old_masters: archived {n} previous master version(s)")
+    return n
 
 
 async def process_master_file(file_id: int) -> None:
@@ -872,6 +872,10 @@ async def process_master_file(file_id: int) -> None:
                 if kf2:
                     kf2.status = "ready"
                     await s2.commit()
+                # Zero-downtime handover: only now that the new master is ready
+                # do we archive the previous version(s). They stay in the DB for
+                # reports/depth but drop out of Q&A (status != "ready").
+                await archive_old_masters(s2, exclude_file_id=file_id)
 
         except Exception as e:
             logger.error(f"process_master_file error file {file_id}: {e}", exc_info=True)
@@ -1536,9 +1540,18 @@ async def get_decisions_context(session: AsyncSession, user_id: int) -> str:
 # ---------------------------------------------------------------------------
 
 async def _get_master_file_id(session: AsyncSession):
-    """Return the id of the current master KnowledgeFile, or None."""
+    """Return the id of the *current* master KnowledgeFile, or None.
+
+    With versioned masters, several rows may have is_master=True; only the
+    active one is status=="ready" (older versions are "archived"). Order by
+    created_at desc as a tiebreaker so the newest ready master always wins.
+    """
     result = await session.execute(
-        select(KnowledgeFile.id).where(KnowledgeFile.is_master).limit(1)
+        select(KnowledgeFile.id)
+        .where(KnowledgeFile.is_master)
+        .where(KnowledgeFile.status == "ready")
+        .order_by(KnowledgeFile.created_at.desc())
+        .limit(1)
     )
     return result.scalar_one_or_none()
 

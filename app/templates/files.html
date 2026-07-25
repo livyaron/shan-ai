@@ -108,6 +108,7 @@
         .badge-ready      { background: #28a745; }
         .badge-processing { background: #ffc107; color: #000; }
         .badge-error      { background: #dc3545; }
+        .badge-archived   { background: #475569; color: #e2e8f0; }
         .file-type-pdf  { background: #dc3545; }
         .file-type-docx { background: #2b7cd3; }
         .file-type-xlsx { background: #1d7a3a; }
@@ -309,12 +310,20 @@
                                     <span class="badge badge-ready">✅ מוכן</span>
                                     {% elif f.status == 'processing' %}
                                     <span class="badge badge-processing">⏳ מעבד...</span>
+                                    {% elif f.status == 'archived' %}
+                                    <span class="badge badge-archived">📦 ארכיון</span>
                                     {% else %}
                                     <span class="badge badge-error" title="{{ f.summary }}">❌ שגיאה</span>
                                     {% endif %}
                                 </td>
                                 <td>
-                                    {% if f.is_master %}
+                                    {% if f.is_master and f.status == 'archived' %}
+                                    <span class="badge badge-archived" title="גרסת מאסטר קודמת — נשמרת לדוחות ולעומק">📦 גרסה קודמת</span>
+                                    <form method="POST" action="/dashboard/files/{{ f.id }}/set_master" class="d-inline"
+                                          onsubmit="return confirm('לשחזר גרסה זו כ-Master הפעיל? הגרסה הנוכחית תעבור לארכיון.')">
+                                        <button type="submit" class="btn btn-sm btn-master mt-1" title="שחזר כ-Master פעיל">↩ שחזר</button>
+                                    </form>
+                                    {% elif f.is_master %}
                                     <span class="badge badge-master">⭐ Master</span>
                                     {% elif f.file_type == 'xlsx' and f.status == 'ready' %}
                                     <form method="POST" action="/dashboard/files/{{ f.id }}/set_master" class="d-inline">

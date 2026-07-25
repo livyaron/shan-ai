@@ -33,6 +33,7 @@
         .file-type-docx { background: #2b7cd3; }
         .file-type-xlsx { background: #1d7a3a; }
         .badge-master { background: #ffc107; color: #000; font-weight: 700; }
+        .badge-archived { background: #475569; color: #e2e8f0; }
         .upload-zone { border: 2px dashed #2d3047; border-radius: 12px;
             padding: 20px; text-align: center; transition: border-color .2s; cursor: pointer; }
         .upload-zone:hover { border-color: #8b9cf4; }
@@ -77,6 +78,8 @@
             <span class="badge badge-ready">✅ מוכן</span>
         {% elif file.status == 'processing' %}
             <span class="badge badge-processing">⏳ מעבד...</span>
+        {% elif file.status == 'archived' %}
+            <span class="badge badge-archived">📦 ארכיון (גרסה קודמת)</span>
         {% else %}
             <span class="badge badge-error">❌ שגיאה</span>
         {% endif %}
@@ -123,7 +126,18 @@
                     <form method="POST" action="/dashboard/files/{{ file.id }}/reprocess" class="d-inline">
                         <button type="submit" class="btn btn-sm btn-outline-info">🔄 עבד מחדש</button>
                     </form>
+                    {% if file.is_master and file.status == 'archived' %}
+                    <form method="POST" action="/dashboard/files/{{ file.id }}/set_master" class="d-inline"
+                          onsubmit="return confirm('לשחזר גרסה זו כ-Master הפעיל? הגרסה הנוכחית תעבור לארכיון.')">
+                        <button type="submit" class="btn btn-sm btn-outline-warning">↩ שחזר כ-Master פעיל</button>
+                    </form>
+                    {% endif %}
                 </div>
+                {% if file.is_master and file.status == 'archived' %}
+                <div class="small mt-2" style="color:#94a3b8;">
+                    📦 זוהי גרסת מאסטר קודמת. היא נשמרת עבור דוחות וניתוח לעומק ואינה משמשת למענה על שאלות.
+                </div>
+                {% endif %}
             </div>
 
             <!-- Edit name + summary -->
