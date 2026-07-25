@@ -88,11 +88,10 @@ async def upload_file(
 
     make_master = is_master.lower() == "true" and ext == "xlsx"
 
-    if make_master:
-        # Delete any previous master entirely — its stale chunks stay reachable
-        # via cross-link retrieval and would pollute answers with old data
-        from app.services.knowledge_service import delete_old_masters
-        await delete_old_masters(session)
+    # Note: previous master versions are NOT deleted. They are archived
+    # automatically once this new master finishes processing (see
+    # process_master_file → archive_old_masters), so old versions stay
+    # available for reports/depth while only the newest answers questions.
 
     kf = KnowledgeFile(
         original_name=file.filename,
@@ -130,7 +129,11 @@ async def set_master_file(
     session: AsyncSession = Depends(get_db_session),
     current_user: User = Depends(get_current_user),
 ):
-    """Delete any previous master, mark this file as master, trigger master ETL."""
+    """Mark this file as the master and trigger master ETL.
+
+    Previous master versions are kept and archived automatically once this one
+    finishes processing (see process_master_file → archive_old_masters).
+    """
     kf = await session.get(KnowledgeFile, file_id)
     if not kf:
         raise HTTPException(status_code=404, detail="קובץ לא נמצא")
@@ -139,10 +142,6 @@ async def set_master_file(
             "/dashboard/files?error=רק+קבצי+XLSX+יכולים+להיות+Master",
             status_code=303,
         )
-
-    # Delete previous masters entirely (stale chunks pollute retrieval)
-    from app.services.knowledge_service import delete_old_masters
-    await delete_old_masters(session, exclude_file_id=file_id)
 
     kf.is_master = True
     kf.status = "processing"

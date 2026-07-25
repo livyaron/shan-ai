@@ -1459,9 +1459,8 @@ class TelegramPollingBot:
 
                 if action == "master_yes":
                     async with async_session_maker() as db:
-                        # Delete any previous master entirely (stale chunks pollute retrieval)
-                        from app.services.knowledge_service import delete_old_masters
-                        await delete_old_masters(db, exclude_file_id=file_id)
+                        # Previous master versions are kept and archived once this
+                        # new master finishes processing (archive_old_masters).
                         kf = await db.get(_KF, file_id)
                         if kf:
                             kf.is_master = True
