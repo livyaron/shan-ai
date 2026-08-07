@@ -69,6 +69,13 @@ def start_scheduler() -> None:
     )
     sch.add_job(_missions_overdue_check, "interval", minutes=30,
                 id="missions_overdue_check", replace_existing=True)
+    # 07:10 (not 07:00): keeps the XLSX off the digest's heels so a slow LLM call
+    # can't delay the digest, and the two documents don't land together.
+    sch.add_job(
+        _missions_daily_xlsx,
+        CronTrigger(day_of_week="sun-thu", hour=7, minute=10, timezone="Asia/Jerusalem"),
+        id="missions_daily_xlsx", replace_existing=True,
+    )
     # Second brain: drip-regenerate dirty project dossiers (K per cycle,
     # hash-gated — protects the Groq TPD budget; see dossier_service).
     sch.add_job(_dossier_drip, "interval", minutes=15,
@@ -94,6 +101,7 @@ def start_scheduler() -> None:
     logger.info("eval_cron: weekly_eval_summary job registered (Sun 07:00 Asia/Jerusalem)")
     logger.info("eval_cron: missions_daily_digest job registered (Sun-Thu 07:00 Asia/Jerusalem)")
     logger.info("eval_cron: missions_overdue_check job registered (every 30 min, sends 07-20 IL)")
+    logger.info("eval_cron: missions_daily_xlsx job registered (Sun-Thu 07:10 Asia/Jerusalem)")
     logger.info("eval_cron: batch_eval job registered (every 3h)")
 
 
@@ -212,6 +220,54 @@ async def _missions_daily_digest() -> None:
                 )
             except Exception as e:
                 logger.error(f"missions_daily_digest: send failed for user {owner_id}: {e}")
+
+
+async def _missions_daily_xlsx() -> None:
+    """Daily board report as XLSX to the war-room operators (Sun-Thu 07:10 IL)."""
+    from io import BytesIO
+    from app.database import async_session_maker
+    from app.services.telegram_polling import telegram_bot
+    from app.services import job_guard
+    from app.services import missions_menu_service as oms
+    from app.services import missions_report_service as mrs
+
+    bot = (telegram_bot.application.bot
+           if telegram_bot.application and telegram_bot.application.bot else None)
+    if bot is None:
+        logger.warning("missions_daily_xlsx: bot not available, skipping")
+        return
+
+    async with async_session_maker() as session:
+        # Without this, a redeploy overlapping 07:10 double-sends the file and
+        # double-burns the daily Groq budget.
+        if not await job_guard.claim(session, "missions_daily_xlsx", oms.today_il().isoformat()):
+            return
+
+        recipients = await mrs.list_war_room_operators(session)
+        if not recipients:
+            logger.info("missions_daily_xlsx: no war-room operators to send to")
+            return
+
+        try:
+            payload, filename = await mrs.build_report_bytes(session)
+        except Exception as e:
+            logger.exception(f"missions_daily_xlsx: report build failed: {e}")
+            return
+
+        caption = ("‏📊 <b>דוח חדר מבצעים — בוקר טוב</b>\n"
+                   "סיכום ותובנות · משימות פתוחות · משימות סגורות")
+        for user in recipients:
+            try:
+                # Same bytes for everyone — the report is always board-wide.
+                await bot.send_document(
+                    chat_id=user.telegram_id,
+                    document=BytesIO(payload),
+                    filename=filename,
+                    caption=caption,
+                    parse_mode="HTML",
+                )
+            except Exception as e:
+                logger.error(f"missions_daily_xlsx: send failed for user {user.id}: {e}")
 
 
 async def _missions_overdue_check() -> None:
