@@ -254,6 +254,32 @@ async def startup():
                     await _es.commit()
                     print(f"Marked {len(_stale)} stale eval run(s) as failed.")
 
+            # Perf: ANN indexes for pgvector similarity search (cosine distance).
+            # Without these, every `ORDER BY embedding.cosine_distance(...)` does a
+            # full sequential scan + sort over the table — the cost grows linearly
+            # with the data and shows up directly in bot response time. HNSW keeps
+            # retrieval fast as the knowledge base grows.
+            # Best-effort + per-index transaction: a build failure (e.g. an older
+            # pgvector without HNSW) must not abort startup, so each runs on its own
+            # connection and is swallowed on error. IF NOT EXISTS makes it a no-op
+            # on every restart after the first successful build.
+            from sqlalchemy import text as _vtext
+            _VECTOR_INDEXES = [
+                ("ix_knowledge_chunks_embedding_hnsw", "knowledge_chunks"),
+                ("ix_memory_notes_embedding_hnsw",     "memory_notes"),
+                ("ix_lessons_learned_embedding_hnsw",  "lessons_learned"),
+                ("ix_decisions_embedding_hnsw",        "decisions"),
+            ]
+            for _idx_name, _tbl in _VECTOR_INDEXES:
+                try:
+                    async with engine.begin() as _vconn:
+                        await _vconn.execute(_vtext(
+                            f"CREATE INDEX IF NOT EXISTS {_idx_name} "
+                            f"ON {_tbl} USING hnsw (embedding vector_cosine_ops)"
+                        ))
+                except Exception as _ve:
+                    print(f"Warning: could not create vector index {_idx_name}: {_ve}")
+
             print("Database tables initialized.")
             break
         except Exception as e:
