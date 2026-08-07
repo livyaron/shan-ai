@@ -47,7 +47,12 @@ async def groq_chat(
         kwargs["response_format"] = {"type": "json_object"}
 
     model_list = models or MODELS
-    MAX_ROUNDS = 3
+    # 2 rounds, not 3: each model has a separate rate-limit bucket, so we try them
+    # back-to-back with no inter-model sleep. When the whole pass is rate-limited we
+    # want to hand control back to llm_router quickly so it can fail over to Gemma —
+    # a long internal backoff here just adds seconds of latency the user feels before
+    # the other provider is even tried.
+    MAX_ROUNDS = 2
     last_error = None
     for rnd in range(MAX_ROUNDS):
         for i, model in enumerate(model_list):
@@ -59,10 +64,10 @@ async def groq_chat(
             except RateLimitError as e:
                 last_error = e
                 logger.warning(f"Rate limit on {model} (round {rnd})")
-                if i < len(model_list) - 1:
-                    await asyncio.sleep(1)
+                # No sleep between models — different buckets, retrying the next
+                # one immediately is free.
             except Exception:
                 raise
         if rnd < MAX_ROUNDS - 1:
-            await asyncio.sleep(2 ** (rnd + 1))   # 2s, 4s between full-pass rounds
+            await asyncio.sleep(1)   # brief pause before one more full pass
     raise last_error
