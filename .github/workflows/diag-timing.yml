@@ -1,0 +1,19 @@
+name: diag-timing
+on:
+  push:
+    paths:
+      - '.github/workflows/diag-timing.yml'
+  workflow_dispatch:
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Probe bot timing + decision health
+        run: |
+          echo "===== /telegram/_diag_timing ====="
+          curl -sS -m 30 -w "\nHTTP=%{http_code} TIME=%{time_total}s\n" \
+            "https://shan-ai.up.railway.app/telegram/_diag_timing" || true
+          echo
+          echo "===== /health ====="
+          curl -sS -m 30 -w "\nHTTP=%{http_code} TIME=%{time_total}s\n" \
+            "https://shan-ai.up.railway.app/health" || true
