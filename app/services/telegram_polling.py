@@ -972,10 +972,14 @@ class TelegramPollingBot:
                 kb = None
                 try:
                     import json as _json
+                    import time as _tt
                     from app.services.ask_router import route as _ask_route
                     from app.services.telegram_state import _awaiting_disambiguation
+                    _ask_t0 = _tt.perf_counter()
                     result = await _ask_route(text, session, user.id, log_to_db=True,
                                               conversation_context=conv_ctx)
+                    logger.info(f"⏱ ask_router.route ({result.path}): "
+                                f"{int((_tt.perf_counter() - _ask_t0) * 1000)}ms")
 
                     if result.path == "disambiguation":
                         candidates = _json.loads(result.answer)

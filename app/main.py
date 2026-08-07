@@ -294,6 +294,18 @@ async def startup():
     from pathlib import Path
     Path("uploads").mkdir(exist_ok=True)
 
+    # Warm the fastembed model in the background so the FIRST user question doesn't
+    # pay the one-time model load (download + init) inside its own latency budget.
+    async def _warm_embeddings():
+        try:
+            from app.services.embedding_service import embed
+            _t = __import__("time").perf_counter()
+            await embed("warmup")
+            print(f"Embedding model warmed in {int((__import__('time').perf_counter() - _t) * 1000)}ms")
+        except Exception as e:
+            print(f"Warning: embedding warmup failed: {e}")
+    asyncio.create_task(_warm_embeddings())
+
     # Migrate user passwords (set default for users without password_hash)
     try:
         from app.database import async_session_maker
