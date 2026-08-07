@@ -363,12 +363,16 @@ async def _ai_detect_intent(text: str) -> tuple[Optional[str], Optional[str]]:
     )
 
     try:
+        import time as _t
+        _t0 = _t.perf_counter()
         response = await llm_chat(
             "intent_detection",
             messages=[{"role": "user", "content": prompt}],
             max_tokens=80,
             temperature=0.0,
+            models=["llama-3.1-8b-instant"],  # trivial classification — fast model, not scout
         )
+        logger.info(f"⏱ project intent detection: {int((_t.perf_counter() - _t0) * 1000)}ms")
         match = _re.search(r'\{[^}]+\}', response)
         if match:
             data = _json.loads(match.group())
@@ -774,6 +778,8 @@ async def answer_project_query(
             except Exception:
                 logger.warning("dossier injection failed", exc_info=True)
 
+        import time as _at
+        _at0 = _at.perf_counter()
         summary = await llm_chat(
             "project_query",
             messages=[
@@ -783,6 +789,8 @@ async def answer_project_query(
             max_tokens=4000 if by_identifier_mode == "multi_card" else 2000,
             temperature=0.2,
         )
+        logger.info(f"⏱ project answer LLM (intent={intent}): "
+                    f"{int((_at.perf_counter() - _at0) * 1000)}ms")
         answer = _strip_thinking(summary)
         log_id = await _log_query(text, answer, intent, current_project_id, session, user_id)
         return answer, log_id
