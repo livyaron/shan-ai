@@ -157,6 +157,10 @@ def get_menu_keyboard(counts: dict[str, int]) -> InlineKeyboardMarkup:
         InlineKeyboardButton("✅ הושלמו",       callback_data="om:hist:0"),
         InlineKeyboardButton("➕ משימה חדשה",  callback_data="om:new"),
     ])
+    rows.append([
+        InlineKeyboardButton("📊 דוח Excel", callback_data="om:xls"),
+        InlineKeyboardButton("🧠 סיכום AI",  callback_data="om:sum"),
+    ])
     return InlineKeyboardMarkup(rows)
 
 

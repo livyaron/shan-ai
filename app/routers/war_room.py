@@ -129,6 +129,45 @@ async def war_room_page(
     })
 
 
+@router.get("/report.xlsx")
+async def download_report(
+    session: AsyncSession = Depends(get_db_session),
+    current_user: User = Depends(get_current_user),
+    ai: int = 1,
+):
+    """Board report as XLSX. Read-only, so viewers may download it too."""
+    from io import BytesIO
+    from urllib.parse import quote
+    from fastapi.responses import StreamingResponse
+    from app.services import missions_report_service as mrs
+
+    payload, filename = await mrs.build_report_bytes(session, with_ai=bool(ai))
+    # A raw Hebrew filename in the header breaks latin-1 encoding — ASCII fallback
+    # plus RFC 5987 for the real name.
+    ascii_name = f"war-room-report-{datetime.date.today():%d-%m-%Y}.xlsx"
+    disposition = (
+        f'attachment; filename="{ascii_name}"; '
+        f"filename*=UTF-8''{quote(filename)}"
+    )
+    return StreamingResponse(
+        BytesIO(payload),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": disposition},
+    )
+
+
+@router.get("/summary")
+async def focus_summary(
+    session: AsyncSession = Depends(get_db_session),
+    current_user: User = Depends(get_current_user),
+):
+    """AI situation assessment of overdue / nearly-overdue missions, for the page modal."""
+    from app.services import missions_report_service as mrs
+
+    text = await mrs.build_focus_summary(session)
+    return JSONResponse({"status": "ok", "text": text})
+
+
 @router.post("/create")
 async def create_mission_web(
     request: Request,

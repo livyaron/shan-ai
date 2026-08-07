@@ -2395,6 +2395,52 @@ class TelegramPollingBot:
             reply_markup=get_menu_keyboard(counts),
         )
 
+    async def _send_missions_xlsx(self, query, context) -> None:
+        """om:xls — build the board report and ship it as an XLSX document."""
+        from io import BytesIO
+        from app.services import missions_report_service as mrs
+
+        try:
+            await query.edit_message_text("‏⏳ מכין את דוח האקסל…")
+        except Exception:
+            pass
+        try:
+            async with async_session_maker() as session:
+                payload, filename = await mrs.build_report_bytes(session)
+            # A document can't ride on edit_message_text — send it as its own message.
+            await context.bot.send_document(
+                chat_id=query.message.chat_id,
+                document=BytesIO(payload),
+                filename=filename,
+                caption="‏📊 <b>דוח חדר מבצעים</b>\nסיכום ותובנות · משימות פתוחות · משימות סגורות",
+                parse_mode="HTML",
+            )
+        except Exception as e:
+            logger.error(f"missions xlsx report failed: {e}")
+            await query.message.reply_text(
+                "‏❌ לא הצלחתי להפיק את הדוח כרגע. נסה שוב בעוד רגע."
+            )
+        await self._render_missions_menu(query)
+
+    async def _send_missions_summary(self, query) -> None:
+        """om:sum — AI situation assessment of overdue / nearly-overdue missions."""
+        from app.services import missions_report_service as mrs
+
+        try:
+            await query.edit_message_text("‏⏳ מנתח משימות בסיכון…")
+        except Exception:
+            pass
+        try:
+            async with async_session_maker() as session:
+                text = await mrs.build_focus_summary(session)
+            await query.message.reply_text(text, parse_mode="HTML")
+        except Exception as e:
+            logger.error(f"missions focus summary failed: {e}")
+            await query.message.reply_text(
+                "‏❌ לא הצלחתי להפיק את הסיכום כרגע. נסה שוב בעוד רגע."
+            )
+        await self._render_missions_menu(query)
+
     async def _render_missions_list(self, query, origin: str, page: int, user) -> None:
         from app.services import missions_menu_service as oms
         async with async_session_maker() as session:
@@ -2468,6 +2514,15 @@ class TelegramPollingBot:
             _missions_create_state.pop(telegram_id, None)
             _missions_edit_state.pop(telegram_id, None)
             await self._render_missions_menu(query)
+            return
+
+        # ── Reports ────────────────────────────────────────────────────
+        if data == "om:xls":
+            await self._send_missions_xlsx(query, context)
+            return
+
+        if data == "om:sum":
+            await self._send_missions_summary(query)
             return
 
         # ── Creation wizard ────────────────────────────────────────────

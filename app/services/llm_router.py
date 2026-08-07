@@ -68,6 +68,9 @@ USAGE_LABELS: dict[str, str] = {
     "eval_repair":             "אבחון: הצעת תיקון",
     "eval_verify":             "אבחון: אימות תיקון",
     "weekly_report":           "דוח שבועי",
+    # Operations room (חדר מבצעים) reporting
+    "missions_insights":       "תובנות AI לדוח חדר מבצעים",
+    "missions_summary":        "סיכום משימות בסיכון (חדר מבצעים)",
 }
 
 
