@@ -43,6 +43,18 @@ def _project_to_dict(project: Project) -> dict:
     }
 
 
+# ── Multi-match ordering ────────────────────────────────────────────────────
+# When a query resolves to several projects, list them sorted by type:
+# הקמה first, then הרחבה, then all the others (stable within each group so the
+# existing name ordering is preserved).
+_TYPE_PRIORITY = {"הקמה": 0, "הרחבה": 1}
+
+
+def _type_sort_key(project: dict) -> int:
+    """Sort priority for multi-match project lists: הקמה → הרחבה → all others."""
+    return _TYPE_PRIORITY.get((project.get("project_type") or "").strip(), 2)
+
+
 # ── DB query tools ─────────────────────────────────────────────────────────
 
 async def find_projects_by_identifier(identifier: str, session: AsyncSession) -> list[dict]:
@@ -582,6 +594,8 @@ async def answer_project_query(
                 log_id = await _log_query(text, answer, intent, data["project_identifier"], session, user_id)
                 return answer, log_id
             else:
+                # Multiple matches → list sorted by type: הקמה, הרחבה, then the rest
+                matches = sorted(matches, key=_type_sort_key)
                 # 2–4 ambiguous matches → signal disambiguation to the caller
                 if 2 <= len(matches) <= 4:
                     candidates = [{"id": p["project_identifier"], "name": p["name"] or p["project_identifier"]} for p in matches]
@@ -615,6 +629,7 @@ async def answer_project_query(
                 context_str = json.dumps(data_p, ensure_ascii=False, indent=2)
                 intent = "by_identifier"
             elif 2 <= len(project_first) <= 4:
+                project_first = sorted(project_first, key=_type_sort_key)
                 candidates = [
                     {"id": p["project_identifier"], "name": p["name"] or p["project_identifier"]}
                     for p in project_first
