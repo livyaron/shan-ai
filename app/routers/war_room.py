@@ -134,14 +134,22 @@ async def download_report(
     session: AsyncSession = Depends(get_db_session),
     current_user: User = Depends(get_current_user),
     ai: int = 1,
+    refresh: int = 0,
 ):
-    """Board report as XLSX. Read-only, so viewers may download it too."""
+    """Board report as XLSX. Read-only, so viewers may download it too.
+
+    Served from the day cache built at 04:10. `?refresh=1` rebuilds it against
+    current board data while reusing the day's cached AI narrative, so a refresh
+    costs no extra Groq tokens. `?ai=0` skips the narrative entirely.
+    """
     from io import BytesIO
     from urllib.parse import quote
     from fastapi.responses import StreamingResponse
     from app.services import missions_report_service as mrs
 
-    payload, filename = await mrs.build_report_bytes(session, with_ai=bool(ai))
+    payload, filename, _generated_at = await mrs.build_report_bytes(
+        session, with_ai=bool(ai), refresh_data=bool(refresh)
+    )
     # A raw Hebrew filename in the header breaks latin-1 encoding — ASCII fallback
     # plus RFC 5987 for the real name.
     ascii_name = f"war-room-report-{datetime.date.today():%d-%m-%Y}.xlsx"

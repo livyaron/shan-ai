@@ -2395,24 +2395,36 @@ class TelegramPollingBot:
             reply_markup=get_menu_keyboard(counts),
         )
 
-    async def _send_missions_xlsx(self, query, context) -> None:
-        """om:xls — build the board report and ship it as an XLSX document."""
+    async def _send_missions_xlsx(self, query, context, refresh: bool = False) -> None:
+        """om:xls / om:xlsr — ship the board report as an XLSX document.
+
+        Default serves the report prepared at 04:10. `refresh` rebuilds it from
+        current board data, reusing the day's cached AI narrative (no Groq call).
+        """
         from io import BytesIO
         from app.services import missions_report_service as mrs
 
         try:
-            await query.edit_message_text("‏⏳ מכין את דוח האקסל…")
+            await query.edit_message_text(
+                "‏⏳ מרענן את הדוח מהנתונים העדכניים…" if refresh
+                else "‏⏳ מכין את דוח האקסל…"
+            )
         except Exception:
             pass
         try:
             async with async_session_maker() as session:
-                payload, filename = await mrs.build_report_bytes(session)
+                payload, filename, generated_at = await mrs.build_report_bytes(
+                    session, refresh_data=refresh
+                )
+            head = "🔄 <b>דוח חדר מבצעים — רוענן</b>" if refresh \
+                else "📊 <b>דוח חדר מבצעים</b>"
             # A document can't ride on edit_message_text — send it as its own message.
             await context.bot.send_document(
                 chat_id=query.message.chat_id,
                 document=BytesIO(payload),
                 filename=filename,
-                caption="‏📊 <b>דוח חדר מבצעים</b>\nסיכום ותובנות · משימות פתוחות · משימות סגורות",
+                caption=(f"‏{head}\nסיכום ותובנות · משימות פתוחות · משימות סגורות\n"
+                         f"<i>נכון ל-{generated_at}</i>"),
                 parse_mode="HTML",
             )
         except Exception as e:
@@ -2519,6 +2531,10 @@ class TelegramPollingBot:
         # ── Reports ────────────────────────────────────────────────────
         if data == "om:xls":
             await self._send_missions_xlsx(query, context)
+            return
+
+        if data == "om:xlsr":
+            await self._send_missions_xlsx(query, context, refresh=True)
             return
 
         if data == "om:sum":

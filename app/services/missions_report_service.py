@@ -652,25 +652,45 @@ def build_workbook(data: dict, ai_text: str = "") -> bytes:
 
 
 async def build_report_bytes(
-    session: AsyncSession, with_ai: bool = True, force: bool = False
-) -> tuple[bytes, str]:
-    """Collect → insights → workbook. Returns (xlsx_bytes, hebrew_filename).
+    session: AsyncSession,
+    with_ai: bool = True,
+    force: bool = False,
+    refresh_data: bool = False,
+) -> tuple[bytes, str, str]:
+    """Collect → insights → workbook. Returns (xlsx_bytes, filename, generated_at).
 
-    Served from the day cache unless `force` (the 04:10 prewarm) or `with_ai=False`
-    (an explicit no-LLM download, which must not overwrite the day's real report).
+    Three modes:
+      default          — serve the day's cached report (a dict lookup).
+      force            — the 04:10 prewarm: rebuild everything, including the LLM call.
+      refresh_data     — rebuild the board data but reuse the day's cached AI narrative,
+                         so a manual refresh costs zero Groq tokens.
+
+    `with_ai=False` is an explicit no-LLM download and never touches the cache.
     """
     import asyncio
 
     key = oms.today_il().isoformat()
-    if with_ai and not force and key in _report_cache:
+    if with_ai and not force and not refresh_data and key in _report_cache:
         return _report_cache[key]
 
     data = await collect_report_data(session)
-    ai_text = await get_ai_insights(data, force=force) if with_ai else ""
+
+    if not with_ai:
+        ai_text = ""
+    elif refresh_data:
+        # Reuse today's narrative; only build one if the prewarm never ran.
+        ai_text = _ai_cache.get(key) or await get_ai_insights(data)
+    else:
+        ai_text = await get_ai_insights(data, force=force)
+
     payload = await asyncio.get_event_loop().run_in_executor(
         None, build_workbook, data, ai_text
     )
-    result = (payload, f"דוח_חדר_מבצעים_{data['meta']['date_slug']}.xlsx")
+    result = (
+        payload,
+        f"דוח_חדר_מבצעים_{data['meta']['date_slug']}.xlsx",
+        data["meta"]["generated_at"],
+    )
     if with_ai:
         _cache_put(_report_cache, key, result)
     return result

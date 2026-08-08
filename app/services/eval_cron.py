@@ -278,13 +278,14 @@ async def _missions_daily_xlsx() -> None:
         try:
             # Cache hit from the 04:10 prewarm; only builds here if that job was
             # skipped or the process restarted since.
-            payload, filename = await mrs.build_report_bytes(session)
+            payload, filename, generated_at = await mrs.build_report_bytes(session)
         except Exception as e:
             logger.exception(f"missions_daily_xlsx: report build failed: {e}")
             return
 
         caption = ("‏📊 <b>דוח חדר מבצעים — בוקר טוב</b>\n"
-                   "סיכום ותובנות · משימות פתוחות · משימות סגורות")
+                   "סיכום ותובנות · משימות פתוחות · משימות סגורות\n"
+                   f"<i>נכון ל-{generated_at}</i>")
         for user in recipients:
             try:
                 # Same bytes for everyone — the report is always board-wide.

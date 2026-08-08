@@ -437,8 +437,8 @@ async def test_report_bytes_cached_per_day(monkeypatch):
     monkeypatch.setattr(mrs, "get_ai_insights", _fake_ai)
     monkeypatch.setattr(mrs.oms, "today_il", lambda: TODAY)
 
-    first, name1 = await mrs.build_report_bytes(session=None)
-    second, name2 = await mrs.build_report_bytes(session=None)
+    first, name1, _ = await mrs.build_report_bytes(session=None)
+    second, name2, _ = await mrs.build_report_bytes(session=None)
     assert first is second and name1 == name2
     assert len(builds) == 1
 
@@ -504,6 +504,98 @@ async def test_prewarm_reports_partial_failure(monkeypatch):
     assert await mrs.prewarm_daily(session=None) == {"report": False, "summary": True}
 
 
+async def test_refresh_rebuilds_data_but_reuses_cached_ai(monkeypatch):
+    """The zero-token guarantee: a refresh re-reads the board but never re-calls the LLM."""
+    collects, llm_calls = [], []
+
+    async def _fake_collect(_session):
+        collects.append(1)
+        return _sample_data()
+
+    async def _llm(*args, **kwargs):
+        llm_calls.append(1)
+        return "\u2022 \u05ea\u05d5\u05d1\u05e0\u05d4 \u05de\u05d4-AI"
+
+    monkeypatch.setattr(mrs, "collect_report_data", _fake_collect)
+    monkeypatch.setattr(mrs.oms, "today_il", lambda: TODAY)
+    from app.services import llm_router
+    monkeypatch.setattr(llm_router, "llm_chat", _llm)
+
+    await mrs.build_report_bytes(session=None)          # first build warms both caches
+    assert (len(collects), len(llm_calls)) == (1, 1)
+
+    await mrs.build_report_bytes(session=None)          # cached — no work at all
+    assert (len(collects), len(llm_calls)) == (1, 1)
+
+    await mrs.build_report_bytes(session=None, refresh_data=True)
+    assert len(collects) == 2, "refresh must re-read the board"
+    assert len(llm_calls) == 1, "refresh must reuse the cached AI narrative — no Groq call"
+
+
+async def test_refresh_builds_ai_once_when_cache_is_cold(monkeypatch):
+    """Covers a process restart before the 04:10 prewarm ran."""
+    llm_calls = []
+
+    async def _fake_collect(_session):
+        return _sample_data()
+
+    async def _llm(*args, **kwargs):
+        llm_calls.append(1)
+        return "\u2022 \u05ea\u05d5\u05d1\u05e0\u05d4"
+
+    monkeypatch.setattr(mrs, "collect_report_data", _fake_collect)
+    monkeypatch.setattr(mrs.oms, "today_il", lambda: TODAY)
+    from app.services import llm_router
+    monkeypatch.setattr(llm_router, "llm_chat", _llm)
+
+    await mrs.build_report_bytes(session=None, refresh_data=True)
+    assert len(llm_calls) == 1
+    await mrs.build_report_bytes(session=None, refresh_data=True)
+    assert len(llm_calls) == 1, "the narrative built by the first refresh is now cached"
+
+
+async def test_refresh_replaces_the_cached_report(monkeypatch):
+    """After a refresh, a plain press must serve the refreshed bytes, not the stale ones."""
+    board = {"rows": 3}
+
+    async def _fake_collect(_session):
+        data = _sample_data()
+        data["open_rows"] = data["open_rows"][: board["rows"]]
+        return data
+
+    async def _fake_ai(_data, force=False):
+        return "\u2022 \u05ea\u05d5\u05d1\u05e0\u05d4"
+
+    monkeypatch.setattr(mrs, "collect_report_data", _fake_collect)
+    monkeypatch.setattr(mrs, "get_ai_insights", _fake_ai)
+    monkeypatch.setattr(mrs.oms, "today_il", lambda: TODAY)
+
+    stale, _, _ = await mrs.build_report_bytes(session=None)
+    board["rows"] = 1                                    # somebody closed two missions
+    fresh, _, _ = await mrs.build_report_bytes(session=None, refresh_data=True)
+    assert fresh != stale
+
+    served, _, _ = await mrs.build_report_bytes(session=None)
+    assert served == fresh
+
+
+async def test_report_returns_generated_at_stamp(monkeypatch):
+    async def _fake_collect(_session):
+        return _sample_data()
+
+    async def _fake_ai(_data, force=False):
+        return ""
+
+    monkeypatch.setattr(mrs, "collect_report_data", _fake_collect)
+    monkeypatch.setattr(mrs, "get_ai_insights", _fake_ai)
+    monkeypatch.setattr(mrs.oms, "today_il", lambda: TODAY)
+
+    payload, filename, generated_at = await mrs.build_report_bytes(session=None)
+    assert payload[:2] == b"PK"
+    assert filename.endswith(".xlsx")
+    assert generated_at == "15/07/2026 06:00"
+
+
 def test_cache_put_keeps_only_today():
     cache = {}
     mrs._cache_put(cache, "2026-07-14", "old")
@@ -519,6 +611,7 @@ def test_menu_keyboard_exposes_report_buttons():
     kb = get_menu_keyboard({"do": 1, "plan": 0, "delegate": 0, "backlog": 0})
     tokens = [b.callback_data for row in kb.inline_keyboard for b in row]
     assert "om:xls" in tokens
+    assert "om:xlsr" in tokens
     assert "om:sum" in tokens
     # Colon-free tail so the om:* dispatcher can keep using split(':').
-    assert all(t.count(":") == 1 for t in ("om:xls", "om:sum"))
+    assert all(t.count(":") == 1 for t in ("om:xls", "om:xlsr", "om:sum"))
