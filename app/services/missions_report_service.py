@@ -55,8 +55,37 @@ SHEET_SUMMARY = "סיכום ותובנות"
 SHEET_OPEN = "משימות פתוחות"
 SHEET_CLOSED = "משימות סגורות"
 
-# One AI narrative per calendar day, shared by the cron and every manual press.
-_ai_cache: dict[str, str] = {}
+# ── Daily caches ───────────────────────────────────────────────────────────
+# Everything expensive is built once per calendar day by the 04:10 prewarm cron
+# and served from memory for the rest of the day, so a button press is a dict
+# lookup rather than a board scan + Groq round-trip. Each cache holds only the
+# current day's entry.
+_ai_cache: dict[str, str] = {}                       # date -> AI insights narrative
+_report_cache: dict[str, tuple[bytes, str]] = {}     # date -> (xlsx bytes, filename)
+_summary_cache: dict[str, str] = {}                  # date -> focus summary HTML
+
+
+def _cache_put(cache: dict, key: str, value):
+    """Store today's entry and drop yesterday's — these caches never grow."""
+    cache.clear()
+    cache[key] = value
+    return value
+
+
+def cache_status() -> dict:
+    """Which of today's artifacts are already warm (diagnostics)."""
+    key = oms.today_il().isoformat()
+    return {
+        "date": key,
+        "ai_insights": key in _ai_cache,
+        "report": key in _report_cache,
+        "summary": key in _summary_cache,
+    }
+
+
+def clear_caches() -> None:
+    for cache in (_ai_cache, _report_cache, _summary_cache):
+        cache.clear()
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────
@@ -416,13 +445,13 @@ def _stats_block(stats: dict) -> str:
     return "\n".join(lines)
 
 
-async def get_ai_insights(data: dict) -> str:
+async def get_ai_insights(data: dict, force: bool = False) -> str:
     """Hebrew narrative for the summary sheet. One LLM call per calendar day, cached.
 
     Returns "" on any failure — the workbook must never fail because the LLM did.
     """
     key = oms.today_il().isoformat()
-    if key in _ai_cache:
+    if not force and key in _ai_cache:
         return _ai_cache[key]
 
     from app.services.llm_router import llm_chat
@@ -438,7 +467,7 @@ async def get_ai_insights(data: dict) -> str:
         )
         text = (text or "").strip()
         if text:
-            _ai_cache[key] = text
+            _cache_put(_ai_cache, key, text)
         return text
     except Exception as e:
         logger.warning(f"missions_report: AI insights failed, continuing without: {e}")
@@ -622,39 +651,82 @@ def build_workbook(data: dict, ai_text: str = "") -> bytes:
     return buf.getvalue()
 
 
-async def build_report_bytes(session: AsyncSession, with_ai: bool = True) -> tuple[bytes, str]:
-    """Collect → insights → workbook. Returns (xlsx_bytes, hebrew_filename)."""
+async def build_report_bytes(
+    session: AsyncSession, with_ai: bool = True, force: bool = False
+) -> tuple[bytes, str]:
+    """Collect → insights → workbook. Returns (xlsx_bytes, hebrew_filename).
+
+    Served from the day cache unless `force` (the 04:10 prewarm) or `with_ai=False`
+    (an explicit no-LLM download, which must not overwrite the day's real report).
+    """
     import asyncio
 
+    key = oms.today_il().isoformat()
+    if with_ai and not force and key in _report_cache:
+        return _report_cache[key]
+
     data = await collect_report_data(session)
-    ai_text = await get_ai_insights(data) if with_ai else ""
+    ai_text = await get_ai_insights(data, force=force) if with_ai else ""
     payload = await asyncio.get_event_loop().run_in_executor(
         None, build_workbook, data, ai_text
     )
-    return payload, f"דוח_חדר_מבצעים_{data['meta']['date_slug']}.xlsx"
+    result = (payload, f"דוח_חדר_מבצעים_{data['meta']['date_slug']}.xlsx")
+    if with_ai:
+        _cache_put(_report_cache, key, result)
+    return result
+
+
+async def prewarm_daily(session: AsyncSession) -> dict:
+    """Build both artifacts and fill the day's caches. Called by the 04:10 cron.
+
+    Each half is guarded separately so a failure in one still leaves the other warm.
+    """
+    out = {"report": False, "summary": False}
+    try:
+        await build_report_bytes(session, with_ai=True, force=True)
+        out["report"] = True
+    except Exception as e:
+        logger.exception(f"missions_report: prewarm of the XLSX report failed: {e}")
+    try:
+        await build_focus_summary(session, force=True)
+        out["summary"] = True
+    except Exception as e:
+        logger.exception(f"missions_report: prewarm of the focus summary failed: {e}")
+    return out
 
 
 # ── Focus summary (the סיכום AI button) ────────────────────────────────────
 
 _SUMMARY_PROMPT = f"""אתה ראש חדר מבצעים באגף תשתיות חשמל.
-לפניך רשימת משימות שנמצאות בסיכון: באיחור, ליעד היום, או ליעד בתוך {AT_RISK_DAYS} ימים.
+לפניך רשימת משימות בסיכון: באיחור, ליעד היום, או ליעד בתוך {AT_RISK_DAYS} ימים.
 
-החזר בעברית בלבד, במבנה הבא ובלי כותרות נוספות:
+החזר בעברית בלבד, בדיוק בארבעת הקטעים הבאים, לפי הסדר, עם הכותרות כלשונן:
 
-הערכת מצב:
-<2 עד 4 משפטים: מה הסיכון המרכזי כרגע ומה הגורם לו>
+תמונת מצב
+• 3 עד 5 נקודות. כל נקודה מצביעה על דפוס — ריכוז עומס אצל אדם מסוים, אשכול
+  משימות באותה תחנה או נושא, איחור שהולך ומעמיק, או צוואר בקבוק חוזר.
+• ציין מספרים ושמות מתוך הנתונים. אל תחזור על אותה עובדה פעמיים.
 
-מה לעשות:
-<רשימת מטלות מקובצת לפי אחראי. לכל אחראי שורת כותרת ואחריה מטלות בסדר עדיפות יורד.
-כל מטלה במשפט אחד קצר שמתחיל בפועל.>
+משימות לביצוע היום
+• 4 עד 8 נקודות, מסודרות מהדחוף לפחות דחוף.
+• כל נקודה בפורמט: [שם האחראי] פועל בהווה + מה בדיוק לעשות — ואז נימוק קצר
+  אחרי מקף (כמה ימים באיחור, או מה חוסם).
+• התחל כל נקודה בפועל פעולה: תאם, בדוק, סגור, עדכן, הזמן, אשר, הסלם.
+• אחד את משימות שאפשר לבצע יחד לנקודה אחת, וציין זאת.
 
-לטיפול הנהלה:
-<רק משימות שבאיחור של יותר משבוע או קריטיות. אם אין — כתוב: אין>
+חסמים ותלויות
+• 1 עד 3 נקודות: מה עלול למנוע סגירה היום. אם אין — כתוב: אין חסמים ידועים.
 
-כללים:
-- התבסס אך ורק על המשימות שניתנו. אל תמציא משימות, שמות או תאריכים.
+לטיפול הנהלה
+• רק משימות באיחור של יותר משבוע, או דחופות וחשובות שלא זזות.
+• לכל נקודה כתוב מה ההחלטה הנדרשת מההנהלה. אם אין — כתוב: אין.
+
+כללים מחייבים:
+- כל שורה ברשימה מתחילה בתו • ורווח. אין פסקאות רצות, אין מספור.
+- כל נקודה היא שורה אחת, עד 25 מילים.
+- התבסס אך ורק על המשימות שניתנו. אל תמציא משימות, שמות, תאריכים או מספרים.
 - אל תשתמש במרכאות כפולות (") — השתמש בגרש בודד (׳) בלבד.
-- ללא markdown וללא תגיות HTML.
+- ללא markdown, ללא כוכביות, ללא תגיות HTML.
 """
 
 
@@ -703,28 +775,76 @@ _BUCKET_TITLES = {
 
 
 def _format_at_risk_plain(groups: dict[str, list[Mission]], today: datetime.date) -> str:
-    """Deterministic fallback — used whenever the LLM is unavailable."""
-    lines = ["‏🧠 <b>משימות בסיכון</b>"]
-    any_row = False
-    for key in ("late", "today", "soon", "nodate"):
-        group = groups.get(key) or []
-        if not group:
-            continue
-        any_row = True
-        lines.append("")
-        lines.append(f"<b>{_BUCKET_TITLES[key]}</b>")
+    """Deterministic fallback — used whenever the LLM is unavailable.
+
+    Mirrors the AI layout (bullets + an explicit to-do list) so a Groq outage
+    degrades the wording, not the structure.
+    """
+    if not any(groups.values()):
+        return ("‏🟢 <b>אין משימות באיחור או בסיכון</b>\n"
+                f"כל המשימות הפעילות עם יעד רחוק מ-{AT_RISK_DAYS} ימים.")
+
+    lines = ["‏🧠 <b>סיכום משימות בסיכון</b>", ""]
+
+    lines.append("<b>🔎 תמונת מצב</b>")
+    load: dict[str, int] = {}
+    for group in groups.values():
         for m in group:
-            lines.append(f"• {oms.format_mission_line(m, today)}")
-    if not any_row:
-        return "‏🟢 <b>אין משימות באיחור או בסיכון</b>\nכל המשימות הפעילות עם יעד רחוק מ-" \
-               f"{AT_RISK_DAYS} ימים."
+            load[_user_name(m.owner)] = load.get(_user_name(m.owner), 0) + 1
+    total = sum(load.values())
+    lines.append(f"• {total} משימות בסיכון: {len(groups['late'])} באיחור, "
+                 f"{len(groups['today'])} ליעד היום, {len(groups['soon'])} בתוך {AT_RISK_DAYS} ימים.")
+    for name, n in sorted(load.items(), key=lambda kv: -kv[1])[:3]:
+        lines.append(f"• {_html.escape(name)} מחזיק {n} מתוך {total} המשימות בסיכון.")
+    deep = [m for m in groups["late"] if m.due_date and (today - m.due_date).days > 7]
+    if deep:
+        lines.append(f"• {len(deep)} משימות באיחור של מעל שבוע.")
+
     lines.append("")
-    lines.append("<i>סיכום ה-AI אינו זמין כרגע — זו הרשימה הגולמית.</i>")
+    lines.append("<b>✅ משימות לביצוע היום</b>")
+    ordered = groups["late"] + groups["today"] + groups["soon"] + groups["nodate"]
+    for m in ordered[:8]:
+        owner = _html.escape(_user_name(m.owner))
+        title = _html.escape(m.title or "")
+        if m.due_date and m.due_date < today:
+            why = f"באיחור של {(today - m.due_date).days} ימים"
+        elif m.due_date == today:
+            why = "היעד היום"
+        elif m.due_date:
+            why = f"יעד {oms.format_due(m.due_date)}"
+        else:
+            why = "דחוף וחשוב, ללא יעד"
+        lines.append(f"• [{owner}] קדם את «{title}» — {why}.")
+
+    if deep:
+        lines.append("")
+        lines.append("<b>🚨 לטיפול הנהלה</b>")
+        for m in deep[:5]:
+            lines.append(
+                f"• {_html.escape(m.title or '')} — באיחור של "
+                f"{(today - m.due_date).days} ימים אצל {_html.escape(_user_name(m.owner))}."
+            )
+
+    lines.append("")
+    lines.append("<i>סיכום ה-AI אינו זמין כרגע — זו הרשימה המחושבת.</i>")
     return "\n".join(lines)
 
 
 def _at_risk_context(groups: dict[str, list[Mission]], today: datetime.date) -> str:
+    """Everything the model needs to spot patterns: owner, age, depth of delay, context."""
     lines = []
+
+    # Owner load first — this is what lets the model say "X holds most of the delay".
+    load: dict[str, int] = {}
+    for group in groups.values():
+        for m in group:
+            load[_user_name(m.owner)] = load.get(_user_name(m.owner), 0) + 1
+    if load:
+        lines.append("עומס בסיכון לפי אחראי:")
+        for name, n in sorted(load.items(), key=lambda kv: -kv[1]):
+            lines.append(f"- {_sanitize(name)}: {n} משימות")
+        lines.append("")
+
     for key in ("late", "today", "soon", "nodate"):
         group = groups.get(key) or []
         if not group:
@@ -732,26 +852,66 @@ def _at_risk_context(groups: dict[str, list[Mission]], today: datetime.date) -> 
         lines.append(f"{_BUCKET_TITLES[key].split(' ', 1)[-1]}:")
         for m in group:
             due = oms.format_due(m.due_date) if m.due_date else "ללא יעד"
-            late_txt = ""
+            bits = [
+                f"אחראי: {_sanitize(_user_name(m.owner))}",
+                f"יעד: {due}",
+                f"סטטוס: {oms.STATUS_LABELS.get(m.status, m.status)}",
+                oms.quadrant_label(oms.quadrant_key(m), with_axis=True),
+            ]
             if m.due_date and m.due_date < today:
-                late_txt = f", באיחור של {(today - m.due_date).days} ימים"
-            lines.append(
-                f"- {_sanitize(m.title)} | אחראי: {_sanitize(_user_name(m.owner))} | "
-                f"יעד: {due}{late_txt} | {oms.quadrant_label(oms.quadrant_key(m))}"
-            )
+                bits.append(f"באיחור של {(today - m.due_date).days} ימים")
+            age = _age_days(m.created_at, today)
+            if age is not None:
+                bits.append(f"נפתחה לפני {age} ימים")
+            line = f"- {_sanitize(m.title)} | " + " | ".join(bits)
+            if m.description:
+                line += f" | פירוט: {_sanitize(m.description)[:180]}"
+            lines.append(line)
         lines.append("")
     return "\n".join(lines)
 
 
-async def build_focus_summary(session: AsyncSession) -> str:
+_SECTION_ICONS = {
+    "תמונת מצב": "🔎",
+    "משימות לביצוע היום": "✅",
+    "חסמים ותלויות": "⛔",
+    "לטיפול הנהלה": "🚨",
+}
+
+
+def _decorate_summary(raw: str) -> str:
+    """Bold the model's section headers and normalise its bullets, after escaping."""
+    out = []
+    for line in _html.escape(raw).splitlines():
+        stripped = line.strip()
+        if not stripped:
+            out.append("")
+            continue
+        if stripped in _SECTION_ICONS:
+            out.append("")
+            out.append(f"<b>{_SECTION_ICONS[stripped]} {stripped}</b>")
+            continue
+        # The model occasionally emits "-" or "*" despite the instruction.
+        if stripped[0] in "-*·" and len(stripped) > 1:
+            stripped = "• " + stripped[1:].strip()
+        out.append(stripped)
+    return "\n".join(out).strip()
+
+
+async def build_focus_summary(session: AsyncSession, force: bool = False) -> str:
     """AI situation assessment + to-do list for everything overdue or due within AT_RISK_DAYS.
 
-    Always returns sendable HTML: falls back to a plain bucketed listing if the LLM fails.
+    Served from the day cache; the 04:10 prewarm builds it with force=True.
+    Always returns sendable HTML: falls back to the computed listing if the LLM fails.
     """
+    key = oms.today_il().isoformat()
+    if not force and key in _summary_cache:
+        return _summary_cache[key]
+
     today = oms.today_il()
     groups = await collect_at_risk(session)
     if not any(groups.values()):
-        return _format_at_risk_plain(groups, today)
+        return _cache_put(_summary_cache, key, _format_at_risk_plain(groups, today))
 
     from app.services.llm_router import llm_chat
     try:
@@ -761,11 +921,12 @@ async def build_focus_summary(session: AsyncSession) -> str:
                 {"role": "system", "content": _SUMMARY_PROMPT},
                 {"role": "user", "content": _at_risk_context(groups, today)},
             ],
-            max_tokens=1200,
+            max_tokens=1600,
             temperature=0.3,
         )
     except Exception as e:
         logger.warning(f"missions_report: focus summary LLM failed, using plain list: {e}")
+        # Not cached — a transient outage shouldn't pin the fallback for the whole day.
         return _format_at_risk_plain(groups, today)
 
     raw = (raw or "").strip()
@@ -777,11 +938,12 @@ async def build_focus_summary(session: AsyncSession) -> str:
         f"📌 {len(groups['today'])} להיום · "
         f"🟡 {len(groups['soon'])} בתוך {AT_RISK_DAYS} ימים"
     )
+    stamp = datetime.datetime.now(oms._IL_TZ).strftime("%d/%m/%Y %H:%M")
     # Escape the model output before wrapping it in our own tags — it must not inject markup.
-    body = _html.escape(raw)
-    text = f"‏🧠 <b>סיכום משימות בסיכון</b>\n<i>{counts}</i>\n\n{body}"
+    text = (f"‏🧠 <b>סיכום משימות בסיכון</b>\n<i>{counts}</i>\n"
+            f"<i>נכון ל-{stamp}</i>\n\n{_decorate_summary(raw)}")
 
     from app.services.telegram_routing import _TG_MAX
     if len(text) > _TG_MAX:
         text = text[: _TG_MAX - 20] + "\n…(קוצר)"
-    return text
+    return _cache_put(_summary_cache, key, text)

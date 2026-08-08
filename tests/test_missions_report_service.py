@@ -324,6 +324,193 @@ async def test_build_focus_summary_escapes_model_output(monkeypatch):
     assert "&lt;script&gt;" in text
 
 
+def test_plain_fallback_has_bullets_and_todo_section():
+    a, b = _make_user(id=1, username="דני"), _make_user(id=2, username="רותם")
+    groups = {
+        "late": [
+            _make_mission(id=1, owner=a, due_date=TODAY - timedelta(days=12)),
+            _make_mission(id=2, owner=a, due_date=TODAY - timedelta(days=2)),
+        ],
+        "today": [_make_mission(id=3, owner=b, due_date=TODAY)],
+        "soon": [_make_mission(id=4, owner=b, due_date=TODAY + timedelta(days=2))],
+        "nodate": [],
+    }
+    text = mrs._format_at_risk_plain(groups, TODAY)
+    assert "🔎 תמונת מצב" in text
+    assert "✅ משימות לביצוע היום" in text
+    assert "🚨 לטיפול הנהלה" in text          # one mission is >7 days late
+    assert text.count("•") >= 6
+    # Every to-do line names its owner so the list is actionable as-is.
+    assert "[דני]" in text and "[רותם]" in text
+
+
+def test_decorate_summary_bolds_headers_and_normalises_bullets():
+    raw = "תמונת מצב\n- שתי משימות באיחור\nמשימות לביצוע היום\n* תאם הפסקת חשמל"
+    out = mrs._decorate_summary(raw)
+    assert "<b>🔎 תמונת מצב</b>" in out
+    assert "<b>✅ משימות לביצוע היום</b>" in out
+    assert "• שתי משימות באיחור" in out
+    assert "• תאם הפסקת חשמל" in out
+    assert "- שתי" not in out and "* תאם" not in out
+
+
+def test_decorate_summary_escapes_before_decorating():
+    out = mrs._decorate_summary("תמונת מצב\n- <img src=x onerror=1>")
+    assert "<img" not in out
+    assert "&lt;img" in out
+    assert "<b>🔎 תמונת מצב</b>" in out       # our own tags survive
+
+
+# ── daily caches ───────────────────────────────────────────────────────────
+
+@pytest.fixture(autouse=True)
+def _clean_caches():
+    mrs.clear_caches()
+    yield
+    mrs.clear_caches()
+
+
+async def test_focus_summary_is_built_once_per_day(monkeypatch):
+    a = _make_user(id=1, username="דני")
+    groups = {"late": [_make_mission(id=1, owner=a, due_date=TODAY - timedelta(days=2))],
+              "today": [], "soon": [], "nodate": []}
+    calls = []
+
+    async def _fake_collect(_session):
+        return groups
+
+    async def _llm(*args, **kwargs):
+        calls.append(1)
+        return "תמונת מצב\n• משימה אחת באיחור"
+
+    monkeypatch.setattr(mrs, "collect_at_risk", _fake_collect)
+    monkeypatch.setattr(mrs.oms, "today_il", lambda: TODAY)
+    from app.services import llm_router
+    monkeypatch.setattr(llm_router, "llm_chat", _llm)
+
+    first = await mrs.build_focus_summary(session=None)
+    second = await mrs.build_focus_summary(session=None)
+    assert first == second
+    assert len(calls) == 1, "second press must be served from the day cache"
+
+    # The 04:10 prewarm is the only thing allowed to rebuild.
+    await mrs.build_focus_summary(session=None, force=True)
+    assert len(calls) == 2
+
+
+async def test_llm_failure_is_not_cached(monkeypatch):
+    """A transient Groq outage must not pin the fallback text for the rest of the day."""
+    a = _make_user(id=1, username="דני")
+    groups = {"late": [_make_mission(id=1, owner=a, due_date=TODAY - timedelta(days=2))],
+              "today": [], "soon": [], "nodate": []}
+    state = {"fail": True}
+
+    async def _fake_collect(_session):
+        return groups
+
+    async def _llm(*args, **kwargs):
+        if state["fail"]:
+            raise RuntimeError("rate limited")
+        return "תמונת מצב\n• הכול תקין"
+
+    monkeypatch.setattr(mrs, "collect_at_risk", _fake_collect)
+    monkeypatch.setattr(mrs.oms, "today_il", lambda: TODAY)
+    from app.services import llm_router
+    monkeypatch.setattr(llm_router, "llm_chat", _llm)
+
+    assert "אינו זמין" in await mrs.build_focus_summary(session=None)
+    state["fail"] = False
+    assert "אינו זמין" not in await mrs.build_focus_summary(session=None)
+
+
+async def test_report_bytes_cached_per_day(monkeypatch):
+    builds = []
+
+    async def _fake_collect(_session):
+        builds.append(1)
+        return _sample_data()
+
+    async def _fake_ai(_data, force=False):
+        return "• תובנה"
+
+    monkeypatch.setattr(mrs, "collect_report_data", _fake_collect)
+    monkeypatch.setattr(mrs, "get_ai_insights", _fake_ai)
+    monkeypatch.setattr(mrs.oms, "today_il", lambda: TODAY)
+
+    first, name1 = await mrs.build_report_bytes(session=None)
+    second, name2 = await mrs.build_report_bytes(session=None)
+    assert first is second and name1 == name2
+    assert len(builds) == 1
+
+    await mrs.build_report_bytes(session=None, force=True)
+    assert len(builds) == 2
+
+
+async def test_no_ai_download_does_not_poison_the_day_cache(monkeypatch):
+    """?ai=0 is an explicit opt-out — it must not become the cached daily report."""
+    async def _fake_collect(_session):
+        return _sample_data()
+
+    async def _fake_ai(_data, force=False):
+        return "• תובנה מה-AI"
+
+    monkeypatch.setattr(mrs, "collect_report_data", _fake_collect)
+    monkeypatch.setattr(mrs, "get_ai_insights", _fake_ai)
+    monkeypatch.setattr(mrs.oms, "today_il", lambda: TODAY)
+
+    await mrs.build_report_bytes(session=None, with_ai=False)
+    assert mrs.cache_status()["report"] is False
+    await mrs.build_report_bytes(session=None)
+    assert mrs.cache_status()["report"] is True
+
+
+async def test_prewarm_fills_both_caches(monkeypatch):
+    a = _make_user(id=1, username="דני")
+    groups = {"late": [_make_mission(id=1, owner=a, due_date=TODAY - timedelta(days=2))],
+              "today": [], "soon": [], "nodate": []}
+
+    async def _fake_collect_report(_session):
+        return _sample_data()
+
+    async def _fake_collect_risk(_session):
+        return groups
+
+    async def _llm(*args, **kwargs):
+        return "תמונת מצב\n• נקודה"
+
+    monkeypatch.setattr(mrs, "collect_report_data", _fake_collect_report)
+    monkeypatch.setattr(mrs, "collect_at_risk", _fake_collect_risk)
+    monkeypatch.setattr(mrs.oms, "today_il", lambda: TODAY)
+    from app.services import llm_router
+    monkeypatch.setattr(llm_router, "llm_chat", _llm)
+
+    assert await mrs.prewarm_daily(session=None) == {"report": True, "summary": True}
+    status = mrs.cache_status()
+    assert status["report"] is True and status["summary"] is True
+
+
+async def test_prewarm_reports_partial_failure(monkeypatch):
+    """A broken report build must still leave the summary warm, and vice versa."""
+    async def _boom(_session):
+        raise RuntimeError("db down")
+
+    async def _fake_collect_risk(_session):
+        return {"late": [], "today": [], "soon": [], "nodate": []}
+
+    monkeypatch.setattr(mrs, "collect_report_data", _boom)
+    monkeypatch.setattr(mrs, "collect_at_risk", _fake_collect_risk)
+    monkeypatch.setattr(mrs.oms, "today_il", lambda: TODAY)
+
+    assert await mrs.prewarm_daily(session=None) == {"report": False, "summary": True}
+
+
+def test_cache_put_keeps_only_today():
+    cache = {}
+    mrs._cache_put(cache, "2026-07-14", "old")
+    mrs._cache_put(cache, "2026-07-15", "new")
+    assert cache == {"2026-07-15": "new"}
+
+
 # ── menu keyboard guard ────────────────────────────────────────────────────
 
 def test_menu_keyboard_exposes_report_buttons():

@@ -69,8 +69,16 @@ def start_scheduler() -> None:
     )
     sch.add_job(_missions_overdue_check, "interval", minutes=30,
                 id="missions_overdue_check", replace_existing=True)
-    # 07:10 (not 07:00): keeps the XLSX off the digest's heels so a slow LLM call
-    # can't delay the digest, and the two documents don't land together.
+    # 04:10 — build the day's XLSX + AI focus summary once and cache them, so the
+    # 07:10 send and every button press all day are served from memory instead of
+    # re-scanning the board and re-calling Groq.
+    sch.add_job(
+        _missions_daily_prewarm,
+        CronTrigger(day_of_week="sun-thu", hour=4, minute=10, timezone="Asia/Jerusalem"),
+        id="missions_daily_prewarm", replace_existing=True,
+    )
+    # 07:10 (not 07:00): keeps the XLSX off the digest's heels so the two documents
+    # don't land together. Sends the artifact prepared at 04:10.
     sch.add_job(
         _missions_daily_xlsx,
         CronTrigger(day_of_week="sun-thu", hour=7, minute=10, timezone="Asia/Jerusalem"),
@@ -101,6 +109,7 @@ def start_scheduler() -> None:
     logger.info("eval_cron: weekly_eval_summary job registered (Sun 07:00 Asia/Jerusalem)")
     logger.info("eval_cron: missions_daily_digest job registered (Sun-Thu 07:00 Asia/Jerusalem)")
     logger.info("eval_cron: missions_overdue_check job registered (every 30 min, sends 07-20 IL)")
+    logger.info("eval_cron: missions_daily_prewarm job registered (Sun-Thu 04:10 Asia/Jerusalem)")
     logger.info("eval_cron: missions_daily_xlsx job registered (Sun-Thu 07:10 Asia/Jerusalem)")
     logger.info("eval_cron: batch_eval job registered (every 3h)")
 
@@ -222,8 +231,26 @@ async def _missions_daily_digest() -> None:
                 logger.error(f"missions_daily_digest: send failed for user {owner_id}: {e}")
 
 
+async def _missions_daily_prewarm() -> None:
+    """Build the day's XLSX + AI focus summary into cache (Sun-Thu 04:10 IL).
+
+    Costs one Groq call each, once a day. Everything after this — the 07:10 send,
+    the Telegram buttons, the web downloads — is a cache hit.
+    """
+    from app.database import async_session_maker
+    from app.services import job_guard
+    from app.services import missions_menu_service as oms
+    from app.services import missions_report_service as mrs
+
+    async with async_session_maker() as session:
+        if not await job_guard.claim(session, "missions_daily_prewarm", oms.today_il().isoformat()):
+            return
+        result = await mrs.prewarm_daily(session)
+    logger.info(f"missions_daily_prewarm: report={result['report']} summary={result['summary']}")
+
+
 async def _missions_daily_xlsx() -> None:
-    """Daily board report as XLSX to the war-room operators (Sun-Thu 07:10 IL)."""
+    """Send the prepared board report to the war-room operators (Sun-Thu 07:10 IL)."""
     from io import BytesIO
     from app.database import async_session_maker
     from app.services.telegram_polling import telegram_bot
@@ -249,6 +276,8 @@ async def _missions_daily_xlsx() -> None:
             return
 
         try:
+            # Cache hit from the 04:10 prewarm; only builds here if that job was
+            # skipped or the process restarted since.
             payload, filename = await mrs.build_report_bytes(session)
         except Exception as e:
             logger.exception(f"missions_daily_xlsx: report build failed: {e}")
