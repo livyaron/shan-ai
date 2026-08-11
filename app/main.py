@@ -208,6 +208,13 @@ async def startup():
                     "ON route_traces (created_at)"
                 ))
 
+                # חדר מבצעים: 'התחל ביצוע' was replaced by free-text status
+                # updates, so the board is open/closed only. Retire legacy rows
+                # still parked in the old intermediate state. Idempotent.
+                await conn.execute(_text(
+                    "UPDATE missions SET status = 'open' WHERE status = 'in_progress'"
+                ))
+
                 # LLM config table
                 await conn.execute(_text("""
                     CREATE TABLE IF NOT EXISTS llm_config (

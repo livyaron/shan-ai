@@ -163,6 +163,12 @@ async def list_war_room_operators(session: AsyncSession) -> list[User]:
 
 # ── Data collection ────────────────────────────────────────────────────────
 
+def _description_with_updates(m: Mission) -> str:
+    """Report description cell — the mission description plus its status-update log."""
+    parts = [p for p in (m.description or "", oms.format_updates_block(m, html=False)) if p]
+    return "\n".join(parts)
+
+
 async def collect_report_data(session: AsyncSession) -> dict:
     """One pass over the whole board → flattened rows + every figure the summary sheet shows."""
     today = oms.today_il()
@@ -170,7 +176,9 @@ async def collect_report_data(session: AsyncSession) -> dict:
 
     missions = list((await session.scalars(
         select(Mission).options(
-            selectinload(Mission.owner), selectinload(Mission.created_by)
+            selectinload(Mission.owner),
+            selectinload(Mission.created_by),
+            selectinload(Mission.updates),
         )
     )).all())
 
@@ -192,7 +200,7 @@ async def collect_report_data(session: AsyncSession) -> dict:
         open_rows.append({
             "id": m.id,
             "title": m.title or "",
-            "description": m.description or "",
+            "description": _description_with_updates(m),
             "quadrant": oms.quadrant_label(oms.quadrant_key(m)),
             "urgent": "כן" if m.is_urgent else "לא",
             "important": "כן" if m.is_important else "לא",
@@ -757,7 +765,7 @@ async def collect_at_risk(session: AsyncSession) -> dict[str, list[Mission]]:
 
     missions = list((await session.scalars(
         select(Mission)
-        .options(selectinload(Mission.owner))
+        .options(selectinload(Mission.owner), selectinload(Mission.updates))
         .where(
             Mission.status.in_(oms.ACTIVE_STATUSES),
             or_(
@@ -884,8 +892,9 @@ def _at_risk_context(groups: dict[str, list[Mission]], today: datetime.date) -> 
             if age is not None:
                 bits.append(f"נפתחה לפני {age} ימים")
             line = f"- {_sanitize(m.title)} | " + " | ".join(bits)
-            if m.description:
-                line += f" | פירוט: {_sanitize(m.description)[:180]}"
+            detail = _description_with_updates(m)
+            if detail:
+                line += f" | פירוט: {_sanitize(detail)[:300]}"
             lines.append(line)
         lines.append("")
     return "\n".join(lines)

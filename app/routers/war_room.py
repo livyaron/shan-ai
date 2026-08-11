@@ -11,7 +11,7 @@ from sqlalchemy import select, func, or_
 from sqlalchemy.orm import selectinload
 
 from app.database import get_db_session
-from app.models import Mission, MissionStatusEnum, User, RoleEnum
+from app.models import Mission, MissionStatusEnum, MissionUpdate, User, RoleEnum
 from app.routers.login import get_current_user
 from app.services import missions_menu_service as oms
 
@@ -77,7 +77,9 @@ async def war_room_page(
     today = oms.today_il()
 
     base = select(Mission).options(
-        selectinload(Mission.owner), selectinload(Mission.created_by)
+        selectinload(Mission.owner),
+        selectinload(Mission.created_by),
+        selectinload(Mission.updates).selectinload(MissionUpdate.author),
     )
     if status == "active":
         base = base.where(Mission.status.in_(oms.ACTIVE_STATUSES))
@@ -87,7 +89,13 @@ async def war_room_page(
         base = base.where(Mission.owner_id == owner)
     if q.strip():
         like = f"%{q.strip()}%"
-        base = base.where(or_(Mission.title.ilike(like), Mission.description.ilike(like)))
+        base = base.where(or_(
+            Mission.title.ilike(like),
+            Mission.description.ilike(like),
+            select(MissionUpdate.id)
+            .where(MissionUpdate.mission_id == Mission.id, MissionUpdate.text.ilike(like))
+            .exists(),
+        ))
 
     missions = list((await session.scalars(
         base.order_by(Mission.due_date.asc().nulls_last(), Mission.id.desc())
@@ -125,6 +133,7 @@ async def war_room_page(
         "today": today,
         "filters": {"owner": owner, "status": status, "q": q},
         "is_viewer": current_user.role == RoleEnum.VIEWER,
+        "fmt_stamp": oms.format_stamp_il,
         "msg": request.query_params.get("msg", ""),
     })
 
@@ -214,7 +223,6 @@ async def change_status(
 ):
     _require_editor(current_user)
     new_status = {
-        "start": MissionStatusEnum.IN_PROGRESS.value,
         "done": MissionStatusEnum.DONE.value,
         "reopen": MissionStatusEnum.OPEN.value,
         "cancel": MissionStatusEnum.CANCELLED.value,
@@ -226,6 +234,24 @@ async def change_status(
         return JSONResponse({"status": "error", "message": "המשימה לא נמצאה"}, status_code=404)
     await oms.set_status(session, m, new_status)
     return JSONResponse({"status": "ok", "message": "הסטטוס עודכן"})
+
+
+@router.post("/{mission_id}/note")
+async def add_note(
+    mission_id: int,
+    session: AsyncSession = Depends(get_db_session),
+    current_user: User = Depends(get_current_user),
+    note: str = Form(...),
+):
+    """Append a free-text status update — mirrors '➕ הוסף סטטוס' on the bot card."""
+    _require_editor(current_user)
+    if not note.strip():
+        return JSONResponse({"status": "error", "message": "נדרש טקסט לעדכון"}, status_code=400)
+    m = await session.get(Mission, mission_id)
+    if not m:
+        return JSONResponse({"status": "error", "message": "המשימה לא נמצאה"}, status_code=404)
+    await oms.add_mission_update(session, m, note, current_user)
+    return JSONResponse({"status": "ok", "message": "העדכון נוסף"})
 
 
 @router.post("/{mission_id}/move")

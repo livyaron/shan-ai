@@ -2678,9 +2678,8 @@ class TelegramPollingBot:
             except (ValueError, IndexError):
                 return
 
-            if action in ("start", "done", "reopen", "cancel"):
+            if action in ("done", "reopen", "cancel"):
                 new_status = {
-                    "start": oms.MissionStatusEnum.IN_PROGRESS.value,
                     "done": oms.MissionStatusEnum.DONE.value,
                     "reopen": oms.MissionStatusEnum.OPEN.value,
                     "cancel": oms.MissionStatusEnum.CANCELLED.value,
@@ -2714,6 +2713,22 @@ class TelegramPollingBot:
             if action == "due":
                 await query.edit_message_reply_markup(
                     reply_markup=oms.build_due_pick_keyboard(f"om:e:due:{tail}", abort_cd=back_to_card)
+                )
+                return
+            if action == "note":
+                _missions_edit_state[telegram_id] = {
+                    "mission_id": mission_id,
+                    "mode": "note_text",
+                    "origin": origin, "page": page,
+                }
+                await query.edit_message_text(
+                    "\u200f➕ <b>הוסף סטטוס</b>\n"
+                    "שלח עכשיו את עדכון הסטטוס כטקסט חופשי — הוא יתווסף לתיאור המשימה "
+                    "עם השם שלך והשעה.",
+                    parse_mode="HTML",
+                    reply_markup=InlineKeyboardMarkup(
+                        [[InlineKeyboardButton("❌ ביטול", callback_data=back_to_card)]]
+                    ),
                 )
                 return
             return
@@ -2843,8 +2858,34 @@ class TelegramPollingBot:
             )
             return
 
-        # Edit flow: custom due date on an existing mission
+        # Edit flow: free-text status update on an existing mission
         edit_state = _missions_edit_state.get(telegram_id)
+        if edit_state and edit_state.get("mode") == "note_text":
+            if not stripped:
+                await update.message.reply_text(
+                    "‏❌ העדכון ריק. שלח טקסט, או בטל:",
+                    reply_markup=oms.build_cancel_keyboard(),
+                )
+                return
+            card = kb = m = None
+            async with async_session_maker() as session:
+                m = await oms.get_mission(session, edit_state["mission_id"])
+                if m:
+                    await oms.add_mission_update(session, m, stripped, user)
+                    m = await oms.get_mission(session, m.id)
+                    card = oms.build_mission_card(m)
+                    kb = oms.build_mission_card_keyboard(
+                        m, edit_state.get("origin", "my"), edit_state.get("page", 0),
+                    )
+            _missions_edit_state.pop(telegram_id, None)
+            if m:
+                await update.message.reply_text("‏✅ העדכון נוסף למשימה.")
+                await update.message.reply_text(card, parse_mode="HTML", reply_markup=kb)
+            else:
+                await update.message.reply_text("‏❌ המשימה לא נמצאה.")
+            return
+
+        # Edit flow: custom due date on an existing mission
         if edit_state and edit_state.get("mode") == "due_text":
             due = oms.parse_due_date_text(stripped)
             if due is None:

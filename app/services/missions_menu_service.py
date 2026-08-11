@@ -12,7 +12,7 @@ from sqlalchemy import select, func, case
 from sqlalchemy.ext.asyncio import AsyncSession
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
-from app.models import Mission, MissionStatusEnum, User, RoleEnum
+from app.models import Mission, MissionStatusEnum, MissionUpdate, User, RoleEnum
 
 _IL_TZ = ZoneInfo("Asia/Jerusalem")
 
@@ -58,6 +58,15 @@ HISTORY_LIMIT = 15
 
 def today_il() -> datetime.date:
     return datetime.datetime.now(_IL_TZ).date()
+
+
+def format_stamp_il(dt: datetime.datetime | None) -> str:
+    """Naive-UTC timestamp (as stored) → Israel-local 'DD/MM HH:MM'."""
+    if dt is None:
+        return "—"
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=datetime.timezone.utc)
+    return dt.astimezone(_IL_TZ).strftime("%d/%m %H:%M")
 
 
 def quadrant_key(m: Mission) -> str:
@@ -195,16 +204,11 @@ def build_results_keyboard(
 def build_mission_card_keyboard(m: Mission, origin: str, page: int) -> InlineKeyboardMarkup:
     tail = f"{m.id}:{origin}:{page}"
     rows = []
-    if m.status == MissionStatusEnum.OPEN.value:
+    if m.status in ACTIVE_STATUSES:
         rows.append([
-            InlineKeyboardButton("▶️ התחל ביצוע", callback_data=f"om:a:start:{tail}"),
+            InlineKeyboardButton("➕ הוסף סטטוס", callback_data=f"om:a:note:{tail}"),
             InlineKeyboardButton("✅ בוצע",        callback_data=f"om:a:done:{tail}"),
         ])
-    elif m.status == MissionStatusEnum.IN_PROGRESS.value:
-        rows.append([InlineKeyboardButton("✅ בוצע", callback_data=f"om:a:done:{tail}")])
-    else:
-        rows.append([InlineKeyboardButton("↩️ פתח מחדש", callback_data=f"om:a:reopen:{tail}")])
-    if m.status in ACTIVE_STATUSES:
         rows.append([
             InlineKeyboardButton("🔀 שנה רביע",   callback_data=f"om:a:quad:{tail}"),
             InlineKeyboardButton("👤 שנה אחראי",  callback_data=f"om:a:own:{tail}"),
@@ -213,6 +217,8 @@ def build_mission_card_keyboard(m: Mission, origin: str, page: int) -> InlineKey
             InlineKeyboardButton("📅 שנה תאריך",  callback_data=f"om:a:due:{tail}"),
             InlineKeyboardButton("🚫 בטל משימה",  callback_data=f"om:a:cancel:{tail}"),
         ])
+    else:
+        rows.append([InlineKeyboardButton("↩️ פתח מחדש", callback_data=f"om:a:reopen:{tail}")])
     rows.append([
         InlineKeyboardButton("🔙 חזרה לרשימה", callback_data=f"om:{origin}:{page}"),
         InlineKeyboardButton("🏠 חדר מבצעים",  callback_data="om:menu"),
@@ -326,6 +332,29 @@ def format_results_message(title: str, missions: list[Mission], total: int, page
     return "\n".join(lines)
 
 
+def format_updates_block(m: Mission, html: bool = True) -> str:
+    """Status-update log, rendered as part of the mission description block.
+
+    Returns "" when the mission has no updates. `html=False` yields plain text
+    for the XLSX report / AI prompt payload.
+    """
+    # Never trigger a lazy load: under asyncio that raises MissingGreenlet.
+    # Callers that want the log eager-load Mission.updates (see get_mission).
+    from sqlalchemy import inspect as _inspect
+    if "updates" in _inspect(m).unloaded:
+        return ""
+    updates = list(m.updates or [])
+    if not updates:
+        return ""
+    esc = _html.escape if html else (lambda t: t)
+    lines = ["🗒 <b>עדכוני סטטוס:</b>" if html else "עדכוני סטטוס:"]
+    for u in updates:
+        who = u.author_name or (u.author.username if u.author else "—")
+        stamp = format_stamp_il(u.created_at)
+        lines.append(f"• {stamp} · {esc(who)} — {esc(u.text or '')}")
+    return "\n".join(lines)
+
+
 def build_mission_card(m: Mission) -> str:
     key = quadrant_key(m)
     today = today_il()
@@ -336,6 +365,9 @@ def build_mission_card(m: Mission) -> str:
     creator = m.created_by.username if m.created_by else "—"
     created_str = m.created_at.strftime("%d/%m/%Y") if m.created_at else "—"
     desc = f"\n📝 {_html.escape(m.description)}\n" if m.description else ""
+    updates = format_updates_block(m)
+    if updates:
+        desc += f"\n{updates}\n"
     return (
         f"‏🎯 <b>משימה #{m.id}</b>\n"
         f"<b>{_html.escape(m.title or '')}</b>\n"
@@ -477,7 +509,11 @@ async def get_mission(session: AsyncSession, mission_id: int) -> Mission | None:
     from sqlalchemy.orm import selectinload
     return await session.scalar(
         select(Mission)
-        .options(selectinload(Mission.owner), selectinload(Mission.created_by))
+        .options(
+            selectinload(Mission.owner),
+            selectinload(Mission.created_by),
+            selectinload(Mission.updates).selectinload(MissionUpdate.author),
+        )
         .where(Mission.id == mission_id)
     )
 
@@ -518,6 +554,25 @@ async def set_status(session: AsyncSession, m: Mission, new_status: str) -> Miss
         m.completed_at = None
     await session.commit()
     return m
+
+
+async def add_mission_update(
+    session: AsyncSession,
+    m: Mission,
+    text: str,
+    author: User | None,
+) -> MissionUpdate:
+    """Append a status update to a mission. author_name is snapshotted on purpose."""
+    upd = MissionUpdate(
+        mission_id=m.id,
+        text=text.strip()[:2000],
+        author_id=author.id if author else None,
+        author_name=(author.username if author else None),
+    )
+    session.add(upd)
+    await session.commit()
+    await session.refresh(upd)
+    return upd
 
 
 async def update_mission(

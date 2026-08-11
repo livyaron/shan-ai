@@ -2,11 +2,12 @@ import datetime
 from datetime import date, timedelta
 
 from sqlalchemy.orm import configure_mappers, class_mapper
-from app.models import Mission, MissionStatusEnum, User
+from app.models import Mission, MissionStatusEnum, MissionUpdate, User
 
 configure_mappers()
 _mission_mgr = class_mapper(Mission).class_manager
 _user_mgr = class_mapper(User).class_manager
+_upd_mgr = class_mapper(MissionUpdate).class_manager
 
 TODAY = date(2026, 7, 15)  # Wednesday
 
@@ -36,13 +37,34 @@ def _make_mission(**kwargs):
     )
     owner = kwargs.pop("owner", _make_user())
     created_by = kwargs.pop("created_by", _make_user())
+    updates = kwargs.pop("updates", [])
     defaults.update(kwargs)
     m = _mission_mgr.new_instance()
     for k, v in defaults.items():
         setattr(m, k, v)
     m.owner = owner
     m.created_by = created_by
+    m.updates = updates
     return m
+
+
+def _make_update(**kwargs):
+    """Transient MissionUpdate. created_at is naive UTC, as stored."""
+    defaults = dict(
+        id=1,
+        mission_id=1,
+        text="הוחלף מבודד בפיידר 3",
+        author_id=1,
+        author_name="דני לוי",
+        created_at=datetime.datetime(2026, 7, 14, 15, 6),
+    )
+    author = kwargs.pop("author", None)
+    defaults.update(kwargs)
+    u = _upd_mgr.new_instance()
+    for k, v in defaults.items():
+        setattr(u, k, v)
+    u.author = author
+    return u
 
 
 # ── Quadrant derivation ─────────────────────────────────────────────────────
@@ -145,6 +167,50 @@ def test_build_mission_card_shows_creator_and_axis():
     assert "01/07/2026" in card
 
 
+def test_build_mission_card_shows_status_updates():
+    from app.services.missions_menu_service import build_mission_card
+    m = _make_mission(updates=[_make_update()])
+    card = build_mission_card(m)
+    assert "עדכוני סטטוס" in card
+    assert "הוחלף מבודד בפיידר 3" in card
+    assert "דני לוי" in card
+    assert "14/07 18:06" in card  # 15:06 UTC → Israel local
+
+
+def test_build_mission_card_without_updates_has_no_block():
+    from app.services.missions_menu_service import build_mission_card
+    assert "עדכוני סטטוס" not in build_mission_card(_make_mission())
+
+
+def test_format_updates_block_escapes_user_text():
+    from app.services.missions_menu_service import format_updates_block
+    m = _make_mission(updates=[_make_update(text="<b>דחוף</b>", author_name="<i>דני</i>")])
+    block = format_updates_block(m)
+    assert "&lt;b&gt;דחוף&lt;/b&gt;" in block
+    assert "&lt;i&gt;דני&lt;/i&gt;" in block
+
+
+def test_format_updates_block_plain_text_mode():
+    from app.services.missions_menu_service import format_updates_block
+    m = _make_mission(updates=[_make_update()])
+    block = format_updates_block(m, html=False)
+    assert "<b>" not in block
+    assert "הוחלף מבודד בפיידר 3" in block
+
+
+def test_format_updates_block_falls_back_to_live_author():
+    """author_name is a snapshot; a row saved without one still names the author."""
+    from app.services.missions_menu_service import format_updates_block
+    m = _make_mission(updates=[_make_update(author_name=None, author=_make_user(username="רות כהן"))])
+    assert "רות כהן" in format_updates_block(m)
+
+
+def test_format_stamp_il_converts_from_utc():
+    from app.services.missions_menu_service import format_stamp_il
+    assert format_stamp_il(datetime.datetime(2026, 7, 14, 15, 6)) == "14/07 18:06"
+    assert format_stamp_il(None) == "—"
+
+
 def test_format_results_message_empty():
     from app.services.missions_menu_service import format_results_message
     msg = format_results_message("🔥 בצע עכשיו", [], 0, 0)
@@ -186,11 +252,27 @@ def test_card_keyboard_open_vs_done():
     from app.services.missions_menu_service import build_mission_card_keyboard
     open_kb = _all_callback_data(build_mission_card_keyboard(_make_mission(status="open"), "my", 0))
     done_kb = _all_callback_data(build_mission_card_keyboard(_make_mission(status="done"), "my", 0))
-    assert any(cd.startswith("om:a:start:") for cd in open_kb)
+    assert any(cd.startswith("om:a:note:") for cd in open_kb)
     assert any(cd.startswith("om:a:reopen:") for cd in done_kb)
     assert not any(cd.startswith("om:a:cancel:") for cd in done_kb)
     for cd in open_kb + done_kb:
         assert len(cd.encode()) <= 64
+
+
+def test_card_keyboard_has_no_start_action():
+    """'התחל ביצוע' is retired — the board is open/closed only."""
+    from app.services.missions_menu_service import build_mission_card_keyboard
+    for status in ("open", "in_progress", "done", "cancelled"):
+        cds = _all_callback_data(build_mission_card_keyboard(_make_mission(status=status), "my", 0))
+        assert not any(cd.startswith("om:a:start:") for cd in cds)
+
+
+def test_card_keyboard_legacy_in_progress_still_editable():
+    """Rows left on the retired status keep the full active action set."""
+    from app.services.missions_menu_service import build_mission_card_keyboard
+    cds = _all_callback_data(build_mission_card_keyboard(_make_mission(status="in_progress"), "my", 0))
+    assert any(cd.startswith("om:a:note:") for cd in cds)
+    assert any(cd.startswith("om:a:done:") for cd in cds)
 
 
 def test_digest_keyboard_one_done_button_per_mission():

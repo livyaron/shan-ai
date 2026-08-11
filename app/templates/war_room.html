@@ -61,6 +61,12 @@ body{background:var(--bg-deep);color:var(--text-1);font-family:var(--ui);min-hei
 .wr-chip{display:inline-block;border:1px solid var(--border-hi);border-radius:20px;padding:1px 10px;font-size:.75rem}
 .wr-chip.st-open{color:var(--text-1)} .wr-chip.st-in_progress{color:var(--cyan);border-color:var(--cyan)}
 .wr-chip.st-done{color:var(--green);border-color:var(--green)} .wr-chip.st-cancelled{color:var(--text-2)}
+.wr-card .m-updates{margin-top:8px;border-inline-start:2px solid var(--border-hi);padding-inline-start:8px}
+.wr-card .m-upd{color:var(--text-2);font-size:.8rem;margin-top:4px;unicode-bidi:isolate}
+.wr-card .m-upd .upd-meta{font-family:var(--mono);color:var(--text-1);opacity:.75}
+.m-notebox{display:none;margin-top:8px}
+.m-notebox textarea{width:100%;background:var(--bg-card);color:var(--text-1);border:1px solid var(--border-hi);
+  border-radius:8px;padding:6px 8px;font-size:.85rem;font-family:var(--ui);resize:vertical}
 .m-actions{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
 .m-actions .wr-btn{padding:4px 10px;font-size:.8rem}
 .m-edit{margin-top:8px}
@@ -169,6 +175,13 @@ dialog.wr-dlg::backdrop{background:rgba(3,6,12,.75)}
         <div class="wr-card{% if late %} overdue{% endif %}">
           <div class="m-title" dir="auto">{{ m.title }}</div>
           {% if m.description %}<div class="m-desc" dir="auto">{{ m.description }}</div>{% endif %}
+          {% if m.updates %}
+          <div class="m-updates">
+            {% for u in m.updates %}
+            <div class="m-upd" dir="auto"><span class="upd-meta">{{ fmt_stamp(u.created_at) }} · {{ u.author_name or (u.author.username if u.author else '—') }}</span> — {{ u.text }}</div>
+            {% endfor %}
+          </div>
+          {% endif %}
           <div class="m-meta">
             <span class="wr-chip st-{{ m.status }}">{{ status_labels.get(m.status, m.status) }}</span>
             <span>👤 {{ m.owner.username if m.owner else '—' }}</span>
@@ -179,17 +192,24 @@ dialog.wr-dlg::backdrop{background:rgba(3,6,12,.75)}
           </div>
           {% if not is_viewer %}
           <div class="m-actions">
-            {% if m.status == 'open' %}
-            <button class="wr-btn" onclick="act({{ m.id }}, 'start')">▶️ התחל</button>
-            <button class="wr-btn" onclick="act({{ m.id }}, 'done')">✅ בוצע</button>
-            <button class="wr-btn" onclick="act({{ m.id }}, 'cancel')">🚫 בטל</button>
-            {% elif m.status == 'in_progress' %}
+            {% if m.status in ('open','in_progress') %}
+            <button class="wr-btn" onclick="toggleNote({{ m.id }})">➕ הוסף סטטוס</button>
             <button class="wr-btn" onclick="act({{ m.id }}, 'done')">✅ בוצע</button>
             <button class="wr-btn" onclick="act({{ m.id }}, 'cancel')">🚫 בטל</button>
             {% else %}
             <button class="wr-btn" onclick="act({{ m.id }}, 'reopen')">↩️ פתח מחדש</button>
             {% endif %}
           </div>
+          {% if m.status in ('open','in_progress') %}
+          <div class="m-notebox" id="notebox-{{ m.id }}">
+            <textarea id="note-{{ m.id }}" rows="2" dir="auto" maxlength="2000"
+                      placeholder="מה התקדם? העדכון יתווסף לתיאור עם השם שלך והשעה"></textarea>
+            <div class="m-edit-row">
+              <button class="wr-btn primary" onclick="addNote({{ m.id }})">✅ שמור עדכון</button>
+              <button class="wr-btn" onclick="toggleNote({{ m.id }})">ביטול</button>
+            </div>
+          </div>
+          {% endif %}
           {% if m.status in ('open','in_progress') %}
           <details class="m-edit">
             <summary>עריכה: רביע · אחראי · תאריך</summary>
@@ -269,6 +289,17 @@ async function post(url, data){
 async function act(id, action){
   if (action === 'cancel' && !confirm('לבטל את המשימה?')) return;
   if (await post(`/dashboard/war-room/${id}/status`, {action})) location.reload();
+}
+function toggleNote(id){
+  const box = document.getElementById(`notebox-${id}`);
+  const open = box.style.display === 'block';
+  box.style.display = open ? 'none' : 'block';
+  if (!open) document.getElementById(`note-${id}`).focus();
+}
+async function addNote(id){
+  const note = document.getElementById(`note-${id}`).value.trim();
+  if (!note){ alert('נדרש טקסט לעדכון'); return; }
+  if (await post(`/dashboard/war-room/${id}/note`, {note})) location.reload();
 }
 async function move(id){
   const quadrant = document.getElementById(`quad-${id}`).value;
