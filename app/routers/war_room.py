@@ -11,7 +11,7 @@ from sqlalchemy import select, func, or_
 from sqlalchemy.orm import selectinload
 
 from app.database import get_db_session
-from app.models import Mission, MissionStatusEnum, User, RoleEnum
+from app.models import Mission, MissionStatusEnum, MissionUpdate, User, RoleEnum
 from app.routers.login import get_current_user
 from app.services import missions_menu_service as oms
 
@@ -77,7 +77,9 @@ async def war_room_page(
     today = oms.today_il()
 
     base = select(Mission).options(
-        selectinload(Mission.owner), selectinload(Mission.created_by)
+        selectinload(Mission.owner),
+        selectinload(Mission.created_by),
+        selectinload(Mission.updates).selectinload(MissionUpdate.author),
     )
     if status == "active":
         base = base.where(Mission.status.in_(oms.ACTIVE_STATUSES))
@@ -87,7 +89,13 @@ async def war_room_page(
         base = base.where(Mission.owner_id == owner)
     if q.strip():
         like = f"%{q.strip()}%"
-        base = base.where(or_(Mission.title.ilike(like), Mission.description.ilike(like)))
+        base = base.where(or_(
+            Mission.title.ilike(like),
+            Mission.description.ilike(like),
+            select(MissionUpdate.id)
+            .where(MissionUpdate.mission_id == Mission.id, MissionUpdate.text.ilike(like))
+            .exists(),
+        ))
 
     missions = list((await session.scalars(
         base.order_by(Mission.due_date.asc().nulls_last(), Mission.id.desc())
@@ -125,8 +133,56 @@ async def war_room_page(
         "today": today,
         "filters": {"owner": owner, "status": status, "q": q},
         "is_viewer": current_user.role == RoleEnum.VIEWER,
+        "fmt_stamp": oms.format_stamp_il,
         "msg": request.query_params.get("msg", ""),
     })
+
+
+@router.get("/report.xlsx")
+async def download_report(
+    session: AsyncSession = Depends(get_db_session),
+    current_user: User = Depends(get_current_user),
+    ai: int = 1,
+    refresh: int = 0,
+):
+    """Board report as XLSX. Read-only, so viewers may download it too.
+
+    Served from the day cache built at 04:10. `?refresh=1` rebuilds it against
+    current board data while reusing the day's cached AI narrative, so a refresh
+    costs no extra Groq tokens. `?ai=0` skips the narrative entirely.
+    """
+    from io import BytesIO
+    from urllib.parse import quote
+    from fastapi.responses import StreamingResponse
+    from app.services import missions_report_service as mrs
+
+    payload, filename, _generated_at = await mrs.build_report_bytes(
+        session, with_ai=bool(ai), refresh_data=bool(refresh)
+    )
+    # A raw Hebrew filename in the header breaks latin-1 encoding — ASCII fallback
+    # plus RFC 5987 for the real name.
+    ascii_name = f"war-room-report-{datetime.date.today():%d-%m-%Y}.xlsx"
+    disposition = (
+        f'attachment; filename="{ascii_name}"; '
+        f"filename*=UTF-8''{quote(filename)}"
+    )
+    return StreamingResponse(
+        BytesIO(payload),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": disposition},
+    )
+
+
+@router.get("/summary")
+async def focus_summary(
+    session: AsyncSession = Depends(get_db_session),
+    current_user: User = Depends(get_current_user),
+):
+    """AI situation assessment of overdue / nearly-overdue missions, for the page modal."""
+    from app.services import missions_report_service as mrs
+
+    text = await mrs.build_focus_summary(session)
+    return JSONResponse({"status": "ok", "text": text})
 
 
 @router.post("/create")
@@ -167,7 +223,6 @@ async def change_status(
 ):
     _require_editor(current_user)
     new_status = {
-        "start": MissionStatusEnum.IN_PROGRESS.value,
         "done": MissionStatusEnum.DONE.value,
         "reopen": MissionStatusEnum.OPEN.value,
         "cancel": MissionStatusEnum.CANCELLED.value,
@@ -179,6 +234,24 @@ async def change_status(
         return JSONResponse({"status": "error", "message": "המשימה לא נמצאה"}, status_code=404)
     await oms.set_status(session, m, new_status)
     return JSONResponse({"status": "ok", "message": "הסטטוס עודכן"})
+
+
+@router.post("/{mission_id}/note")
+async def add_note(
+    mission_id: int,
+    session: AsyncSession = Depends(get_db_session),
+    current_user: User = Depends(get_current_user),
+    note: str = Form(...),
+):
+    """Append a free-text status update — mirrors '➕ הוסף סטטוס' on the bot card."""
+    _require_editor(current_user)
+    if not note.strip():
+        return JSONResponse({"status": "error", "message": "נדרש טקסט לעדכון"}, status_code=400)
+    m = await session.get(Mission, mission_id)
+    if not m:
+        return JSONResponse({"status": "error", "message": "המשימה לא נמצאה"}, status_code=404)
+    await oms.add_mission_update(session, m, note, current_user)
+    return JSONResponse({"status": "ok", "message": "העדכון נוסף"})
 
 
 @router.post("/{mission_id}/move")

@@ -43,6 +43,18 @@ def _project_to_dict(project: Project) -> dict:
     }
 
 
+# ── Multi-match ordering ────────────────────────────────────────────────────
+# When a query resolves to several projects, list them sorted by type:
+# הקמה first, then הרחבה, then all the others (stable within each group so the
+# existing name ordering is preserved).
+_TYPE_PRIORITY = {"הקמה": 0, "הרחבה": 1}
+
+
+def _type_sort_key(project: dict) -> int:
+    """Sort priority for multi-match project lists: הקמה → הרחבה → all others."""
+    return _TYPE_PRIORITY.get((project.get("project_type") or "").strip(), 2)
+
+
 # ── DB query tools ─────────────────────────────────────────────────────────
 
 async def find_projects_by_identifier(identifier: str, session: AsyncSession) -> list[dict]:
@@ -363,12 +375,16 @@ async def _ai_detect_intent(text: str) -> tuple[Optional[str], Optional[str]]:
     )
 
     try:
+        import time as _t
+        _t0 = _t.perf_counter()
         response = await llm_chat(
             "intent_detection",
             messages=[{"role": "user", "content": prompt}],
             max_tokens=80,
             temperature=0.0,
+            models=["llama-3.1-8b-instant"],  # trivial classification — fast model, not scout
         )
+        logger.info(f"⏱ project intent detection: {int((_t.perf_counter() - _t0) * 1000)}ms")
         match = _re.search(r'\{[^}]+\}', response)
         if match:
             data = _json.loads(match.group())
@@ -578,6 +594,8 @@ async def answer_project_query(
                 log_id = await _log_query(text, answer, intent, data["project_identifier"], session, user_id)
                 return answer, log_id
             else:
+                # Multiple matches → list sorted by type: הקמה, הרחבה, then the rest
+                matches = sorted(matches, key=_type_sort_key)
                 # 2–4 ambiguous matches → signal disambiguation to the caller
                 if 2 <= len(matches) <= 4:
                     candidates = [{"id": p["project_identifier"], "name": p["name"] or p["project_identifier"]} for p in matches]
@@ -611,6 +629,7 @@ async def answer_project_query(
                 context_str = json.dumps(data_p, ensure_ascii=False, indent=2)
                 intent = "by_identifier"
             elif 2 <= len(project_first) <= 4:
+                project_first = sorted(project_first, key=_type_sort_key)
                 candidates = [
                     {"id": p["project_identifier"], "name": p["name"] or p["project_identifier"]}
                     for p in project_first
@@ -774,6 +793,8 @@ async def answer_project_query(
             except Exception:
                 logger.warning("dossier injection failed", exc_info=True)
 
+        import time as _at
+        _at0 = _at.perf_counter()
         summary = await llm_chat(
             "project_query",
             messages=[
@@ -783,6 +804,8 @@ async def answer_project_query(
             max_tokens=4000 if by_identifier_mode == "multi_card" else 2000,
             temperature=0.2,
         )
+        logger.info(f"⏱ project answer LLM (intent={intent}): "
+                    f"{int((_at.perf_counter() - _at0) * 1000)}ms")
         answer = _strip_thinking(summary)
         log_id = await _log_query(text, answer, intent, current_project_id, session, user_id)
         return answer, log_id

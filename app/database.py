@@ -1,13 +1,20 @@
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy import pool
 from app.config import settings
 
-# Create async engine
+# Create async engine.
+# Real pooling (not NullPool): the bot opens several short-lived sessions per
+# Telegram message, and NullPool forced a fresh TCP+TLS handshake to the Railway
+# Postgres on every one — hundreds of ms of pure connection overhead per reply.
+# pool_pre_ping transparently discards connections dropped by Railway restarts,
+# and pool_recycle caps connection age so we never hand out a stale socket.
 engine = create_async_engine(
     settings.DATABASE_URL,
     echo=False,
-    poolclass=pool.NullPool,
+    pool_size=10,
+    max_overflow=5,
+    pool_pre_ping=True,
+    pool_recycle=1800,
     future=True
 )
 

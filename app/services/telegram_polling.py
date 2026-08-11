@@ -972,10 +972,14 @@ class TelegramPollingBot:
                 kb = None
                 try:
                     import json as _json
+                    import time as _tt
                     from app.services.ask_router import route as _ask_route
                     from app.services.telegram_state import _awaiting_disambiguation
+                    _ask_t0 = _tt.perf_counter()
                     result = await _ask_route(text, session, user.id, log_to_db=True,
                                               conversation_context=conv_ctx)
+                    logger.info(f"⏱ ask_router.route ({result.path}): "
+                                f"{int((_tt.perf_counter() - _ask_t0) * 1000)}ms")
 
                     if result.path == "disambiguation":
                         candidates = _json.loads(result.answer)
@@ -2391,6 +2395,64 @@ class TelegramPollingBot:
             reply_markup=get_menu_keyboard(counts),
         )
 
+    async def _send_missions_xlsx(self, query, context, refresh: bool = False) -> None:
+        """om:xls / om:xlsr — ship the board report as an XLSX document.
+
+        Default serves the report prepared at 04:10. `refresh` rebuilds it from
+        current board data, reusing the day's cached AI narrative (no Groq call).
+        """
+        from io import BytesIO
+        from app.services import missions_report_service as mrs
+
+        try:
+            await query.edit_message_text(
+                "‏⏳ מרענן את הדוח מהנתונים העדכניים…" if refresh
+                else "‏⏳ מכין את דוח האקסל…"
+            )
+        except Exception:
+            pass
+        try:
+            async with async_session_maker() as session:
+                payload, filename, generated_at = await mrs.build_report_bytes(
+                    session, refresh_data=refresh
+                )
+            head = "🔄 <b>דוח חדר מבצעים — רוענן</b>" if refresh \
+                else "📊 <b>דוח חדר מבצעים</b>"
+            # A document can't ride on edit_message_text — send it as its own message.
+            await context.bot.send_document(
+                chat_id=query.message.chat_id,
+                document=BytesIO(payload),
+                filename=filename,
+                caption=(f"‏{head}\nסיכום ותובנות · משימות פתוחות · משימות סגורות\n"
+                         f"<i>נכון ל-{generated_at}</i>"),
+                parse_mode="HTML",
+            )
+        except Exception as e:
+            logger.error(f"missions xlsx report failed: {e}")
+            await query.message.reply_text(
+                "‏❌ לא הצלחתי להפיק את הדוח כרגע. נסה שוב בעוד רגע."
+            )
+        await self._render_missions_menu(query)
+
+    async def _send_missions_summary(self, query) -> None:
+        """om:sum — AI situation assessment of overdue / nearly-overdue missions."""
+        from app.services import missions_report_service as mrs
+
+        try:
+            await query.edit_message_text("‏⏳ מנתח משימות בסיכון…")
+        except Exception:
+            pass
+        try:
+            async with async_session_maker() as session:
+                text = await mrs.build_focus_summary(session)
+            await query.message.reply_text(text, parse_mode="HTML")
+        except Exception as e:
+            logger.error(f"missions focus summary failed: {e}")
+            await query.message.reply_text(
+                "‏❌ לא הצלחתי להפיק את הסיכום כרגע. נסה שוב בעוד רגע."
+            )
+        await self._render_missions_menu(query)
+
     async def _render_missions_list(self, query, origin: str, page: int, user) -> None:
         from app.services import missions_menu_service as oms
         async with async_session_maker() as session:
@@ -2464,6 +2526,19 @@ class TelegramPollingBot:
             _missions_create_state.pop(telegram_id, None)
             _missions_edit_state.pop(telegram_id, None)
             await self._render_missions_menu(query)
+            return
+
+        # ── Reports ────────────────────────────────────────────────────
+        if data == "om:xls":
+            await self._send_missions_xlsx(query, context)
+            return
+
+        if data == "om:xlsr":
+            await self._send_missions_xlsx(query, context, refresh=True)
+            return
+
+        if data == "om:sum":
+            await self._send_missions_summary(query)
             return
 
         # ── Creation wizard ────────────────────────────────────────────
@@ -2603,9 +2678,8 @@ class TelegramPollingBot:
             except (ValueError, IndexError):
                 return
 
-            if action in ("start", "done", "reopen", "cancel"):
+            if action in ("done", "reopen", "cancel"):
                 new_status = {
-                    "start": oms.MissionStatusEnum.IN_PROGRESS.value,
                     "done": oms.MissionStatusEnum.DONE.value,
                     "reopen": oms.MissionStatusEnum.OPEN.value,
                     "cancel": oms.MissionStatusEnum.CANCELLED.value,
@@ -2639,6 +2713,22 @@ class TelegramPollingBot:
             if action == "due":
                 await query.edit_message_reply_markup(
                     reply_markup=oms.build_due_pick_keyboard(f"om:e:due:{tail}", abort_cd=back_to_card)
+                )
+                return
+            if action == "note":
+                _missions_edit_state[telegram_id] = {
+                    "mission_id": mission_id,
+                    "mode": "note_text",
+                    "origin": origin, "page": page,
+                }
+                await query.edit_message_text(
+                    "\u200f➕ <b>הוסף סטטוס</b>\n"
+                    "שלח עכשיו את עדכון הסטטוס כטקסט חופשי — הוא יתווסף לתיאור המשימה "
+                    "עם השם שלך והשעה.",
+                    parse_mode="HTML",
+                    reply_markup=InlineKeyboardMarkup(
+                        [[InlineKeyboardButton("❌ ביטול", callback_data=back_to_card)]]
+                    ),
                 )
                 return
             return
@@ -2768,8 +2858,34 @@ class TelegramPollingBot:
             )
             return
 
-        # Edit flow: custom due date on an existing mission
+        # Edit flow: free-text status update on an existing mission
         edit_state = _missions_edit_state.get(telegram_id)
+        if edit_state and edit_state.get("mode") == "note_text":
+            if not stripped:
+                await update.message.reply_text(
+                    "‏❌ העדכון ריק. שלח טקסט, או בטל:",
+                    reply_markup=oms.build_cancel_keyboard(),
+                )
+                return
+            card = kb = m = None
+            async with async_session_maker() as session:
+                m = await oms.get_mission(session, edit_state["mission_id"])
+                if m:
+                    await oms.add_mission_update(session, m, stripped, user)
+                    m = await oms.get_mission(session, m.id)
+                    card = oms.build_mission_card(m)
+                    kb = oms.build_mission_card_keyboard(
+                        m, edit_state.get("origin", "my"), edit_state.get("page", 0),
+                    )
+            _missions_edit_state.pop(telegram_id, None)
+            if m:
+                await update.message.reply_text("‏✅ העדכון נוסף למשימה.")
+                await update.message.reply_text(card, parse_mode="HTML", reply_markup=kb)
+            else:
+                await update.message.reply_text("‏❌ המשימה לא נמצאה.")
+            return
+
+        # Edit flow: custom due date on an existing mission
         if edit_state and edit_state.get("mode") == "due_text":
             due = oms.parse_due_date_text(stripped)
             if due is None:

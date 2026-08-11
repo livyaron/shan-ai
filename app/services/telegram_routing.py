@@ -225,12 +225,16 @@ async def _ai_route_message(text: str, conversation_context: list[dict] | None =
 
     prompt = _ROUTING_PROMPT.replace("{text}", effective_text)
     try:
+        import time as _t
+        _t0 = _t.perf_counter()
         response = await llm_chat(
             "message_routing",
             messages=[{"role": "user", "content": prompt}],
             max_tokens=100,
             temperature=0.0,
+            models=["llama-3.1-8b-instant"],  # trivial classification — fast model, not scout
         )
+        logger.info(f"⏱ routing LLM call: {int((_t.perf_counter() - _t0) * 1000)}ms")
         result = _parse_routing_response(response)
         if result["route"]:
             logger.info(f"_ai_route_message: route={result['route']!r} intent={result['intent']!r} param={result['param']!r}")

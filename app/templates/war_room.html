@@ -61,6 +61,12 @@ body{background:var(--bg-deep);color:var(--text-1);font-family:var(--ui);min-hei
 .wr-chip{display:inline-block;border:1px solid var(--border-hi);border-radius:20px;padding:1px 10px;font-size:.75rem}
 .wr-chip.st-open{color:var(--text-1)} .wr-chip.st-in_progress{color:var(--cyan);border-color:var(--cyan)}
 .wr-chip.st-done{color:var(--green);border-color:var(--green)} .wr-chip.st-cancelled{color:var(--text-2)}
+.wr-card .m-updates{margin-top:8px;border-inline-start:2px solid var(--border-hi);padding-inline-start:8px}
+.wr-card .m-upd{color:var(--text-2);font-size:.8rem;margin-top:4px;unicode-bidi:isolate}
+.wr-card .m-upd .upd-meta{font-family:var(--mono);color:var(--text-1);opacity:.75}
+.m-notebox{display:none;margin-top:8px}
+.m-notebox textarea{width:100%;background:var(--bg-card);color:var(--text-1);border:1px solid var(--border-hi);
+  border-radius:8px;padding:6px 8px;font-size:.85rem;font-family:var(--ui);resize:vertical}
 .m-actions{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
 .m-actions .wr-btn{padding:4px 10px;font-size:.8rem}
 .m-edit{margin-top:8px}
@@ -78,6 +84,16 @@ dialog#createDlg::backdrop{background:rgba(3,6,12,.75)}
 #createDlg input,#createDlg textarea,#createDlg select{width:100%;background:var(--bg-deep);color:var(--text-1);
   border:1px solid var(--border-hi);border-radius:8px;padding:8px 10px;font-family:var(--ui);font-size:.9rem}
 #createDlg .dlg-actions{display:flex;gap:10px;justify-content:flex-start;margin-top:18px}
+
+/* AI summary dialog */
+dialog.wr-dlg{background:var(--bg-card);color:var(--text-1);border:1px solid var(--border-hi);
+  border-radius:14px;padding:24px;width:min(680px,94vw)}
+dialog.wr-dlg::backdrop{background:rgba(3,6,12,.75)}
+.wr-dlg-head{font-weight:700;font-size:1.1rem;margin-bottom:14px;color:var(--cyan)}
+.wr-summary{white-space:pre-wrap;line-height:1.65;font-size:.92rem;max-height:62vh;overflow-y:auto;
+  unicode-bidi:isolate}
+.wr-summary b{color:var(--cyan)}
+.wr-summary i{color:var(--text-2)}
 
 /* toast */
 .wr-toast{position:fixed;bottom:24px;inset-inline-start:24px;background:var(--bg-card);border:1px solid var(--green);
@@ -126,7 +142,21 @@ dialog#createDlg::backdrop{background:rgba(3,6,12,.75)}
     <input type="text" name="q" placeholder="חיפוש חופשי…" value="{{ filters.q }}">
     <button class="wr-btn" type="submit">🔍 סנן</button>
     <a class="wr-btn" href="/dashboard/war-room">איפוס</a>
+    <span style="margin-inline-start:auto;display:flex;gap:10px">
+      <a class="wr-btn" href="/dashboard/war-room/report.xlsx">⬇️ דוח Excel</a>
+      <a class="wr-btn" href="/dashboard/war-room/report.xlsx?refresh=1"
+         title="בונה מחדש מהנתונים העדכניים (ללא עלות AI נוספת)">🔄 רענן</a>
+      <button class="wr-btn" type="button" onclick="openSummary()">🧠 סיכום AI</button>
+    </span>
   </form>
+
+  <dialog id="summaryDlg" class="wr-dlg">
+    <div class="wr-dlg-head">🧠 סיכום משימות בסיכון</div>
+    <div id="summaryBody" class="wr-summary">טוען…</div>
+    <div style="text-align:left;margin-top:14px">
+      <button class="wr-btn" onclick="document.getElementById('summaryDlg').close()">סגור</button>
+    </div>
+  </dialog>
 
   <div class="wr-grid">
     {% for qkey, qemoji, qverb, qaxis in quadrant_defs %}
@@ -145,6 +175,13 @@ dialog#createDlg::backdrop{background:rgba(3,6,12,.75)}
         <div class="wr-card{% if late %} overdue{% endif %}">
           <div class="m-title" dir="auto">{{ m.title }}</div>
           {% if m.description %}<div class="m-desc" dir="auto">{{ m.description }}</div>{% endif %}
+          {% if m.updates %}
+          <div class="m-updates">
+            {% for u in m.updates %}
+            <div class="m-upd" dir="auto"><span class="upd-meta">{{ fmt_stamp(u.created_at) }} · {{ u.author_name or (u.author.username if u.author else '—') }}</span> — {{ u.text }}</div>
+            {% endfor %}
+          </div>
+          {% endif %}
           <div class="m-meta">
             <span class="wr-chip st-{{ m.status }}">{{ status_labels.get(m.status, m.status) }}</span>
             <span>👤 {{ m.owner.username if m.owner else '—' }}</span>
@@ -155,17 +192,24 @@ dialog#createDlg::backdrop{background:rgba(3,6,12,.75)}
           </div>
           {% if not is_viewer %}
           <div class="m-actions">
-            {% if m.status == 'open' %}
-            <button class="wr-btn" onclick="act({{ m.id }}, 'start')">▶️ התחל</button>
-            <button class="wr-btn" onclick="act({{ m.id }}, 'done')">✅ בוצע</button>
-            <button class="wr-btn" onclick="act({{ m.id }}, 'cancel')">🚫 בטל</button>
-            {% elif m.status == 'in_progress' %}
+            {% if m.status in ('open','in_progress') %}
+            <button class="wr-btn" onclick="toggleNote({{ m.id }})">➕ הוסף סטטוס</button>
             <button class="wr-btn" onclick="act({{ m.id }}, 'done')">✅ בוצע</button>
             <button class="wr-btn" onclick="act({{ m.id }}, 'cancel')">🚫 בטל</button>
             {% else %}
             <button class="wr-btn" onclick="act({{ m.id }}, 'reopen')">↩️ פתח מחדש</button>
             {% endif %}
           </div>
+          {% if m.status in ('open','in_progress') %}
+          <div class="m-notebox" id="notebox-{{ m.id }}">
+            <textarea id="note-{{ m.id }}" rows="2" dir="auto" maxlength="2000"
+                      placeholder="מה התקדם? העדכון יתווסף לתיאור עם השם שלך והשעה"></textarea>
+            <div class="m-edit-row">
+              <button class="wr-btn primary" onclick="addNote({{ m.id }})">✅ שמור עדכון</button>
+              <button class="wr-btn" onclick="toggleNote({{ m.id }})">ביטול</button>
+            </div>
+          </div>
+          {% endif %}
           {% if m.status in ('open','in_progress') %}
           <details class="m-edit">
             <summary>עריכה: רביע · אחראי · תאריך</summary>
@@ -246,6 +290,17 @@ async function act(id, action){
   if (action === 'cancel' && !confirm('לבטל את המשימה?')) return;
   if (await post(`/dashboard/war-room/${id}/status`, {action})) location.reload();
 }
+function toggleNote(id){
+  const box = document.getElementById(`notebox-${id}`);
+  const open = box.style.display === 'block';
+  box.style.display = open ? 'none' : 'block';
+  if (!open) document.getElementById(`note-${id}`).focus();
+}
+async function addNote(id){
+  const note = document.getElementById(`note-${id}`).value.trim();
+  if (!note){ alert('נדרש טקסט לעדכון'); return; }
+  if (await post(`/dashboard/war-room/${id}/note`, {note})) location.reload();
+}
 async function move(id){
   const quadrant = document.getElementById(`quad-${id}`).value;
   if (await post(`/dashboard/war-room/${id}/move`, {quadrant})) location.reload();
@@ -257,6 +312,20 @@ async function assign(id){
 async function setDue(id){
   const due_date = document.getElementById(`due-${id}`).value;
   if (await post(`/dashboard/war-room/${id}/due`, {due_date})) location.reload();
+}
+async function openSummary(){
+  const dlg  = document.getElementById('summaryDlg');
+  const body = document.getElementById('summaryBody');
+  body.textContent = 'מנתח משימות בסיכון…';
+  dlg.showModal();
+  try {
+    const res = await fetch('/dashboard/war-room/summary');
+    const payload = await res.json();
+    // Server-side output is already escaped; only our own <b>/<i> tags remain.
+    body.innerHTML = payload.text || 'לא התקבל סיכום.';
+  } catch(e) {
+    body.textContent = 'שגיאה בהפקת הסיכום. נסה שוב בעוד רגע.';
+  }
 }
 const toast = document.getElementById('toast');
 if (toast) setTimeout(() => toast.remove(), 3500);

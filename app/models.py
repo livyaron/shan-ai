@@ -409,8 +409,32 @@ class Mission(Base):
 
     owner      = relationship("User", foreign_keys=[owner_id])
     created_by = relationship("User", foreign_keys=[created_by_id])
+    updates    = relationship(
+        "MissionUpdate",
+        cascade="all, delete-orphan",
+        order_by="MissionUpdate.created_at",
+    )
 
     __table_args__ = (Index("ix_missions_status_due", "status", "due_date"),)
+
+
+class MissionUpdate(Base):
+    """Free-text status update on a mission (חדר מבצעים). Append-only log.
+
+    author_id is nullable and author_name is a snapshot on purpose: deleting a
+    user must never erase who reported what.
+    """
+    __tablename__ = "mission_updates"
+
+    id          = Column(Integer, primary_key=True, index=True)
+    mission_id  = Column(Integer, ForeignKey("missions.id", ondelete="CASCADE"),
+                         nullable=False, index=True)
+    text        = Column(Text, nullable=False)
+    author_id   = Column(Integer, ForeignKey("users.id"), nullable=True)
+    author_name = Column(String(100), nullable=True)
+    created_at  = Column(DateTime, default=datetime.utcnow)
+
+    author = relationship("User", foreign_keys=[author_id])
 
 
 # =============================================================================
