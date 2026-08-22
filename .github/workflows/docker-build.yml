@@ -1,0 +1,45 @@
+name: docker-build
+# Railway builds this same Dockerfile on every push to master. When that build
+# breaks, Railway keeps serving the previous container — master moves ahead and
+# nothing says otherwise. This runs the build in CI so a broken image is a red
+# check within minutes instead of a silently stale deployment.
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the image Railway builds
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: false
+          tags: shan-ai:ci
+
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: pip install --no-cache-dir -r requirements.txt
+      - name: Import the app the way uvicorn does
+        run: python -c "import app.main; print('app imports cleanly')"
+      - name: Run the tests that need no database
+        run: |
+          python -m pytest -q \
+            tests/test_missions_menu_service.py \
+            tests/test_missions_report_service.py \
+            tests/test_missions_telegram.py \
+            tests/test_dashboard_ai_analysis.py \
+            tests/test_llm_fallback.py \
+            tests/test_health_provenance.py
