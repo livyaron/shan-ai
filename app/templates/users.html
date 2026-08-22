@@ -578,26 +578,40 @@ function renderSections(sections) {
     }).join('');
 }
 
-async function openAiAnalysis(userId, username) {
+/* The panel is cached server-side for ~15 minutes, so reopening it is instant.
+   This footer says how old the answer is and offers an explicit rebuild. */
+function aiFooter(data, onRefresh) {
+    if (!data || data.error) return '';
+    const when = data.generated_at ? new Date(data.generated_at + 'Z') : null;
+    const stamp = when && !isNaN(when) ? when.toLocaleTimeString('he-IL', {hour:'2-digit', minute:'2-digit'}) : '';
+    const note = data.cached ? `הניתוח נוצר ב-${stamp}` : `נוצר עכשיו${stamp ? ' · ' + stamp : ''}`;
+    return `<div class="d-flex align-items-center gap-3 mt-3" style="font-size:.78rem;color:#8b9cf4;">
+        <span>${note}</span>
+        <button class="btn btn-sm btn-outline-light py-0 px-2" style="font-size:.75rem;"
+                onclick="${onRefresh}">🔄 רענן ניתוח</button>
+    </div>`;
+}
+
+async function openAiAnalysis(userId, username, refresh) {
+    const body = document.getElementById('aiModalBody');
     document.getElementById('aiModalName').textContent = username;
-    document.getElementById('aiModalBody').innerHTML = `
+    body.innerHTML = `
         <div class="text-center py-5" style="color:#8b9cf4;">
             <div style="font-size:2rem; margin-bottom:12px;">🤖</div>
             <div>מנתח נתוני משתמש...</div>
         </div>`;
-    new bootstrap.Modal(document.getElementById('aiModal')).show();
+    if (!refresh) new bootstrap.Modal(document.getElementById('aiModal')).show();
     try {
-        const resp = await fetch(`/dashboard/users/${userId}/ai-analysis`);
+        const resp = await fetch(`/dashboard/users/${userId}/ai-analysis` + (refresh ? '?refresh=1' : ''));
         const data = await resp.json();
         if (data.error) {
-            document.getElementById('aiModalBody').innerHTML =
-                `<div class="alert alert-danger">❌ ${data.error}</div>`;
+            body.innerHTML = `<div class="alert alert-danger">❌ ${data.error}</div>`;
             return;
         }
-        document.getElementById('aiModalBody').innerHTML = renderSections(data.sections || []);
+        const again = `openAiAnalysis(${userId}, ${JSON.stringify(username)}, true)`;
+        body.innerHTML = renderSections(data.sections || []) + aiFooter(data, again.replace(/"/g, '&quot;'));
     } catch(e) {
-        document.getElementById('aiModalBody').innerHTML =
-            `<div class="alert alert-danger">❌ שגיאה בטעינת הניתוח</div>`;
+        body.innerHTML = `<div class="alert alert-danger">❌ שגיאה בטעינת הניתוח</div>`;
     }
 }
 

@@ -722,32 +722,50 @@ function renderAISections(sections) {
     }).join('');
 }
 
-async function openDashboardAI() {
-    document.getElementById('aiDashboardModalBody').innerHTML =
-        '<div class="text-center py-5" style="color:#8b9cf4;"><div style="font-size:1.6rem;">◈</div><div class="mt-2" style="font-size:.85rem;letter-spacing:.1em;">מנתח...</div></div>';
-    new bootstrap.Modal(document.getElementById('aiDashboardModal')).show();
+/* Panels are cached server-side for ~15 minutes, so reopening one is instant.
+   This footer says how old the answer is and offers an explicit rebuild. */
+function aiFooter(data, onRefresh) {
+    if (!data || data.error) return '';
+    const when = data.generated_at ? new Date(data.generated_at + 'Z') : null;
+    const stamp = when && !isNaN(when) ? when.toLocaleTimeString('he-IL', {hour:'2-digit', minute:'2-digit'}) : '';
+    const note = data.cached ? `הניתוח נוצר ב-${stamp}` : `נוצר עכשיו${stamp ? ' · ' + stamp : ''}`;
+    return `<div class="d-flex align-items-center gap-3 mt-3" style="font-size:.78rem;color:#8b9cf4;">
+        <span>${note}</span>
+        <button class="btn btn-sm btn-outline-light py-0 px-2" style="font-size:.75rem;"
+                onclick="${onRefresh}">🔄 רענן ניתוח</button>
+    </div>`;
+}
+
+const AI_SPINNER = '<div class="text-center py-5" style="color:#8b9cf4;"><div style="font-size:1.6rem;">◈</div><div class="mt-2" style="font-size:.85rem;letter-spacing:.1em;">מנתח...</div></div>';
+
+async function openDashboardAI(refresh) {
+    const body = document.getElementById('aiDashboardModalBody');
+    body.innerHTML = AI_SPINNER;
+    if (!refresh) new bootstrap.Modal(document.getElementById('aiDashboardModal')).show();
     try {
-        const resp = await fetch('/dashboard/ai-analysis');
+        const resp = await fetch('/dashboard/ai-analysis' + (refresh ? '?refresh=1' : ''));
         const data = await resp.json();
-        document.getElementById('aiDashboardModalBody').innerHTML =
-            data.error ? `<div class="alert alert-danger">❌ ${data.error}</div>` : renderAISections(data.sections);
+        body.innerHTML = data.error
+            ? `<div class="alert alert-danger">❌ ${data.error}</div>`
+            : renderAISections(data.sections) + aiFooter(data, 'openDashboardAI(true)');
     } catch (e) {
-        document.getElementById('aiDashboardModalBody').innerHTML = '<div class="text-center py-4" style="color:#ff6b7a;">שגיאה בטעינת הניתוח</div>';
+        body.innerHTML = '<div class="text-center py-4" style="color:#ff6b7a;">שגיאה בטעינת הניתוח</div>';
     }
 }
 
-async function openDecisionAI(id) {
+async function openDecisionAI(id, refresh) {
+    const body = document.getElementById('aiDecisionModalBody');
     document.getElementById('aiDecisionModalTitle').textContent = 'החלטה #' + id;
-    document.getElementById('aiDecisionModalBody').innerHTML =
-        '<div class="text-center py-5" style="color:#8b9cf4;"><div style="font-size:1.6rem;">◈</div><div class="mt-2" style="font-size:.85rem;letter-spacing:.1em;">מנתח...</div></div>';
-    new bootstrap.Modal(document.getElementById('aiDecisionModal')).show();
+    body.innerHTML = AI_SPINNER;
+    if (!refresh) new bootstrap.Modal(document.getElementById('aiDecisionModal')).show();
     try {
-        const resp = await fetch(`/dashboard/decisions/${id}/ai-analysis`);
+        const resp = await fetch(`/dashboard/decisions/${id}/ai-analysis` + (refresh ? '?refresh=1' : ''));
         const data = await resp.json();
-        document.getElementById('aiDecisionModalBody').innerHTML =
-            data.error ? `<div class="alert alert-danger">❌ ${data.error}</div>` : renderAISections(data.sections);
+        body.innerHTML = data.error
+            ? `<div class="alert alert-danger">❌ ${data.error}</div>`
+            : renderAISections(data.sections) + aiFooter(data, `openDecisionAI(${id}, true)`);
     } catch (e) {
-        document.getElementById('aiDecisionModalBody').innerHTML = '<div class="text-center py-4" style="color:#ff6b7a;">שגיאה בטעינת הניתוח</div>';
+        body.innerHTML = '<div class="text-center py-4" style="color:#ff6b7a;">שגיאה בטעינת הניתוח</div>';
     }
 }
 

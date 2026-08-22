@@ -740,13 +740,116 @@ async def save_avatar(
 # -----------------------------------------------------------------------
 # AI Analysis endpoints
 # -----------------------------------------------------------------------
+#
+# Two things used to make every ◈ ניתוח AI press slow:
+#   1. the panels loaded EVERY matching Decision row into Python just to count
+#      them, so the cost grew linearly with the table on each click;
+#   2. nothing was cached, so opening the same panel twice cost two Groq calls.
+# The helpers below do the counting in SQL and serve repeats from a short-TTL
+# cache, with an explicit refresh for when the data has moved.
+
+
+async def _decision_rollup(session: AsyncSession, where) -> dict:
+    """Type/status distributions + feedback average for a decision set, in SQL.
+
+    Replaces hydrating the whole result set just to tally it in a Python loop.
+    """
+    type_rows = (await session.execute(
+        select(Decision.type, func.count()).where(where).group_by(Decision.type)
+    )).all()
+    status_rows = (await session.execute(
+        select(Decision.status, func.count()).where(where).group_by(Decision.status)
+    )).all()
+    avg_fb, n_fb = (await session.execute(
+        select(func.avg(Decision.feedback_score), func.count(Decision.feedback_score))
+        .where(where, Decision.feedback_score > 0)
+    )).one()
+
+    type_counts = {(t.value if t else "unknown"): n for t, n in type_rows}
+    status_counts = {(st.value if st else "unknown"): n for st, n in status_rows}
+    return {
+        "total": sum(type_counts.values()),
+        "type_counts": type_counts,
+        "status_counts": status_counts,
+        # avg() comes back as Decimal on Postgres.
+        "avg_feedback": round(float(avg_fb), 1) if avg_fb is not None else None,
+        "n_feedback": n_fb or 0,
+    }
+
+
+async def _recent_decision_lines(session: AsyncSession, where, limit: int, with_status: bool) -> list[str]:
+    """The newest N decision summaries, fetched with a LIMIT instead of sorted in Python."""
+    rows = (await session.execute(
+        select(Decision.type, Decision.status, Decision.summary)
+        .where(where, Decision.summary.isnot(None), Decision.summary != "")
+        .order_by(Decision.created_at.desc())
+        .limit(limit)
+    )).all()
+    out = []
+    for t, st, summary in rows:
+        tag = (t.value if t else "unknown").upper()
+        prefix = f"[{tag}][{st.value if st else 'unknown'}]" if with_status else f"[{tag}]"
+        out.append(f"{prefix} {summary}")
+    return out
+
+
+async def _recent_feedback_notes(session: AsyncSession, where, limit: int) -> list[str]:
+    """The newest N feedback notes. Newest-first: stale notes are the least useful."""
+    rows = (await session.execute(
+        select(Decision.feedback_notes)
+        .where(where, Decision.feedback_notes.isnot(None), Decision.feedback_notes != "")
+        .order_by(Decision.created_at.desc())
+        .limit(limit)
+    )).scalars().all()
+    return list(rows)
+
+
+def _parse_ai_json(raw: str) -> dict:
+    """Parse the model's JSON, tolerating a ```json fence it sometimes adds anyway."""
+    text = (raw or "").strip()
+    if text.startswith("```"):
+        text = text.split("\n", 1)[-1]
+        if text.rstrip().endswith("```"):
+            text = text.rstrip()[:-3]
+    return json.loads(text)
+
+
+async def _cached_ai_panel(cache_key: str, refresh: bool, build):
+    """Serve an AI panel from the short-TTL cache, or build it once and store it.
+
+    `build` is an async callable returning the payload dict. Errors are never
+    cached — a transient Groq outage must not pin a failure for 15 minutes.
+    """
+    from time import perf_counter
+    from app.services import analysis_cache
+
+    if not refresh:
+        hit = analysis_cache.get(cache_key)
+        if hit is not None:
+            logger.info(f"⏱ ai panel [{cache_key}]: hit")
+            return JSONResponse({**hit, "cached": True})
+
+    t0 = perf_counter()
+    payload = await build()
+    logger.info(
+        f"⏱ ai panel [{cache_key}]: {'refresh' if refresh else 'miss'}, "
+        f"built in {int((perf_counter() - t0) * 1000)}ms"
+    )
+    payload["generated_at"] = datetime.utcnow().isoformat()
+    analysis_cache.put(cache_key, payload)
+    return JSONResponse({**payload, "cached": False})
+
 
 @router.get("/ai-analysis")
 async def dashboard_ai_analysis(
     session: AsyncSession = Depends(get_db_session),
     current_user: User = Depends(get_current_user),
+    refresh: int = 0,
 ):
-    """Analyze the current user's full dashboard — decisions, trends, patterns, recommendations."""
+    """Analyze the current user's full dashboard — decisions, trends, patterns, recommendations.
+
+    Served from the short-TTL panel cache; `?refresh=1` rebuilds it.
+    """
     from fastapi.responses import JSONResponse
     import json as _json
     from datetime import datetime as _dt
@@ -761,45 +864,35 @@ async def dashboard_ai_analysis(
     )
     _involved = or_(Decision.submitter_id == uid, _dist_sent)
 
-    all_q = await session.execute(select(Decision).where(_involved).order_by(Decision.created_at))
-    all_decisions = all_q.scalars().all()
+    # Everything below is counted in SQL. This used to select every decision the
+    # user has ever touched and tally it in Python on each button press.
+    rollup = await _decision_rollup(session, _involved)
+    total = rollup["total"]
+    type_counts = rollup["type_counts"]
+    status_counts = rollup["status_counts"]
+    avg_fb = rollup["avg_feedback"]
+    n_feedback = rollup["n_feedback"]
 
-    total = len(all_decisions)
-    type_counts: dict = {}
-    status_counts: dict = {}
-    feedback_scores = []
-    feedback_notes = []
-    submitted = 0
-    received_dist = 0
-    pending_count = 0
-    critical_count = 0
-
-    for d in all_decisions:
-        t = d.type.value if d.type else "unknown"
-        s = d.status.value if d.status else "unknown"
-        type_counts[t] = type_counts.get(t, 0) + 1
-        status_counts[s] = status_counts.get(s, 0) + 1
-        if d.feedback_score:
-            feedback_scores.append(d.feedback_score)
-        if d.feedback_notes:
-            feedback_notes.append(d.feedback_notes)
-        if d.submitter_id == uid:
-            submitted += 1
-        else:
-            received_dist += 1
-        if s == "pending":
-            pending_count += 1
-        if t == "critical":
-            critical_count += 1
+    submitted = await session.scalar(
+        select(func.count()).select_from(Decision)
+        .where(_involved, Decision.submitter_id == uid)
+    ) or 0
+    received_dist = total - submitted
+    pending_count = status_counts.get(DecisionStatusEnum.PENDING.value, 0)
+    critical_count = type_counts.get(DecisionTypeEnum.CRITICAL.value, 0)
 
     # 7-day trend
     week_ago = _dt.utcnow() - timedelta(days=7)
-    recent_7 = [d for d in all_decisions if d.created_at >= week_ago]
+    recent_7_count = await session.scalar(
+        select(func.count()).select_from(Decision)
+        .where(_involved, Decision.created_at >= week_ago)
+    ) or 0
 
     # Pending approvals
     pending_approvals = await _pending_approvals_count(uid, session)
 
-    avg_fb = round(sum(feedback_scores) / len(feedback_scores), 1) if feedback_scores else None
+    recent_summaries = await _recent_decision_lines(session, _involved, 6, with_status=True)
+    feedback_notes = await _recent_feedback_notes(session, _involved, 4)
 
     role_labels = {
         "project_manager": "מנהל פרויקט",
@@ -809,11 +902,6 @@ async def dashboard_ai_analysis(
         "viewer": "צופה",
     }
     role_he = role_labels.get(current_user.role.value, current_user.role.value) if current_user.role else "לא מוגדר"
-
-    recent_summaries = [
-        f"[{d.type.value.upper()}][{d.status.value}] {d.summary or '—'}"
-        for d in sorted(all_decisions, key=lambda x: x.created_at, reverse=True)[:6]
-    ]
 
     data_block = f"""
 משתמש: {current_user.username}
@@ -825,12 +913,12 @@ async def dashboard_ai_analysis(
 - הגיש בעצמו: {submitted} | קיבל מאחרים: {received_dist}
 - ממתינות לטיפול: {pending_count} | דורשות אישורו: {pending_approvals}
 - קריטיות: {critical_count}
-- ציון פידבק ממוצע: {avg_fb}/5 מתוך {len(feedback_scores)} ציונים
+- ציון פידבק ממוצע: {avg_fb}/5 מתוך {n_feedback} ציונים
 
 התפלגות לפי סוג: {_json.dumps(type_counts, ensure_ascii=False)}
 התפלגות לפי סטטוס: {_json.dumps(status_counts, ensure_ascii=False)}
 
-פעילות 7 ימים אחרונים: {len(recent_7)} החלטות
+פעילות 7 ימים אחרונים: {recent_7_count} החלטות
 
 החלטות אחרונות:
 {chr(10).join(recent_summaries) if recent_summaries else 'אין'}
@@ -852,7 +940,7 @@ async def dashboard_ai_analysis(
 }
 כל content חייב להיות ספציפי לנתונים — עם מספרים, דפוסים ותובנות אמיתיות. אל תהיה גנרי."""
 
-    try:
+    async def _build():
         from app.services.llm_router import llm_chat
         raw = await llm_chat(
             "dashboard_analysis",
@@ -864,9 +952,12 @@ async def dashboard_ai_analysis(
             temperature=0.3,
             json_mode=True,
         )
-        result = _json.loads(raw)
-        return JSONResponse(result)
+        return _parse_ai_json(raw)
+
+    try:
+        return await _cached_ai_panel(f"dashboard:{uid}", bool(refresh), _build)
     except Exception as e:
+        logger.warning(f"dashboard ai-analysis failed for user {uid}: {e}")
         return JSONResponse({"error": f"שגיאה בניתוח AI: {str(e)[:100]}"}, status_code=500)
 
 
@@ -875,7 +966,9 @@ async def user_ai_analysis(
     user_id: int,
     session: AsyncSession = Depends(get_db_session),
     current_user: User = Depends(get_current_user),
+    refresh: int = 0,
 ):
+    """Performance analysis for one user. Cached with a short TTL; `?refresh=1` rebuilds."""
     from fastapi.responses import JSONResponse
     import json as _json
 
@@ -883,40 +976,31 @@ async def user_ai_analysis(
     if not user:
         return JSONResponse({"error": "משתמש לא נמצא"}, status_code=404)
 
-    # Gather decision stats for this user
-    decisions_q = await session.execute(
-        select(Decision).where(Decision.submitter_id == user_id)
-    )
-    decisions = decisions_q.scalars().all()
+    # Counted in SQL — this used to load every decision the user ever submitted,
+    # plus every distribution row addressed to them, on each button press.
+    _submitted_by = Decision.submitter_id == user_id
+    rollup = await _decision_rollup(session, _submitted_by)
+    total = rollup["total"]
+    type_counts = rollup["type_counts"]
+    status_counts = rollup["status_counts"]
+    avg_feedback = rollup["avg_feedback"]
+    n_feedback = rollup["n_feedback"]
 
-    total = len(decisions)
-    type_counts = {}
-    status_counts = {}
-    feedback_scores = []
-    feedback_notes = []
-    recent_summaries = []
-
-    for d in sorted(decisions, key=lambda x: x.created_at, reverse=True):
-        t = d.type.value if d.type else "unknown"
-        s = d.status.value if d.status else "unknown"
-        type_counts[t] = type_counts.get(t, 0) + 1
-        status_counts[s] = status_counts.get(s, 0) + 1
-        if d.feedback_score:
-            feedback_scores.append(d.feedback_score)
-        if d.feedback_notes:
-            feedback_notes.append(d.feedback_notes)
-        if d.summary and len(recent_summaries) < 5:
-            recent_summaries.append(f"[{t.upper()}] {d.summary}")
+    recent_summaries = await _recent_decision_lines(session, _submitted_by, 5, with_status=False)
+    feedback_notes = await _recent_feedback_notes(session, _submitted_by, 5)
 
     # Distribution participation (decisions sent to this user)
-    dist_q = await session.execute(
-        select(DecisionDistribution).where(DecisionDistribution.user_id == user_id)
-    )
-    dists = dist_q.scalars().all()
-    dist_received = len(dists)
-    dist_responded = sum(1 for d in dists if d.status.value not in ("pending",))
-
-    avg_feedback = round(sum(feedback_scores) / len(feedback_scores), 1) if feedback_scores else None
+    dist_received = await session.scalar(
+        select(func.count()).select_from(DecisionDistribution)
+        .where(DecisionDistribution.user_id == user_id)
+    ) or 0
+    dist_responded = await session.scalar(
+        select(func.count()).select_from(DecisionDistribution)
+        .where(
+            DecisionDistribution.user_id == user_id,
+            DecisionDistribution.status != DistributionStatusEnum.PENDING,
+        )
+    ) or 0
 
     role_labels = {
         "project_manager": "מנהל פרויקט",
@@ -936,7 +1020,7 @@ async def user_ai_analysis(
 - סה"כ החלטות שהוגשו: {total}
 - לפי סוג: {_json.dumps(type_counts, ensure_ascii=False)}
 - לפי סטטוס: {_json.dumps(status_counts, ensure_ascii=False)}
-- ציון פידבק ממוצע: {avg_feedback}/5 (מתוך {len(feedback_scores)} ציונים)
+- ציון פידבק ממוצע: {avg_feedback}/5 (מתוך {n_feedback} ציונים)
 
 השתתפות בהחלטות שנשלחו אליו: {dist_received} (מגיב ל-{dist_responded})
 
@@ -959,7 +1043,7 @@ async def user_ai_analysis(
 }
 כל section.content צריך להיות פסקה מלאה בעברית, עם תובנות ספציפיות לנתונים — לא גנריות. אם אין מספיק נתונים, ציין זאת בכנות."""
 
-    try:
+    async def _build():
         from app.services.llm_router import llm_chat
         raw = await llm_chat(
             "dashboard_analysis",
@@ -971,9 +1055,12 @@ async def user_ai_analysis(
             temperature=0.3,
             json_mode=True,
         )
-        result = _json.loads(raw)
-        return JSONResponse({"name": user.username, **result})
+        return {"name": user.username, **_parse_ai_json(raw)}
+
+    try:
+        return await _cached_ai_panel(f"user:{user_id}", bool(refresh), _build)
     except Exception as e:
+        logger.warning(f"user ai-analysis failed for user {user_id}: {e}")
         return JSONResponse({"error": f"שגיאה בניתוח AI: {str(e)[:100]}"}, status_code=500)
 
 
@@ -982,9 +1069,14 @@ async def decision_ai_analysis(
     decision_id: int,
     session: AsyncSession = Depends(get_db_session),
     current_user: User = Depends(get_current_user),
+    refresh: int = 0,
 ):
+    """Deep analysis of one decision. Cached with a short TTL; `?refresh=1` rebuilds.
+
+    The queries here are already bounded to a single decision — the win is not
+    re-paying the Groq call every time the panel is reopened.
+    """
     from fastapi.responses import JSONResponse
-    import json as _json
 
     d = await session.get(Decision, decision_id)
     if not d:
@@ -1070,7 +1162,7 @@ async def decision_ai_analysis(
 }
 כל section.content צריך להיות ניתוח ספציפי לנתונים — לא גנרי. התחשב במשובים שניתנו מהמשתמשים בניתוחך. היה כן גם אם הניתוח שלילי."""
 
-    try:
+    async def _build():
         from app.services.llm_router import llm_chat
         raw = await llm_chat(
             "dashboard_analysis",
@@ -1082,9 +1174,12 @@ async def decision_ai_analysis(
             temperature=0.3,
             json_mode=True,
         )
-        result = _json.loads(raw)
-        return JSONResponse({"title": f"החלטה #{d.id}", **result})
+        return {"title": f"החלטה #{d.id}", **_parse_ai_json(raw)}
+
+    try:
+        return await _cached_ai_panel(f"decision:{decision_id}", bool(refresh), _build)
     except Exception as e:
+        logger.warning(f"decision ai-analysis failed for #{decision_id}: {e}")
         return JSONResponse({"error": f"שגיאה בניתוח AI: {str(e)[:100]}"}, status_code=500)
 
 

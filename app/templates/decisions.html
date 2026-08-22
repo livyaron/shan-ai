@@ -1110,7 +1110,21 @@ function renderAISections(sections) {
     }).join('');
 }
 
-async function loadAIInline(decisionId, summary) {
+/* Panels are cached server-side for ~15 minutes, so reopening one is instant.
+   This footer says how old the answer is and offers an explicit rebuild. */
+function aiFooter(data, onRefresh) {
+    if (!data || data.error) return '';
+    const when = data.generated_at ? new Date(data.generated_at + 'Z') : null;
+    const stamp = when && !isNaN(when) ? when.toLocaleTimeString('he-IL', {hour:'2-digit', minute:'2-digit'}) : '';
+    const note = data.cached ? `הניתוח נוצר ב-${stamp}` : `נוצר עכשיו${stamp ? ' · ' + stamp : ''}`;
+    return `<div class="d-flex align-items-center gap-3 mt-3" style="font-size:.78rem;color:#8b9cf4;">
+        <span>${note}</span>
+        <button class="btn btn-sm btn-outline-light py-0 px-2" style="font-size:.75rem;"
+                onclick="${onRefresh}">🔄 רענן ניתוח</button>
+    </div>`;
+}
+
+async function loadAIInline(decisionId, summary, refresh) {
     const el = document.getElementById('aiInlineSection');
     if (!el) return;
     el.innerHTML = `
@@ -1121,7 +1135,7 @@ async function loadAIInline(decisionId, summary) {
             </div>
         </div>`;
     try {
-        const resp = await fetch(`/dashboard/decisions/${decisionId}/ai-analysis`);
+        const resp = await fetch(`/dashboard/decisions/${decisionId}/ai-analysis` + (refresh ? '?refresh=1' : ''));
         const data = await resp.json();
         if (data.error) {
             el.innerHTML = `<div class="alert alert-danger mt-3">❌ ${data.error}</div>`;
@@ -1132,6 +1146,7 @@ async function loadAIInline(decisionId, summary) {
                 <div class="detail-label mb-1">🤖 ניתוח AI</div>
                 <div class="small text-muted mb-3" style="font-style:italic;">📋 ${summary || 'החלטה #' + decisionId}</div>
                 ${renderAISections(data.sections || [])}
+                ${aiFooter(data, `loadAIInline(${decisionId}, ${JSON.stringify(summary || '')}, true)`.replace(/"/g, '&quot;'))}
             </div>`;
         el.scrollIntoView({behavior:'smooth', block:'nearest'});
     } catch(e) {
@@ -1139,30 +1154,30 @@ async function loadAIInline(decisionId, summary) {
     }
 }
 
-async function openDecisionAI(decisionId) {
+async function openDecisionAI(decisionId, refresh) {
+    const body = document.getElementById('aiDecisionModalBody');
     const d = DECISIONS.find(x => x.id === decisionId) || {};
     const summary = d.summary || `החלטה #${decisionId}`;
     document.getElementById('aiDecisionModalTitle').textContent = `#${decisionId} — ${summary}`;
-    document.getElementById('aiDecisionModalBody').innerHTML = `
+    body.innerHTML = `
         <div class="text-center py-5" style="color:#8b9cf4;">
             <div style="font-size:2rem; margin-bottom:12px;">🤖</div>
             <div>מנתח החלטה...</div>
         </div>`;
-    new bootstrap.Modal(document.getElementById('aiDecisionModal')).show();
+    if (!refresh) new bootstrap.Modal(document.getElementById('aiDecisionModal')).show();
     try {
-        const resp = await fetch(`/dashboard/decisions/${decisionId}/ai-analysis`);
+        const resp = await fetch(`/dashboard/decisions/${decisionId}/ai-analysis` + (refresh ? '?refresh=1' : ''));
         const data = await resp.json();
         if (data.error) {
-            document.getElementById('aiDecisionModalBody').innerHTML =
-                `<div class="alert alert-danger">❌ ${data.error}</div>`;
+            body.innerHTML = `<div class="alert alert-danger">❌ ${data.error}</div>`;
             return;
         }
-        document.getElementById('aiDecisionModalBody').innerHTML =
+        body.innerHTML =
             `<div class="small text-muted mb-3" style="font-style:italic;">📋 ${summary}</div>` +
-            renderAISections(data.sections || []);
+            renderAISections(data.sections || []) +
+            aiFooter(data, `openDecisionAI(${decisionId}, true)`);
     } catch(e) {
-        document.getElementById('aiDecisionModalBody').innerHTML =
-            `<div class="alert alert-danger">❌ שגיאה בטעינת הניתוח</div>`;
+        body.innerHTML = `<div class="alert alert-danger">❌ שגיאה בטעינת הניתוח</div>`;
     }
 }
 
