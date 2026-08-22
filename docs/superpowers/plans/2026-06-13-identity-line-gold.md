@@ -133,7 +133,7 @@ curl -s -X POST "https://backboard.railway.app/graphql/v2" -H "Authorization: Be
 After the new build is live (~2-3 min; confirm app up):
 ```bash
 docker exec shan-ai-postgres psql "postgresql://shan_user:shan_secure_pass_2025@interchange.proxy.rlwy.net:15720/shan_ai" -c "DELETE FROM eval_gold_answers WHERE source IN ('db_lookup','auto_user_confirmed');"
-URL="https://easygoing-endurance-production-df54.up.railway.app"
+URL="https://shan-ai.up.railway.app"
 curl -s -m 15 -c /tmp/rw.txt -o /dev/null -X POST "$URL/login" -d "user_id=3&password=1234"
 curl -s -m 150 -b /tmp/rw.txt -X POST "$URL/dashboard/eval/gold/seed-from-production"
 ```
@@ -146,7 +146,7 @@ Expected: an identity line (id | name | מנה"פ | שלב), no `📁` card head
 - [ ] **Step 5: Judge-only live measurement**
 
 ```bash
-URL="https://easygoing-endurance-production-df54.up.railway.app"
+URL="https://shan-ai.up.railway.app"
 curl -s -m 20 -b /tmp/rw.txt -X POST "$URL/dashboard/eval/run?repair=false"
 ```
 Poll `/dashboard/eval/runs` (Monitor loop) until newest run `status=="completed"`, then:

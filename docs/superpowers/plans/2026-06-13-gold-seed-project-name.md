@@ -222,7 +222,7 @@ curl -s -X POST "https://backboard.railway.app/graphql/v2" -H "Authorization: Be
 
 The change is internal (no new route), so probe behaviour: after deploy, re-seed should now seed many more. First confirm the app is back up:
 ```bash
-URL="https://easygoing-endurance-production-df54.up.railway.app"
+URL="https://shan-ai.up.railway.app"
 curl -s -m 10 -o /dev/null -w "%{http_code}\n" "$URL/dashboard/quality/distinct"   # 303 (up, auth redirect)
 ```
 To be sure the NEW code is running (not the old container), check the Railway deploy status via the API or wait ~2–3 min after the mutation, then proceed — the re-seed result in Step 6 (seeded count jumping well above the previous 6) confirms the new code.
@@ -230,14 +230,14 @@ To be sure the NEW code is running (not the old container), check the Railway de
 - [ ] **Step 5: Login**
 
 ```bash
-URL="https://easygoing-endurance-production-df54.up.railway.app"
+URL="https://shan-ai.up.railway.app"
 curl -s -m 15 -c /tmp/rw.txt -o /dev/null -w "login:%{http_code}\n" -X POST "$URL/login" -d "user_id=3&password=1234"
 ```
 
 - [ ] **Step 6: Re-seed gold from production**
 
 ```bash
-URL="https://easygoing-endurance-production-df54.up.railway.app"
+URL="https://shan-ai.up.railway.app"
 curl -s -m 120 -b /tmp/rw.txt -X POST "$URL/dashboard/eval/gold/seed-from-production"
 docker exec shan-ai-postgres psql "postgresql://shan_user:shan_secure_pass_2025@interchange.proxy.rlwy.net:15720/shan_ai" -c "SELECT source, count(*) FROM eval_gold_answers GROUP BY 1;"
 ```
@@ -246,7 +246,7 @@ Expected: `seeded` now far higher than 6 (project-name questions); total gold �
 - [ ] **Step 7: Re-judge distinct (gold-backed refresh)**
 
 ```bash
-URL="https://easygoing-endurance-production-df54.up.railway.app"
+URL="https://shan-ai.up.railway.app"
 curl -s -m 15 -b /tmp/rw.txt -X POST "$URL/dashboard/eval/rejudge-distinct"
 # poll until done:
 curl -s -m 15 -b /tmp/rw.txt "$URL/dashboard/eval/rejudge/status"
@@ -256,7 +256,7 @@ Wait until `running:false` (use a Monitor poll loop; ~85 representatives, severa
 - [ ] **Step 8: Report**
 
 ```bash
-URL="https://easygoing-endurance-production-df54.up.railway.app"
+URL="https://shan-ai.up.railway.app"
 curl -s -m 20 -b /tmp/rw.txt "$URL/dashboard/quality/distinct" | python -c "import sys,json; d=json.load(sys.stdin); print('summary:', d['summary']); print('failures:', d['failures'])"
 ```
 Report: new gold count, gold-backed share, and the **trustworthy distinct pass-rate** vs the earlier 27% (mostly-guessed). Note whether ≥50 gold reached and which questions still need human `/gold` curation.

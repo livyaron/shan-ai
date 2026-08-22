@@ -1282,8 +1282,12 @@ async def _telegram_send_report(bot, user, report_id: int, data: dict) -> None:
 
     # Fallback: text summary + dashboard link
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    from app.config import settings
     es   = data.get("executive_summary", {})
-    base = "https://easygoing-endurance-production-df54.up.railway.app"
+    # Never hardcode the domain: settings.public_base_url prefers Railway's
+    # auto-injected RAILWAY_PUBLIC_DOMAIN, so a domain change self-heals instead
+    # of silently sending users a link to the previous deployment.
+    base = settings.public_base_url
     summary = (
         f"‏📊 *דוח פרויקטים* — {meta.get('generated_at', '')}\n\n"
         f"📌 פעיל: *{es.get('total_active', 0)}*  |  "

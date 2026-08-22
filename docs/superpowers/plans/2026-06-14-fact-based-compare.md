@@ -151,7 +151,7 @@ curl -s -X POST "https://backboard.railway.app/graphql/v2" -H "Authorization: Be
 
 - [ ] **Step 4: Wait for build (~2-3 min), confirm up**
 ```bash
-URL="https://easygoing-endurance-production-df54.up.railway.app"
+URL="https://shan-ai.up.railway.app"
 curl -s -m 10 -o /dev/null -w "%{http_code}\n" "$URL/dashboard/quality/distinct"   # 303
 ```
 
@@ -159,7 +159,7 @@ curl -s -m 10 -o /dev/null -w "%{http_code}\n" "$URL/dashboard/quality/distinct"
 
 The existing `last_live_*` reflect the OLD LLM judge. Re-run batches so questions get re-judged by the fact-based path. Login + fire several batches (oldest-checked rotate, so repeated batches cover the set):
 ```bash
-URL="https://easygoing-endurance-production-df54.up.railway.app"
+URL="https://shan-ai.up.railway.app"
 curl -s -m 15 -c /tmp/rw.txt -o /dev/null -X POST "$URL/login" -d "user_id=3&password=1234"
 # fire a batch, wait completion, read cumulative; repeat ~8 times for full 61 coverage
 curl -s -m 20 -b /tmp/rw.txt -X POST "$URL/dashboard/eval/run?repair=false&batch=8"

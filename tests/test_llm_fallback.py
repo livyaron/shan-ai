@@ -235,3 +235,33 @@ async def test_routing_flags_usages_with_the_backup_switched_off():
         routing,
     )
     assert "warning" in summary
+
+
+# ── No hardcoded deployment domain in application code ─────────────────────
+
+def test_no_hardcoded_railway_domain_in_app_code():
+    """A pinned domain silently sends users to the previous deployment.
+
+    settings.public_base_url reads Railway's auto-injected RAILWAY_PUBLIC_DOMAIN,
+    so a domain change self-heals with no code edit.
+    """
+    import pathlib
+
+    offenders = [
+        f"{path}:{i}"
+        for path in pathlib.Path("app").rglob("*.py")
+        for i, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1)
+        if "up.railway.app" in line
+    ]
+    assert not offenders, f"hardcoded deployment domain in: {offenders}"
+
+
+def test_public_base_url_prefers_the_railway_domain(monkeypatch):
+    from app.config import Settings
+
+    s = Settings(RAILWAY_PUBLIC_DOMAIN="example.up.railway.app",
+                 BASE_URL="http://localhost:8000")
+    assert s.public_base_url == "https://example.up.railway.app"
+
+    s = Settings(RAILWAY_PUBLIC_DOMAIN="", BASE_URL="http://localhost:8000")
+    assert s.public_base_url == "http://localhost:8000"

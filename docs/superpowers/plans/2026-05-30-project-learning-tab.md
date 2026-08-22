@@ -1467,7 +1467,7 @@ Expected: `{"data":{"serviceInstanceDeploy":true}}`
 
 - [ ] **Step 3: Smoke test on Railway**
 
-1. Open `https://easygoing-endurance-production-df54.up.railway.app/dashboard/learning`
+1. Open `https://shan-ai.up.railway.app/dashboard/learning`
 2. Click "🏗️ פרויקטים" tab
 3. Upload a master file → verify risk scores appear in the table
 4. Click a project row → verify detail card expands with score breakdown and drift history

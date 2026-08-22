@@ -666,7 +666,7 @@ curl -s -X POST "https://backboard.railway.app/graphql/v2" \
 
 - [ ] **Step 4: Verify in dashboard**
 
-Open `https://easygoing-endurance-production-df54.up.railway.app/dashboard/users` → edit any user → confirm `צופה` appears in the role dropdown.
+Open `https://shan-ai.up.railway.app/dashboard/users` → edit any user → confirm `צופה` appears in the role dropdown.
 
 - [ ] **Step 5: Smoke test in Telegram**
 

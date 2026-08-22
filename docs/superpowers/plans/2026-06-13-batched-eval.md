@@ -355,13 +355,13 @@ curl -s -X POST "https://backboard.railway.app/graphql/v2" -H "Authorization: Be
 
 - [ ] **Step 4: Wait for build (~2-3 min), confirm up**
 ```bash
-URL="https://easygoing-endurance-production-df54.up.railway.app"
+URL="https://shan-ai.up.railway.app"
 curl -s -m 10 -o /dev/null -w "%{http_code}\n" "$URL/dashboard/quality/distinct"   # 303
 ```
 
 - [ ] **Step 5: Run a few spaced batches manually to seed coverage**
 ```bash
-URL="https://easygoing-endurance-production-df54.up.railway.app"
+URL="https://shan-ai.up.railway.app"
 curl -s -m 15 -c /tmp/rw.txt -o /dev/null -X POST "$URL/login" -d "user_id=3&password=1234"
 # batch 1:
 curl -s -m 20 -b /tmp/rw.txt -X POST "$URL/dashboard/eval/run?repair=false&batch=8"

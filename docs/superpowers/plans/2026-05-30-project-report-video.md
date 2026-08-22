@@ -1400,7 +1400,7 @@ Note: Railway build will be slower (~5 min) due to ffmpeg + fonts installation.
 
 - [ ] **Step 3: Verify Railway app**
 
-Navigate to `https://easygoing-endurance-production-df54.up.railway.app/dashboard/project-reports`.
+Navigate to `https://shan-ai.up.railway.app/dashboard/project-reports`.
 
 Click "צור דוח חדש" → verify HTML report renders. Wait ~3 min → verify video appears.
 

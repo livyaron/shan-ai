@@ -25,5 +25,5 @@ railway up --detach
 
 echo ""
 echo "Monitor: https://railway.app/project/369d826d-2dd9-42ae-879e-69f3806db3ed"
-echo "App URL: https://easygoing-endurance-production-df54.up.railway.app"
+echo "App URL: https://shan-ai.up.railway.app"
 echo "Done."

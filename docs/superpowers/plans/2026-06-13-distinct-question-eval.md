@@ -486,7 +486,7 @@ curl -s -X POST "https://backboard.railway.app/graphql/v2" -H "Authorization: Be
 
 Poll until the new endpoint exists (old build 404s it):
 ```bash
-URL="https://easygoing-endurance-production-df54.up.railway.app"
+URL="https://shan-ai.up.railway.app"
 # repeat until 303 (auth redirect = route exists): unknown route returns 404
 curl -s -m 10 -o /dev/null -w "%{http_code}\n" "$URL/dashboard/quality/distinct"
 ```
@@ -495,7 +495,7 @@ Expected eventually: 303 (route exists). 404 = old build still serving.
 - [ ] **Step 5: Verify distinct metric on Railway**
 
 ```bash
-URL="https://easygoing-endurance-production-df54.up.railway.app"
+URL="https://shan-ai.up.railway.app"
 curl -s -m 15 -c /tmp/rw.txt -o /dev/null -X POST "$URL/login" -d "user_id=3&password=1234"
 curl -s -m 20 -b /tmp/rw.txt "$URL/dashboard/quality/distinct" | python -c "import sys,json; d=json.load(sys.stdin); print('summary:', d['summary']); print('failures:', d['failures']); [print(m['count'], m['verdict'], m['question'][:40]) for m in d['most_asked'][:8]]"
 ```

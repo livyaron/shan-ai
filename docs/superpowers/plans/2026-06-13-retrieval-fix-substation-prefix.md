@@ -378,7 +378,7 @@ git commit -m "feat(quality): judge-only live-measure button + failed-questions 
 
 The fix is not deployed yet, so prod still has the bug. Record the broken probes:
 ```bash
-cd /tmp; URL="https://easygoing-endurance-production-df54.up.railway.app"
+cd /tmp; URL="https://shan-ai.up.railway.app"
 curl -s -m 15 -c /tmp/rw.txt -o /dev/null -X POST "$URL/login" -d "user_id=3&password=1234"
 for f in "תחמ\"ש ניר יצחק" "תחנת נתניה"; do printf '{"question":"%s"}' "$f" > qb.json; echo "BEFORE $f:"; curl -s -m 50 -b /tmp/rw.txt -X POST "$URL/dashboard/ask/query" -H "Content-Type: application/json; charset=utf-8" --data-binary @qb.json | python -c "import sys,json;print(json.load(sys.stdin).get('answer','(none)')[:80])"; done
 ```
@@ -409,7 +409,7 @@ curl -s -X POST "https://backboard.railway.app/graphql/v2" -H "Authorization: Be
 - [ ] **Step 5: Wait for new build (~2-3 min), then confirm the fix live**
 
 ```bash
-cd /tmp; URL="https://easygoing-endurance-production-df54.up.railway.app"
+cd /tmp; URL="https://shan-ai.up.railway.app"
 # after the app is back up:
 for f in "תחמ\"ש ניר יצחק" "תחנת נתניה"; do printf '{"question":"%s"}' "$f" > qa.json; echo "AFTER $f:"; curl -s -m 50 -b /tmp/rw.txt -X POST "$URL/dashboard/ask/query" -H "Content-Type: application/json; charset=utf-8" --data-binary @qa.json | python -c "import sys,json;print(json.load(sys.stdin).get('answer','(none)')[:90])"; done
 ```
@@ -418,7 +418,7 @@ Expected: both now resolve to a project (no longer "not found"). If still broken
 - [ ] **Step 6: Run the judge-only live measurement on Railway**
 
 ```bash
-URL="https://easygoing-endurance-production-df54.up.railway.app"
+URL="https://shan-ai.up.railway.app"
 curl -s -m 15 -b /tmp/rw.txt -X POST "$URL/dashboard/eval/run?repair=false"
 ```
 Then poll the latest run (Monitor loop) via `/dashboard/eval/runs` until the newest run `status=="completed"`, then read pass-rate + failed_questions:

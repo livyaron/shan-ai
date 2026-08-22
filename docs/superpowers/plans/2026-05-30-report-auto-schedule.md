@@ -211,7 +211,7 @@ async def _telegram_send_report(bot, user, report_id: int, data: dict, video_pat
         f"ציון סיכון ממוצע: *{es.get('avg_risk_score', 0)}*\n"
         f"אחוז אישורי החלטות: *{es.get('approval_rate_pct', 0)}%*\n\n"
         f"[צפה בדוח המלא בדשבורד]"
-        f"(https://easygoing-endurance-production-df54.up.railway.app/dashboard/project-reports/{report_id})"
+        f"(https://shan-ai.up.railway.app/dashboard/project-reports/{report_id})"
     )
 
     await bot.send_message(
@@ -697,7 +697,7 @@ Expected: `{"data":{"serviceInstanceDeploy":true}}`
 
 - [ ] **Step 3: Smoke test on Railway**
 
-1. Navigate to `https://easygoing-endurance-production-df54.up.railway.app/dashboard` → verify "📋 דוחות פרויקטים →" button visible
+1. Navigate to `https://shan-ai.up.railway.app/dashboard` → verify "📋 דוחות פרויקטים →" button visible
 2. Navigate to `/dashboard/project-reports/schedule` → verify schedule table loads
 3. Enable one user + save → verify settings persist
 4. Click "▶ שלח" on a user with Telegram → verify report generated + video sent
