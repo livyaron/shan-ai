@@ -430,7 +430,7 @@ async def test_report_bytes_cached_per_day(monkeypatch):
         builds.append(1)
         return _sample_data()
 
-    async def _fake_ai(_data, force=False):
+    async def _fake_ai(_data, force=False, session=None):
         return "• תובנה"
 
     monkeypatch.setattr(mrs, "collect_report_data", _fake_collect)
@@ -451,7 +451,7 @@ async def test_no_ai_download_does_not_poison_the_day_cache(monkeypatch):
     async def _fake_collect(_session):
         return _sample_data()
 
-    async def _fake_ai(_data, force=False):
+    async def _fake_ai(_data, force=False, session=None):
         return "• תובנה מה-AI"
 
     monkeypatch.setattr(mrs, "collect_report_data", _fake_collect)
@@ -563,7 +563,7 @@ async def test_refresh_replaces_the_cached_report(monkeypatch):
         data["open_rows"] = data["open_rows"][: board["rows"]]
         return data
 
-    async def _fake_ai(_data, force=False):
+    async def _fake_ai(_data, force=False, session=None):
         return "\u2022 \u05ea\u05d5\u05d1\u05e0\u05d4"
 
     monkeypatch.setattr(mrs, "collect_report_data", _fake_collect)
@@ -583,7 +583,7 @@ async def test_report_returns_generated_at_stamp(monkeypatch):
     async def _fake_collect(_session):
         return _sample_data()
 
-    async def _fake_ai(_data, force=False):
+    async def _fake_ai(_data, force=False, session=None):
         return ""
 
     monkeypatch.setattr(mrs, "collect_report_data", _fake_collect)
@@ -615,3 +615,152 @@ def test_menu_keyboard_exposes_report_buttons():
     assert "om:sum" in tokens
     # Colon-free tail so the om:* dispatcher can keep using split(':').
     assert all(t.count(":") == 1 for t in ("om:xls", "om:xlsr", "om:sum"))
+
+
+# ── Day cache survives a restart (the 🧠 סיכום AI latency fix) ──────────────
+
+class _FakeCacheSession:
+    """Stand-in for an AsyncSession backed by a dict of persisted rows.
+
+    Models just enough of the mission_report_cache read/write path to prove the
+    read-through works without a live Postgres.
+    """
+
+    def __init__(self, rows=None):
+        self.rows = dict(rows or {})   # kind -> SimpleNamespace
+        self.writes = []
+
+    async def scalar(self, _stmt):
+        return self.rows.get(self._kind_of(_stmt))
+
+    async def execute(self, _stmt):
+        return None
+
+    async def commit(self):
+        return None
+
+    async def rollback(self):
+        return None
+
+    @staticmethod
+    def _kind_of(stmt):
+        # The only queries this session ever sees filter on a single kind literal.
+        for kind in (mrs.KIND_SUMMARY, mrs.KIND_AI_INSIGHTS, mrs.KIND_REPORT):
+            if f"'{kind}'" in str(stmt.compile(compile_kwargs={"literal_binds": True})):
+                return kind
+        return None
+
+
+def _cached_row(**kwargs):
+    from types import SimpleNamespace
+    defaults = dict(text=None, blob=None, filename=None, generated_at=None)
+    defaults.update(kwargs)
+    return SimpleNamespace(**defaults)
+
+
+async def test_summary_served_from_the_db_after_a_restart(monkeypatch):
+    """The exact bug: a redeploy wiped memory and every press paid a full LLM call."""
+    llm_calls = []
+
+    async def _llm(*args, **kwargs):
+        llm_calls.append(1)
+        return "תמונת מצב\n• נקודה"
+
+    monkeypatch.setattr(mrs.oms, "today_il", lambda: TODAY)
+    from app.services import llm_router
+    monkeypatch.setattr(llm_router, "llm_chat", _llm)
+
+    session = _FakeCacheSession({mrs.KIND_SUMMARY: _cached_row(text="‏🧠 סיכום של הבוקר")})
+    mrs.clear_caches()                       # simulate the fresh container
+
+    text = await mrs.build_focus_summary(session)
+    assert text == "‏🧠 סיכום של הבוקר"
+    assert llm_calls == [], "a persisted summary must not trigger a Groq call"
+    assert mrs.cache_status()["summary"] is True, "and it must land back in memory"
+
+
+async def test_load_caches_from_db_restores_every_artifact(monkeypatch):
+    monkeypatch.setattr(mrs.oms, "today_il", lambda: TODAY)
+    session = _FakeCacheSession({
+        mrs.KIND_SUMMARY: _cached_row(text="סיכום"),
+        mrs.KIND_AI_INSIGHTS: _cached_row(text="תובנות"),
+        mrs.KIND_REPORT: _cached_row(blob=b"xlsx", filename="a.xlsx", generated_at="15/07/2026"),
+    })
+    mrs.clear_caches()
+
+    loaded = await mrs.load_caches_from_db(session)
+    assert loaded == {"summary": True, "ai_insights": True, "report": True}
+    status = mrs.cache_status()
+    assert status["summary"] and status["ai_insights"] and status["report"]
+
+
+async def test_is_summary_warm_reads_through_to_the_db(monkeypatch):
+    monkeypatch.setattr(mrs.oms, "today_il", lambda: TODAY)
+    mrs.clear_caches()
+    assert await mrs.is_summary_warm(_FakeCacheSession()) is False
+    assert await mrs.is_summary_warm(
+        _FakeCacheSession({mrs.KIND_SUMMARY: _cached_row(text="סיכום")})
+    ) is True
+
+
+async def test_prewarm_reports_failure_when_the_llm_leg_falls_back(monkeypatch):
+    """The silent bug: the prewarm logged summary=True while the cache stayed empty.
+
+    A prewarm that fell back must report False so the watchdog retries, instead
+    of leaving the button cold — and slow — for the rest of the day.
+    """
+    groups = {"late": [_make_mission(id=1, due_date=TODAY - timedelta(days=2))],
+              "today": [], "soon": [], "nodate": []}
+
+    async def _fake_collect_report(_session):
+        return _sample_data()
+
+    async def _fake_collect_risk(_session):
+        return groups
+
+    async def _llm_down(*args, **kwargs):
+        raise RuntimeError("groq rate limited")
+
+    monkeypatch.setattr(mrs, "collect_report_data", _fake_collect_report)
+    monkeypatch.setattr(mrs, "collect_at_risk", _fake_collect_risk)
+    monkeypatch.setattr(mrs.oms, "today_il", lambda: TODAY)
+    from app.services import llm_router
+    monkeypatch.setattr(llm_router, "llm_chat", _llm_down)
+
+    result = await mrs.prewarm_daily(session=None)
+    assert result["summary"] is False
+    assert mrs.cache_status()["summary"] is False
+
+
+async def test_focus_summary_still_returns_the_plain_list_for_normal_callers(monkeypatch):
+    """strict=False (every user-facing caller) must never raise — text or nothing."""
+    groups = {"late": [_make_mission(id=1, due_date=TODAY - timedelta(days=2))],
+              "today": [], "soon": [], "nodate": []}
+
+    async def _fake_collect_risk(_session):
+        return groups
+
+    async def _llm_down(*args, **kwargs):
+        raise RuntimeError("groq down")
+
+    monkeypatch.setattr(mrs, "collect_at_risk", _fake_collect_risk)
+    monkeypatch.setattr(mrs.oms, "today_il", lambda: TODAY)
+    from app.services import llm_router
+    monkeypatch.setattr(llm_router, "llm_chat", _llm_down)
+
+    text = await mrs.build_focus_summary(session=None)
+    assert "סיכום ה-AI אינו זמין" in text
+    assert mrs.cache_status()["summary"] is False, "a transient outage must not pin the fallback"
+
+
+async def test_at_risk_prompt_is_capped(monkeypatch):
+    """An unbounded prompt is what made a cold build slow on a busy board."""
+    monkeypatch.setattr(mrs.oms, "today_il", lambda: TODAY)
+    late = [_make_mission(id=i, title=f"משימה {i:03d}", due_date=TODAY - timedelta(days=3))
+            for i in range(1, mrs.PROMPT_MISSION_CAP + 21)]
+    context = mrs._at_risk_context(
+        {"late": late, "today": [], "soon": [], "nodate": []}, TODAY
+    )
+    assert context.count("| אחראי:") == mrs.PROMPT_MISSION_CAP
+    # The owner-load header is still computed from the whole board.
+    assert f"{len(late)} משימות" in context

@@ -74,8 +74,16 @@ def start_scheduler() -> None:
     # re-scanning the board and re-calling Groq.
     sch.add_job(
         _missions_daily_prewarm,
-        CronTrigger(day_of_week="sun-thu", hour=4, minute=10, timezone="Asia/Jerusalem"),
+        # Every day, not sun-thu: a Friday press used to be a guaranteed cold build.
+        CronTrigger(hour=4, minute=10, timezone="Asia/Jerusalem"),
         id="missions_daily_prewarm", replace_existing=True,
+    )
+    # Safety net for the prewarm: a container recycle, a Groq hiccup at 04:10, or a
+    # day the cron never got to all leave the board cold, and nothing used to notice.
+    # This rebuilds only when today's summary is genuinely missing.
+    sch.add_job(
+        _missions_cache_watchdog, "interval", hours=1,
+        id="missions_cache_watchdog", replace_existing=True,
     )
     # 07:10 (not 07:00): keeps the XLSX off the digest's heels so the two documents
     # don't land together. Sends the artifact prepared at 04:10.
@@ -109,7 +117,8 @@ def start_scheduler() -> None:
     logger.info("eval_cron: weekly_eval_summary job registered (Sun 07:00 Asia/Jerusalem)")
     logger.info("eval_cron: missions_daily_digest job registered (Sun-Thu 07:00 Asia/Jerusalem)")
     logger.info("eval_cron: missions_overdue_check job registered (every 30 min, sends 07-20 IL)")
-    logger.info("eval_cron: missions_daily_prewarm job registered (Sun-Thu 04:10 Asia/Jerusalem)")
+    logger.info("eval_cron: missions_daily_prewarm job registered (daily 04:10 Asia/Jerusalem)")
+    logger.info("eval_cron: missions_cache_watchdog job registered (hourly)")
     logger.info("eval_cron: missions_daily_xlsx job registered (Sun-Thu 07:10 Asia/Jerusalem)")
     logger.info("eval_cron: batch_eval job registered (every 3h)")
 
@@ -247,6 +256,39 @@ async def _missions_daily_prewarm() -> None:
             return
         result = await mrs.prewarm_daily(session)
     logger.info(f"missions_daily_prewarm: report={result['report']} summary={result['summary']}")
+
+
+async def _missions_cache_watchdog() -> None:
+    """Rebuild today's AI summary when it is missing (hourly, 07:00-20:00 IL).
+
+    The 04:10 prewarm claims its run key for the whole day, so it cannot retry
+    itself: a restart after it — or a Groq rate-limit during it — used to leave
+    the 🧠 סיכום AI button paying a full board scan + LLM call on every press for
+    the rest of the day. This is the only thing that closes that hole.
+    """
+    from datetime import datetime as _dt
+    from zoneinfo import ZoneInfo
+    from app.database import async_session_maker
+    from app.services import missions_report_service as mrs
+
+    if not (7 <= _dt.now(tz=ZoneInfo("Asia/Jerusalem")).hour <= 20):
+        return
+
+    # Only the summary is worth an unattended Groq call — the XLSX is a much rarer
+    # press and rebuilds cheaply on demand.
+    async with async_session_maker() as session:
+        try:
+            if await mrs.is_summary_warm(session):
+                return
+            logger.info("missions_cache_watchdog: today's summary is cold — rebuilding")
+            await mrs.build_focus_summary(session, force=True, strict=True)
+            logger.info("missions_cache_watchdog: summary rebuilt")
+        except mrs.SummaryNotBuilt:
+            logger.warning(
+                "missions_cache_watchdog: LLM still unavailable — will retry next hour"
+            )
+        except Exception as e:
+            logger.exception(f"missions_cache_watchdog failed: {e}")
 
 
 async def _missions_daily_xlsx() -> None:

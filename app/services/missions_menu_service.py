@@ -6,6 +6,7 @@ cron jobs. Pure functions only — never imports the bot (callers do the sends).
 
 import html as _html
 import datetime
+import re
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import select, func, case
@@ -34,13 +35,14 @@ _QUADRANT_FLAGS = {
 }
 
 STATUS_LABELS = {
-    "open":        "⬜ פתוחה",
-    "in_progress": "🔵 בביצוע",
-    "done":        "✅ הושלמה",
-    "cancelled":   "🚫 בוטלה",
+    "open":      "⬜ פתוחה",
+    "done":      "✅ הושלמה",
+    "cancelled": "🚫 בוטלה",
 }
 
-ACTIVE_STATUSES = [MissionStatusEnum.OPEN.value, MissionStatusEnum.IN_PROGRESS.value]
+# The board is open/closed only — see MissionStatusEnum. Every "is this mission
+# live?" question in the app funnels through this list; never inline the values.
+ACTIVE_STATUSES = [MissionStatusEnum.OPEN.value]
 
 DUE_QUICK_PICKS = [
     ("today", "היום"),
@@ -174,6 +176,20 @@ def get_menu_keyboard(counts: dict[str, int]) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(rows)
 
 
+def button_title(m: Mission, index: int) -> str:
+    """Label for a mission's button in a list — the title itself, not "פרטים".
+
+    Titles are stored raw but rendered through HTML elsewhere; button labels are
+    plain text, so strip tags and unescape (same treatment as the projects menu).
+    """
+    title = _html.unescape(re.sub(r"<[^>]+>", "", m.title or "")).strip()
+    if len(title) > 38:
+        title = title[:38] + "…"
+    emoji = next((e for k, e, _v, _a in QUADRANTS if k == quadrant_key(m)), "•")
+    late = " ⚠️" if is_overdue(m) else ""
+    return f"{index}. {emoji} {title}{late}"
+
+
 def build_results_keyboard(
     origin: str,
     page: int,
@@ -181,12 +197,12 @@ def build_results_keyboard(
     missions: list[Mission],
     with_done_shortcut: bool = False,
 ) -> InlineKeyboardMarkup:
-    """List view: one detail button per mission (+ optional ✅ shortcut), nav, back."""
+    """List view: one button per mission, labelled with its title (+ optional ✅), nav, back."""
     rows = []
     for i, m in enumerate(missions, start=page * PAGE_SIZE + 1):
-        btns = [InlineKeyboardButton(f"{i}. פרטים", callback_data=f"om:d:{m.id}:{origin}:{page}")]
+        btns = [InlineKeyboardButton(button_title(m, i), callback_data=f"om:d:{m.id}:{origin}:{page}")]
         if with_done_shortcut and m.status in ACTIVE_STATUSES:
-            btns.append(InlineKeyboardButton(f"✅ {i}", callback_data=f"om:ld:{m.id}:{origin}:{page}"))
+            btns.append(InlineKeyboardButton("✅", callback_data=f"om:ld:{m.id}:{origin}:{page}"))
         rows.append(btns)
     total_pages = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
     if total_pages > 1:
@@ -201,7 +217,9 @@ def build_results_keyboard(
     return InlineKeyboardMarkup(rows)
 
 
-def build_mission_card_keyboard(m: Mission, origin: str, page: int) -> InlineKeyboardMarkup:
+def build_mission_card_keyboard(
+    m: Mission, origin: str, page: int, show_all_updates: bool = False,
+) -> InlineKeyboardMarkup:
     tail = f"{m.id}:{origin}:{page}"
     rows = []
     if m.status in ACTIVE_STATUSES:
@@ -219,11 +237,51 @@ def build_mission_card_keyboard(m: Mission, origin: str, page: int) -> InlineKey
         ])
     else:
         rows.append([InlineKeyboardButton("↩️ פתח מחדש", callback_data=f"om:a:reopen:{tail}")])
+    # The card shows only the latest update by default — this toggles the full log.
+    n_updates = len(get_mission_updates(m))
+    if n_updates > 1:
+        rows.append([
+            InlineKeyboardButton("🔼 עדכון אחרון בלבד", callback_data=f"om:d:{tail}")
+            if show_all_updates else
+            InlineKeyboardButton(f"🗒 כל העדכונים ({n_updates})", callback_data=f"om:u:{tail}")
+        ])
     rows.append([
         InlineKeyboardButton("🔙 חזרה לרשימה", callback_data=f"om:{origin}:{page}"),
         InlineKeyboardButton("🏠 חדר מבצעים",  callback_data="om:menu"),
     ])
     return InlineKeyboardMarkup(rows)
+
+
+# Short status tokens keep om:cl callbacks well inside Telegram's 64-byte limit.
+CLOSE_TOKENS = {
+    "d": MissionStatusEnum.DONE.value,
+    "x": MissionStatusEnum.CANCELLED.value,
+}
+CLOSE_TOKEN_BY_STATUS = {v: k for k, v in CLOSE_TOKENS.items()}
+
+
+def build_close_prompt_keyboard(
+    status: str, mission_id: int, origin: str, page: int, back_cd: str,
+) -> InlineKeyboardMarkup:
+    """Closing-note prompt: write a note, or close without one. Never blocking."""
+    token = CLOSE_TOKEN_BY_STATUS.get(status, "d")
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(
+            "⏭ סגור בלי הערה", callback_data=f"om:cl:{token}:{mission_id}:{origin}:{page}"
+        )],
+        [InlineKeyboardButton("❌ ביטול", callback_data=back_cd)],
+    ])
+
+
+def close_prompt_text(status: str) -> str:
+    """Hebrew prompt shown before a mission is closed."""
+    if status == MissionStatusEnum.CANCELLED.value:
+        return ("\u200f🚫 <b>ביטול משימה</b>\n"
+                "שלח את <b>סיבת הביטול</b> כטקסט חופשי — היא תישמר כעדכון סטטוס "
+                "עם השם שלך והשעה, או סגור בלי הערה.")
+    return ("\u200f✅ <b>סגירת משימה</b>\n"
+            "שלח תיאור קצר של <b>מה בוצע</b> — הוא יישמר כעדכון סטטוס עם השם שלך "
+            "והשעה, או סגור בלי הערה.")
 
 
 def build_quadrant_pick_keyboard(prefix: str, abort_cd: str = "om:c:abort") -> InlineKeyboardMarkup:
@@ -316,8 +374,6 @@ def format_mission_line(m: Mission, today: datetime.date | None = None) -> str:
         if is_overdue(m, today):
             due += " ⚠️"
         parts.append(f"📅 {due}")
-    if m.status == MissionStatusEnum.IN_PROGRESS.value:
-        parts.append("🔵")
     return "  |  ".join(parts)
 
 
@@ -332,30 +388,66 @@ def format_results_message(title: str, missions: list[Mission], total: int, page
     return "\n".join(lines)
 
 
-def format_updates_block(m: Mission, html: bool = True) -> str:
+def get_mission_updates(m: Mission) -> list[MissionUpdate]:
+    """Loaded status updates, oldest first. [] when the log was not eager-loaded.
+
+    Never triggers a lazy load: under asyncio that raises MissingGreenlet.
+    Callers that want the log eager-load Mission.updates (see get_mission).
+    """
+    from sqlalchemy import inspect as _inspect
+    if "updates" in _inspect(m).unloaded:
+        return []
+    return list(m.updates or [])
+
+
+def _update_line(u: MissionUpdate, esc) -> str:
+    who = u.author_name or (u.author.username if u.author else "—")
+    lock = "🔒 " if u.kind == "close" else ""
+    return f"• {lock}{format_stamp_il(u.created_at)} · {esc(who)} — {esc(u.text or '')}"
+
+
+def format_updates_block(
+    m: Mission,
+    html: bool = True,
+    latest_only: bool = False,
+    limit: int | None = None,
+) -> str:
     """Status-update log, rendered as part of the mission description block.
 
     Returns "" when the mission has no updates. `html=False` yields plain text
-    for the XLSX report / AI prompt payload.
+    for the XLSX report / AI prompt payload. `latest_only` shows just the newest
+    entry — what the mission cards show by default, so a long log never buries
+    the card. `limit` keeps the newest N when the whole log is shown.
     """
-    # Never trigger a lazy load: under asyncio that raises MissingGreenlet.
-    # Callers that want the log eager-load Mission.updates (see get_mission).
-    from sqlalchemy import inspect as _inspect
-    if "updates" in _inspect(m).unloaded:
-        return ""
-    updates = list(m.updates or [])
+    updates = get_mission_updates(m)
     if not updates:
         return ""
     esc = _html.escape if html else (lambda t: t)
-    lines = ["🗒 <b>עדכוני סטטוס:</b>" if html else "עדכוני סטטוס:"]
-    for u in updates:
-        who = u.author_name or (u.author.username if u.author else "—")
-        stamp = format_stamp_il(u.created_at)
-        lines.append(f"• {stamp} · {esc(who)} — {esc(u.text or '')}")
+    total = len(updates)
+
+    if latest_only:
+        head = "🗒 <b>עדכון אחרון:</b>" if html else "עדכון אחרון:"
+        if total > 1:
+            more = f"(מתוך {total} עדכונים)"
+            head += f" <i>{more}</i>" if html else f" {more}"
+        return f"{head}\n{_update_line(updates[-1], esc)}"
+
+    shown = updates
+    footer = ""
+    if limit and total > limit:
+        shown = updates[-limit:]
+        note = f"מוצגים {limit} העדכונים האחרונים מתוך {total}"
+        footer = f"<i>…{note}</i>" if html else f"…{note}"
+
+    head = "🗒 <b>עדכוני סטטוס:</b>" if html else "עדכוני סטטוס:"
+    lines = [head] + [_update_line(u, esc) for u in shown]
+    if footer:
+        lines.append(footer)
     return "\n".join(lines)
 
 
-def build_mission_card(m: Mission) -> str:
+def build_mission_card(m: Mission, show_all_updates: bool = False) -> str:
+    """Mission detail card. Shows the latest status update; the full log on demand."""
     key = quadrant_key(m)
     today = today_il()
     due_line = format_due(m.due_date)
@@ -365,7 +457,11 @@ def build_mission_card(m: Mission) -> str:
     creator = m.created_by.username if m.created_by else "—"
     created_str = m.created_at.strftime("%d/%m/%Y") if m.created_at else "—"
     desc = f"\n📝 {_html.escape(m.description)}\n" if m.description else ""
-    updates = format_updates_block(m)
+    updates = format_updates_block(
+        m,
+        latest_only=not show_all_updates,
+        limit=HISTORY_LIMIT if show_all_updates else None,
+    )
     if updates:
         desc += f"\n{updates}\n"
     return (
@@ -561,15 +657,24 @@ async def add_mission_update(
     m: Mission,
     text: str,
     author: User | None,
+    kind: str | None = None,
 ) -> MissionUpdate:
-    """Append a status update to a mission. author_name is snapshotted on purpose."""
+    """Append a status update to a mission. author_name is snapshotted on purpose.
+
+    kind=None is an ordinary update; kind="close" is the note written while
+    closing the mission.
+    """
     upd = MissionUpdate(
         mission_id=m.id,
         text=text.strip()[:2000],
+        kind=kind,
         author_id=author.id if author else None,
         author_name=(author.username if author else None),
     )
     session.add(upd)
+    # Reporting treats updated_at as "last touched" (the STALE_DAYS figure), so a
+    # mission being actively reported on must not read as abandoned.
+    m.updated_at = datetime.datetime.utcnow()
     await session.commit()
     await session.refresh(upd)
     return upd

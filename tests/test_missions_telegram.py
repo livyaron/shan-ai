@@ -20,6 +20,8 @@ def _make_query(data):
     query.answer = AsyncMock()
     query.edit_message_text = AsyncMock()
     query.edit_message_reply_markup = AsyncMock()
+    query.message.reply_text = AsyncMock()
+    query.message.reply_markup = None
     return query
 
 
@@ -238,3 +240,141 @@ async def test_missions_command_blocks_viewer():
 
     update.message.reply_text.assert_called_once()
     assert "🔒" in update.message.reply_text.call_args[0][0]
+
+
+# ── Closing a mission asks for the "why" first ─────────────────────────────
+
+def _manager(id=7):
+    user = MagicMock()
+    user.role = RoleEnum.PROJECT_MANAGER
+    user.id = id
+    return user
+
+
+async def _run_callback(data, telegram_id=999, user=None):
+    """Drive one om:* callback through handle_callback with a mocked session."""
+    from app.services.telegram_polling import TelegramPollingBot
+
+    bot = TelegramPollingBot()
+    update = _make_callback_update(data, telegram_id=telegram_id)
+    context = MagicMock()
+    context.bot = AsyncMock()
+    with patch("app.services.telegram_polling.async_session_maker") as mock_sm:
+        session = AsyncMock()
+        session.scalar = AsyncMock(return_value=user or _manager())
+        _mock_session_maker(mock_sm, session)
+        await bot.handle_callback(update, context)
+    return update.callback_query, context
+
+
+@pytest.mark.asyncio
+async def test_card_done_prompts_for_a_closing_note_instead_of_closing():
+    """✅ בוצע must ask what was done — the record of the 'why' is the point."""
+    from app.services.telegram_state import _missions_edit_state
+
+    _missions_edit_state.pop(999, None)
+    try:
+        query, _ = await _run_callback("om:a:done:42:my:0")
+
+        query.edit_message_text.assert_called_once()
+        text = query.edit_message_text.call_args[0][0]
+        assert "מה בוצע" in text
+
+        state = _missions_edit_state[999]
+        assert state["mode"] == "close_text"
+        assert state["mission_id"] == 42
+        assert state["pending_status"] == "done"
+        assert state["after"] == "card"
+
+        cds = [b.callback_data
+               for row in query.edit_message_text.call_args[1]["reply_markup"].inline_keyboard
+               for b in row]
+        assert "om:cl:d:42:my:0" in cds      # skip = close with no note
+        assert "om:d:42:my:0" in cds         # cancel = back to the card
+    finally:
+        _missions_edit_state.pop(999, None)
+
+
+@pytest.mark.asyncio
+async def test_card_cancel_prompts_for_a_reason():
+    from app.services.telegram_state import _missions_edit_state
+
+    _missions_edit_state.pop(999, None)
+    try:
+        query, _ = await _run_callback("om:a:cancel:42:my:0")
+        assert "סיבת הביטול" in query.edit_message_text.call_args[0][0]
+        assert _missions_edit_state[999]["pending_status"] == "cancelled"
+        cds = [b.callback_data
+               for row in query.edit_message_text.call_args[1]["reply_markup"].inline_keyboard
+               for b in row]
+        assert "om:cl:x:42:my:0" in cds
+    finally:
+        _missions_edit_state.pop(999, None)
+
+
+@pytest.mark.asyncio
+async def test_list_done_shortcut_also_prompts():
+    """The ✅ shortcut in a list closes through the same flow, not silently."""
+    from app.services.telegram_state import _missions_edit_state
+
+    _missions_edit_state.pop(999, None)
+    try:
+        await _run_callback("om:ld:42:my:0")
+        state = _missions_edit_state[999]
+        assert state["mode"] == "close_text" and state["after"] == "list"
+    finally:
+        _missions_edit_state.pop(999, None)
+
+
+@pytest.mark.asyncio
+async def test_digest_done_prompts_in_a_new_message_and_keeps_the_digest():
+    """The morning digest must stay actionable while the note is being written."""
+    from app.services.telegram_state import _missions_edit_state
+
+    _missions_edit_state.pop(999, None)
+    try:
+        query, _ = await _run_callback("om:dg:done:42")
+
+        # The digest itself is untouched until the close actually lands.
+        query.edit_message_text.assert_not_called()
+        query.edit_message_reply_markup.assert_not_called()
+        query.message.reply_text.assert_awaited()
+
+        state = _missions_edit_state[999]
+        assert state["after"] == "digest"
+        assert state["dg_chat_id"] == query.message.chat_id
+        assert state["dg_message_id"] == query.message.message_id
+    finally:
+        _missions_edit_state.pop(999, None)
+
+
+@pytest.mark.asyncio
+async def test_reopen_still_closes_immediately():
+    """Reopening is not a close — it must not ask for a note."""
+    from app.services.telegram_state import _missions_edit_state
+
+    _missions_edit_state.pop(999, None)
+    try:
+        with patch("app.services.missions_menu_service.get_mission",
+                   new=AsyncMock(return_value=None)):
+            await _run_callback("om:a:reopen:42:my:0")
+        assert 999 not in _missions_edit_state
+    finally:
+        _missions_edit_state.pop(999, None)
+
+
+def test_digest_keyboard_without_drops_only_that_mission_row():
+    """Closing one digest item must leave the other buttons usable."""
+    from telegram import InlineKeyboardButton
+    from app.services.telegram_polling import TelegramPollingBot
+
+    rows = [
+        [InlineKeyboardButton("✔️ א", callback_data="om:dg:done:1")],
+        [InlineKeyboardButton("✔️ ב", callback_data="om:dg:done:2")],
+    ]
+    kb = TelegramPollingBot._digest_keyboard_without({"dg_rows": rows}, 1)
+    cds = [b.callback_data for row in kb.inline_keyboard for b in row]
+    assert cds == ["om:dg:done:2"]
+
+    assert TelegramPollingBot._digest_keyboard_without({"dg_rows": rows[:1]}, 1) is None
+    assert TelegramPollingBot._digest_keyboard_without({}, 1) is None

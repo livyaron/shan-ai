@@ -28,6 +28,11 @@ AT_RISK_DAYS = 3
 # Active missions untouched for this long are flagged as stale on the summary sheet.
 STALE_DAYS = 30
 
+# Ceiling on how many missions are spelled out in the AI summary prompt. The
+# owner-load header above the list is computed from the whole board either way,
+# so the model still sees the shape of the backlog.
+PROMPT_MISSION_CAP = 40
+
 CLOSED_STATUSES = [MissionStatusEnum.DONE.value, MissionStatusEnum.CANCELLED.value]
 
 # War-room operators: admins + the manager roles that already receive board-wide
@@ -57,12 +62,21 @@ SHEET_CLOSED = "משימות סגורות"
 
 # ── Daily caches ───────────────────────────────────────────────────────────
 # Everything expensive is built once per calendar day by the 04:10 prewarm cron
-# and served from memory for the rest of the day, so a button press is a dict
-# lookup rather than a board scan + Groq round-trip. Each cache holds only the
-# current day's entry.
+# and served for the rest of the day, so a button press is a lookup rather than
+# a board scan + Groq round-trip. Each cache holds only the current day's entry.
+#
+# Memory alone was not enough: the container is recycled on every Railway deploy,
+# and the 04:10 cron does not fire again until tomorrow (and job_guard would
+# refuse it if it did) — so a mid-day restart left the 🧠 סיכום AI button cold,
+# and paying the full cost, for the rest of the day. Every entry is therefore
+# mirrored into the mission_report_cache table and read back on a memory miss.
 _ai_cache: dict[str, str] = {}                       # date -> AI insights narrative
-_report_cache: dict[str, tuple[bytes, str]] = {}     # date -> (xlsx bytes, filename)
+_report_cache: dict[str, tuple[bytes, str, str]] = {} # date -> (xlsx bytes, filename, stamp)
 _summary_cache: dict[str, str] = {}                  # date -> focus summary HTML
+
+KIND_AI_INSIGHTS = "ai_insights"
+KIND_REPORT = "report"
+KIND_SUMMARY = "summary"
 
 
 def _cache_put(cache: dict, key: str, value):
@@ -72,8 +86,65 @@ def _cache_put(cache: dict, key: str, value):
     return value
 
 
+async def _db_cache_get(session: AsyncSession, kind: str):
+    """Today's persisted artifact, or None. Never raises — a cache is not the truth."""
+    if session is None:
+        return None
+    from app.models import MissionReportCache
+    try:
+        return await session.scalar(
+            select(MissionReportCache).where(
+                MissionReportCache.day == oms.today_il(),
+                MissionReportCache.kind == kind,
+            )
+        )
+    except Exception as e:
+        logger.warning(f"missions_report: cache read failed for {kind}: {e}")
+        try:
+            await session.rollback()
+        except Exception:
+            pass
+        return None
+
+
+async def _db_cache_put(
+    session: AsyncSession, kind: str,
+    text: str | None = None, blob: bytes | None = None,
+    filename: str | None = None, generated_at: str | None = None,
+) -> None:
+    """Upsert today's artifact and drop older days. Never raises."""
+    if session is None:
+        return
+    from sqlalchemy import delete as _delete
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+    from app.models import MissionReportCache
+    day = oms.today_il()
+    values = dict(day=day, kind=kind, text=text, blob=blob,
+                  filename=filename, generated_at=generated_at)
+    try:
+        await session.execute(
+            pg_insert(MissionReportCache)
+            .values(**values)
+            .on_conflict_do_update(
+                index_elements=["day", "kind"],
+                set_={k: v for k, v in values.items() if k not in ("day", "kind")},
+            )
+        )
+        # Yesterday's rows are dead weight — this table only ever serves today.
+        await session.execute(
+            _delete(MissionReportCache).where(MissionReportCache.day < day)
+        )
+        await session.commit()
+    except Exception as e:
+        logger.warning(f"missions_report: cache write failed for {kind}: {e}")
+        try:
+            await session.rollback()
+        except Exception:
+            pass
+
+
 def cache_status() -> dict:
-    """Which of today's artifacts are already warm (diagnostics)."""
+    """Which of today's artifacts are already warm in memory (diagnostics)."""
     key = oms.today_il().isoformat()
     return {
         "date": key,
@@ -81,6 +152,42 @@ def cache_status() -> dict:
         "report": key in _report_cache,
         "summary": key in _summary_cache,
     }
+
+
+async def load_caches_from_db(session: AsyncSession) -> dict:
+    """Pull today's persisted artifacts into memory. Called at startup.
+
+    This is what makes a redeploy cheap: the button stays instant without
+    re-running the board scan or the Groq call.
+    """
+    key = oms.today_il().isoformat()
+    loaded = {KIND_SUMMARY: False, KIND_AI_INSIGHTS: False, KIND_REPORT: False}
+
+    row = await _db_cache_get(session, KIND_SUMMARY)
+    if row is not None and row.text:
+        _cache_put(_summary_cache, key, row.text)
+        loaded[KIND_SUMMARY] = True
+
+    row = await _db_cache_get(session, KIND_AI_INSIGHTS)
+    if row is not None and row.text:
+        _cache_put(_ai_cache, key, row.text)
+        loaded[KIND_AI_INSIGHTS] = True
+
+    row = await _db_cache_get(session, KIND_REPORT)
+    if row is not None and row.blob:
+        _cache_put(_report_cache, key,
+                   (row.blob, row.filename or "", row.generated_at or ""))
+        loaded[KIND_REPORT] = True
+
+    return loaded
+
+
+async def is_summary_warm(session: AsyncSession) -> bool:
+    """True when today's AI summary is available without an LLM call."""
+    if oms.today_il().isoformat() in _summary_cache:
+        return True
+    row = await _db_cache_get(session, KIND_SUMMARY)
+    return bool(row is not None and row.text)
 
 
 def clear_caches() -> None:
@@ -258,7 +365,6 @@ def _compute_stats(
 ) -> dict:
     total_open = len(active)
     overdue = [m for m in active if oms.is_overdue(m, today)]
-    in_progress = [m for m in active if m.status == MissionStatusEnum.IN_PROGRESS.value]
 
     buckets = {b: 0 for b in BUCKET_ORDER}
     for m in active:
@@ -289,17 +395,15 @@ def _compute_stats(
     per_owner: dict[str, dict] = {}
     for m in active:
         row = per_owner.setdefault(_user_name(m.owner), {
-            "owner": _user_name(m.owner), "open": 0, "in_progress": 0,
+            "owner": _user_name(m.owner), "open": 0,
             "overdue": 0, "done_30": 0, "cycles": [],
         })
         row["open"] += 1
-        if m.status == MissionStatusEnum.IN_PROGRESS.value:
-            row["in_progress"] += 1
         if oms.is_overdue(m, today):
             row["overdue"] += 1
     for m in done_30:
         row = per_owner.setdefault(_user_name(m.owner), {
-            "owner": _user_name(m.owner), "open": 0, "in_progress": 0,
+            "owner": _user_name(m.owner), "open": 0,
             "overdue": 0, "done_30": 0, "cycles": [],
         })
         row["done_30"] += 1
@@ -316,7 +420,6 @@ def _compute_stats(
 
     return {
         "total_open": total_open,
-        "in_progress": len(in_progress),
         "overdue": len(overdue),
         "overdue_rate": round(len(overdue) / total_open * 100) if total_open else 0,
         "buckets": buckets,
@@ -427,7 +530,6 @@ def _stats_block(stats: dict) -> str:
     """Compact Hebrew rendering of the figures — sent instead of raw rows to keep tokens small."""
     lines = [
         f"סה\"כ משימות פתוחות: {stats['total_open']}",
-        f"בביצוע: {stats['in_progress']}",
         f"באיחור: {stats['overdue']} ({stats['overdue_rate']}%)",
         f"גיל ממוצע של משימה פתוחה: {stats['avg_age_open']} ימים",
         f"זמן ביצוע ממוצע (30 יום): {stats['avg_cycle_30d']} ימים",
@@ -453,14 +555,20 @@ def _stats_block(stats: dict) -> str:
     return "\n".join(lines)
 
 
-async def get_ai_insights(data: dict, force: bool = False) -> str:
+async def get_ai_insights(
+    data: dict, force: bool = False, session: AsyncSession | None = None,
+) -> str:
     """Hebrew narrative for the summary sheet. One LLM call per calendar day, cached.
 
     Returns "" on any failure — the workbook must never fail because the LLM did.
     """
     key = oms.today_il().isoformat()
-    if not force and key in _ai_cache:
-        return _ai_cache[key]
+    if not force:
+        if key in _ai_cache:
+            return _ai_cache[key]
+        row = await _db_cache_get(session, KIND_AI_INSIGHTS)
+        if row is not None and row.text:
+            return _cache_put(_ai_cache, key, row.text)
 
     from app.services.llm_router import llm_chat
     try:
@@ -476,6 +584,7 @@ async def get_ai_insights(data: dict, force: bool = False) -> str:
         text = (text or "").strip()
         if text:
             _cache_put(_ai_cache, key, text)
+            await _db_cache_put(session, KIND_AI_INSIGHTS, text=text)
         return text
     except Exception as e:
         logger.warning(f"missions_report: AI insights failed, continuing without: {e}")
@@ -521,7 +630,6 @@ def build_workbook(data: dict, ai_text: str = "") -> bytes:
     r += 1
     kpis = [
         ("משימות פתוחות", stats["total_open"]),
-        ("מתוכן בביצוע", stats["in_progress"]),
         ("באיחור", stats["overdue"]),
         ("אחוז איחור", f"{stats['overdue_rate']}%"),
         ("גיל ממוצע של משימה פתוחה (ימים)", stats["avg_age_open"]),
@@ -556,7 +664,7 @@ def build_workbook(data: dict, ai_text: str = "") -> bytes:
     r += 1
     owner_hdr_row = r
     for c, label in enumerate(
-        ["אחראי", "פתוחות", "בביצוע", "באיחור", "% איחור", "הושלמו 30 יום", "ממוצע ימי ביצוע"], 1
+        ["אחראי", "פתוחות", "באיחור", "% איחור", "הושלמו 30 יום", "ממוצע ימי ביצוע"], 1
     ):
         cell = ws.cell(r, c, label)
         cell.font = hdr_font
@@ -566,13 +674,12 @@ def build_workbook(data: dict, ai_text: str = "") -> bytes:
     for row in stats["owners"]:
         ws.cell(r, 1, row["owner"])
         ws.cell(r, 2, row["open"])
-        ws.cell(r, 3, row["in_progress"])
-        ws.cell(r, 4, row["overdue"])
-        ws.cell(r, 5, row["overdue_rate"])
-        ws.cell(r, 6, row["done_30"])
-        ws.cell(r, 7, row["avg_cycle"])
+        ws.cell(r, 3, row["overdue"])
+        ws.cell(r, 4, row["overdue_rate"])
+        ws.cell(r, 5, row["done_30"])
+        ws.cell(r, 6, row["avg_cycle"])
         if row["overdue"]:
-            for c in range(1, 8):
+            for c in range(1, 7):
                 ws.cell(r, c).fill = overdue_fill
         r += 1
     owner_last_row = r - 1
@@ -583,7 +690,7 @@ def build_workbook(data: dict, ai_text: str = "") -> bytes:
         chart.title = "עומס לפי אחראי — פתוחות מול באיחור"
         chart.height, chart.width = 8, 18
         chart.add_data(
-            Reference(ws, min_col=2, max_col=4, min_row=owner_hdr_row, max_row=owner_last_row),
+            Reference(ws, min_col=2, max_col=3, min_row=owner_hdr_row, max_row=owner_last_row),
             titles_from_data=True,
         )
         chart.set_categories(
@@ -676,20 +783,31 @@ async def build_report_bytes(
     `with_ai=False` is an explicit no-LLM download and never touches the cache.
     """
     import asyncio
+    from time import perf_counter
 
     key = oms.today_il().isoformat()
-    if with_ai and not force and not refresh_data and key in _report_cache:
-        return _report_cache[key]
+    if with_ai and not force and not refresh_data:
+        if key in _report_cache:
+            logger.info("⏱ missions report: hit (memory)")
+            return _report_cache[key]
+        row = await _db_cache_get(session, KIND_REPORT)
+        if row is not None and row.blob:
+            logger.info("⏱ missions report: hit (db)")
+            return _cache_put(
+                _report_cache, key,
+                (row.blob, row.filename or "", row.generated_at or ""),
+            )
 
+    t0 = perf_counter()
     data = await collect_report_data(session)
 
     if not with_ai:
         ai_text = ""
     elif refresh_data:
         # Reuse today's narrative; only build one if the prewarm never ran.
-        ai_text = _ai_cache.get(key) or await get_ai_insights(data)
+        ai_text = _ai_cache.get(key) or await get_ai_insights(data, session=session)
     else:
-        ai_text = await get_ai_insights(data, force=force)
+        ai_text = await get_ai_insights(data, force=force, session=session)
 
     payload = await asyncio.get_event_loop().run_in_executor(
         None, build_workbook, data, ai_text
@@ -699,8 +817,14 @@ async def build_report_bytes(
         f"דוח_חדר_מבצעים_{data['meta']['date_slug']}.xlsx",
         data["meta"]["generated_at"],
     )
+    logger.info(f"⏱ missions report: miss, built in {int((perf_counter() - t0) * 1000)}ms")
     if with_ai:
         _cache_put(_report_cache, key, result)
+        if not refresh_data:
+            await _db_cache_put(
+                session, KIND_REPORT,
+                blob=result[0], filename=result[1], generated_at=result[2],
+            )
     return result
 
 
@@ -708,6 +832,9 @@ async def prewarm_daily(session: AsyncSession) -> dict:
     """Build both artifacts and fill the day's caches. Called by the 04:10 cron.
 
     Each half is guarded separately so a failure in one still leaves the other warm.
+    A True here means the cache genuinely holds an LLM-built artifact — the
+    summary leg runs strict so a silent fallback is reported as a failure and the
+    watchdog picks it up later, instead of the board staying cold all day.
     """
     out = {"report": False, "summary": False}
     try:
@@ -716,8 +843,13 @@ async def prewarm_daily(session: AsyncSession) -> dict:
     except Exception as e:
         logger.exception(f"missions_report: prewarm of the XLSX report failed: {e}")
     try:
-        await build_focus_summary(session, force=True)
+        await build_focus_summary(session, force=True, strict=True)
         out["summary"] = True
+    except SummaryNotBuilt:
+        logger.warning(
+            "missions_report: prewarm of the focus summary fell back to the plain "
+            "listing (LLM unavailable) — leaving it cold for the watchdog to retry"
+        )
     except Exception as e:
         logger.exception(f"missions_report: prewarm of the focus summary failed: {e}")
     return out
@@ -873,10 +1005,15 @@ def _at_risk_context(groups: dict[str, list[Mission]], today: datetime.date) -> 
             lines.append(f"- {_sanitize(name)}: {n} משימות")
         lines.append("")
 
+    # The prompt used to grow linearly with the board — ~300 chars of detail per
+    # mission with no cap, which is what made a cold build slow on a busy board.
+    # Buckets are walked worst-first, so the cap only ever drops the least urgent.
+    budget = PROMPT_MISSION_CAP
     for key in ("late", "today", "soon", "nodate"):
-        group = groups.get(key) or []
+        group = (groups.get(key) or [])[:budget]
         if not group:
             continue
+        budget -= len(group)
         lines.append(f"{_BUCKET_TITLES[key].split(' ', 1)[-1]}:")
         for m in group:
             due = oms.format_due(m.due_date) if m.due_date else "ללא יעד"
@@ -927,20 +1064,57 @@ def _decorate_summary(raw: str) -> str:
     return "\n".join(out).strip()
 
 
-async def build_focus_summary(session: AsyncSession, force: bool = False) -> str:
+class SummaryNotBuilt(Exception):
+    """The LLM leg of the focus summary failed and the plain fallback was served.
+
+    Raised only towards prewarm_daily, so a prewarm can no longer report success
+    while leaving the cache empty — the exact bug that made the 🧠 סיכום AI button
+    slow all day after a bad 04:10.
+    """
+
+    def __init__(self, fallback: str):
+        super().__init__("focus summary fell back to the plain listing")
+        self.fallback = fallback
+
+
+async def build_focus_summary(
+    session: AsyncSession, force: bool = False, strict: bool = False,
+) -> str:
     """AI situation assessment + to-do list for everything overdue or due within AT_RISK_DAYS.
 
-    Served from the day cache; the 04:10 prewarm builds it with force=True.
-    Always returns sendable HTML: falls back to the computed listing if the LLM fails.
+    Served from the day cache (memory, then the DB mirror); the 04:10 prewarm and
+    the watchdog build it with force=True. Always returns sendable HTML: falls back
+    to the computed listing if the LLM fails. `strict=True` additionally raises
+    SummaryNotBuilt on that fallback, so callers that care whether the cache is now
+    warm can tell — plain callers still just get the fallback text.
     """
-    key = oms.today_il().isoformat()
-    if not force and key in _summary_cache:
-        return _summary_cache[key]
+    from time import perf_counter
 
+    key = oms.today_il().isoformat()
+    if not force:
+        if key in _summary_cache:
+            logger.info("⏱ missions summary: hit (memory)")
+            return _summary_cache[key]
+        row = await _db_cache_get(session, KIND_SUMMARY)
+        if row is not None and row.text:
+            logger.info("⏱ missions summary: hit (db)")
+            return _cache_put(_summary_cache, key, row.text)
+
+    t0 = perf_counter()
     today = oms.today_il()
     groups = await collect_at_risk(session)
     if not any(groups.values()):
-        return _cache_put(_summary_cache, key, _format_at_risk_plain(groups, today))
+        plain = _format_at_risk_plain(groups, today)
+        _cache_put(_summary_cache, key, plain)
+        await _db_cache_put(session, KIND_SUMMARY, text=plain)
+        return plain
+
+    def _fallback() -> str:
+        # Not cached — a transient outage shouldn't pin the fallback for the whole day.
+        text = _format_at_risk_plain(groups, today)
+        if strict:
+            raise SummaryNotBuilt(text)
+        return text
 
     from app.services.llm_router import llm_chat
     try:
@@ -955,12 +1129,12 @@ async def build_focus_summary(session: AsyncSession, force: bool = False) -> str
         )
     except Exception as e:
         logger.warning(f"missions_report: focus summary LLM failed, using plain list: {e}")
-        # Not cached — a transient outage shouldn't pin the fallback for the whole day.
-        return _format_at_risk_plain(groups, today)
+        return _fallback()
 
     raw = (raw or "").strip()
     if not raw:
-        return _format_at_risk_plain(groups, today)
+        logger.warning("missions_report: focus summary LLM returned empty, using plain list")
+        return _fallback()
 
     counts = (
         f"⚠️ {len(groups['late'])} באיחור · "
@@ -975,4 +1149,7 @@ async def build_focus_summary(session: AsyncSession, force: bool = False) -> str
     from app.services.telegram_routing import _TG_MAX
     if len(text) > _TG_MAX:
         text = text[: _TG_MAX - 20] + "\n…(קוצר)"
-    return _cache_put(_summary_cache, key, text)
+    logger.info(f"⏱ missions summary: miss, built in {int((perf_counter() - t0) * 1000)}ms")
+    _cache_put(_summary_cache, key, text)
+    await _db_cache_put(session, KIND_SUMMARY, text=text)
+    return text

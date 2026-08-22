@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, BigInteger, String, Text, DateTime, Date, Boolean, ForeignKey, Enum, JSON, Float, Index, UniqueConstraint
+from sqlalchemy import Column, Integer, BigInteger, String, Text, DateTime, Date, Boolean, ForeignKey, Enum, JSON, Float, Index, UniqueConstraint, LargeBinary
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 from pgvector.sqlalchemy import Vector
@@ -383,8 +383,10 @@ class ProjectReportSchedule(Base):
 
 class MissionStatusEnum(str, enum.Enum):
     # Stored as VARCHAR (not PG enum) — see CLAUDE.md §4; never convert to a PG enum.
+    # open/closed only: the intermediate 'in_progress' is removed. Progress is
+    # reported via MissionUpdate rows, not a status change. Legacy rows are
+    # normalized to 'open' at startup (app/main.py).
     OPEN = "open"
-    IN_PROGRESS = "in_progress"
     DONE = "done"
     CANCELLED = "cancelled"
 
@@ -430,11 +432,38 @@ class MissionUpdate(Base):
     mission_id  = Column(Integer, ForeignKey("missions.id", ondelete="CASCADE"),
                          nullable=False, index=True)
     text        = Column(Text, nullable=False)
+    # None = ordinary status update, "close" = the note written while closing.
+    kind        = Column(String(16), nullable=True)
     author_id   = Column(Integer, ForeignKey("users.id"), nullable=True)
     author_name = Column(String(100), nullable=True)
     created_at  = Column(DateTime, default=datetime.utcnow)
 
     author = relationship("User", foreign_keys=[author_id])
+
+
+class MissionReportCache(Base):
+    """Day-cache for the expensive חדר מבצעים artifacts (XLSX + AI narratives).
+
+    The in-process dicts in missions_report_service die with the container, so a
+    Railway redeploy after the 04:10 prewarm used to leave the 🧠 סיכום AI button
+    cold — and paying a full board scan + Groq call — for the rest of the day.
+    Persisting here makes the cache survive a restart.
+
+    kind: "summary" (focus summary HTML) | "ai_insights" (report narrative) |
+          "report" (XLSX bytes).
+    """
+    __tablename__ = "mission_report_cache"
+
+    id           = Column(Integer, primary_key=True)
+    day          = Column(Date, nullable=False)        # Israel-local calendar day
+    kind         = Column(String(16), nullable=False)
+    text         = Column(Text, nullable=True)
+    blob         = Column(LargeBinary, nullable=True)
+    filename     = Column(String(255), nullable=True)
+    generated_at = Column(String(32), nullable=True)   # display stamp, as built
+    created_at   = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (UniqueConstraint("day", "kind", name="uq_mission_report_cache_day_kind"),)
 
 
 # =============================================================================

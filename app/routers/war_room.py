@@ -123,6 +123,9 @@ async def war_room_page(
         "quadrants": quadrants,
         "quadrant_defs": oms.QUADRANTS,
         "status_labels": oms.STATUS_LABELS,
+        # Single source of truth for "is this mission live?" — the template must
+        # never re-spell the status list.
+        "active_statuses": oms.ACTIVE_STATUSES,
         "stats": {
             "open": sum(counts.values()),
             "do_now": counts.get("do", 0),
@@ -177,12 +180,28 @@ async def download_report(
 async def focus_summary(
     session: AsyncSession = Depends(get_db_session),
     current_user: User = Depends(get_current_user),
+    refresh: int = 0,
 ):
-    """AI situation assessment of overdue / nearly-overdue missions, for the page modal."""
+    """AI situation assessment of overdue / nearly-overdue missions, for the page modal.
+
+    Served from the day cache; `?refresh=1` rebuilds it against the current board.
+    """
     from app.services import missions_report_service as mrs
 
-    text = await mrs.build_focus_summary(session)
+    text = await mrs.build_focus_summary(session, force=bool(refresh))
     return JSONResponse({"status": "ok", "text": text})
+
+
+@router.get("/cache-status")
+async def cache_status(current_user: User = Depends(get_current_user)):
+    """Which of today's expensive artifacts are warm — the answer to "was it prebuilt?".
+
+    Without this there is no way to tell a cold press from a slow Groq call in
+    production.
+    """
+    from app.services import missions_report_service as mrs
+
+    return JSONResponse({"status": "ok", **mrs.cache_status()})
 
 
 @router.post("/create")
@@ -220,7 +239,9 @@ async def change_status(
     session: AsyncSession = Depends(get_db_session),
     current_user: User = Depends(get_current_user),
     action: str = Form(...),
+    note: str = Form(""),
 ):
+    """Change a mission's status. `note` is the optional closing text (mirrors the bot)."""
     _require_editor(current_user)
     new_status = {
         "done": MissionStatusEnum.DONE.value,
@@ -232,6 +253,8 @@ async def change_status(
     m = await session.get(Mission, mission_id)
     if not m:
         return JSONResponse({"status": "error", "message": "המשימה לא נמצאה"}, status_code=404)
+    if note.strip() and action in ("done", "cancel"):
+        await oms.add_mission_update(session, m, note, current_user, kind="close")
     await oms.set_status(session, m, new_status)
     return JSONResponse({"status": "ok", "message": "הסטטוס עודכן"})
 

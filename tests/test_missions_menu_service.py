@@ -54,6 +54,7 @@ def _make_update(**kwargs):
         id=1,
         mission_id=1,
         text="הוחלף מבודד בפיידר 3",
+        kind=None,
         author_id=1,
         author_name="דני לוי",
         created_at=datetime.datetime(2026, 7, 14, 15, 6),
@@ -167,19 +168,81 @@ def test_build_mission_card_shows_creator_and_axis():
     assert "01/07/2026" in card
 
 
-def test_build_mission_card_shows_status_updates():
+def test_build_mission_card_shows_latest_status_update():
+    """The card leads with where the mission stands now — one line, not the whole log."""
     from app.services.missions_menu_service import build_mission_card
     m = _make_mission(updates=[_make_update()])
     card = build_mission_card(m)
-    assert "עדכוני סטטוס" in card
+    assert "עדכון אחרון" in card
     assert "הוחלף מבודד בפיידר 3" in card
     assert "דני לוי" in card
     assert "14/07 18:06" in card  # 15:06 UTC → Israel local
 
 
+def test_build_mission_card_shows_only_the_newest_update_by_default():
+    from app.services.missions_menu_service import build_mission_card
+    m = _make_mission(updates=[
+        _make_update(id=1, text="ישן"),
+        _make_update(id=2, text="חדש", created_at=datetime.datetime(2026, 7, 14, 16, 0)),
+    ])
+    card = build_mission_card(m)
+    assert "חדש" in card
+    assert "ישן" not in card
+    assert "מתוך 2 עדכונים" in card
+
+
+def test_build_mission_card_show_all_updates_lists_everything():
+    from app.services.missions_menu_service import build_mission_card
+    m = _make_mission(updates=[
+        _make_update(id=1, text="ישן"),
+        _make_update(id=2, text="חדש", created_at=datetime.datetime(2026, 7, 14, 16, 0)),
+    ])
+    card = build_mission_card(m, show_all_updates=True)
+    assert "עדכוני סטטוס" in card
+    assert "ישן" in card and "חדש" in card
+
+
+def test_all_updates_view_caps_at_history_limit():
+    from app.services.missions_menu_service import format_updates_block, HISTORY_LIMIT
+    total = HISTORY_LIMIT + 5
+    m = _make_mission(updates=[
+        _make_update(id=i, text=f"עדכון מספר {i:03d}") for i in range(1, total + 1)
+    ])
+    block = format_updates_block(m, limit=HISTORY_LIMIT)
+    assert "עדכון מספר 001" not in block          # trimmed off the front
+    assert f"עדכון מספר {total:03d}" in block     # newest survives
+    assert block.count("• ") == HISTORY_LIMIT
+    assert f"מוצגים {HISTORY_LIMIT}" in block and f"מתוך {total}" in block
+
+
+def test_closing_note_is_marked_with_a_lock():
+    from app.services.missions_menu_service import format_updates_block
+    m = _make_mission(updates=[_make_update(text="הוחלף והופעל", kind="close")])
+    assert "🔒" in format_updates_block(m)
+
+
+def test_card_keyboard_offers_full_log_only_when_there_is_more_than_one():
+    from app.services.missions_menu_service import build_mission_card_keyboard
+    one = _all_callback_data(build_mission_card_keyboard(
+        _make_mission(updates=[_make_update()]), "my", 0))
+    assert not any(cd.startswith("om:u:") for cd in one)
+
+    many = _all_callback_data(build_mission_card_keyboard(
+        _make_mission(updates=[_make_update(id=1), _make_update(id=2)]), "my", 0))
+    assert "om:u:1:my:0" in many
+
+    expanded = _all_callback_data(build_mission_card_keyboard(
+        _make_mission(updates=[_make_update(id=1), _make_update(id=2)]), "my", 0,
+        show_all_updates=True))
+    assert not any(cd.startswith("om:u:") for cd in expanded)
+    assert "om:d:1:my:0" in expanded
+
+
 def test_build_mission_card_without_updates_has_no_block():
     from app.services.missions_menu_service import build_mission_card
-    assert "עדכוני סטטוס" not in build_mission_card(_make_mission())
+    card = build_mission_card(_make_mission())
+    assert "עדכוני סטטוס" not in card
+    assert "עדכון אחרון" not in card
 
 
 def test_format_updates_block_escapes_user_text():
@@ -260,19 +323,28 @@ def test_card_keyboard_open_vs_done():
 
 
 def test_card_keyboard_has_no_start_action():
-    """'התחל ביצוע' is retired — the board is open/closed only."""
+    """'התחל ביצוע' is gone — the board is open/closed only."""
     from app.services.missions_menu_service import build_mission_card_keyboard
-    for status in ("open", "in_progress", "done", "cancelled"):
+    for status in ("open", "done", "cancelled"):
         cds = _all_callback_data(build_mission_card_keyboard(_make_mission(status=status), "my", 0))
         assert not any(cd.startswith("om:a:start:") for cd in cds)
 
 
-def test_card_keyboard_legacy_in_progress_still_editable():
-    """Rows left on the retired status keep the full active action set."""
+def test_active_statuses_is_open_only():
+    from app.services.missions_menu_service import ACTIVE_STATUSES, STATUS_LABELS
+    assert ACTIVE_STATUSES == ["open"]
+    assert "in_progress" not in STATUS_LABELS
+
+
+def test_card_keyboard_legacy_in_progress_does_not_crash():
+    """A row left on the removed status renders as closed, not as an exception.
+
+    Startup normalizes these to 'open' (app/main.py), so this only guards the
+    window before that migration runs.
+    """
     from app.services.missions_menu_service import build_mission_card_keyboard
     cds = _all_callback_data(build_mission_card_keyboard(_make_mission(status="in_progress"), "my", 0))
-    assert any(cd.startswith("om:a:note:") for cd in cds)
-    assert any(cd.startswith("om:a:done:") for cd in cds)
+    assert any(cd.startswith("om:a:reopen:") for cd in cds)
 
 
 def test_digest_keyboard_one_done_button_per_mission():
@@ -300,3 +372,65 @@ def test_results_keyboard_done_shortcut_only_for_my():
 def test_status_enum_values():
     assert MissionStatusEnum.OPEN.value == "open"
     assert MissionStatusEnum.DONE.value == "done"
+
+
+# ── List buttons carry the mission, not a "פרטים" placeholder ──────────────
+
+def test_results_keyboard_buttons_are_labelled_with_the_mission_title():
+    from app.services.missions_menu_service import build_results_keyboard
+    missions = [
+        _make_mission(id=11, title="החלפת מבודד בשדרות"),
+        _make_mission(id=12, title="בדיקת ממסר באשקלון"),
+    ]
+    kb = build_results_keyboard("qdo", 0, 2, missions)
+    labels = [b.text for row in kb.inline_keyboard for b in row]
+    assert any("החלפת מבודד בשדרות" in t for t in labels)
+    assert any("בדיקת ממסר באשקלון" in t for t in labels)
+    assert not any("פרטים" in t for t in labels)
+    # Pressing the mission still opens its card, and the way back is still there.
+    cds = _all_callback_data(kb)
+    assert "om:d:11:qdo:0" in cds and "om:d:12:qdo:0" in cds
+    assert "om:menu" in cds
+
+
+def test_results_keyboard_button_title_is_stripped_and_truncated():
+    from app.services.missions_menu_service import button_title
+    label = button_title(_make_mission(title="<b>דחוף</b> " + "א" * 80), 3)
+    assert "<b>" not in label
+    assert label.startswith("3. ")
+    assert "…" in label
+
+
+def test_results_keyboard_marks_overdue_missions():
+    from app.services.missions_menu_service import button_title
+    m = _make_mission(due_date=date.today() - timedelta(days=2))
+    assert "⚠️" in button_title(m, 1)
+
+
+# ── Closing a mission ──────────────────────────────────────────────────────
+
+def test_close_prompt_keyboard_callbacks_are_short_and_correct():
+    from app.services.missions_menu_service import build_close_prompt_keyboard
+    kb = build_close_prompt_keyboard("done", 12345, "qbacklog", 9, back_cd="om:d:12345:qbacklog:9")
+    cds = _all_callback_data(kb)
+    assert "om:cl:d:12345:qbacklog:9" in cds
+    assert "om:d:12345:qbacklog:9" in cds
+    for cd in cds:
+        assert len(cd.encode()) <= 64
+
+    cancel_cds = _all_callback_data(
+        build_close_prompt_keyboard("cancelled", 1, "my", 0, back_cd="om:d:1:my:0")
+    )
+    assert "om:cl:x:1:my:0" in cancel_cds
+
+
+def test_close_tokens_round_trip():
+    from app.services.missions_menu_service import CLOSE_TOKENS, CLOSE_TOKEN_BY_STATUS
+    assert CLOSE_TOKENS["d"] == "done" and CLOSE_TOKENS["x"] == "cancelled"
+    assert CLOSE_TOKEN_BY_STATUS["done"] == "d"
+
+
+def test_close_prompt_text_differs_for_done_and_cancel():
+    from app.services.missions_menu_service import close_prompt_text
+    assert "מה בוצע" in close_prompt_text("done")
+    assert "סיבת הביטול" in close_prompt_text("cancelled")

@@ -215,6 +215,13 @@ async def startup():
                     "UPDATE missions SET status = 'open' WHERE status = 'in_progress'"
                 ))
 
+                # חדר מבצעים: the note written while closing a mission is stored as
+                # an ordinary status update tagged kind='close'. create_all does not
+                # ALTER an existing table, so this column needs its own migration.
+                await conn.execute(_text(
+                    "ALTER TABLE mission_updates ADD COLUMN IF NOT EXISTS kind VARCHAR(16)"
+                ))
+
                 # LLM config table
                 await conn.execute(_text("""
                     CREATE TABLE IF NOT EXISTS llm_config (
@@ -312,6 +319,33 @@ async def startup():
         except Exception as e:
             print(f"Warning: embedding warmup failed: {e}")
     asyncio.create_task(_warm_embeddings())
+
+    # Warm the חדר מבצעים day-cache. The 04:10 prewarm runs once and claims its run
+    # key for the whole day, so before this the 🧠 סיכום AI button was cold — and
+    # paying a full board scan + Groq call on every press — after any redeploy.
+    # Normally this is a single SELECT against mission_report_cache.
+    async def _warm_missions_cache():
+        try:
+            from app.database import async_session_maker
+            from app.services import missions_report_service as mrs
+            async with async_session_maker() as session:
+                loaded = await mrs.load_caches_from_db(session)
+                if loaded.get("summary"):
+                    print("חדר מבצעים: day cache restored from DB.")
+                    return
+                print("חדר מבצעים: no cached summary for today — building it now.")
+                await mrs.build_focus_summary(session, force=True, strict=True)
+                print("חדר מבצעים: summary cache warmed.")
+        except Exception as e:
+            # Never fatal: a cold cache only costs latency on the first press, and
+            # the hourly watchdog retries. SummaryNotBuilt means the LLM was down.
+            from app.services.missions_report_service import SummaryNotBuilt
+            if isinstance(e, SummaryNotBuilt):
+                print("Warning: חדר מבצעים summary still cold (LLM unavailable) — "
+                      "the hourly watchdog will retry.")
+            else:
+                print(f"Warning: חדר מבצעים cache warmup failed: {e}")
+    asyncio.create_task(_warm_missions_cache())
 
     # Migrate user passwords (set default for users without password_hash)
     try:

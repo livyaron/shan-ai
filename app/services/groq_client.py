@@ -22,8 +22,17 @@ MODELS = [
 ]
 
 
+# One client for the whole process. Building an AsyncGroq per call meant a fresh
+# httpx pool and TLS handshake on every LLM request (~100-300ms of pure overhead)
+# and leaked the socket, since nothing ever closed it.
+_shared_client: AsyncGroq | None = None
+
+
 def get_client() -> AsyncGroq:
-    return AsyncGroq(api_key=settings.GROQ_API_KEY)
+    global _shared_client
+    if _shared_client is None:
+        _shared_client = AsyncGroq(api_key=settings.GROQ_API_KEY)
+    return _shared_client
 
 
 async def groq_chat(

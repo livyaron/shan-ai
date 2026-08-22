@@ -2434,24 +2434,52 @@ class TelegramPollingBot:
             )
         await self._render_missions_menu(query)
 
-    async def _send_missions_summary(self, query) -> None:
-        """om:sum — AI situation assessment of overdue / nearly-overdue missions."""
+    async def _send_missions_summary(self, query, force: bool = False) -> None:
+        """om:sum / om:sumr — AI situation assessment of at-risk missions.
+
+        Served from the day cache (built at 04:10, re-warmed on boot), so a normal
+        press is a lookup. `force` rebuilds it against the current board.
+        """
         from app.services import missions_report_service as mrs
 
-        try:
-            await query.edit_message_text("‏⏳ מנתח משימות בסיכון…")
-        except Exception:
-            pass
+        # The progress note goes in its own message: editing the menu in place fails
+        # with "message is not modified" when the text is unchanged, and the button
+        # then looks frozen for the whole build.
+        progress = None
+        if force:
+            # A refresh is pressed on the summary message itself — rebuild in place
+            # instead of stacking another copy under it.
+            try:
+                await query.edit_message_text("‏🔄 בונה סיכום עדכני…")
+                progress = query.message
+            except Exception:
+                progress = None
+        if progress is None:
+            try:
+                progress = await query.message.reply_text("‏⏳ מנתח משימות בסיכון…")
+            except Exception:
+                pass
         try:
             async with async_session_maker() as session:
-                text = await mrs.build_focus_summary(session)
-            await query.message.reply_text(text, parse_mode="HTML")
+                text = await mrs.build_focus_summary(session, force=force)
+            kb = InlineKeyboardMarkup([[
+                InlineKeyboardButton("🔄 רענן סיכום", callback_data="om:sumr"),
+                InlineKeyboardButton("🏠 חדר מבצעים", callback_data="om:menu"),
+            ]])
+            if progress is not None:
+                await progress.edit_text(text, parse_mode="HTML", reply_markup=kb)
+            else:
+                await query.message.reply_text(text, parse_mode="HTML", reply_markup=kb)
         except Exception as e:
             logger.error(f"missions focus summary failed: {e}")
-            await query.message.reply_text(
-                "‏❌ לא הצלחתי להפיק את הסיכום כרגע. נסה שוב בעוד רגע."
-            )
-        await self._render_missions_menu(query)
+            msg = "‏❌ לא הצלחתי להפיק את הסיכום כרגע. נסה שוב בעוד רגע."
+            if progress is not None:
+                try:
+                    await progress.edit_text(msg)
+                    return
+                except Exception:
+                    pass
+            await query.message.reply_text(msg)
 
     async def _render_missions_list(self, query, origin: str, page: int, user) -> None:
         from app.services import missions_menu_service as oms
@@ -2479,16 +2507,110 @@ class TelegramPollingBot:
             ),
         )
 
-    async def _render_mission_card(self, query, mission_id: int, origin: str, page: int) -> None:
+    async def _render_mission_card(
+        self, query, mission_id: int, origin: str, page: int, show_all: bool = False,
+    ) -> None:
         from app.services import missions_menu_service as oms
         async with async_session_maker() as session:
             m = await oms.get_mission(session, mission_id)
             if not m:
                 await query.edit_message_text("‏❌ המשימה לא נמצאה.")
                 return
-            text = oms.build_mission_card(m)
-            kb = oms.build_mission_card_keyboard(m, origin, page)
+            text = oms.build_mission_card(m, show_all_updates=show_all)
+            kb = oms.build_mission_card_keyboard(m, origin, page, show_all_updates=show_all)
+        # A long update log can push the card past Telegram's message limit.
+        if len(text) > _TG_MAX:
+            text = text[: _TG_MAX - 20] + "\n…(קוצר)"
         await query.edit_message_text(text, parse_mode="HTML", reply_markup=kb)
+
+    async def _prompt_mission_close(
+        self, query, mission_id: int, new_status: str, origin: str, page: int,
+        telegram_id: int, after: str = "card", dg_message=None,
+    ) -> None:
+        """Ask for a closing note before flipping the status. Always skippable."""
+        from app.services import missions_menu_service as oms
+        from app.services.telegram_state import _missions_edit_state
+
+        state = {
+            "mission_id": mission_id,
+            "mode": "close_text",
+            "pending_status": new_status,
+            "origin": origin,
+            "page": page,
+            "after": after,
+        }
+        if dg_message is not None:
+            state["dg_chat_id"] = dg_message.chat_id
+            state["dg_message_id"] = dg_message.message_id
+            state["dg_rows"] = list(
+                dg_message.reply_markup.inline_keyboard if dg_message.reply_markup else []
+            )
+        _missions_edit_state[telegram_id] = state
+
+        kb = oms.build_close_prompt_keyboard(
+            new_status, mission_id, origin, page,
+            back_cd=f"om:d:{mission_id}:{origin}:{page}",
+        )
+        text = oms.close_prompt_text(new_status)
+        if after == "digest":
+            # The digest message must stay intact — prompt in a new message.
+            await query.message.reply_text(text, parse_mode="HTML", reply_markup=kb)
+        else:
+            await query.edit_message_text(text, parse_mode="HTML", reply_markup=kb)
+
+    async def _finish_mission_close(
+        self, query, context, mission, state: dict, origin: str, page: int, user,
+    ) -> None:
+        """Render whatever follows a close, per where the close was started from."""
+        from app.services import missions_menu_service as oms
+        after = state.get("after", "card")
+
+        if after == "digest":
+            # Drop just this mission's row so the rest of the digest stays actionable.
+            chat_id, message_id = state.get("dg_chat_id"), state.get("dg_message_id")
+            if chat_id and message_id:
+                try:
+                    await context.bot.edit_message_reply_markup(
+                        chat_id=chat_id, message_id=message_id,
+                        reply_markup=self._digest_keyboard_without(state, mission.id),
+                    )
+                except Exception:
+                    pass
+            await query.edit_message_text(
+                f"‏✅ המשימה “{_html.escape(mission.title or '')}” נסגרה.",
+                parse_mode="HTML",
+            )
+            return
+
+        if after == "list":
+            await self._render_missions_list(query, origin, page, user)
+            return
+
+        text = oms.build_mission_card(mission)
+        kb = oms.build_mission_card_keyboard(mission, origin, page)
+        await query.edit_message_text(text, parse_mode="HTML", reply_markup=kb)
+
+    @staticmethod
+    def _digest_keyboard_without(state: dict, mission_id: int):
+        """The digest keyboard snapshot minus this mission's row (None when empty)."""
+        rows = [
+            row for row in (state.get("dg_rows") or [])
+            if not any(btn.callback_data == f"om:dg:done:{mission_id}" for btn in row)
+        ]
+        return InlineKeyboardMarkup(rows) if rows else None
+
+    async def _close_mission(
+        self, session, mission_id: int, new_status: str, note: str | None, user,
+    ):
+        """Append the closing note (when given), then flip the status."""
+        from app.services import missions_menu_service as oms
+        m = await oms.get_mission(session, mission_id)
+        if not m:
+            return None
+        if note:
+            await oms.add_mission_update(session, m, note, user, kind="close")
+        await oms.set_status(session, m, new_status)
+        return await oms.get_mission(session, mission_id)
 
     async def _notify_mission_owner(self, bot, session, mission, actor_user) -> None:
         """Tell the owner they got a mission — skipped when the actor owns it."""
@@ -2539,6 +2661,10 @@ class TelegramPollingBot:
 
         if data == "om:sum":
             await self._send_missions_summary(query)
+            return
+
+        if data == "om:sumr":
+            await self._send_missions_summary(query, force=True)
             return
 
         # ── Creation wizard ────────────────────────────────────────────
@@ -2667,6 +2793,38 @@ class TelegramPollingBot:
             await self._render_mission_card(query, mission_id, origin, page)
             return
 
+        # ── Full update log: om:u:{id}:{origin}:{page} ─────────────────
+        if data.startswith("om:u:"):
+            _missions_edit_state.pop(telegram_id, None)
+            parts = data.split(":")
+            try:
+                mission_id = int(parts[2])
+                origin = parts[3] if len(parts) > 3 else "my"
+                page = int(parts[4]) if len(parts) > 4 else 0
+            except (ValueError, IndexError):
+                return
+            await self._render_mission_card(query, mission_id, origin, page, show_all=True)
+            return
+
+        # ── Close without a note: om:cl:{d|x}:{id}:{origin}:{page} ─────
+        if data.startswith("om:cl:"):
+            parts = data.split(":")
+            try:
+                new_status = oms.CLOSE_TOKENS[parts[2]]
+                mission_id = int(parts[3])
+                origin = parts[4] if len(parts) > 4 else "my"
+                page = int(parts[5]) if len(parts) > 5 else 0
+            except (ValueError, IndexError, KeyError):
+                return
+            state = _missions_edit_state.pop(telegram_id, None) or {}
+            async with async_session_maker() as session:
+                m = await self._close_mission(session, mission_id, new_status, None, user)
+            if m is None:
+                await query.edit_message_text("‏❌ המשימה לא נמצאה.")
+                return
+            await self._finish_mission_close(query, context, m, state, origin, page, user)
+            return
+
         # ── Card actions: om:a:{action}:{id}:{origin}:{page} ─────────
         if data.startswith("om:a:"):
             parts = data.split(":")
@@ -2678,17 +2836,22 @@ class TelegramPollingBot:
             except (ValueError, IndexError):
                 return
 
-            if action in ("done", "reopen", "cancel"):
-                new_status = {
-                    "done": oms.MissionStatusEnum.DONE.value,
-                    "reopen": oms.MissionStatusEnum.OPEN.value,
-                    "cancel": oms.MissionStatusEnum.CANCELLED.value,
-                }[action]
+            if action == "reopen":
                 async with async_session_maker() as session:
                     m = await oms.get_mission(session, mission_id)
                     if m:
-                        await oms.set_status(session, m, new_status)
+                        await oms.set_status(session, m, oms.MissionStatusEnum.OPEN.value)
                 await self._render_mission_card(query, mission_id, origin, page)
+                return
+
+            if action in ("done", "cancel"):
+                # Closing asks for a note first — the "why" is worth one extra tap,
+                # and ⏭ סגור בלי הערה keeps a fast close one tap away.
+                new_status = (oms.MissionStatusEnum.DONE.value if action == "done"
+                              else oms.MissionStatusEnum.CANCELLED.value)
+                await self._prompt_mission_close(
+                    query, mission_id, new_status, origin, page, telegram_id, after="card",
+                )
                 return
 
             tail = f"{mission_id}:{origin}:{page}"
@@ -2789,11 +2952,10 @@ class TelegramPollingBot:
                 page = int(parts[4]) if len(parts) > 4 else 0
             except (ValueError, IndexError):
                 return
-            async with async_session_maker() as session:
-                m = await oms.get_mission(session, mission_id)
-                if m:
-                    await oms.set_status(session, m, oms.MissionStatusEnum.DONE.value)
-            await self._render_missions_list(query, origin, page, user)
+            await self._prompt_mission_close(
+                query, mission_id, oms.MissionStatusEnum.DONE.value,
+                origin, page, telegram_id, after="list",
+            )
             return
 
         # ── Digest ✔️: om:dg:done:{id} — keep the digest message intact ─
@@ -2802,28 +2964,11 @@ class TelegramPollingBot:
                 mission_id = int(data.rsplit(":", 1)[1])
             except ValueError:
                 return
-            async with async_session_maker() as session:
-                m = await oms.get_mission(session, mission_id)
-                if not m:
-                    return
-                await oms.set_status(session, m, oms.MissionStatusEnum.DONE.value)
-                title = m.title or ""
-            # Drop just this button row so the rest of the digest stays actionable
-            try:
-                old_kb = query.message.reply_markup.inline_keyboard if query.message and query.message.reply_markup else []
-                new_rows = [
-                    row for row in old_kb
-                    if not any(btn.callback_data == data for btn in row)
-                ]
-                await query.edit_message_reply_markup(
-                    reply_markup=InlineKeyboardMarkup(new_rows) if new_rows else None
-                )
-            except Exception:
-                pass
-            await context.bot.send_message(
-                chat_id=telegram_id,
-                text=f"‏✅ המשימה “{_html.escape(title)}” סומנה כבוצעה.",
-                parse_mode="HTML",
+            # Ask for the closing note in a new message; the digest itself is only
+            # edited once the close actually lands (so ❌ ביטול leaves it usable).
+            await self._prompt_mission_close(
+                query, mission_id, oms.MissionStatusEnum.DONE.value,
+                "my", 0, telegram_id, after="digest", dg_message=query.message,
             )
             return
 
@@ -2858,8 +3003,53 @@ class TelegramPollingBot:
             )
             return
 
-        # Edit flow: free-text status update on an existing mission
         edit_state = _missions_edit_state.get(telegram_id)
+
+        # Close flow: the note written while closing a mission
+        if edit_state and edit_state.get("mode") == "close_text":
+            if not stripped:
+                await update.message.reply_text(
+                    "‏❌ הטקסט ריק. שלח תיאור, או סגור בלי הערה:",
+                    reply_markup=oms.build_close_prompt_keyboard(
+                        edit_state["pending_status"], edit_state["mission_id"],
+                        edit_state.get("origin", "my"), edit_state.get("page", 0),
+                        back_cd=(f"om:d:{edit_state['mission_id']}:"
+                                 f"{edit_state.get('origin', 'my')}:{edit_state.get('page', 0)}"),
+                    ),
+                )
+                return
+            async with async_session_maker() as session:
+                m = await self._close_mission(
+                    session, edit_state["mission_id"], edit_state["pending_status"],
+                    stripped, user,
+                )
+            _missions_edit_state.pop(telegram_id, None)
+            if m is None:
+                await update.message.reply_text("‏❌ המשימה לא נמצאה.")
+                return
+            if edit_state.get("after") == "digest":
+                chat_id, message_id = edit_state.get("dg_chat_id"), edit_state.get("dg_message_id")
+                if chat_id and message_id:
+                    try:
+                        await context.bot.edit_message_reply_markup(
+                            chat_id=chat_id, message_id=message_id,
+                            reply_markup=self._digest_keyboard_without(edit_state, m.id),
+                        )
+                    except Exception:
+                        pass
+            closed_word = ("בוטלה" if edit_state["pending_status"]
+                           == oms.MissionStatusEnum.CANCELLED.value else "נסגרה")
+            await update.message.reply_text(f"‏✅ המשימה {closed_word} והעדכון נשמר.")
+            await update.message.reply_text(
+                oms.build_mission_card(m),
+                parse_mode="HTML",
+                reply_markup=oms.build_mission_card_keyboard(
+                    m, edit_state.get("origin", "my"), edit_state.get("page", 0),
+                ),
+            )
+            return
+
+        # Edit flow: free-text status update on an existing mission
         if edit_state and edit_state.get("mode") == "note_text":
             if not stripped:
                 await update.message.reply_text(

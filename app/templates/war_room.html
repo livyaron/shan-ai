@@ -59,11 +59,13 @@ body{background:var(--bg-deep);color:var(--text-1);font-family:var(--ui);min-hei
 .wr-card .m-meta{display:flex;flex-wrap:wrap;gap:10px;margin-top:8px;font-size:.8rem;color:var(--text-2);font-family:var(--mono)}
 .wr-card .m-meta .late{color:var(--red);font-weight:600}
 .wr-chip{display:inline-block;border:1px solid var(--border-hi);border-radius:20px;padding:1px 10px;font-size:.75rem}
-.wr-chip.st-open{color:var(--text-1)} .wr-chip.st-in_progress{color:var(--cyan);border-color:var(--cyan)}
+.wr-chip.st-open{color:var(--text-1)}
 .wr-chip.st-done{color:var(--green);border-color:var(--green)} .wr-chip.st-cancelled{color:var(--text-2)}
 .wr-card .m-updates{margin-top:8px;border-inline-start:2px solid var(--border-hi);padding-inline-start:8px}
 .wr-card .m-upd{color:var(--text-2);font-size:.8rem;margin-top:4px;unicode-bidi:isolate}
 .wr-card .m-upd .upd-meta{font-family:var(--mono);color:var(--text-1);opacity:.75}
+.wr-card .m-updlog{margin-top:6px}
+.wr-card .m-updlog summary{cursor:pointer;color:var(--text-2);font-size:.78rem;opacity:.85}
 .m-notebox{display:none;margin-top:8px}
 .m-notebox textarea{width:100%;background:var(--bg-card);color:var(--text-1);border:1px solid var(--border-hi);
   border-radius:8px;padding:6px 8px;font-size:.85rem;font-family:var(--ui);resize:vertical}
@@ -153,7 +155,9 @@ dialog.wr-dlg::backdrop{background:rgba(3,6,12,.75)}
   <dialog id="summaryDlg" class="wr-dlg">
     <div class="wr-dlg-head">🧠 סיכום משימות בסיכון</div>
     <div id="summaryBody" class="wr-summary">טוען…</div>
-    <div style="text-align:left;margin-top:14px">
+    <div style="text-align:left;margin-top:14px;display:flex;gap:8px;justify-content:flex-start">
+      <button class="wr-btn" onclick="openSummary(true)"
+              title="בונה סיכום חדש מהמצב הנוכחי של הלוח">🔄 רענן סיכום</button>
       <button class="wr-btn" onclick="document.getElementById('summaryDlg').close()">סגור</button>
     </div>
   </dialog>
@@ -171,15 +175,22 @@ dialog.wr-dlg::backdrop{background:rgba(3,6,12,.75)}
         <div class="wr-empty">אין משימות ברביע זה</div>
         {% endif %}
         {% for m in quadrants[qkey] %}
-        {% set late = m.due_date and m.status in ('open','in_progress') and m.due_date < today %}
+        {% set late = m.due_date and m.status in active_statuses and m.due_date < today %}
         <div class="wr-card{% if late %} overdue{% endif %}">
           <div class="m-title" dir="auto">{{ m.title }}</div>
           {% if m.description %}<div class="m-desc" dir="auto">{{ m.description }}</div>{% endif %}
           {% if m.updates %}
+          {% set last_upd = m.updates[-1] %}
           <div class="m-updates">
-            {% for u in m.updates %}
-            <div class="m-upd" dir="auto"><span class="upd-meta">{{ fmt_stamp(u.created_at) }} · {{ u.author_name or (u.author.username if u.author else '—') }}</span> — {{ u.text }}</div>
-            {% endfor %}
+            <div class="m-upd" dir="auto"><span class="upd-meta">{% if last_upd.kind == 'close' %}🔒 {% endif %}עדכון אחרון · {{ fmt_stamp(last_upd.created_at) }} · {{ last_upd.author_name or (last_upd.author.username if last_upd.author else '—') }}</span> — {{ last_upd.text }}</div>
+            {% if m.updates|length > 1 %}
+            <details class="m-updlog">
+              <summary>🗒 כל העדכונים ({{ m.updates|length }})</summary>
+              {% for u in m.updates %}
+              <div class="m-upd" dir="auto"><span class="upd-meta">{% if u.kind == 'close' %}🔒 {% endif %}{{ fmt_stamp(u.created_at) }} · {{ u.author_name or (u.author.username if u.author else '—') }}</span> — {{ u.text }}</div>
+              {% endfor %}
+            </details>
+            {% endif %}
           </div>
           {% endif %}
           <div class="m-meta">
@@ -192,15 +203,15 @@ dialog.wr-dlg::backdrop{background:rgba(3,6,12,.75)}
           </div>
           {% if not is_viewer %}
           <div class="m-actions">
-            {% if m.status in ('open','in_progress') %}
+            {% if m.status in active_statuses %}
             <button class="wr-btn" onclick="toggleNote({{ m.id }})">➕ הוסף סטטוס</button>
-            <button class="wr-btn" onclick="act({{ m.id }}, 'done')">✅ בוצע</button>
-            <button class="wr-btn" onclick="act({{ m.id }}, 'cancel')">🚫 בטל</button>
+            <button class="wr-btn" onclick="toggleClose({{ m.id }}, 'done')">✅ בוצע</button>
+            <button class="wr-btn" onclick="toggleClose({{ m.id }}, 'cancel')">🚫 בטל</button>
             {% else %}
             <button class="wr-btn" onclick="act({{ m.id }}, 'reopen')">↩️ פתח מחדש</button>
             {% endif %}
           </div>
-          {% if m.status in ('open','in_progress') %}
+          {% if m.status in active_statuses %}
           <div class="m-notebox" id="notebox-{{ m.id }}">
             <textarea id="note-{{ m.id }}" rows="2" dir="auto" maxlength="2000"
                       placeholder="מה התקדם? העדכון יתווסף לתיאור עם השם שלך והשעה"></textarea>
@@ -209,8 +220,17 @@ dialog.wr-dlg::backdrop{background:rgba(3,6,12,.75)}
               <button class="wr-btn" onclick="toggleNote({{ m.id }})">ביטול</button>
             </div>
           </div>
+          <div class="m-notebox" id="closebox-{{ m.id }}">
+            <textarea id="closenote-{{ m.id }}" rows="2" dir="auto" maxlength="2000"
+                      placeholder="מה בוצע / סיבת הביטול? יישמר כעדכון סטטוס עם השם שלך והשעה"></textarea>
+            <div class="m-edit-row">
+              <button class="wr-btn primary" onclick="closeMission({{ m.id }}, true)">✅ סגור עם הערה</button>
+              <button class="wr-btn" onclick="closeMission({{ m.id }}, false)">⏭ סגור בלי הערה</button>
+              <button class="wr-btn" onclick="toggleClose({{ m.id }}, null)">ביטול</button>
+            </div>
+          </div>
           {% endif %}
-          {% if m.status in ('open','in_progress') %}
+          {% if m.status in active_statuses %}
           <details class="m-edit">
             <summary>עריכה: רביע · אחראי · תאריך</summary>
             <div class="m-edit-row">
@@ -287,7 +307,6 @@ async function post(url, data){
   return true;
 }
 async function act(id, action){
-  if (action === 'cancel' && !confirm('לבטל את המשימה?')) return;
   if (await post(`/dashboard/war-room/${id}/status`, {action})) location.reload();
 }
 function toggleNote(id){
@@ -295,6 +314,26 @@ function toggleNote(id){
   const open = box.style.display === 'block';
   box.style.display = open ? 'none' : 'block';
   if (!open) document.getElementById(`note-${id}`).focus();
+}
+// Closing asks for the "why" first — never blocking: ⏭ סגור בלי הערה is one click.
+const pendingClose = {};
+function toggleClose(id, action){
+  const box = document.getElementById(`closebox-${id}`);
+  if (action === null){ box.style.display = 'none'; delete pendingClose[id]; return; }
+  pendingClose[id] = action;
+  box.style.display = 'block';
+  const ta = document.getElementById(`closenote-${id}`);
+  ta.placeholder = action === 'cancel'
+    ? 'סיבת הביטול? תישמר כעדכון סטטוס עם השם שלך והשעה'
+    : 'מה בוצע? יישמר כעדכון סטטוס עם השם שלך והשעה';
+  ta.focus();
+}
+async function closeMission(id, withNote){
+  const action = pendingClose[id];
+  if (!action) return;
+  const note = withNote ? document.getElementById(`closenote-${id}`).value.trim() : '';
+  if (withNote && !note){ alert('נדרש טקסט, או סגור בלי הערה'); return; }
+  if (await post(`/dashboard/war-room/${id}/status`, {action, note})) location.reload();
 }
 async function addNote(id){
   const note = document.getElementById(`note-${id}`).value.trim();
@@ -313,13 +352,13 @@ async function setDue(id){
   const due_date = document.getElementById(`due-${id}`).value;
   if (await post(`/dashboard/war-room/${id}/due`, {due_date})) location.reload();
 }
-async function openSummary(){
+async function openSummary(refresh){
   const dlg  = document.getElementById('summaryDlg');
   const body = document.getElementById('summaryBody');
-  body.textContent = 'מנתח משימות בסיכון…';
-  dlg.showModal();
+  body.textContent = refresh ? 'בונה סיכום עדכני…' : 'מנתח משימות בסיכון…';
+  if (!dlg.open) dlg.showModal();
   try {
-    const res = await fetch('/dashboard/war-room/summary');
+    const res = await fetch('/dashboard/war-room/summary' + (refresh ? '?refresh=1' : ''));
     const payload = await res.json();
     // Server-side output is already escaped; only our own <b>/<i> tags remain.
     body.innerHTML = payload.text || 'לא התקבל סיכום.';
