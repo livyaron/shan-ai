@@ -59,7 +59,14 @@ app.include_router(profile_router)
 async def startup():
     """Initialize database tables and start Telegram bot polling."""
     global _polling_task
+    import datetime as _startup_dt
     from app.utils.migrations import migrate_user_passwords
+
+    # Stamped before anything can fail, so /health reports uptime even on a
+    # partially-degraded boot.
+    app.state.started_at = _startup_dt.datetime.utcnow()
+    print(f"Booting commit {settings.RAILWAY_GIT_COMMIT_SHA[:12] or 'unknown'} "
+          f"on branch {settings.RAILWAY_GIT_BRANCH or 'unknown'}")
 
     # Retry DB connection up to 10 times (Railway internal DNS may take a moment)
     for attempt in range(10):
@@ -420,9 +427,24 @@ async def root(request: Request):
 
 @app.get("/health")
 async def health_check():
+    """Liveness + build provenance.
+
+    The commit is the answer to "is my code actually deployed?" — without it a
+    404 on a new route is indistinguishable from a route that was never added.
+    """
+    import datetime as _dt
+
+    started = getattr(app.state, "started_at", None)
     return {
         "status": "healthy",
-        "service": "shan-ai-api"
+        "service": "shan-ai-api",
+        "commit": (settings.RAILWAY_GIT_COMMIT_SHA or "unknown")[:12],
+        "branch": settings.RAILWAY_GIT_BRANCH or "unknown",
+        "deployment_id": settings.RAILWAY_DEPLOYMENT_ID or "unknown",
+        "started_at": started.isoformat() + "Z" if started else None,
+        "uptime_seconds": (
+            int((_dt.datetime.utcnow() - started).total_seconds()) if started else None
+        ),
     }
 
 @app.get("/api/v1/status")

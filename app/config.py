@@ -20,6 +20,13 @@ class Settings(BaseSettings):
     # Railway auto-injects this and keeps it current across domain changes.
     RAILWAY_PUBLIC_DOMAIN: str = os.getenv("RAILWAY_PUBLIC_DOMAIN", "")
 
+    # Build provenance, also injected by Railway. Empty when running locally.
+    # Surfaced on /health so "is my code actually deployed?" has an answer that
+    # does not depend on guessing from behaviour.
+    RAILWAY_GIT_COMMIT_SHA: str = os.getenv("RAILWAY_GIT_COMMIT_SHA", "")
+    RAILWAY_GIT_BRANCH: str = os.getenv("RAILWAY_GIT_BRANCH", "")
+    RAILWAY_DEPLOYMENT_ID: str = os.getenv("RAILWAY_DEPLOYMENT_ID", "")
+
     # Claude API
     ANTHROPIC_API_KEY: str = os.getenv("ANTHROPIC_API_KEY", "")
 
