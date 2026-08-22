@@ -10,12 +10,13 @@ from io import BytesIO
 import pytest
 from sqlalchemy.orm import configure_mappers, class_mapper
 
-from app.models import Mission, User
+from app.models import Mission, MissionUpdate, User
 from app.services import missions_report_service as mrs
 
 configure_mappers()
 _mission_mgr = class_mapper(Mission).class_manager
 _user_mgr = class_mapper(User).class_manager
+_upd_mgr = class_mapper(MissionUpdate).class_manager
 
 TODAY = date(2026, 7, 15)
 NOW = datetime.datetime(2026, 7, 15, 6, 0)
@@ -46,13 +47,33 @@ def _make_mission(**kwargs):
         completed_at=None,
     )
     owner = kwargs.pop("owner", _make_user())
+    updates = kwargs.pop("updates", None)
     defaults.update(kwargs)
     m = _mission_mgr.new_instance()
     for k, v in defaults.items():
         setattr(m, k, v)
     m.owner = owner
     m.created_by = owner
+    # Left unset when not given, so get_mission_updates sees an unloaded log —
+    # exactly what a query without selectinload produces.
+    if updates is not None:
+        m.updates = updates
     return m
+
+
+def _make_update(**kwargs):
+    """Transient MissionUpdate. created_at is naive UTC, as stored."""
+    defaults = dict(
+        id=1, mission_id=1, text="הוחלף מבודד", kind=None,
+        author_id=1, author_name="דני",
+        created_at=datetime.datetime(2026, 7, 14, 15, 6),
+    )
+    defaults.update(kwargs)
+    u = _upd_mgr.new_instance()
+    for k, v in defaults.items():
+        setattr(u, k, v)
+    u.author = None
+    return u
 
 
 # ── due_bucket boundaries ──────────────────────────────────────────────────
@@ -764,3 +785,126 @@ async def test_at_risk_prompt_is_capped(monkeypatch):
     assert context.count("| אחראי:") == mrs.PROMPT_MISSION_CAP
     # The owner-load header is still computed from the whole board.
     assert f"{len(late)} משימות" in context
+
+
+# ── "עדכון אחרון" — when each owner last reported on their open work ────────
+
+def _owner_stats(active, closed=()):
+    return mrs._compute_stats(list(active), list(closed), TODAY, NOW)
+
+
+def test_last_update_at_reads_the_status_log_not_updated_at():
+    """Editing a due date bumps updated_at; it is not a report on the work."""
+    m = _make_mission(updated_at=datetime.datetime(2026, 7, 15, 9, 0), updates=[])
+    assert mrs._last_update_at(m) is None
+
+    m = _make_mission(updates=[
+        _make_update(id=1, created_at=datetime.datetime(2026, 7, 10, 8, 0)),
+        _make_update(id=2, created_at=datetime.datetime(2026, 7, 12, 8, 0)),
+    ])
+    assert mrs._last_update_at(m) == datetime.datetime(2026, 7, 12, 8, 0)
+
+
+def test_last_update_at_returns_none_when_the_log_is_not_loaded():
+    """A lazy load here would raise MissingGreenlet under asyncio."""
+    assert mrs._last_update_at(_make_mission()) is None
+
+
+def test_owner_row_carries_the_newest_update_across_their_open_missions():
+    a = _make_user(id=1, username="דני")
+    stats = _owner_stats([
+        _make_mission(id=1, owner=a, updates=[
+            _make_update(id=1, created_at=datetime.datetime(2026, 7, 9, 8, 0))]),
+        _make_mission(id=2, owner=a, updates=[
+            _make_update(id=2, created_at=datetime.datetime(2026, 7, 13, 8, 0))]),
+        _make_mission(id=3, owner=a, updates=[]),
+    ])
+    row = stats["owners"][0]
+    assert row["last_update"] == "13/07/2026"
+    assert row["days_since_update"] == 2          # TODAY is 15/07/2026
+
+
+def test_owner_with_no_reports_shows_a_dash():
+    a = _make_user(id=1, username="דני")
+    row = _owner_stats([_make_mission(id=1, owner=a, updates=[])])["owners"][0]
+    assert row["last_update"] == "—"
+    assert row["days_since_update"] is None
+
+
+def test_a_report_on_a_closed_mission_does_not_count_as_reporting():
+    """The column answers "is this person reporting on their OPEN work?"."""
+    a = _make_user(id=1, username="דני")
+    closed = _make_mission(
+        id=10, owner=a, status="done",
+        completed_at=datetime.datetime(2026, 7, 14, 8, 0),
+        updates=[_make_update(id=9, created_at=datetime.datetime(2026, 7, 14, 8, 0))],
+    )
+    stats = _owner_stats([_make_mission(id=1, owner=a, updates=[])], [closed])
+    row = stats["owners"][0]
+    assert row["last_update"] == "—"
+    assert row["done_30"] == 1
+
+
+def test_silent_owners_counts_only_those_holding_open_work():
+    fresh = _make_user(id=1, username="דני")
+    quiet = _make_user(id=2, username="רות")
+    stats = _owner_stats([
+        _make_mission(id=1, owner=fresh, updates=[
+            _make_update(id=1, created_at=datetime.datetime(2026, 7, 14, 8, 0))]),
+        _make_mission(id=2, owner=quiet, updates=[
+            _make_update(id=2, created_at=datetime.datetime(2026, 5, 1, 8, 0))]),
+    ])
+    assert stats["silent_owners"] == 1
+
+
+def test_owner_closed_out_is_not_silent():
+    """Someone with nothing open cannot be 'not reporting'."""
+    a = _make_user(id=1, username="דני")
+    stats = _owner_stats([], [_make_mission(
+        id=10, owner=a, status="done",
+        completed_at=datetime.datetime(2026, 7, 14, 8, 0), updates=[])])
+    assert stats["silent_owners"] == 0
+
+
+def test_silent_owners_surfaces_as_an_insight():
+    a = _make_user(id=1, username="דני")
+    stats = _owner_stats([_make_mission(id=1, owner=a, updates=[])])
+    headlines = " ".join(i["headline"] for i in mrs.compute_insights(stats))
+    assert "לא דיווחו" in headlines
+
+
+def test_stats_block_tells_the_model_how_long_each_owner_has_been_quiet():
+    a = _make_user(id=1, username="דני")
+    stats = _owner_stats([_make_mission(id=1, owner=a, updates=[
+        _make_update(id=1, created_at=datetime.datetime(2026, 7, 13, 8, 0))])])
+    block = mrs._stats_block(stats)
+    assert "עדכון אחרון" in block
+    assert "לפני 2 ימים" in block
+
+
+def test_workbook_owner_table_has_the_last_update_column():
+    from openpyxl import load_workbook
+
+    a = _make_user(id=1, username="דני")
+    active = [_make_mission(id=1, owner=a, due_date=TODAY - timedelta(days=2), updates=[
+        _make_update(id=1, created_at=datetime.datetime(2026, 7, 13, 8, 0))])]
+    data = {
+        "open_rows": [], "closed_rows": [],
+        "stats": _owner_stats(active),
+        "meta": {"generated_at": "15/07/2026 06:00", "date_slug": "15-07-2026"},
+    }
+    wb = load_workbook(BytesIO(mrs.build_workbook(data)))
+    ws = wb[mrs.SHEET_SUMMARY]
+    rows = [[c.value for c in r] for r in ws.iter_rows(max_col=8)]
+
+    hdr = next(i for i, r in enumerate(rows) if r[0] == "אחראי")
+    assert rows[hdr][:7] == [
+        "אחראי", "פתוחות", "באיחור", "% איחור", "הושלמו 30 יום",
+        "ממוצע ימי ביצוע", "עדכון אחרון",
+    ]
+    assert rows[hdr][7] is None, "the table must not spill into an 8th column"
+    assert rows[hdr + 1][0] == "דני"
+    assert rows[hdr + 1][6] == "13/07/2026"
+
+    flat = [c for r in rows for c in r if isinstance(c, str)]
+    assert any("אחראים ללא דיווח" in c for c in flat), "the KPI block gained the figure"

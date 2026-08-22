@@ -227,6 +227,16 @@ def _age_days(created: datetime.datetime | None, today: datetime.date) -> int | 
     return None if created is None else (today - created.date()).days
 
 
+def _last_update_at(m: Mission) -> datetime.datetime | None:
+    """When someone last reported on this mission, or None if nobody ever has.
+
+    This is the status-update log, not `updated_at` — editing a due date is not
+    a report on the work.
+    """
+    stamps = [u.created_at for u in oms.get_mission_updates(m) if u.created_at]
+    return max(stamps) if stamps else None
+
+
 def due_bucket(due: datetime.date | None, today: datetime.date) -> str:
     """Which urgency bucket a due date falls into. Boundaries are inclusive at 0 and AT_RISK_DAYS."""
     if due is None:
@@ -393,28 +403,41 @@ def _compute_stats(
 
     # Per-owner load — the row that exposes who is actually holding the overdue work.
     per_owner: dict[str, dict] = {}
-    for m in active:
-        row = per_owner.setdefault(_user_name(m.owner), {
+
+    def _owner_row(m: Mission) -> dict:
+        return per_owner.setdefault(_user_name(m.owner), {
             "owner": _user_name(m.owner), "open": 0,
-            "overdue": 0, "done_30": 0, "cycles": [],
+            "overdue": 0, "done_30": 0, "cycles": [], "last_update": None,
         })
+
+    for m in active:
+        row = _owner_row(m)
         row["open"] += 1
         if oms.is_overdue(m, today):
             row["overdue"] += 1
+        # Deliberately across the owner's ACTIVE missions only: a report filed on
+        # something they closed last month says nothing about their open work.
+        last = _last_update_at(m)
+        if last and (row["last_update"] is None or last > row["last_update"]):
+            row["last_update"] = last
     for m in done_30:
-        row = per_owner.setdefault(_user_name(m.owner), {
-            "owner": _user_name(m.owner), "open": 0,
-            "overdue": 0, "done_30": 0, "cycles": [],
-        })
+        row = _owner_row(m)
         row["done_30"] += 1
         if m.completed_at and m.created_at:
             row["cycles"].append(max((m.completed_at - m.created_at).days, 0))
 
     owners = []
+    silent_owners = 0
     for row in per_owner.values():
         cyc = row.pop("cycles")
         row["overdue_rate"] = round(row["overdue"] / row["open"] * 100) if row["open"] else 0
         row["avg_cycle"] = round(sum(cyc) / len(cyc), 1) if cyc else 0.0
+        last = row.pop("last_update")
+        row["last_update"] = oms.format_due(last.date()) if last else "—"
+        row["days_since_update"] = (today - last.date()).days if last else None
+        if row["open"] and (row["days_since_update"] is None
+                            or row["days_since_update"] > STALE_DAYS):
+            silent_owners += 1
         owners.append(row)
     owners.sort(key=lambda r: (-r["overdue"], -r["open"], r["owner"]))
 
@@ -430,6 +453,7 @@ def _compute_stats(
         "closed_30d": len(done_30),
         "created_7d": created_7,
         "stale": len(stale),
+        "silent_owners": silent_owners,
         "owners": owners,
     }
 
@@ -476,6 +500,14 @@ def compute_insights(stats: dict) -> list[dict]:
             "sev": "medium", "icon": "🕸",
             "headline": f"{stats['stale']} משימות פעילות ללא עדכון מעל {STALE_DAYS} ימים",
             "action": "בדוק אם הן עדיין רלוונטיות — או סגור אותן.",
+        })
+
+    if stats.get("silent_owners"):
+        out.append({
+            "sev": "medium", "icon": "🔇",
+            "headline": (f"{stats['silent_owners']} אחראים עם משימות פתוחות "
+                         f"לא דיווחו מעל {STALE_DAYS} ימים"),
+            "action": "ראה עמודת «עדכון אחרון» בטבלת העומס — בקש מהם עדכון סטטוס.",
         })
 
     do_now = stats["quadrants"].get("do", 0)
@@ -535,6 +567,7 @@ def _stats_block(stats: dict) -> str:
         f"זמן ביצוע ממוצע (30 יום): {stats['avg_cycle_30d']} ימים",
         f"נסגרו ב-7 ימים: {stats['closed_7d']} | נסגרו ב-30 יום: {stats['closed_30d']}",
         f"נפתחו ב-7 ימים: {stats['created_7d']}",
+        f"אחראים עם משימות פתוחות שלא דיווחו מעל {STALE_DAYS} ימים: {stats['silent_owners']}",
         f"ללא עדכון מעל {STALE_DAYS} ימים: {stats['stale']}",
         "",
         "פילוח לפי רביע:",
@@ -546,11 +579,15 @@ def _stats_block(stats: dict) -> str:
     for b in BUCKET_ORDER:
         lines.append(f"- {b}: {stats['buckets'].get(b, 0)}")
     lines.append("")
-    lines.append("עומס לפי אחראי (פתוחות / באיחור / אחוז איחור / הושלמו ב-30 יום):")
+    lines.append("עומס לפי אחראי (פתוחות / באיחור / אחוז איחור / הושלמו ב-30 יום / עדכון אחרון):")
     for row in stats["owners"][:12]:
+        days = row.get("days_since_update")
+        when = "לא דיווח מעולם" if days is None else (
+            "היום" if days == 0 else f"לפני {days} ימים"
+        )
         lines.append(
             f"- {_sanitize(row['owner'])}: {row['open']} / {row['overdue']} / "
-            f"{row['overdue_rate']}% / {row['done_30']}"
+            f"{row['overdue_rate']}% / {row['done_30']} / {when}"
         )
     return "\n".join(lines)
 
@@ -636,7 +673,8 @@ def build_workbook(data: dict, ai_text: str = "") -> bytes:
         ("זמן ביצוע ממוצע, 30 יום (ימים)", stats["avg_cycle_30d"]),
         ("נסגרו ב-7 הימים האחרונים", stats["closed_7d"]),
         ("נפתחו ב-7 הימים האחרונים", stats["created_7d"]),
-        (f"ללא עדכון מעל {STALE_DAYS} ימים", stats["stale"]),
+        (f"משימות ללא עדכון מעל {STALE_DAYS} ימים", stats["stale"]),
+        (f"אחראים ללא דיווח מעל {STALE_DAYS} ימים", stats["silent_owners"]),
     ]
     for label, value in kpis:
         ws.cell(r, 1, label).font = Font(bold=True)
@@ -664,7 +702,8 @@ def build_workbook(data: dict, ai_text: str = "") -> bytes:
     r += 1
     owner_hdr_row = r
     for c, label in enumerate(
-        ["אחראי", "פתוחות", "באיחור", "% איחור", "הושלמו 30 יום", "ממוצע ימי ביצוע"], 1
+        ["אחראי", "פתוחות", "באיחור", "% איחור", "הושלמו 30 יום", "ממוצע ימי ביצוע",
+         "עדכון אחרון"], 1
     ):
         cell = ws.cell(r, c, label)
         cell.font = hdr_font
@@ -678,8 +717,10 @@ def build_workbook(data: dict, ai_text: str = "") -> bytes:
         ws.cell(r, 4, row["overdue_rate"])
         ws.cell(r, 5, row["done_30"])
         ws.cell(r, 6, row["avg_cycle"])
+        # When the owner last reported on their open work — "—" means never.
+        ws.cell(r, 7, row["last_update"])
         if row["overdue"]:
-            for c in range(1, 7):
+            for c in range(1, 8):
                 ws.cell(r, c).fill = overdue_fill
         r += 1
     owner_last_row = r - 1
