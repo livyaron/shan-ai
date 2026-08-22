@@ -220,6 +220,7 @@ def _sample_data():
             "urgent": "כן", "important": "כן", "status": "פתוחה", "owner": "דני",
             "created_by": "דני", "due": "01/01/2026", "days_to_due": 1,
             "days_overdue": None, "age_days": 5, "created_at": "", "updated_at": "",
+            "last_status_update": "—",
             "_overdue": m.due_date < TODAY, "_at_risk": False,
         } for m in active],
         "closed_rows": [{
@@ -908,3 +909,83 @@ def test_workbook_owner_table_has_the_last_update_column():
 
     flat = [c for r in rows for c in r if isinstance(c, str)]
     assert any("אחראים ללא דיווח" in c for c in flat), "the KPI block gained the figure"
+
+
+# ── Per-mission "עדכון סטטוס אחרון" on the open sheet ──────────────────────
+
+async def _collected(missions, monkeypatch):
+    """Run the real collect_report_data over a fixed mission list."""
+    class _FakeSession:
+        async def scalars(self, _stmt):
+            return _Scalars(missions)
+
+    class _Scalars:
+        def __init__(self, rows):
+            self._rows = rows
+
+        def all(self):
+            return self._rows
+
+    monkeypatch.setattr(mrs.oms, "today_il", lambda: TODAY)
+    return await mrs.collect_report_data(_FakeSession())
+
+
+async def test_open_row_carries_the_last_status_update(monkeypatch):
+    data = await _collected([_make_mission(id=1, updates=[
+        _make_update(id=1, created_at=datetime.datetime(2026, 7, 13, 6, 30)),
+        _make_update(id=2, created_at=datetime.datetime(2026, 7, 14, 12, 5)),
+    ])], monkeypatch)
+    # 12:05 UTC → 15:05 Israel local.
+    assert data["open_rows"][0]["last_status_update"] == "14/07/2026 15:05"
+
+
+async def test_open_row_shows_a_dash_when_nobody_reported(monkeypatch):
+    data = await _collected([_make_mission(id=1, updates=[])], monkeypatch)
+    assert data["open_rows"][0]["last_status_update"] == "—"
+
+
+async def test_last_status_update_is_independent_of_updated_at(monkeypatch):
+    """A due-date edit bumps updated_at but must not look like a status report."""
+    data = await _collected([_make_mission(
+        id=1, updated_at=datetime.datetime(2026, 7, 15, 5, 0), updates=[])], monkeypatch)
+    row = data["open_rows"][0]
+    assert row["updated_at"] == "15/07/2026 08:00"     # 05:00 UTC → 08:00 IL
+    assert row["last_status_update"] == "—"
+
+
+def test_open_sheet_appends_the_column_without_shifting_the_others():
+    """Saved filters and column references depend on the existing positions."""
+    assert mrs.OPEN_HEADERS[-1] == "עדכון סטטוס אחרון"
+    assert mrs.OPEN_HEADERS[-2] == "עודכנה לאחרונה"
+    assert len(mrs.OPEN_HEADERS) == len(mrs.OPEN_WIDTHS)
+
+
+def test_workbook_open_sheet_writes_the_new_column():
+    from openpyxl import load_workbook
+
+    data = _sample_data()
+    data["open_rows"][0]["last_status_update"] = "14/07/2026 15:05"
+    ws = load_workbook(BytesIO(mrs.build_workbook(data)))[mrs.SHEET_OPEN]
+
+    assert [c.value for c in ws[1]] == mrs.OPEN_HEADERS
+    col = mrs.OPEN_HEADERS.index("עדכון סטטוס אחרון") + 1
+    assert ws.cell(2, col).value == "14/07/2026 15:05"
+    # The filter must span the new column too, or it is invisible to filtering.
+    assert ws.auto_filter.ref.split(":")[1].startswith(
+        __import__("openpyxl").utils.get_column_letter(len(mrs.OPEN_HEADERS))
+    )
+
+
+# ── Timestamps are Israel-local, matching the sheet's own header ───────────
+
+def test_fmt_dt_converts_stored_utc_to_israel_local():
+    assert mrs._fmt_dt(datetime.datetime(2026, 7, 14, 12, 5)) == "14/07/2026 15:05"
+
+
+def test_fmt_dt_handles_a_date_rollover():
+    """22:30 UTC is already the next day in Israel."""
+    assert mrs._fmt_dt(datetime.datetime(2026, 7, 14, 22, 30)) == "15/07/2026 01:30"
+
+
+def test_fmt_dt_none_is_blank():
+    assert mrs._fmt_dt(None) == ""

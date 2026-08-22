@@ -46,9 +46,11 @@ MANAGER_ROLES = (
 OPEN_HEADERS = [
     "מזהה", "כותרת", "תיאור", "רביע", "דחוף", "חשוב", "סטטוס", "אחראי", "נוצר ע\"י",
     "תאריך יעד", "ימים ליעד", "ימים באיחור", "גיל המשימה (ימים)", "נוצרה בתאריך",
-    "עודכנה לאחרונה",
+    "עודכנה לאחרונה", "עדכון סטטוס אחרון",
 ]
-OPEN_WIDTHS = [8, 42, 50, 20, 8, 8, 14, 18, 18, 14, 12, 14, 18, 16, 16]
+# New columns go on the END: inserting one would silently shift every saved
+# filter and column reference someone has built on top of this sheet.
+OPEN_WIDTHS = [8, 42, 50, 20, 8, 8, 14, 18, 18, 14, 12, 14, 18, 16, 16, 18]
 
 CLOSED_HEADERS = [
     "מזהה", "כותרת", "רביע", "סטטוס", "אחראי", "תאריך יעד", "הושלמה בתאריך",
@@ -219,8 +221,18 @@ def _days_until(due: datetime.date | None, today: datetime.date) -> int | None:
 
 
 def _fmt_dt(dt: datetime.datetime | None) -> str:
-    """DD/MM/YYYY HH:MM — digits are direction-neutral, so this survives RTL."""
-    return dt.strftime("%d/%m/%Y %H:%M") if dt else ""
+    """Naive-UTC timestamp (as stored) → Israel-local 'DD/MM/YYYY HH:MM'.
+
+    Digits are direction-neutral, so this survives RTL. The conversion matters:
+    rendering the stored UTC raw made every timestamp in the sheet disagree with
+    the sheet's own "הופק בתאריך" header (already Israel-local) and with the same
+    event on the Telegram card by the UTC offset.
+    """
+    if dt is None:
+        return ""
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=datetime.timezone.utc)
+    return dt.astimezone(oms._IL_TZ).strftime("%d/%m/%Y %H:%M")
 
 
 def _age_days(created: datetime.datetime | None, today: datetime.date) -> int | None:
@@ -330,6 +342,9 @@ async def collect_report_data(session: AsyncSession) -> dict:
             "age_days": _age_days(m.created_at, today),
             "created_at": _fmt_dt(m.created_at),
             "updated_at": _fmt_dt(m.updated_at),
+            # Distinct from updated_at on purpose: that moves on any edit, this
+            # only when someone actually reported on the work. "—" means nobody has.
+            "last_status_update": _fmt_dt(_last_update_at(m)) or "—",
             "_overdue": oms.is_overdue(m, today),
             "_at_risk": delta is not None and 0 <= delta <= AT_RISK_DAYS,
         })
@@ -772,7 +787,7 @@ def build_workbook(data: dict, ai_text: str = "") -> bytes:
             row["id"], row["title"], row["description"], row["quadrant"], row["urgent"],
             row["important"], row["status"], row["owner"], row["created_by"], row["due"],
             row["days_to_due"], row["days_overdue"], row["age_days"],
-            row["created_at"], row["updated_at"],
+            row["created_at"], row["updated_at"], row["last_status_update"],
         ]
         for ci, value in enumerate(values, 1):
             ws2.cell(ri, ci, value)
