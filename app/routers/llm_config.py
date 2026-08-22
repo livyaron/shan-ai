@@ -50,6 +50,32 @@ async def llm_config_page(
     )
 
 
+@router.get("/llm-health")
+async def llm_health(
+    session: AsyncSession = Depends(get_db_session),
+    current_user: User = Depends(get_current_user),
+    probe: int = 0,
+):
+    """Is the primary provider up, and is the backup real?
+
+    Config-only by default (free). `?probe=1` actually calls each provider with a
+    one-word prompt — the only way to catch an exhausted quota or a revoked key
+    before an outage does it for you.
+    """
+    from fastapi.responses import JSONResponse
+    from app.services import llm_health as health
+
+    providers = await health.check_providers(probe=bool(probe))
+    routing = await health.check_routing(session)
+    return JSONResponse({
+        "status": "ok",
+        "probed": bool(probe),
+        **health.summarize(providers, routing),
+        "providers": providers,
+        "routing": routing,
+    })
+
+
 @router.post("/llm-config")
 async def llm_config_save(
     request: Request,

@@ -121,6 +121,15 @@ async def gemma_chat(
 
     Signature matches groq_chat so llm_router can call either transparently.
     """
+    # Without this the request goes out as "?key=" and comes back 400 — which is
+    # not in the retry set, so it raised an opaque HTTPStatusError that said
+    # nothing about the real problem: the backup provider was never configured.
+    if not settings.GOOGLE_AI_API_KEY:
+        raise RuntimeError(
+            "gemma_chat: GOOGLE_AI_API_KEY is not set — the fallback provider is "
+            "unavailable, so a Groq outage has nothing to fall back to."
+        )
+
     system_text, contents = _to_google_format(messages)
 
     if json_mode:

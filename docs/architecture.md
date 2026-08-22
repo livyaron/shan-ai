@@ -2,7 +2,13 @@
 
 ## Core Services Map
 - `telegram_polling.py`: Main entry point. Single instance only.
-- `groq_client.py`: Primary AI (Llama-3.3-70b-versatile).
+- `groq_client.py`: Primary AI (Llama-4-scout first, Llama-3.3-70b as backup model).
+- `gemma_client.py`: **Fallback provider** (Google AI Studio). `llm_router` switches
+  to it on any Groq failure when the usage's `fallback` flag is on (default on),
+  and vice-versa. Needs `GOOGLE_AI_API_KEY` — without it there is no backup.
+- `llm_health.py`: on-demand provider check. `/dashboard/llm-health` reports config;
+  `?probe=1` actually calls each provider, which is the only way to catch an
+  exhausted quota before an outage does. Also on the הגדרות מודל AI page.
 - `decision_service.py`: Classification (INFO/NORMAL/CRITICAL/UNCERTAIN).
 - `embedding_service.py`: FastEmbed (384 dims).
 - `knowledge_service.py`: pgvector RAG retrieval.

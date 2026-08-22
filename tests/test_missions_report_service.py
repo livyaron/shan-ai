@@ -989,3 +989,65 @@ def test_fmt_dt_handles_a_date_rollover():
 
 def test_fmt_dt_none_is_blank():
     assert mrs._fmt_dt(None) == ""
+
+
+# ── The summary survives a Groq outage via the backup provider ─────────────
+
+async def test_summary_uses_the_backup_provider_when_groq_is_down(monkeypatch):
+    """Groq down must not mean a cold cache — Gemma answers and we cache that."""
+    groups = {"late": [_make_mission(id=1, due_date=TODAY - timedelta(days=2))],
+              "today": [], "soon": [], "nodate": []}
+
+    async def _fake_collect_risk(_session):
+        return groups
+
+    monkeypatch.setattr(mrs, "collect_at_risk", _fake_collect_risk)
+    monkeypatch.setattr(mrs.oms, "today_il", lambda: TODAY)
+
+    from app.services import groq_client, gemma_client, llm_router
+
+    async def _groq_down(*a, **k):
+        raise RuntimeError("groq 429")
+
+    async def _gemma_ok(*a, **k):
+        return "תמונת מצב\n• הגיבוי ענה"
+
+    async def _cfg(_usage):
+        return "groq", True
+
+    monkeypatch.setattr(groq_client, "groq_chat", _groq_down)
+    monkeypatch.setattr(gemma_client, "gemma_chat", _gemma_ok)
+    monkeypatch.setattr(llm_router, "_get_config", _cfg)
+
+    text = await mrs.build_focus_summary(session=None, force=True, strict=True)
+    assert "הגיבוי ענה" in text
+    assert mrs.cache_status()["summary"] is True, "a backup answer must warm the cache"
+
+
+async def test_summary_falls_back_to_the_plain_list_when_both_providers_are_down(monkeypatch):
+    """Third layer: no LLM at all still produces a sendable Hebrew answer."""
+    groups = {"late": [_make_mission(id=1, due_date=TODAY - timedelta(days=2))],
+              "today": [], "soon": [], "nodate": []}
+
+    async def _fake_collect_risk(_session):
+        return groups
+
+    monkeypatch.setattr(mrs, "collect_at_risk", _fake_collect_risk)
+    monkeypatch.setattr(mrs.oms, "today_il", lambda: TODAY)
+
+    from app.services import groq_client, gemma_client, llm_router
+
+    async def _down(*a, **k):
+        raise RuntimeError("provider down")
+
+    async def _cfg(_usage):
+        return "groq", True
+
+    monkeypatch.setattr(groq_client, "groq_chat", _down)
+    monkeypatch.setattr(gemma_client, "gemma_chat", _down)
+    monkeypatch.setattr(llm_router, "_get_config", _cfg)
+
+    text = await mrs.build_focus_summary(session=None)
+    assert "סיכום ה-AI אינו זמין" in text
+    assert "משימות לביצוע היום" in text, "the computed listing still names the work"
+    assert mrs.cache_status()["summary"] is False

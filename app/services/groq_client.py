@@ -30,6 +30,9 @@ _shared_client: AsyncGroq | None = None
 
 def get_client() -> AsyncGroq:
     global _shared_client
+    if not settings.GROQ_API_KEY:
+        raise RuntimeError("groq_chat: GROQ_API_KEY is not set — the primary provider "
+                           "is unavailable.")
     if _shared_client is None:
         _shared_client = AsyncGroq(api_key=settings.GROQ_API_KEY)
     return _shared_client

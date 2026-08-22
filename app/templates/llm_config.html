@@ -173,6 +173,19 @@
     <div class="alert-saved">✅ ההגדרות נשמרו בהצלחה</div>
     {% endif %}
 
+    <!-- ── Provider health: the backup is only exercised during an outage,
+         so it needs somewhere to be checked on purpose. ── -->
+    <div class="quick-bar" style="margin-bottom:14px">
+        <span class="label">בדיקת ספקים:</span>
+        <button type="button" class="btn-quick" onclick="checkHealth(0)"
+                title="בודק מפתחות והגדרות בלבד — ללא עלות">🔍 בדיקת הגדרות</button>
+        <button type="button" class="btn-quick" onclick="checkHealth(1)"
+                title="שולח פנייה קצרה לכל ספק — עולה מספר טוקנים">📡 בדיקה חיה</button>
+        <span id="healthResult" style="margin-inline-start:12px;font-size:.85rem"></span>
+    </div>
+    <div id="healthDetail" style="display:none;font-size:.8rem;opacity:.85;
+         margin:-6px 0 14px;white-space:pre-wrap"></div>
+
     <form method="post" action="/dashboard/llm-config">
 
         <!-- ── Quick-select bar ── -->
@@ -269,6 +282,31 @@ function selectAll(provider) {
     document.querySelectorAll('.provider-select').forEach(sel => {
         sel.value = provider;
     });
+}
+
+async function checkHealth(probe) {
+    const out = document.getElementById('healthResult');
+    const detail = document.getElementById('healthDetail');
+    out.textContent = probe ? 'בודק מול הספקים…' : 'בודק הגדרות…';
+    detail.style.display = 'none';
+    try {
+        const resp = await fetch('/dashboard/llm-health' + (probe ? '?probe=1' : ''));
+        const d = await resp.json();
+        out.textContent = d.verdict + (d.warning ? '  ' + d.warning : '');
+        const lines = Object.entries(d.providers || {}).map(([name, p]) => {
+            const bits = [name, p.status];
+            if (p.ms !== undefined) bits.push(p.ms + 'ms');
+            if (p.error) bits.push(p.error);
+            return '• ' + bits.join(' — ');
+        });
+        if ((((d.routing || {}).fallback_disabled_for) || []).length) {
+            lines.push('• מעבר לגיבוי כבוי עבור: ' + d.routing.fallback_disabled_for.join(', '));
+        }
+        detail.textContent = lines.join('\n');
+        detail.style.display = 'block';
+    } catch (e) {
+        out.textContent = '❌ בדיקת הספקים נכשלה';
+    }
 }
 </script>
 
