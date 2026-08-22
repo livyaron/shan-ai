@@ -1,0 +1,168 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+  <style>
+    body { margin: 0; direction: rtl; background: #070b12;
+           font-family: 'Heebo', sans-serif; -webkit-font-smoothing: antialiased; }
+    a { color: #00d4ff; } a:hover { color: #66e5ff; }
+  </style>
+</helmet>
+<div dir="rtl" style="width: 1120px; background: #070b12; color: #e2e8f0; padding: 24px 20px 40px">
+
+  <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 20px">
+    <div>
+      <div style="font-size: 1.6rem; font-weight: 800; letter-spacing: .5px">🎯 חדר מבצעים <span style="color: #00d4ff">/</span> WAR ROOM</div>
+      <div style="color: #64748b; font-size: .85rem; font-family: 'IBM Plex Mono', monospace">משימות דחופות · חשובות · לוח מצב משותף</div>
+    </div>
+    <span style="background: #00d4ff; color: #04121a; font-weight: 700; border: 1px solid #00d4ff; border-radius: 8px; padding: 7px 14px; font-size: .9rem">➕ משימה חדשה</span>
+  </div>
+
+  <div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 20px">
+    <div style="background: #0f1826; border: 1px solid #1a2d47; border-radius: 10px; padding: 14px 16px">
+      <div style="font-family: 'IBM Plex Mono', monospace; font-size: 1.7rem; font-weight: 600; line-height: 1.1; color: #00d4ff">14</div>
+      <div style="color: #64748b; font-size: .8rem; margin-top: 2px">משימות פתוחות</div>
+    </div>
+    <div style="background: #0f1826; border: 1px solid #1a2d47; border-radius: 10px; padding: 14px 16px">
+      <div style="font-family: 'IBM Plex Mono', monospace; font-size: 1.7rem; font-weight: 600; line-height: 1.1; color: #ef4444">4</div>
+      <div style="color: #64748b; font-size: .8rem; margin-top: 2px">🔥 בצע עכשיו</div>
+    </div>
+    <div style="background: #0f1826; border: 1px solid #1a2d47; border-radius: 10px; padding: 14px 16px">
+      <div style="font-family: 'IBM Plex Mono', monospace; font-size: 1.7rem; font-weight: 600; line-height: 1.1; color: #f59e0b">3</div>
+      <div style="color: #64748b; font-size: .8rem; margin-top: 2px">⚠️ באיחור</div>
+    </div>
+    <div style="background: #0f1826; border: 1px solid #1a2d47; border-radius: 10px; padding: 14px 16px">
+      <div style="font-family: 'IBM Plex Mono', monospace; font-size: 1.7rem; font-weight: 600; line-height: 1.1; color: #10b981">6</div>
+      <div style="color: #64748b; font-size: .8rem; margin-top: 2px">✅ הושלמו השבוע</div>
+    </div>
+  </div>
+
+  <div style="display: flex; flex-wrap: wrap; gap: 10px; align-items: center; background: #0f1826; border: 1px solid #1a2d47; border-radius: 10px; padding: 12px 14px; margin-bottom: 20px">
+    <span style="background: #070b12; color: #e2e8f0; border: 1px solid #1e3a5f; border-radius: 8px; padding: 7px 10px; font-size: .9rem">כל האחראים ▾</span>
+    <span style="background: #070b12; color: #e2e8f0; border: 1px solid #1e3a5f; border-radius: 8px; padding: 7px 10px; font-size: .9rem">פעילות ▾</span>
+    <span style="background: #070b12; color: #64748b; border: 1px solid #1e3a5f; border-radius: 8px; padding: 7px 10px; font-size: .9rem; min-width: 160px">חיפוש חופשי…</span>
+    <span style="border: 1px solid #1e3a5f; background: #070b12; border-radius: 8px; padding: 7px 14px; font-size: .9rem">🔍 סנן</span>
+    <span style="margin-inline-start: auto; display: flex; gap: 10px">
+      <span style="border: 1px solid #1e3a5f; background: #070b12; border-radius: 8px; padding: 7px 14px; font-size: .9rem">⬇️ דוח Excel</span>
+      <span style="border: 1px solid #1e3a5f; background: #070b12; border-radius: 8px; padding: 7px 14px; font-size: .9rem">🧠 סיכום AI</span>
+    </span>
+  </div>
+
+  <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px">
+
+    <div style="background: #0f1826; border: 1px solid #5c1e1e; border-radius: 12px; display: flex; flex-direction: column">
+      <div style="padding: 12px 16px; border-bottom: 1px solid #5c1e1e; display: flex; align-items: baseline; gap: 8px">
+        <span style="font-weight: 700; font-size: 1.05rem">🔥 בצע עכשיו</span>
+        <span style="color: #64748b; font-size: .78rem; font-family: 'IBM Plex Mono', monospace">דחוף · חשוב</span>
+        <span style="margin-inline-start: auto; font-family: 'IBM Plex Mono', monospace; color: #64748b">4</span>
+      </div>
+      <div style="padding: 12px; display: flex; flex-direction: column; gap: 10px">
+        <div style="background: #070b12; border: 1px solid #ef4444; border-radius: 10px; padding: 12px 14px">
+          <div style="font-weight: 600" dir="auto">החלפת מפסק ראשי — תחנת נשר</div>
+          <div style="color: #64748b; font-size: .85rem; margin-top: 4px" dir="auto">הוזמן חלק חלופי, ממתין לאישור בטיחות</div>
+          <div style="margin-top: 8px; border-inline-start: 2px solid #1e3a5f; padding-inline-start: 8px">
+            <div style="color: #64748b; font-size: .8rem" dir="auto"><span style="font-family: 'IBM Plex Mono', monospace; color: #e2e8f0; opacity: .75">עדכון אחרון · 21/08 14:20 · אבי כהן</span> — נקבע חלון עבודה מול המוקד</div>
+          </div>
+          <div style="display: flex; flex-wrap: wrap; gap: 10px; margin-top: 8px; font-size: .8rem; color: #64748b; font-family: 'IBM Plex Mono', monospace">
+            <span style="border: 1px solid #1e3a5f; border-radius: 20px; padding: 1px 10px; font-size: .75rem; color: #e2e8f0">⬜ פתוחה</span>
+            <span>👤 אבי כהן</span>
+            <span style="color: #ef4444; font-weight: 600">📅 20/08/2026 ⚠️</span>
+          </div>
+          <div style="display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px">
+            <span style="border: 1px solid #1e3a5f; background: #070b12; border-radius: 8px; padding: 4px 10px; font-size: .8rem">➕ הוסף סטטוס</span>
+            <span style="border: 1px solid #1e3a5f; background: #070b12; border-radius: 8px; padding: 4px 10px; font-size: .8rem">✅ בוצע</span>
+            <span style="border: 1px solid #1e3a5f; background: #070b12; border-radius: 8px; padding: 4px 10px; font-size: .8rem">🚫 בטל</span>
+          </div>
+        </div>
+        <div style="background: #070b12; border: 1px solid #1a2d47; border-radius: 10px; padding: 12px 14px">
+          <div style="font-weight: 600" dir="auto">ליקוי בטיחות בחדר מ״ג — תחנת רמת גן</div>
+          <div style="color: #64748b; font-size: .85rem; margin-top: 4px" dir="auto">דוח בטיחות הועבר לקבלן</div>
+          <div style="display: flex; flex-wrap: wrap; gap: 10px; margin-top: 8px; font-size: .8rem; color: #64748b; font-family: 'IBM Plex Mono', monospace">
+            <span style="border: 1px solid #1e3a5f; border-radius: 20px; padding: 1px 10px; font-size: .75rem; color: #e2e8f0">⬜ פתוחה</span>
+            <span>👤 דנה לוי</span>
+            <span>📅 22/08/2026</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div style="background: #0f1826; border: 1px solid #1e3a5f; border-radius: 12px; display: flex; flex-direction: column">
+      <div style="padding: 12px 16px; border-bottom: 1px solid #1a2d47; display: flex; align-items: baseline; gap: 8px">
+        <span style="font-weight: 700; font-size: 1.05rem">🗓 תכנן</span>
+        <span style="color: #64748b; font-size: .78rem; font-family: 'IBM Plex Mono', monospace">חשוב · לא דחוף</span>
+        <span style="margin-inline-start: auto; font-family: 'IBM Plex Mono', monospace; color: #64748b">5</span>
+      </div>
+      <div style="padding: 12px; display: flex; flex-direction: column; gap: 10px">
+        <div style="background: #070b12; border: 1px solid #1a2d47; border-radius: 10px; padding: 12px 14px">
+          <div style="font-weight: 600" dir="auto">בדיקת ממסרי הגנה רבעונית</div>
+          <div style="color: #64748b; font-size: .85rem; margin-top: 4px" dir="auto">נקבע מועד מול צוות המדידה</div>
+          <div style="display: flex; flex-wrap: wrap; gap: 10px; margin-top: 8px; font-size: .8rem; color: #64748b; font-family: 'IBM Plex Mono', monospace">
+            <span style="border: 1px solid #1e3a5f; border-radius: 20px; padding: 1px 10px; font-size: .75rem; color: #e2e8f0">⬜ פתוחה</span>
+            <span>👤 שרון מזרחי</span>
+            <span>📅 05/09/2026</span>
+          </div>
+        </div>
+        <div style="background: #070b12; border: 1px solid #1a2d47; border-radius: 10px; padding: 12px 14px">
+          <div style="font-weight: 600" dir="auto">עדכון תוכניות חשמל — תחנת השדה</div>
+          <div style="color: #64748b; font-size: .85rem; margin-top: 4px" dir="auto">ממתין לקבצי AS-MADE מהקבלן</div>
+          <div style="display: flex; flex-wrap: wrap; gap: 10px; margin-top: 8px; font-size: .8rem; color: #64748b; font-family: 'IBM Plex Mono', monospace">
+            <span style="border: 1px solid #1e3a5f; border-radius: 20px; padding: 1px 10px; font-size: .75rem; color: #e2e8f0">⬜ פתוחה</span>
+            <span>👤 יעל ברק</span>
+            <span>📅 12/09/2026</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div style="background: #0f1826; border: 1px solid #1a2d47; border-radius: 12px; display: flex; flex-direction: column">
+      <div style="padding: 12px 16px; border-bottom: 1px solid #1a2d47; display: flex; align-items: baseline; gap: 8px">
+        <span style="font-weight: 700; font-size: 1.05rem">🤝 האצל</span>
+        <span style="color: #64748b; font-size: .78rem; font-family: 'IBM Plex Mono', monospace">דחוף · לא חשוב</span>
+        <span style="margin-inline-start: auto; font-family: 'IBM Plex Mono', monospace; color: #64748b">3</span>
+      </div>
+      <div style="padding: 12px; display: flex; flex-direction: column; gap: 10px">
+        <div style="background: #070b12; border: 1px solid #1a2d47; border-radius: 10px; padding: 12px 14px">
+          <div style="font-weight: 600" dir="auto">תיאום הפסקת חשמל מתוכננת מול הלקוח</div>
+          <div style="color: #64748b; font-size: .85rem; margin-top: 4px" dir="auto">נשלחה הודעה מוקדמת ל־14 מנויים</div>
+          <div style="display: flex; flex-wrap: wrap; gap: 10px; margin-top: 8px; font-size: .8rem; color: #64748b; font-family: 'IBM Plex Mono', monospace">
+            <span style="border: 1px solid #1e3a5f; border-radius: 20px; padding: 1px 10px; font-size: .75rem; color: #e2e8f0">⬜ פתוחה</span>
+            <span>👤 משה פרץ</span>
+            <span>📅 24/08/2026</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div style="background: #0f1826; border: 1px solid #1a2d47; border-radius: 12px; display: flex; flex-direction: column">
+      <div style="padding: 12px 16px; border-bottom: 1px solid #1a2d47; display: flex; align-items: baseline; gap: 8px">
+        <span style="font-weight: 700; font-size: 1.05rem">🧺 מאגר משימות</span>
+        <span style="color: #64748b; font-size: .78rem; font-family: 'IBM Plex Mono', monospace">לא דחוף · לא חשוב</span>
+        <span style="margin-inline-start: auto; font-family: 'IBM Plex Mono', monospace; color: #64748b">2</span>
+      </div>
+      <div style="padding: 12px; display: flex; flex-direction: column; gap: 10px">
+        <div style="background: #070b12; border: 1px solid #1a2d47; border-radius: 10px; padding: 12px 14px">
+          <div style="font-weight: 600" dir="auto">מיפוי מלאי חלפים במחסן הצפון</div>
+          <div style="display: flex; flex-wrap: wrap; gap: 10px; margin-top: 8px; font-size: .8rem; color: #64748b; font-family: 'IBM Plex Mono', monospace">
+            <span style="border: 1px solid #1e3a5f; border-radius: 20px; padding: 1px 10px; font-size: .75rem; color: #e2e8f0">⬜ פתוחה</span>
+            <span>👤 אבי כהן</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <div style="margin-top: 16px; font-size: .8rem; color: #64748b; line-height: 1.6">
+    הסגנון הקיים — נשאר כאפשרות מלאה ברשימת הבחירה, ללא שינוי.
+  </div>
+
+</div>
+</x-dc>
+</body>
+</html>
