@@ -2,13 +2,15 @@
 
 import datetime
 import logging
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, Request, Form, HTTPException
+from fastapi import APIRouter, Depends, Request, Form, HTTPException, Query
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, or_
 from sqlalchemy.orm import selectinload
+from pydantic import BeforeValidator
 
 from app.database import get_db_session
 from app.models import Mission, MissionStatusEnum, MissionUpdate, User, RoleEnum
@@ -20,6 +22,28 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/dashboard/war-room", tags=["war-room"])
 templates = Jinja2Templates(directory="app/templates")
+
+
+def _blank_to_none(value: object) -> object:
+    """An empty <select>/<input> submits `?owner=`, not a missing param.
+
+    Without this, "כל האחראים" (value="") reaches Pydantic as "" and the filter
+    form answers with a 422 int_parsing blob instead of the board. Blank means
+    "no filter", exactly like the param being absent.
+    """
+    if isinstance(value, str) and not value.strip():
+        return None
+    return value
+
+
+_BLANK_TO_NONE = BeforeValidator(_blank_to_none)
+
+# Optional int params that tolerate the empty string an HTML form submits.
+# The query variant MUST carry an explicit `Query()` inside the Annotated —
+# without it FastAPI 0.104 builds the field straight from `int | None` and the
+# validator never runs, which is exactly how the 422 got shipped.
+BlankableIntQuery = Annotated[int | None, Query(), _BLANK_TO_NONE]
+BlankableIntForm = Annotated[int | None, _BLANK_TO_NONE]
 
 
 def _require_editor(user: User) -> None:
@@ -77,7 +101,7 @@ async def war_room_page(
     request: Request,
     session: AsyncSession = Depends(get_db_session),
     current_user: User = Depends(get_current_user),
-    owner: int | None = None,
+    owner: BlankableIntQuery = None,
     status: str = "active",
     q: str = "",
     style: str | None = None,
@@ -338,7 +362,7 @@ async def bulk_action(
     current_user: User = Depends(get_current_user),
     ids: str = Form(...),
     action: str = Form(...),
-    owner_id: int | None = Form(None),
+    owner_id: BlankableIntForm = Form(None),
     due_date: str = Form(""),
     quadrant: str = Form(""),
     note: str = Form(""),
