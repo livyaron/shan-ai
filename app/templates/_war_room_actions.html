@@ -1,0 +1,77 @@
+{# חדר מבצעים — the board write actions, shared by every layout.
+   Every layout posts to the same endpoints and uses the same element id
+   conventions (note-<id>, closenote-<id>, quad-<id>, own-<id>, due-<id>),
+   so the behaviour lives here once and a new layout inherits it. #}
+<script>
+async function post(url, data){
+  const body = new FormData();
+  for (const [k, v] of Object.entries(data)) body.append(k, v);
+  const res = await fetch(url, {method:'POST', body});
+  let payload = {};
+  try { payload = await res.json(); } catch(e) {}
+  if (!res.ok){ alert(payload.detail || payload.message || 'שגיאה'); return false; }
+  return true;
+}
+async function act(id, action){
+  if (await post(`/dashboard/war-room/${id}/status`, {action})) location.reload();
+}
+function toggleNote(id){
+  const box = document.getElementById(`notebox-${id}`);
+  const open = box.style.display === 'block';
+  box.style.display = open ? 'none' : 'block';
+  if (!open) document.getElementById(`note-${id}`).focus();
+}
+// Closing asks for the "why" first — never blocking: ⏭ סגור בלי הערה is one click.
+const pendingClose = {};
+function toggleClose(id, action){
+  const box = document.getElementById(`closebox-${id}`);
+  if (action === null){ box.style.display = 'none'; delete pendingClose[id]; return; }
+  pendingClose[id] = action;
+  box.style.display = 'block';
+  const ta = document.getElementById(`closenote-${id}`);
+  ta.placeholder = action === 'cancel'
+    ? 'סיבת הביטול? תישמר כעדכון סטטוס עם השם שלך והשעה'
+    : 'מה בוצע? יישמר כעדכון סטטוס עם השם שלך והשעה';
+  ta.focus();
+}
+async function closeMission(id, withNote){
+  const action = pendingClose[id];
+  if (!action) return;
+  const note = withNote ? document.getElementById(`closenote-${id}`).value.trim() : '';
+  if (withNote && !note){ alert('נדרש טקסט, או סגור בלי הערה'); return; }
+  if (await post(`/dashboard/war-room/${id}/status`, {action, note})) location.reload();
+}
+async function addNote(id){
+  const note = document.getElementById(`note-${id}`).value.trim();
+  if (!note){ alert('נדרש טקסט לעדכון'); return; }
+  if (await post(`/dashboard/war-room/${id}/note`, {note})) location.reload();
+}
+async function move(id){
+  const quadrant = document.getElementById(`quad-${id}`).value;
+  if (await post(`/dashboard/war-room/${id}/move`, {quadrant})) location.reload();
+}
+async function assign(id){
+  const owner_id = document.getElementById(`own-${id}`).value;
+  if (await post(`/dashboard/war-room/${id}/assign`, {owner_id})) location.reload();
+}
+async function setDue(id){
+  const due_date = document.getElementById(`due-${id}`).value;
+  if (await post(`/dashboard/war-room/${id}/due`, {due_date})) location.reload();
+}
+async function openSummary(refresh){
+  const dlg  = document.getElementById('summaryDlg');
+  const body = document.getElementById('summaryBody');
+  body.textContent = refresh ? 'בונה סיכום עדכני…' : 'מנתח משימות בסיכון…';
+  if (!dlg.open) dlg.showModal();
+  try {
+    const res = await fetch('/dashboard/war-room/summary' + (refresh ? '?refresh=1' : ''));
+    const payload = await res.json();
+    // Server-side output is already escaped; only our own <b>/<i> tags remain.
+    body.innerHTML = payload.text || 'לא התקבל סיכום.';
+  } catch(e) {
+    body.textContent = 'שגיאה בהפקת הסיכום. נסה שוב בעוד רגע.';
+  }
+}
+const toast = document.getElementById('toast');
+if (toast) setTimeout(() => toast.remove(), 3500);
+</script>

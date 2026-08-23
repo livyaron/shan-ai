@@ -61,6 +61,9 @@ class User(Base):
     job_title = Column(String(255), nullable=True)
     responsibilities = Column(Text, nullable=True)   # תחומי אחריות — used for AI RACI assignment
     hierarchy_level = Column(Integer, nullable=True)
+    # חדר מבצעים: which board layout this user sees. NULL = the default
+    # (war_room_styles.DEFAULT_STYLE), so nobody gets a new screen unasked.
+    war_room_style = Column(String(16), nullable=True)
     manager_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

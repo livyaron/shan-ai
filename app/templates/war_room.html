@@ -11,6 +11,7 @@
   --cyan:#00d4ff; --purple:#8b9cf4; --green:#10b981; --red:#ef4444; --amber:#f59e0b;
   --text-1:#e2e8f0; --text-2:#64748b;
   --mono:'IBM Plex Mono',monospace; --ui:'Heebo',sans-serif;
+  --wrs-bg:#0f1826; --wrs-fg:#e2e8f0;
 }
 *{box-sizing:border-box;margin:0;padding:0}
 body{background:var(--bg-deep);color:var(--text-1);font-family:var(--ui);min-height:100vh}
@@ -117,9 +118,12 @@ dialog.wr-dlg::backdrop{background:rgba(3,6,12,.75)}
       <div class="wr-title">🎯 חדר מבצעים <span class="dot">/</span> WAR ROOM</div>
       <div class="wr-sub">משימות דחופות · חשובות · לוח מצב משותף</div>
     </div>
-    {% if not is_viewer %}
-    <button class="wr-btn primary" onclick="document.getElementById('createDlg').showModal()">➕ משימה חדשה</button>
-    {% endif %}
+    <div style="display:flex;align-items:center;gap:10px">
+      {% include "_war_room_style_switcher.html" %}
+      {% if not is_viewer %}
+      <button class="wr-btn primary" onclick="document.getElementById('createDlg').showModal()">➕ משימה חדשה</button>
+      {% endif %}
+    </div>
   </div>
 
   <div class="wr-stats">
@@ -296,78 +300,6 @@ dialog.wr-dlg::backdrop{background:rgba(3,6,12,.75)}
 
 {% if msg %}<div class="wr-toast" id="toast">{{ msg }}</div>{% endif %}
 
-<script>
-async function post(url, data){
-  const body = new FormData();
-  for (const [k, v] of Object.entries(data)) body.append(k, v);
-  const res = await fetch(url, {method:'POST', body});
-  let payload = {};
-  try { payload = await res.json(); } catch(e) {}
-  if (!res.ok){ alert(payload.detail || payload.message || 'שגיאה'); return false; }
-  return true;
-}
-async function act(id, action){
-  if (await post(`/dashboard/war-room/${id}/status`, {action})) location.reload();
-}
-function toggleNote(id){
-  const box = document.getElementById(`notebox-${id}`);
-  const open = box.style.display === 'block';
-  box.style.display = open ? 'none' : 'block';
-  if (!open) document.getElementById(`note-${id}`).focus();
-}
-// Closing asks for the "why" first — never blocking: ⏭ סגור בלי הערה is one click.
-const pendingClose = {};
-function toggleClose(id, action){
-  const box = document.getElementById(`closebox-${id}`);
-  if (action === null){ box.style.display = 'none'; delete pendingClose[id]; return; }
-  pendingClose[id] = action;
-  box.style.display = 'block';
-  const ta = document.getElementById(`closenote-${id}`);
-  ta.placeholder = action === 'cancel'
-    ? 'סיבת הביטול? תישמר כעדכון סטטוס עם השם שלך והשעה'
-    : 'מה בוצע? יישמר כעדכון סטטוס עם השם שלך והשעה';
-  ta.focus();
-}
-async function closeMission(id, withNote){
-  const action = pendingClose[id];
-  if (!action) return;
-  const note = withNote ? document.getElementById(`closenote-${id}`).value.trim() : '';
-  if (withNote && !note){ alert('נדרש טקסט, או סגור בלי הערה'); return; }
-  if (await post(`/dashboard/war-room/${id}/status`, {action, note})) location.reload();
-}
-async function addNote(id){
-  const note = document.getElementById(`note-${id}`).value.trim();
-  if (!note){ alert('נדרש טקסט לעדכון'); return; }
-  if (await post(`/dashboard/war-room/${id}/note`, {note})) location.reload();
-}
-async function move(id){
-  const quadrant = document.getElementById(`quad-${id}`).value;
-  if (await post(`/dashboard/war-room/${id}/move`, {quadrant})) location.reload();
-}
-async function assign(id){
-  const owner_id = document.getElementById(`own-${id}`).value;
-  if (await post(`/dashboard/war-room/${id}/assign`, {owner_id})) location.reload();
-}
-async function setDue(id){
-  const due_date = document.getElementById(`due-${id}`).value;
-  if (await post(`/dashboard/war-room/${id}/due`, {due_date})) location.reload();
-}
-async function openSummary(refresh){
-  const dlg  = document.getElementById('summaryDlg');
-  const body = document.getElementById('summaryBody');
-  body.textContent = refresh ? 'בונה סיכום עדכני…' : 'מנתח משימות בסיכון…';
-  if (!dlg.open) dlg.showModal();
-  try {
-    const res = await fetch('/dashboard/war-room/summary' + (refresh ? '?refresh=1' : ''));
-    const payload = await res.json();
-    // Server-side output is already escaped; only our own <b>/<i> tags remain.
-    body.innerHTML = payload.text || 'לא התקבל סיכום.';
-  } catch(e) {
-    body.textContent = 'שגיאה בהפקת הסיכום. נסה שוב בעוד רגע.';
-  }
-}
-const toast = document.getElementById('toast');
-if (toast) setTimeout(() => toast.remove(), 3500);
-</script>
+{% include "_war_room_actions.html" %}
 </body>
 </html>

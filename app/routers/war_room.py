@@ -14,6 +14,7 @@ from app.database import get_db_session
 from app.models import Mission, MissionStatusEnum, MissionUpdate, User, RoleEnum
 from app.routers.login import get_current_user
 from app.services import missions_menu_service as oms
+from app.services import war_room_styles as wrs
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +57,12 @@ async def _notify_owner_via_telegram(session: AsyncSession, mission: Mission, ac
         logger.warning(f"war_room: owner notification failed: {e}")
 
 
+def _quadrant_of(m: Mission) -> str:
+    """Quadrant label for one mission — the layouts that don't draw the 2×2 grid
+    still need to say which quadrant a mission sits in."""
+    return oms.quadrant_label(oms.quadrant_key(m))
+
+
 def _parse_due(value: str | None) -> datetime.date | None:
     if not value:
         return None
@@ -73,8 +80,10 @@ async def war_room_page(
     owner: int | None = None,
     status: str = "active",
     q: str = "",
+    style: str | None = None,
 ):
     today = oms.today_il()
+    active_style = wrs.resolve(style, current_user.war_room_style)
 
     base = select(Mission).options(
         selectinload(Mission.owner),
@@ -117,9 +126,10 @@ async def war_room_page(
 
     users = await oms.list_assignable_users(session)
 
-    return templates.TemplateResponse("war_room.html", {
+    ctx = {
         "request": request,
         "current_user": current_user,
+        "missions": missions,
         "quadrants": quadrants,
         "quadrant_defs": oms.QUADRANTS,
         "status_labels": oms.STATUS_LABELS,
@@ -137,8 +147,97 @@ async def war_room_page(
         "filters": {"owner": owner, "status": status, "q": q},
         "is_viewer": current_user.role == RoleEnum.VIEWER,
         "fmt_stamp": oms.format_stamp_il,
+        "quadrant_of": _quadrant_of,
         "msg": request.query_params.get("msg", ""),
-    })
+        # The style switcher renders in every layout, so every layout gets these.
+        "styles": wrs.STYLES,
+        "current_style": active_style,
+        "style_labels": wrs.STYLE_LABELS,
+    }
+
+    # Per-style extras. Each block only runs for the style that needs it, so the
+    # default board costs exactly what it cost before.
+    if active_style == "focus":
+        ctx.update(await _focus_context(session, current_user, today))
+    elif active_style == "wall":
+        ctx.update(await _wall_context(session, today))
+
+    return templates.TemplateResponse(wrs.template_for(active_style), ctx)
+
+
+async def _focus_context(session: AsyncSession, user: User, today: datetime.date) -> dict:
+    """"My missions", split by when they are due.
+
+    Deliberately board-wide and ignores the filter bar: the point of this layout
+    is "what does today ask of me", which a leftover owner filter would lie about.
+    """
+    mine = list((await session.scalars(
+        select(Mission)
+        .options(selectinload(Mission.owner), selectinload(Mission.updates))
+        .where(Mission.owner_id == user.id, Mission.status.in_(oms.ACTIVE_STATUSES))
+        .order_by(Mission.due_date.asc().nulls_last(), Mission.id.desc())
+    )).all())
+
+    due_now = [m for m in mine if m.due_date and m.due_date <= today]
+    upcoming = [m for m in mine if m.due_date and m.due_date > today]
+    undated = [m for m in mine if m.due_date is None]
+    return {
+        "my_due_now": due_now,
+        "my_upcoming": upcoming[:8],
+        "my_undated": undated[:8],
+        "my_total": len(mine),
+    }
+
+
+async def _wall_context(session: AsyncSession, today: datetime.date) -> dict:
+    """What a room needs to see from four metres: what burns, who carries it, what just closed."""
+    active = list((await session.scalars(
+        select(Mission)
+        .options(selectinload(Mission.owner))
+        .where(Mission.status.in_(oms.ACTIVE_STATUSES))
+        .order_by(Mission.due_date.asc().nulls_last(), Mission.id.desc())
+    )).all())
+
+    load: dict[str, int] = {}
+    for m in active:
+        name = m.owner.username if m.owner else "—"
+        load[name] = load.get(name, 0) + 1
+    owner_load = sorted(load.items(), key=lambda kv: -kv[1])[:6]
+
+    closed = list((await session.scalars(
+        select(Mission)
+        .options(selectinload(Mission.owner))
+        .where(Mission.status == MissionStatusEnum.DONE.value)
+        .order_by(Mission.completed_at.desc().nulls_last(), Mission.id.desc())
+        .limit(4)
+    )).all())
+
+    return {
+        # Only dated missions can burn; an undated one has nothing to be late for.
+        "wall_urgent": [m for m in active if m.due_date is not None][:5],
+        "owner_load": owner_load,
+        "owner_load_max": max((c for _, c in owner_load), default=1),
+        "wall_closed": closed,
+    }
+
+
+@router.post("/style")
+async def set_style(
+    session: AsyncSession = Depends(get_db_session),
+    current_user: User = Depends(get_current_user),
+    style: str = Form(...),
+):
+    """Save the signed-in user's board layout.
+
+    Not an editor action: this changes nothing on the board, only what THIS user
+    sees, so viewers may switch too.
+    """
+    if not wrs.is_known(style):
+        return RedirectResponse("/dashboard/war-room?msg=תצוגה+לא+מוכרת", status_code=303)
+    current_user.war_room_style = style
+    session.add(current_user)
+    await session.commit()
+    return RedirectResponse("/dashboard/war-room", status_code=303)
 
 
 @router.get("/report.xlsx")
@@ -231,6 +330,59 @@ async def create_mission_web(
     )
     await _notify_owner_via_telegram(session, m, current_user)
     return RedirectResponse("/dashboard/war-room?msg=המשימה+נוצרה", status_code=303)
+
+
+@router.post("/bulk")
+async def bulk_action(
+    session: AsyncSession = Depends(get_db_session),
+    current_user: User = Depends(get_current_user),
+    ids: str = Form(...),
+    action: str = Form(...),
+    owner_id: int | None = Form(None),
+    due_date: str = Form(""),
+    quadrant: str = Form(""),
+    note: str = Form(""),
+):
+    """Apply one change to several missions at once — the table layout's reason to exist.
+
+    Every branch routes through the same service helpers the single-mission
+    endpoints use, so a bulk edit can never take a path the board itself cannot.
+    """
+    _require_editor(current_user)
+
+    mission_ids = [int(x) for x in ids.split(",") if x.strip().lstrip("-").isdigit()]
+    if not mission_ids:
+        return JSONResponse({"status": "error", "message": "לא נבחרו משימות"}, status_code=400)
+    if action not in ("assign", "due", "move", "done", "cancel"):
+        return JSONResponse({"status": "error", "message": "פעולה לא מוכרת"}, status_code=400)
+    if action == "assign" and not owner_id:
+        return JSONResponse({"status": "error", "message": "נדרש אחראי"}, status_code=400)
+    if action == "move" and quadrant not in {key for key, *_ in oms.QUADRANTS}:
+        return JSONResponse({"status": "error", "message": "רביע לא מוכר"}, status_code=400)
+
+    missions = list((await session.scalars(
+        select(Mission).where(Mission.id.in_(mission_ids))
+    )).all())
+    if not missions:
+        return JSONResponse({"status": "error", "message": "לא נמצאו משימות"}, status_code=404)
+
+    for m in missions:
+        if action == "assign":
+            await oms.update_mission(session, m, owner_id=owner_id)
+            await _notify_owner_via_telegram(session, m, current_user)
+        elif action == "due":
+            await oms.update_mission(session, m, due_date=_parse_due(due_date))
+        elif action == "move":
+            await oms.update_mission(session, m, quadrant=quadrant)
+        else:
+            if note.strip():
+                await oms.add_mission_update(session, m, note, current_user, kind="close")
+            await oms.set_status(
+                session, m,
+                MissionStatusEnum.DONE.value if action == "done" else MissionStatusEnum.CANCELLED.value,
+            )
+
+    return JSONResponse({"status": "ok", "message": f"עודכנו {len(missions)} משימות"})
 
 
 @router.post("/{mission_id}/status")

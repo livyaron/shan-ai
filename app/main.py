@@ -229,6 +229,12 @@ async def startup():
                     "ALTER TABLE mission_updates ADD COLUMN IF NOT EXISTS kind VARCHAR(16)"
                 ))
 
+                # חדר מבצעים: per-user board layout. NULL means "the default
+                # style", so existing users keep exactly the screen they know.
+                await conn.execute(_text(
+                    "ALTER TABLE users ADD COLUMN IF NOT EXISTS war_room_style VARCHAR(16)"
+                ))
+
                 # LLM config table
                 await conn.execute(_text("""
                     CREATE TABLE IF NOT EXISTS llm_config (
