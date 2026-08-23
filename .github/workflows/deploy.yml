@@ -47,13 +47,26 @@ jobs:
           ref: ${{ steps.target.outputs.sha }}
 
       - name: Require the deploy token
+        # Probes the likely near-miss spellings so a naming mistake diagnoses
+        # itself instead of costing another round trip. Only booleans are
+        # printed — never a value, and never the full secret list, since this
+        # repo is public and its action logs are readable by anyone.
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          ALT_RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
+          ALT_RAILWAY: ${{ secrets.RAILWAY }}
+          ALT_RAILWAY_PROJECT_TOKEN: ${{ secrets.RAILWAY_PROJECT_TOKEN }}
         run: |
-          if [ -z "$RAILWAY_TOKEN" ]; then
-            echo "::error::RAILWAY_TOKEN is not set. Add it under Settings → Secrets and variables → Actions."
-            exit 1
+          if [ -n "$RAILWAY_TOKEN" ]; then
+            echo "RAILWAY_TOKEN is present (${#RAILWAY_TOKEN} characters)."
+            exit 0
           fi
+          echo "Other names checked:"
+          for n in ALT_RAILWAY_API_TOKEN ALT_RAILWAY ALT_RAILWAY_PROJECT_TOKEN; do
+            [ -n "${!n}" ] && echo "  ${n#ALT_}: present" || echo "  ${n#ALT_}: empty"
+          done
+          echo "::error::RAILWAY_TOKEN resolved to empty. It must be a repository secret under Settings → Secrets and variables → **Actions** → Repository secrets. It will NOT be visible here if it was added under the Dependabot or Codespaces tab, saved as a *variable* rather than a secret, or scoped to a deployment Environment (an environment secret needs `environment:` declared on this job)."
+          exit 1
 
       - uses: actions/setup-node@v4
         with:
