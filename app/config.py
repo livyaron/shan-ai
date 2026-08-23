@@ -1,5 +1,22 @@
 import os
+import pathlib
+
 from pydantic_settings import BaseSettings
+
+
+def _read_build_commit() -> str:
+    """The commit baked in by whatever performed the deploy.
+
+    `railway up` uploads a tarball, not a git ref, so Railway injects no
+    RAILWAY_GIT_* vars for a CLI deploy — /health would report "unknown" and the
+    "did my deploy actually land?" check would silently stop working. Both deploy
+    paths (deploy.sh and the CI workflow) write this file before uploading.
+    """
+    try:
+        return (pathlib.Path(__file__).resolve().parent.parent / "BUILD_COMMIT").read_text().strip()
+    except OSError:
+        return ""
+
 
 class Settings(BaseSettings):
     # Database
@@ -26,6 +43,8 @@ class Settings(BaseSettings):
     RAILWAY_GIT_COMMIT_SHA: str = os.getenv("RAILWAY_GIT_COMMIT_SHA", "")
     RAILWAY_GIT_BRANCH: str = os.getenv("RAILWAY_GIT_BRANCH", "")
     RAILWAY_DEPLOYMENT_ID: str = os.getenv("RAILWAY_DEPLOYMENT_ID", "")
+    # Fallback for CLI deploys, which carry no Railway git metadata.
+    BUILD_COMMIT_SHA: str = os.getenv("BUILD_COMMIT_SHA", "") or _read_build_commit()
 
     # Claude API
     ANTHROPIC_API_KEY: str = os.getenv("ANTHROPIC_API_KEY", "")

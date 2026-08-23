@@ -47,6 +47,7 @@ async def test_health_degrades_gracefully_outside_railway(monkeypatch):
     monkeypatch.setattr(main_mod.settings, "RAILWAY_GIT_COMMIT_SHA", "")
     monkeypatch.setattr(main_mod.settings, "RAILWAY_GIT_BRANCH", "")
     monkeypatch.setattr(main_mod.settings, "RAILWAY_DEPLOYMENT_ID", "")
+    monkeypatch.setattr(main_mod.settings, "BUILD_COMMIT_SHA", "")
     if hasattr(app.state, "started_at"):
         del app.state.started_at
 
@@ -54,6 +55,33 @@ async def test_health_degrades_gracefully_outside_railway(monkeypatch):
     assert body["status"] == "healthy"
     assert body["commit"] == "unknown"
     assert body["started_at"] is None and body["uptime_seconds"] is None
+
+
+async def test_health_reports_the_commit_stamped_by_a_cli_deploy(monkeypatch):
+    """`railway up` sends a tarball, so Railway injects no RAILWAY_GIT_* vars.
+
+    The deploy path writes BUILD_COMMIT into the upload instead. Without this
+    fallback every CLI deploy answers "unknown" and "did it land?" goes
+    unanswerable again — which is the whole reason /health carries a commit.
+    """
+    from app import main as main_mod
+
+    monkeypatch.setattr(main_mod.settings, "RAILWAY_GIT_COMMIT_SHA", "")
+    monkeypatch.setattr(main_mod.settings, "BUILD_COMMIT_SHA", "cd6db20de2fbaaaabbbb")
+    app.state.started_at = datetime.datetime.utcnow()
+
+    assert (await health_check())["commit"] == "cd6db20de2fb"
+
+
+async def test_railway_git_metadata_wins_over_the_stamped_file(monkeypatch):
+    """A stale BUILD_COMMIT must never override what Railway itself reports."""
+    from app import main as main_mod
+
+    monkeypatch.setattr(main_mod.settings, "RAILWAY_GIT_COMMIT_SHA", "aaaaaaaaaaaabbbb")
+    monkeypatch.setattr(main_mod.settings, "BUILD_COMMIT_SHA", "ccccccccccccdddd")
+    app.state.started_at = datetime.datetime.utcnow()
+
+    assert (await health_check())["commit"] == "aaaaaaaaaaaa"
 
 
 def test_the_diagnostic_routes_are_registered():

@@ -444,7 +444,7 @@ async def health_check():
     return {
         "status": "healthy",
         "service": "shan-ai-api",
-        "commit": (settings.RAILWAY_GIT_COMMIT_SHA or "unknown")[:12],
+        "commit": (settings.RAILWAY_GIT_COMMIT_SHA or settings.BUILD_COMMIT_SHA or "unknown")[:12],
         "branch": settings.RAILWAY_GIT_BRANCH or "unknown",
         "deployment_id": settings.RAILWAY_DEPLOYMENT_ID or "unknown",
         "started_at": started.isoformat() + "Z" if started else None,
