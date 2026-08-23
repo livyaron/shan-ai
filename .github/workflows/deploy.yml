@@ -1,0 +1,103 @@
+name: deploy
+
+# Deploying used to depend on someone being at a machine with the Railway CLI,
+# which is why "merged to master" and "actually running in production" kept
+# drifting apart. This closes that gap: a green docker-build on master deploys
+# itself, and the job only goes green once the new commit is genuinely serving.
+#
+# Requires one repository secret: RAILWAY_TOKEN (Railway → project → Settings →
+# Tokens; a project token scopes to this service). Optional repository variable:
+# RAILWAY_SERVICE, needed only if the token is account-wide rather than
+# project-scoped.
+on:
+  workflow_run:
+    workflows: ["docker-build"]
+    types: [completed]
+    branches: [master]
+  workflow_dispatch:
+
+concurrency:
+  # Never let two deploys race; queue instead of cancelling, since a cancelled
+  # deploy would leave the verify step lying about what is running.
+  group: railway-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    # workflow_run fires on failure too — deploying a red build is the exact
+    # thing this is meant to prevent.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    env:
+      HEALTH_URL: https://shan-ai.up.railway.app/health
+
+    steps:
+      - name: Work out which commit we are deploying
+        id: target
+        run: |
+          SHA="${{ github.event.workflow_run.head_sha || github.sha }}"
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "short=${SHA:0:12}" >> "$GITHUB_OUTPUT"
+          echo "Deploying $SHA"
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.target.outputs.sha }}
+
+      - name: Require the deploy token
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
+          if [ -z "$RAILWAY_TOKEN" ]; then
+            echo "::error::RAILWAY_TOKEN is not set. Add it under Settings → Secrets and variables → Actions."
+            exit 1
+          fi
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install the Railway CLI
+        run: npm install -g @railway/cli
+
+      - name: Stamp the commit into the upload
+        # `railway up` sends a tarball, not a git ref, so Railway injects no
+        # RAILWAY_GIT_* vars — without this file /health reports "unknown" and
+        # the verify step below could never pass. It rides inside the artifact
+        # rather than living in a Railway variable, so the provenance can never
+        # disagree with the code that is actually running.
+        run: echo "${{ steps.target.outputs.sha }}" > BUILD_COMMIT
+
+      - name: Deploy to Railway
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          RAILWAY_SERVICE: ${{ vars.RAILWAY_SERVICE }}
+        run: |
+          if [ -n "$RAILWAY_SERVICE" ]; then
+            railway up --detach --service "$RAILWAY_SERVICE"
+          else
+            railway up --detach
+          fi
+
+      - name: Wait until the new commit is actually serving
+        # `railway up --detach` returns as soon as the upload lands, so a green
+        # job at this point would only prove the tarball was accepted. Poll
+        # /health until it reports our commit, or fail loudly.
+        env:
+          WANT: ${{ steps.target.outputs.short }}
+        run: |
+          echo "Waiting for $HEALTH_URL to report $WANT"
+          for i in $(seq 1 60); do
+            GOT="$(curl -fsS --max-time 10 "$HEALTH_URL" 2>/dev/null \
+                   | python3 -c 'import json,sys; print(json.load(sys.stdin).get("commit",""))' 2>/dev/null || true)"
+            if [ "$GOT" = "$WANT" ]; then
+              echo "Deployed: $GOT is serving after $((i * 15))s."
+              exit 0
+            fi
+            echo "  [$i/60] serving '${GOT:-unreachable}', want '$WANT'"
+            sleep 15
+          done
+          echo "::error::15 minutes on and $HEALTH_URL still is not serving $WANT. The build likely failed — check the Railway deploy logs."
+          exit 1

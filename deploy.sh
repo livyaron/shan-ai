@@ -25,6 +25,13 @@ echo "Pushed to GitHub."
 echo "Syncing learned instructions to Railway DB..."
 python3 scripts/copy_instructions.py || echo "⚠️  Instruction sync failed — continuing to deploy anyway."
 
+# `railway up` uploads a tarball with no git metadata, so Railway injects no
+# RAILWAY_GIT_COMMIT_SHA and /health would answer "unknown" — making the
+# verification printed below impossible to pass. Stamp the commit into the
+# upload itself, then drop the file so it never lingers in the working tree.
+git rev-parse HEAD > BUILD_COMMIT
+trap 'rm -f BUILD_COMMIT' EXIT
+
 echo "Deploying to Railway..."
 unset RAILWAY_TOKEN
 railway up --detach
