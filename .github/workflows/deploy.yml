@@ -86,7 +86,12 @@ jobs:
       - name: Deploy to Railway
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
-          RAILWAY_SERVICE: ${{ vars.RAILWAY_SERVICE }}
+          # The project holds the app next to its database, so `railway up`
+          # refuses to choose and needs the service named. Identified from
+          # `railway status`, not guessed: the other service is `postgres`,
+          # and this is the one carrying the /app/uploads volume. A repository
+          # variable of the same name overrides it if the service is renamed.
+          RAILWAY_SERVICE: ${{ vars.RAILWAY_SERVICE || 'easygoing-endurance' }}
         run: |
           if [ -n "$RAILWAY_SERVICE" ]; then
             railway up --detach --service "$RAILWAY_SERVICE"
