@@ -1,0 +1,279 @@
+{# חדר מבצעים — "פוקוס": the personal day view. Same data, same endpoints as the
+   board; what changes is that it opens on the three missions that need YOU
+   today instead of on the whole 2×2 matrix. Built for a phone, after a Telegram
+   ping — every action target is at least 46px tall. #}
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>חדר מבצעים · פוקוס — SHAN-AI</title>
+<link href="https://fonts.googleapis.com/css2?family=Rubik:wght@300;400;500;600;700&family=Frank+Ruhl+Libre:wght@500;700;900&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#f7f3ec; --card:#fffdf9; --line:#e6ded1; --line-2:#d8ccbb;
+  --ink:#241f1a; --ink-2:#6b6055; --ink-3:#7a6f62;
+  --late:oklch(0.55 0.11 35); --late-bg:oklch(0.94 0.03 35); --late-ink:oklch(0.44 0.11 35);
+  --today:oklch(0.55 0.1 75); --today-bg:oklch(0.95 0.04 75); --today-ink:oklch(0.42 0.1 75);
+  --good:oklch(0.55 0.11 155);
+  --wrs-bg:#fffdf9; --wrs-fg:#241f1a;
+  --ui:'Rubik',sans-serif,'Segoe UI Emoji','Apple Color Emoji','Noto Color Emoji';
+  --display:'Frank Ruhl Libre',serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--ink);font-family:var(--ui);min-height:100vh}
+a{color:var(--late);text-decoration:none}
+.fc-wrap{max-width:1180px;margin:0 auto;padding:24px 20px 64px}
+.fc-top{display:flex;align-items:center;gap:16px;flex-wrap:wrap;padding-bottom:18px;border-bottom:1px solid var(--line);margin-bottom:26px}
+.fc-brand{font-family:var(--display);font-size:1.35rem;font-weight:700}
+.fc-tabs{display:flex;gap:6px;background:#efe8dd;border-radius:999px;padding:4px}
+.fc-tab{padding:7px 16px;border-radius:999px;font-size:.87rem;color:var(--ink-3)}
+.fc-tab.on{background:var(--card);color:var(--ink);font-weight:600;box-shadow:0 1px 2px rgba(60,45,25,.08)}
+.fc-cols{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:34px;align-items:start}
+.fc-hi{font-family:var(--display);font-size:1.9rem;font-weight:700;line-height:1.25}
+.fc-sub{font-size:.95rem;color:var(--ink-3);margin-top:6px}
+.fc-sec{font-family:var(--display);font-size:1.2rem;font-weight:700;margin:28px 0 12px}
+
+.fc-card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:20px 22px;
+  box-shadow:0 1px 3px rgba(60,45,25,.05);margin-top:14px}
+.fc-card.late{border-inline-start:4px solid var(--late)}
+.fc-card.today{border-inline-start:4px solid var(--today)}
+.fc-tag{border-radius:999px;padding:4px 12px;font-size:.78rem;font-weight:600}
+.fc-tag.late{background:var(--late-bg);color:var(--late-ink)}
+.fc-tag.today{background:var(--today-bg);color:var(--today-ink)}
+.fc-tag.plain{background:#efe8dd;color:#5f5346}
+.fc-title{font-size:1.2rem;font-weight:600;margin-top:12px;line-height:1.4;unicode-bidi:isolate}
+.fc-desc{font-size:.92rem;color:var(--ink-2);margin-top:8px;line-height:1.6;unicode-bidi:isolate}
+.fc-upd{font-size:.85rem;color:var(--ink-2);margin-top:10px;line-height:1.6;
+  border-inline-start:2px solid var(--line-2);padding-inline-start:10px;unicode-bidi:isolate}
+.fc-acts{display:flex;gap:10px;margin-top:18px;flex-wrap:wrap}
+.fc-btn{display:flex;align-items:center;min-height:46px;padding:13px 22px;border-radius:10px;
+  background:var(--card);border:1px solid var(--line-2);color:var(--ink);font-family:var(--ui);
+  font-size:.92rem;cursor:pointer}
+.fc-btn:hover{border-color:var(--ink-2)}
+.fc-btn.go{background:var(--ink);color:var(--card);border-color:var(--ink);font-weight:500}
+.fc-btn.sm{min-height:38px;padding:8px 16px;font-size:.85rem}
+.fc-box{display:none;margin-top:12px}
+.fc-box textarea{width:100%;background:var(--bg);color:var(--ink);border:1px solid var(--line-2);
+  border-radius:10px;padding:10px 12px;font-size:.92rem;font-family:var(--ui);resize:vertical}
+.fc-rows{border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--line)}
+.fc-row{display:flex;align-items:center;gap:14px;background:var(--card);padding:14px 18px;flex-wrap:wrap}
+.fc-row + .fc-row{border-top:1px solid var(--line)}
+.fc-when{font-size:.82rem;color:var(--ink-3);min-width:64px;font-variant-numeric:tabular-nums}
+.fc-rowt{font-size:.95rem;flex-grow:1;unicode-bidi:isolate}
+.fc-empty{background:var(--card);border:1px dashed var(--line-2);border-radius:12px;padding:26px;
+  text-align:center;color:var(--ink-3);font-size:.95rem;line-height:1.7}
+.fc-rail{display:flex;flex-direction:column;gap:16px}
+.fc-panel{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px 20px}
+.fc-panel h4{font-size:.82rem;color:var(--ink-3);font-weight:500;margin-bottom:14px}
+.fc-stats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+.fc-num{font-size:1.6rem;font-weight:600;line-height:1.1;font-variant-numeric:tabular-nums}
+.fc-lbl{font-size:.78rem;color:var(--ink-3)}
+dialog.fc-dlg{background:var(--card);color:var(--ink);border:1px solid var(--line-2);border-radius:14px;
+  padding:24px;width:min(560px,94vw)}
+dialog.fc-dlg::backdrop{background:rgba(36,31,26,.45)}
+dialog.fc-dlg label{display:block;font-size:.85rem;color:var(--ink-3);margin:12px 0 4px}
+dialog.fc-dlg input,dialog.fc-dlg textarea,dialog.fc-dlg select{width:100%;background:var(--bg);
+  color:var(--ink);border:1px solid var(--line-2);border-radius:10px;padding:10px 12px;
+  font-family:var(--ui);font-size:.92rem}
+.fc-summary{white-space:pre-wrap;line-height:1.75;font-size:.93rem;max-height:60vh;overflow-y:auto;unicode-bidi:isolate}
+.fc-toast{position:fixed;bottom:24px;inset-inline-start:24px;background:var(--card);
+  border:1px solid var(--good);border-radius:10px;padding:12px 18px;z-index:50;box-shadow:0 8px 30px rgba(60,45,25,.18)}
+@media (max-width:900px){
+  .fc-cols{grid-template-columns:1fr;gap:26px}
+  .fc-hi{font-size:1.6rem}
+}
+</style>
+</head>
+<body>
+{% include "_navbar.html" %}
+<div class="fc-wrap">
+
+  <div class="fc-top">
+    <div class="fc-brand">חדר מבצעים</div>
+    <div class="fc-tabs">
+      <span class="fc-tab on">היום</span>
+      <a class="fc-tab" href="/dashboard/war-room?style=table">כל המשימות</a>
+      <a class="fc-tab" href="/dashboard/war-room?style=cyber">הלוח המלא</a>
+    </div>
+    <div style="margin-inline-start:auto;display:flex;align-items:center;gap:10px">
+      {% include "_war_room_style_switcher.html" %}
+      {% if not is_viewer %}
+      <button class="fc-btn sm go" onclick="document.getElementById('createDlg').showModal()">משימה חדשה</button>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="fc-cols">
+    <div>
+      <div class="fc-hi">שלום, {{ current_user.username }}</div>
+      <div class="fc-sub">
+        {% if my_due_now %}{{ my_due_now|length }} משימות דורשות אותך היום{% else %}אין משימות שדורשות אותך היום{% endif %}
+        · {{ my_total }} משימות פתוחות בסך הכול
+      </div>
+
+      <div class="fc-sec">היום</div>
+      {% if not my_due_now %}
+      <div class="fc-empty">אין משימה שהיעד שלה עבר או חל היום.<br>מה שמחכה בהמשך מופיע למטה.</div>
+      {% endif %}
+      {% for m in my_due_now %}
+      {% set late = m.due_date < today %}
+      <div class="fc-card {% if late %}late{% else %}today{% endif %}">
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          {% if late %}
+          <span class="fc-tag late">באיחור {{ (today - m.due_date).days }} ימים</span>
+          {% else %}
+          <span class="fc-tag today">היעד היום</span>
+          {% endif %}
+          <span style="font-size:.8rem;color:var(--ink-3)">{{ quadrant_of(m) }}</span>
+        </div>
+        <div class="fc-title" dir="auto">{{ m.title }}</div>
+        {% if m.description %}<div class="fc-desc" dir="auto">{{ m.description }}</div>{% endif %}
+        {% if m.updates %}
+        {% set u = m.updates[-1] %}
+        <div class="fc-upd" dir="auto">{{ fmt_stamp(u.created_at) }} · {{ u.author_name or '—' }} — {{ u.text }}</div>
+        {% endif %}
+        {% if not is_viewer %}
+        <div class="fc-acts">
+          <button class="fc-btn go" onclick="toggleNote({{ m.id }})">כתוב עדכון</button>
+          <button class="fc-btn" onclick="toggleClose({{ m.id }}, 'done')">סמן כבוצע</button>
+          <button class="fc-btn" onclick="toggleClose({{ m.id }}, 'cancel')">בטל</button>
+        </div>
+        <div class="fc-box" id="notebox-{{ m.id }}">
+          <textarea id="note-{{ m.id }}" rows="3" dir="auto" maxlength="2000"
+                    placeholder="מה התקדם? העדכון יישמר עם השם שלך והשעה"></textarea>
+          <div class="fc-acts">
+            <button class="fc-btn go" onclick="addNote({{ m.id }})">שמור עדכון</button>
+            <button class="fc-btn" onclick="toggleNote({{ m.id }})">ביטול</button>
+          </div>
+        </div>
+        <div class="fc-box" id="closebox-{{ m.id }}">
+          <textarea id="closenote-{{ m.id }}" rows="3" dir="auto" maxlength="2000"></textarea>
+          <div class="fc-acts">
+            <button class="fc-btn go" onclick="closeMission({{ m.id }}, true)">סגור עם הערה</button>
+            <button class="fc-btn" onclick="closeMission({{ m.id }}, false)">סגור בלי הערה</button>
+            <button class="fc-btn" onclick="toggleClose({{ m.id }}, null)">ביטול</button>
+          </div>
+        </div>
+        {% endif %}
+      </div>
+      {% endfor %}
+
+      {% if my_upcoming %}
+      <div class="fc-sec">בהמשך</div>
+      <div class="fc-rows">
+        {% for m in my_upcoming %}
+        <div class="fc-row">
+          <span class="fc-when">{{ m.due_date.strftime('%d/%m') }}</span>
+          <span class="fc-rowt" dir="auto">{{ m.title }}</span>
+          {% if not is_viewer %}
+          <button class="fc-btn sm" onclick="toggleNote({{ m.id }})">עדכון</button>
+          <button class="fc-btn sm" onclick="toggleClose({{ m.id }}, 'done')">בוצע</button>
+          <div class="fc-box" id="notebox-{{ m.id }}" style="flex-basis:100%">
+            <textarea id="note-{{ m.id }}" rows="2" dir="auto" maxlength="2000"
+                      placeholder="מה התקדם?"></textarea>
+            <div class="fc-acts">
+              <button class="fc-btn sm go" onclick="addNote({{ m.id }})">שמור</button>
+              <button class="fc-btn sm" onclick="toggleNote({{ m.id }})">ביטול</button>
+            </div>
+          </div>
+          <div class="fc-box" id="closebox-{{ m.id }}" style="flex-basis:100%">
+            <textarea id="closenote-{{ m.id }}" rows="2" dir="auto" maxlength="2000"></textarea>
+            <div class="fc-acts">
+              <button class="fc-btn sm go" onclick="closeMission({{ m.id }}, true)">סגור עם הערה</button>
+              <button class="fc-btn sm" onclick="closeMission({{ m.id }}, false)">סגור בלי הערה</button>
+              <button class="fc-btn sm" onclick="toggleClose({{ m.id }}, null)">ביטול</button>
+            </div>
+          </div>
+          {% endif %}
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+
+      {% if my_undated %}
+      <div class="fc-sec">ללא תאריך יעד</div>
+      <div class="fc-rows">
+        {% for m in my_undated %}
+        <div class="fc-row">
+          <span class="fc-when">—</span>
+          <span class="fc-rowt" dir="auto">{{ m.title }}</span>
+          {% if not is_viewer %}
+          <input type="date" id="due-{{ m.id }}" style="border:1px solid var(--line-2);border-radius:8px;padding:7px 10px;font-family:var(--ui)">
+          <button class="fc-btn sm" onclick="setDue({{ m.id }})">קבע יעד</button>
+          {% endif %}
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+    </div>
+
+    <div class="fc-rail">
+      <div class="fc-panel">
+        <h4>מצב הלוח</h4>
+        <div class="fc-stats">
+          <div><div class="fc-num">{{ stats.open }}</div><div class="fc-lbl">פתוחות</div></div>
+          <div><div class="fc-num" style="color:var(--late)">{{ stats.overdue }}</div><div class="fc-lbl">באיחור</div></div>
+          <div><div class="fc-num">{{ stats.do_now }}</div><div class="fc-lbl">בצע עכשיו</div></div>
+          <div><div class="fc-num" style="color:var(--good)">{{ stats.done_week }}</div><div class="fc-lbl">הושלמו השבוע</div></div>
+        </div>
+      </div>
+      <div class="fc-panel" style="background:#efe8dd;border-color:#e0d6c6">
+        <h4 style="color:#5f5346;font-weight:600">סיכום AI · מה בסיכון</h4>
+        <button class="fc-btn sm" onclick="openSummary()">הצג סיכום</button>
+      </div>
+      <div class="fc-panel">
+        <h4>קיצורים</h4>
+        <div style="display:flex;flex-direction:column;gap:10px;font-size:.92rem">
+          <a href="/dashboard/war-room?style=cyber">הלוח המלא (2×2)</a>
+          <a href="/dashboard/war-room?style=table">טבלת כל המשימות</a>
+          <a href="/dashboard/war-room/report.xlsx">דוח Excel</a>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<dialog id="summaryDlg" class="fc-dlg">
+  <div style="font-family:var(--display);font-weight:700;font-size:1.15rem;margin-bottom:14px">סיכום משימות בסיכון</div>
+  <div id="summaryBody" class="fc-summary">טוען…</div>
+  <div class="fc-acts">
+    <button class="fc-btn sm" onclick="openSummary(true)">רענן סיכום</button>
+    <button class="fc-btn sm" onclick="document.getElementById('summaryDlg').close()">סגור</button>
+  </div>
+</dialog>
+
+{% if not is_viewer %}
+<dialog id="createDlg" class="fc-dlg">
+  <div style="font-family:var(--display);font-weight:700;font-size:1.15rem">משימה חדשה</div>
+  <form method="POST" action="/dashboard/war-room/create">
+    <label>כותרת *</label>
+    <input name="title" required maxlength="255" dir="auto">
+    <label>תיאור</label>
+    <textarea name="description" rows="3" dir="auto"></textarea>
+    <label>רביע (דחיפות × חשיבות)</label>
+    <select name="quadrant">
+      {% for k2, e2, v2, a2 in quadrant_defs %}
+      <option value="{{ k2 }}">{{ v2 }} — {{ a2 }}</option>
+      {% endfor %}
+    </select>
+    <label>אחראי</label>
+    <select name="owner_id">
+      {% for u in users %}
+      <option value="{{ u.id }}" {% if u.id == current_user.id %}selected{% endif %}>{{ u.username }}</option>
+      {% endfor %}
+    </select>
+    <label>תאריך יעד</label>
+    <input type="date" name="due_date">
+    <div class="fc-acts">
+      <button class="fc-btn go" type="submit">שמור</button>
+      <button class="fc-btn" type="button" onclick="document.getElementById('createDlg').close()">ביטול</button>
+    </div>
+  </form>
+</dialog>
+{% endif %}
+
+{% if msg %}<div class="fc-toast" id="toast">{{ msg }}</div>{% endif %}
+{% include "_war_room_actions.html" %}
+</body>
+</html>

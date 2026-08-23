@@ -1,0 +1,47 @@
+{# חדר מבצעים — the per-user layout picker.
+
+   Included by every board layout, so it carries its own styling and leans on
+   two CSS variables the host template sets (--wrs-bg / --wrs-fg) instead of
+   assuming a dark or light page. Plain form POST: it must work on the wall
+   display, which runs no page JS. #}
+<style>
+.wrs { position: relative; display: inline-block; font-family: inherit; }
+.wrs > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 7px;
+  border: 1px solid currentColor; border-radius: 8px; padding: 7px 13px; font-size: .9rem;
+  opacity: .85; user-select: none; }
+.wrs > summary::-webkit-details-marker { display: none; }
+.wrs > summary:hover { opacity: 1; }
+.wrs[open] > summary { opacity: 1; }
+.wrs-menu { position: absolute; inset-inline-start: 0; top: calc(100% + 6px); z-index: 60;
+  width: 280px; padding: 6px; margin: 0; border-radius: 10px;
+  background: var(--wrs-bg, #ffffff); color: var(--wrs-fg, #111111);
+  border: 1px solid rgba(128,128,128,.45); box-shadow: 0 10px 30px rgba(0,0,0,.35); }
+.wrs-title { font-size: .72rem; opacity: .6; padding: 6px 10px 4px; }
+.wrs-item { display: block; width: 100%; text-align: start; cursor: pointer;
+  background: transparent; color: inherit; border: 0; border-radius: 7px; padding: 8px 10px;
+  font-family: inherit; }
+.wrs-item:hover { background: rgba(128,128,128,.18); }
+.wrs-item[disabled] { cursor: default; background: rgba(128,128,128,.18); }
+.wrs-name { display: block; font-size: .92rem; font-weight: 600; }
+.wrs-desc { display: block; font-size: .76rem; opacity: .65; margin-top: 2px; }
+.wrs-on { float: inline-end; font-size: .8rem; opacity: .8; }
+</style>
+<details class="wrs">
+  <summary title="בחירת תצוגה — נשמרת בפרופיל שלך">
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+         stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <rect x="3" y="3" width="18" height="18" rx="2"></rect><path d="M3 9h18M9 21V9"></path>
+    </svg>
+    תצוגה: {{ style_labels.get(current_style, current_style) }}
+  </summary>
+  <form class="wrs-menu" method="POST" action="/dashboard/war-room/style">
+    <div class="wrs-title">התצוגה נשמרת עבורך בלבד</div>
+    {% for key, name, desc in styles %}
+    <button class="wrs-item" type="submit" name="style" value="{{ key }}"
+            {% if key == current_style %}disabled{% endif %}>
+      <span class="wrs-name">{{ name }}{% if key == current_style %}<span class="wrs-on">✓ נוכחית</span>{% endif %}</span>
+      <span class="wrs-desc">{{ desc }}</span>
+    </button>
+    {% endfor %}
+  </form>
+</details>
