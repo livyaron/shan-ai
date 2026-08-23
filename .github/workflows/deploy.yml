@@ -90,9 +90,20 @@ jobs:
         run: |
           if [ -n "$RAILWAY_SERVICE" ]; then
             railway up --detach --service "$RAILWAY_SERVICE"
-          else
-            railway up --detach
+            exit $?
           fi
+          # No service pinned: fine for a single-service project, but this one
+          # has a database alongside the app, and `railway up` refuses to guess.
+          # Name the candidates in the log so the fix is a copy-paste rather
+          # than another round trip through the Railway dashboard.
+          if railway up --detach; then
+            exit 0
+          fi
+          echo "--- services visible to this token ---"
+          railway status --json 2>/dev/null || railway status 2>/dev/null || \
+            echo "(railway status returned nothing)"
+          echo "::error::railway up could not pick a service. Set a repository VARIABLE named RAILWAY_SERVICE (Settings -> Secrets and variables -> Actions -> Variables) to the service name listed above."
+          exit 1
 
       - name: Wait until the new commit is actually serving
         # `railway up --detach` returns as soon as the upload lands, so a green
