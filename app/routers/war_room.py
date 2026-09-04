@@ -279,8 +279,8 @@ async def _wall_context(session: AsyncSession, today: datetime.date, stats: dict
         }
     wall_feed = [
         {
-            "mission": titles.get(u.mission_id, ""),
-            "text": " ".join((u.text or "").split()),
+            "mission": wall.shorten(titles.get(u.mission_id, ""), wall.FEED_TITLE_CHARS),
+            "text": wall.shorten(u.text, wall.FEED_TEXT_CHARS),
             "who": u.author_name or (u.author.username if u.author else "—"),
             "when": oms.format_stamp_il(u.created_at),
             "close": u.kind == "close",

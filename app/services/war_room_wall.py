@@ -29,6 +29,29 @@ ROTATE_SECONDS = 15
 # Beyond this, "late" stops being a slip and becomes a management problem.
 DEEP_LATE_DAYS = 7
 
+# Text caps. Every line on the wall is cut HERE, in Python, and never left to
+# CSS: the screen runs on a TV browser whose text-overflow / line-clamp handling
+# we cannot see from a laptop, and when that engine cuts a line itself what
+# survives on the wall is a meaningless three-letter fragment instead of a clean
+# ending. A capped string needs no clipping at all.
+TITLE_CHARS = 70
+UPDATE_CHARS = 90
+FEED_TITLE_CHARS = 44
+FEED_TEXT_CHARS = 70
+MOTTO_LINE_CHARS = 95
+
+
+def shorten(text: str | None, limit: int) -> str:
+    """One flat line of at most `limit` characters, cut on a word boundary."""
+    flat = " ".join((text or "").split())
+    if len(flat) <= limit:
+        return flat
+    cut = flat[:limit].rstrip()
+    space = cut.rfind(" ")
+    if space > limit * 0.6:          # never leave a two-letter stub of a word
+        cut = cut[:space]
+    return cut.rstrip(" ,.;:-—־–") + "…"
+
 # tone key → (legend label, rank). Colour lives in the template's CSS; the rank
 # is what puts the worst card on page 1.
 TONES: dict[str, tuple[str, int]] = {
@@ -135,10 +158,10 @@ def card_for(m: Mission, today: datetime.date) -> dict:
     else:
         big, unit = m.due_date.strftime("%d/%m"), f"בעוד {(m.due_date - today).days} ימים"
 
-    text = " ".join((upd.text or "").split()) if upd else ""
+    text = shorten(upd.text, UPDATE_CHARS) if upd else ""
     return {
         "id": m.id,
-        "title": m.title or "",
+        "title": shorten(m.title, TITLE_CHARS),
         "owner": (m.owner.username if m.owner else "—"),
         "quadrant": oms.quadrant_label(oms.quadrant_key(m)),
         "tone": tone,
@@ -159,11 +182,11 @@ def closed_card_for(m: Mission, today: datetime.date) -> dict:
     upd = _last_update(m)
     return {
         "id": m.id,
-        "title": m.title or "",
+        "title": shorten(m.title, TITLE_CHARS),
         "owner": (m.owner.username if m.owner else "—"),
         "quadrant": oms.quadrant_label(oms.quadrant_key(m)),
         "when": oms.format_stamp_il(m.completed_at) if m.completed_at else "—",
-        "note": " ".join((upd.text or "").split()) if upd else "",
+        "note": shorten(upd.text, UPDATE_CHARS) if upd else "",
     }
 
 

@@ -158,3 +158,39 @@ def test_updates_are_never_lazy_loaded():
     card = wall.card_for(m, TODAY)
     assert card["update_text"] == ""
     assert card["is_silent"] is True
+
+
+# --------------------------------------------------------------------------
+# text capping — the wall cuts its own strings, the browser never does
+# --------------------------------------------------------------------------
+
+def test_shorten_leaves_a_short_line_alone():
+    assert wall.shorten("ממתין לאישור בטיחות", 40) == "ממתין לאישור בטיחות"
+    assert wall.shorten(None, 40) == ""
+    assert wall.shorten("  שתי   שורות\nלשורה אחת ", 40) == "שתי שורות לשורה אחת"
+
+
+def test_shorten_cuts_on_a_word_boundary():
+    """A cut mid-word is what put a meaningless three-letter fragment on the wall."""
+    text = "הוזמן קבלן חיצוני להחלפת המבודדים בקו המתח הגבוה והעבודה מתחילה ביום ראשון"
+    out = wall.shorten(text, 40)
+    assert len(out) <= 41            # the ellipsis is the one extra character
+    assert out.endswith("…")
+    assert out[:-1].strip() in text  # nothing invented, nothing half-written
+    assert not out[:-1].endswith(" ")
+
+
+def test_shorten_never_leaves_a_stub_of_a_word():
+    """A limit that lands two letters into a long word must not keep those two."""
+    out = wall.shorten("קבלן " + "א" * 60, 20)
+    assert out.startswith("קבלן")
+    assert "…" in out
+
+
+def test_card_text_is_capped_before_it_reaches_the_template():
+    long_title = "החלפת מפסק ראשי " * 8
+    long_update = "ממתין לאישור בטיחות מהמחוז " * 8
+    m = _mission(1, title=long_title, due=TODAY, updates=[_update(long_update, days_ago=1)])
+    card = wall.card_for(m, TODAY)
+    assert len(card["title"]) <= wall.TITLE_CHARS + 1
+    assert len(card["update_text"]) <= wall.UPDATE_CHARS + 1

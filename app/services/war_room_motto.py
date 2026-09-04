@@ -146,7 +146,10 @@ async def build(session: AsyncSession, stats: dict, now: datetime.datetime | Non
         raw = ""
 
     # One line, no stray markup — the model occasionally answers with a bullet.
-    line = " ".join((raw or "").split()).lstrip("-•* ").strip('"״')
+    # Capped here rather than in CSS: see war_room_wall.shorten for why the wall
+    # never lets the browser do its own cutting.
+    from app.services.war_room_wall import MOTTO_LINE_CHARS, shorten
+    line = shorten((raw or "").lstrip("-•* ").strip('"״'), MOTTO_LINE_CHARS)
     if not line:
         # Not cached: a transient outage must not pin the fallback for the hour.
         return _motto(quote, fallback_line(stats))
@@ -171,7 +174,9 @@ async def _db_get(session: AsyncSession, key: str) -> dict | None:
         return None
     quote, author, line = row.text.split("|", 2)
     kind = next((k for t, a, k in QUOTES if t == quote), "stoic")
-    return {"quote": quote, "author": author, "kind": kind, "line": line}
+    from app.services.war_room_wall import MOTTO_LINE_CHARS, shorten
+    return {"quote": quote, "author": author, "kind": kind,
+            "line": shorten(line, MOTTO_LINE_CHARS)}
 
 
 def _spawn(session_factory, stats: dict, now: datetime.datetime) -> None:

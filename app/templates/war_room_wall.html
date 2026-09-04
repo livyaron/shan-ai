@@ -117,25 +117,27 @@ a{color:var(--amber);text-decoration:none}
 /* ── the hourly line: a real quote plus one AI sentence about the board ──
    Last band on the screen, and deliberately the only one that is not the board's
    grey: its own tinted ground and accent rule, so the eye reads it as a remark
-   about the board rather than another row of data. */
-.wl-motto{flex:0 0 auto;display:flex;align-items:center;gap:clamp(16px,2vw,34px);
-  padding:1.5vh 30px;position:relative;overflow:hidden;
+   about the board rather than another row of data.
+
+   NOTHING in this band is clipped by CSS — no nowrap, no text-overflow, no
+   line-clamp, no overflow:hidden. Both strings are already capped in Python
+   (war_room_wall.shorten), because the wall runs on a TV browser whose clipping
+   behaviour we cannot see from a laptop: what it left on the wall was a
+   three-letter fragment that read like a word. A grid with minmax(0,1fr)
+   columns also means neither half can starve the other, whatever their length. */
+.wl-motto{flex:0 0 auto;display:grid;grid-template-columns:minmax(0,1.55fr) minmax(0,1fr);
+  align-items:center;gap:clamp(16px,2vw,34px);padding:1.5vh 30px;
   border-top:3px solid #4aa3ff;
   background:linear-gradient(100deg,rgba(74,163,255,.17),rgba(176,124,255,.10) 45%,rgba(13,17,25,0) 85%),#0d1119}
 .wl-motto.wry{border-top-color:var(--amber);
   background:linear-gradient(100deg,rgba(255,176,46,.18),rgba(255,93,77,.09) 45%,rgba(13,17,25,0) 85%),#0d1119}
-.wl-motto .q{flex:1 1 58%;min-width:0;position:relative}
-/* The attribution gets its OWN line and is never clipped: squeezed next to the
-   quote — or starved by a flex sibling that refused to shrink — it came out as a
-   half-eaten "מרו", which is worse than no attribution at all. */
-.wl-motto .txt{font-size:clamp(1rem,2.5vh,1.75rem);font-weight:700;line-height:1.25;color:#eef2f8;
-  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.wl-motto .q{min-width:0}
+.wl-motto .txt{font-size:clamp(1rem,2.5vh,1.75rem);font-weight:700;line-height:1.3;color:#eef2f8}
 .wl-motto .a{font-size:clamp(.75rem,1.6vh,1.1rem);font-weight:600;color:var(--amber);margin-top:.4vh}
 .wl-motto.wry .a{color:var(--t-soon)}
-.wl-motto .l{flex:1 1 34%;min-width:0;max-width:44%;font-size:clamp(.85rem,1.9vh,1.3rem);
-  color:#d5dae2;unicode-bidi:isolate;margin-inline-start:auto;
-  border-inline-start:3px solid rgba(74,163,255,.75);padding-inline-start:18px;
-  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.wl-motto .l{min-width:0;font-size:clamp(.85rem,1.9vh,1.3rem);line-height:1.35;
+  color:#d5dae2;unicode-bidi:isolate;
+  border-inline-start:3px solid rgba(74,163,255,.75);padding-inline-start:18px}
 .wl-motto.wry .l{border-inline-start-color:rgba(255,176,46,.8)}
 
 /* ── footer feed ──────────────────────────────────────────────────────── */
@@ -144,8 +146,7 @@ a{color:var(--amber);text-decoration:none}
 .wl-chip{background:rgba(154,161,171,.14);color:var(--ink-2);border:1px solid var(--line);
   font-weight:600;border-radius:4px;padding:3px 12px;
   font-size:clamp(.7rem,1.5vh,.95rem);flex-shrink:0}
-.wl-feed{flex-grow:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
-  unicode-bidi:isolate;color:#c3c9d2}
+.wl-feed{flex-grow:1;min-width:0;white-space:nowrap;overflow:hidden;unicode-bidi:isolate;color:#c3c9d2}
 </style>
 </head>
 <body>

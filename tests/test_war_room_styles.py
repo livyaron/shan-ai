@@ -289,6 +289,19 @@ def test_wall_feed_label_is_not_a_traffic_light():
     assert ".wl-chip{background:var(--green)" not in html
 
 
+def test_wall_motto_band_does_no_css_clipping():
+    """Every string in the band is capped in Python. The band itself must not
+    clip: on the room's TV the browser's own cut left a three-letter fragment
+    that read like a word."""
+    import pathlib
+    css = pathlib.Path("app/templates/war_room_wall.html").read_text(encoding="utf-8")
+    # From the first rule, not the section comment — the comment names the very
+    # constructs this test forbids.
+    band = css[css.index(".wl-motto{"):css.index("── footer feed")]
+    for construct in ("nowrap", "text-overflow", "line-clamp", "overflow:hidden"):
+        assert construct not in band, construct
+
+
 def test_tv_mode_drops_the_navigation_chrome():
     """?tv=1 is the wall-mounted screen: board data only, no nav, no switcher."""
     env = Environment(loader=FileSystemLoader("app/templates"), undefined=StrictUndefined)
