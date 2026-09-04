@@ -54,6 +54,19 @@ WRY = [q for q in QUOTES if q[2] == "wry"]
 # Every Nth hour gets the dry shelf instead of the Stoic one.
 HUMOR_EVERY = 4
 
+# A sentence shorter than this is not a sentence — it is what is left of one.
+# See _pick_sentence: the wall would rather print its own computed line than a
+# two-letter stub of the model's.
+MIN_LINE_CHARS = 25
+MIN_LINE_WORDS = 4
+
+# Budget for the hourly call. NOT a tight one: the fallback provider (gemma) leaks
+# a chain-of-thought preamble before its answer, so a small ceiling is spent on
+# the reasoning and the actual sentence gets cut off mid-word — which is exactly
+# how a three-letter stub reached the wall. gemma_client.py carries the same
+# warning. One call per hour: the extra tokens cost nothing worth counting.
+MAX_TOKENS = 700
+
 _cache: dict[str, dict] = {}      # "YYYY-MM-DD HH" -> motto dict
 _inflight: set[str] = set()       # keys currently being built in the background
 
@@ -88,6 +101,26 @@ def fallback_line(stats: dict) -> str:
     if do_now:
         return f"{do_now} משימות דחופות על השולחן. אחת בכל פעם, עד הסוף."
     return "הלוח נקי. זה הזמן לתכנן את השבוע הבא, לא לנוח בו."
+
+
+def _hebrew_ratio(text: str) -> float:
+    if not text:
+        return 0.0
+    return sum(1 for c in text if "\u05d0" <= c <= "\u05ea") / len(text)
+
+
+def _pick_sentence(raw: str) -> str:
+    """The Hebrew sentence out of whatever the model sent back.
+
+    A provider that leaks its reasoning answers with English lines before the
+    Hebrew one; flattening the whole reply would put that reasoning on the wall.
+    The answer we asked for is one sentence, so it is the longest Hebrew line.
+    """
+    lines = [" ".join(line.split()) for line in (raw or "").splitlines()]
+    hebrew = [line for line in lines if line and _hebrew_ratio(line) >= 0.3]
+    if not hebrew:
+        return ""
+    return max(hebrew, key=len)
 
 
 def _motto(quote: tuple[str, str, str], line: str) -> dict:
@@ -138,7 +171,7 @@ async def build(session: AsyncSession, stats: dict, now: datetime.datetime | Non
             "wall_motto",
             [{"role": "system", "content": _PROMPT},
              {"role": "user", "content": _context(quote, stats)}],
-            max_tokens=120,
+            max_tokens=MAX_TOKENS,
             temperature=0.7,
         )
     except Exception as e:
@@ -149,9 +182,15 @@ async def build(session: AsyncSession, stats: dict, now: datetime.datetime | Non
     # Capped here rather than in CSS: see war_room_wall.shorten for why the wall
     # never lets the browser do its own cutting.
     from app.services.war_room_wall import MOTTO_LINE_CHARS, shorten
-    line = shorten((raw or "").lstrip("-•* ").strip('"״'), MOTTO_LINE_CHARS)
-    if not line:
-        # Not cached: a transient outage must not pin the fallback for the hour.
+    line = shorten(_pick_sentence(raw).lstrip("-•* ").strip('"״'), MOTTO_LINE_CHARS)
+    if len(line) < MIN_LINE_CHARS or len(line.split()) < MIN_LINE_WORDS:
+        # What came back is a stub, not a sentence — usually a reasoning preamble
+        # that ate the token budget. Print our own line rather than the stub, and
+        # do not cache it: the next hour gets a fresh try.
+        logger.warning(
+            f"war_room_motto: model answer unusable ({len(raw or '')} chars raw, "
+            f"{len(line)} kept: {line!r}) — serving the computed line"
+        )
         return _motto(quote, fallback_line(stats))
 
     motto = _motto(quote, line)
@@ -175,8 +214,13 @@ async def _db_get(session: AsyncSession, key: str) -> dict | None:
     quote, author, line = row.text.split("|", 2)
     kind = next((k for t, a, k in QUOTES if t == quote), "stoic")
     from app.services.war_room_wall import MOTTO_LINE_CHARS, shorten
-    return {"quote": quote, "author": author, "kind": kind,
-            "line": shorten(line, MOTTO_LINE_CHARS)}
+    line = shorten(line, MOTTO_LINE_CHARS)
+    # A stub stored by an earlier build must not be served for the rest of the
+    # hour: treat it as a miss, so the caller shows the computed line and a fresh
+    # build replaces it.
+    if len(line) < MIN_LINE_CHARS or len(line.split()) < MIN_LINE_WORDS:
+        return None
+    return {"quote": quote, "author": author, "kind": kind, "line": line}
 
 
 def _spawn(session_factory, stats: dict, now: datetime.datetime) -> None:
