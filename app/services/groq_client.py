@@ -66,8 +66,13 @@ async def groq_chat(
     # the other provider is even tried.
     MAX_ROUNDS = 2
     last_error = None
+    # A model that answered 404/400 is not coming back inside this call — asking
+    # it again on round 2 only burns latency.
+    dead: set[str] = set()
     for rnd in range(MAX_ROUNDS):
         for i, model in enumerate(model_list):
+            if model in dead:
+                continue
             try:
                 resp = await _client.chat.completions.create(model=model, **kwargs)
                 if i > 0 or rnd > 0:
@@ -78,8 +83,16 @@ async def groq_chat(
                 logger.warning(f"Rate limit on {model} (round {rnd})")
                 # No sleep between models — different buckets, retrying the next
                 # one immediately is free.
-            except Exception:
-                raise
-        if rnd < MAX_ROUNDS - 1:
+            except Exception as e:
+                # Was: `raise`. One decommissioned model at the head of the list
+                # therefore took the WHOLE provider down without the healthy model
+                # behind it ever being tried — which is exactly how a 404 on
+                # llama-4-scout made every AI feature in the app fail while
+                # llama-3.3-70b sat there working. A per-model failure is now a
+                # per-model failure; only an empty list of survivors is an outage.
+                last_error = e
+                dead.add(model)
+                logger.warning(f"Model {model} failed ({type(e).__name__}: {str(e)[:120]}) — trying the next")
+        if rnd < MAX_ROUNDS - 1 and len(dead) < len(model_list):
             await asyncio.sleep(1)   # brief pause before one more full pass
     raise last_error

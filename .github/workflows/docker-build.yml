@@ -45,4 +45,6 @@ jobs:
             tests/test_health_provenance.py \
             tests/test_war_room_styles.py \
             tests/test_war_room_wall.py \
-            tests/test_war_room_motto.py
+            tests/test_war_room_motto.py \
+            tests/test_groq_retry.py \
+            tests/test_key_redaction.py

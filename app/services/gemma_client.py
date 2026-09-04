@@ -25,6 +25,27 @@ GEMMA_MODELS = [
 _BASE = "https://generativelanguage.googleapis.com/v1beta/models"
 
 
+# The key is a query parameter on every Google AI URL, so an httpx error string
+# carries it verbatim — into the logs, and out through the /llm-health endpoint.
+# That is a credential leak with no attacker required, so nothing that leaves this
+# module is allowed to contain one.
+_KEY_PATTERNS = [
+    re.compile(r"([?&]key=)[^&\s\"']+"),
+    re.compile(r"\bAIza[0-9A-Za-z_\-]{10,}"),
+    re.compile(r"\bgsk_[0-9A-Za-z]{10,}"),
+    re.compile(r"\bsk-ant-[0-9A-Za-z_\-]{10,}"),
+]
+
+
+def redact(text: str) -> str:
+    """Strip API keys out of a message before it is logged or returned."""
+    out = text or ""
+    out = _KEY_PATTERNS[0].sub(r"\1<redacted>", out)
+    for pattern in _KEY_PATTERNS[1:]:
+        out = pattern.sub("<redacted>", out)
+    return out
+
+
 def _to_google_format(messages: list) -> tuple[str | None, list]:
     """Convert OpenAI-style messages to Google AI contents + system_instruction."""
     system_parts: list[str] = []
@@ -184,7 +205,12 @@ async def gemma_chat(
                     if i < len(model_list) - 1:
                         await asyncio.sleep(1)
                 else:
-                    raise
+                    # Same lesson as groq_client: one dead model must not take the
+                    # whole provider with it while a working one waits behind it.
+                    last_error = e
+                    logger.warning(
+                        f"gemma_chat: {e.response.status_code} on {model} — trying the next"
+                    )
             except (KeyError, IndexError, ValueError) as e:
                 # ValueError = empty response (model returned nothing usable).
                 # Treat like a transient failure and try the next model instead of

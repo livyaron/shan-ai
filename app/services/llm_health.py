@@ -13,12 +13,27 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
+from app.services.gemma_client import redact
 
 logger = logging.getLogger(__name__)
 
 # Cheapest possible round-trip: enough to prove the key and the quota, no more.
 _PROBE_MESSAGES = [{"role": "user", "content": "Reply with the single word: OK"}]
 _PROBE_MAX_TOKENS = 8
+
+
+async def _probe_models(chat, models: list[str]) -> dict[str, str]:
+    """One-word round-trip per model. Without this the report says "groq is down"
+    when the truth is "the first model in the list was decommissioned"."""
+    out: dict[str, str] = {}
+    for model in models:
+        try:
+            await chat(_PROBE_MESSAGES, max_tokens=_PROBE_MAX_TOKENS,
+                       temperature=0, models=[model])
+            out[model] = "ok"
+        except Exception as e:
+            out[model] = redact(f"{type(e).__name__}: {str(e)}")[:120]
+    return out
 
 
 async def _probe_groq() -> dict:
@@ -28,11 +43,15 @@ async def _probe_groq() -> dict:
     try:
         text = await groq_chat(_PROBE_MESSAGES, max_tokens=_PROBE_MAX_TOKENS, temperature=0)
         return {"status": "ok", "ms": int((perf_counter() - t0) * 1000),
-                "reply": (text or "")[:40]}
+                "reply": (text or "")[:40],
+                "per_model": await _probe_models(groq_chat, MODELS)}
     except Exception as e:
         return {"status": "error", "ms": int((perf_counter() - t0) * 1000),
-                "error": f"{type(e).__name__}: {str(e)[:200]}",
-                "models_tried": MODELS}
+                # Redacted: the Google AI key rides in the request URL, so an
+                # un-scrubbed error string published this endpoint's own
+                # credentials to anyone who opened it.
+                "error": redact(f"{type(e).__name__}: {str(e)}")[:200],
+                "per_model": await _probe_models(groq_chat, MODELS)}
 
 
 async def _probe_gemma() -> dict:
@@ -42,11 +61,12 @@ async def _probe_gemma() -> dict:
     try:
         text = await gemma_chat(_PROBE_MESSAGES, max_tokens=_PROBE_MAX_TOKENS, temperature=0)
         return {"status": "ok", "ms": int((perf_counter() - t0) * 1000),
-                "reply": (text or "")[:40]}
+                "reply": (text or "")[:40],
+                "per_model": await _probe_models(gemma_chat, GEMMA_MODELS)}
     except Exception as e:
         return {"status": "error", "ms": int((perf_counter() - t0) * 1000),
-                "error": f"{type(e).__name__}: {str(e)[:200]}",
-                "models_tried": GEMMA_MODELS}
+                "error": redact(f"{type(e).__name__}: {str(e)}")[:200],
+                "per_model": await _probe_models(gemma_chat, GEMMA_MODELS)}
 
 
 async def check_providers(probe: bool = False) -> dict:
