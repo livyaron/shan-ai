@@ -30,6 +30,9 @@
   --t-late-deep:#ff2118; --t-late:#ff5d4d; --t-today:#ff9f1c; --t-soon:#ffd23f;
   --t-week:#4aa3ff; --t-nodate:#b07cff; --t-later:#6b7280;
   --wrs-bg:#16181d; --wrs-fg:#f2f4f7;
+  /* One number for the top bar's height: the layout picker's menu hangs
+     from it and must not guess where the bar ends. */
+  --wl-top-h:max(8.4vh,54px);
   --ui:'Heebo',sans-serif,'Segoe UI Emoji','Apple Color Emoji','Noto Color Emoji';
   --mono:'IBM Plex Mono',monospace,'Segoe UI Emoji','Noto Color Emoji';
 }
@@ -42,7 +45,7 @@ a{color:var(--amber);text-decoration:none}
 
 /* ── header ───────────────────────────────────────────────────────────── */
 .wl-top{flex:0 0 auto;display:flex;align-items:center;gap:24px;padding:0 30px;
-  height:8.4vh;min-height:54px;border-bottom:2px solid var(--line);overflow:hidden}
+  height:var(--wl-top-h);border-bottom:2px solid var(--line);overflow:hidden}
 .wl-name{font-size:clamp(1.3rem,3.1vh,2.2rem);font-weight:900;letter-spacing:.5px;white-space:nowrap}
 .wl-sub{font-size:clamp(.85rem,1.8vh,1.3rem);color:var(--ink-2);font-weight:500;white-space:nowrap}
 .wl-live{display:flex;align-items:center;gap:9px;font-size:clamp(.8rem,1.7vh,1.15rem);
@@ -139,6 +142,24 @@ a{color:var(--amber);text-decoration:none}
   color:#d5dae2;unicode-bidi:isolate;
   border-inline-start:3px solid rgba(74,163,255,.75);padding-inline-start:18px}
 .wl-motto.wry .l{border-inline-start-color:rgba(255,176,46,.8)}
+
+/* ── the layout picker, on a bar that clips ───────────────────────────────
+   .wl-top is exactly one row tall and hides its overflow, so the menu the shared
+   switcher opens — absolutely positioned just under its own button — was cut off
+   a few pixels below it: on the TV the thing read as a menu opening BEHIND the
+   header, and the wall looked like a screen you could not leave. Fixed
+   positioning takes the menu out of the clipped box altogether. The switcher is
+   the last item of the top bar, so the menu hangs from the bar's inline-end edge
+   (its own padding, 30px), directly under the button.
+   Sized up as well: this one is read from arm's length rather than from 4m, but
+   the shared .9rem on a 4K panel is a rumour, not a menu. */
+.wl-top .wrs > summary{font-size:clamp(.85rem,1.8vh,1.25rem);padding:8px 14px}
+.wl-top .wrs-menu{position:fixed;top:calc(var(--wl-top-h) + 6px);
+  inset-inline-start:auto;inset-inline-end:30px;
+  width:clamp(280px,24vw,420px);z-index:200}
+.wl-top .wrs-item{padding:10px 12px}
+.wl-top .wrs-name{font-size:clamp(.92rem,1.9vh,1.3rem)}
+.wl-top .wrs-desc{font-size:clamp(.76rem,1.5vh,1.05rem)}
 
 /* ── footer feed ──────────────────────────────────────────────────────── */
 .wl-foot{flex:0 0 auto;display:flex;align-items:center;gap:16px;background:var(--panel-2);

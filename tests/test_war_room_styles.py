@@ -302,6 +302,23 @@ def test_wall_motto_band_does_no_css_clipping():
         assert construct not in band, construct
 
 
+def test_wall_switcher_menu_is_not_trapped_in_the_clipped_top_bar():
+    """The wall's top bar is exactly one row tall and hides its overflow, so the
+    shared picker's menu — absolutely positioned under its own button — was cut
+    off a few pixels below it: on the room's TV that read as a menu opening
+    behind the header, and the wall became a screen you could not leave."""
+    import pathlib
+    import re
+    css = pathlib.Path("app/templates/war_room_wall.html").read_text(encoding="utf-8")
+    assert "overflow:hidden}" in re.search(r"\.wl-top\{[^}]*\}", css).group(0)
+    rule = re.search(r"\.wl-top \.wrs-menu\{([^}]*)\}", css)
+    assert rule, "the wall must re-position the switcher menu out of its clipped bar"
+    assert "position:fixed" in rule.group(1)
+    # Anchored to the bar's own height, so changing the header cannot desync it.
+    assert "var(--wl-top-h)" in rule.group(1)
+    assert "var(--wl-top-h)" in re.search(r"\.wl-top\{[^}]*\}", css).group(0)
+
+
 def test_tv_mode_drops_the_navigation_chrome():
     """?tv=1 is the wall-mounted screen: board data only, no nav, no switcher."""
     env = Environment(loader=FileSystemLoader("app/templates"), undefined=StrictUndefined)
