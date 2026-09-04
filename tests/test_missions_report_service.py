@@ -220,7 +220,8 @@ def _sample_data():
             "urgent": "כן", "important": "כן", "status": "פתוחה", "owner": "דני",
             "created_by": "דני", "due": "01/01/2026", "days_to_due": 1,
             "days_overdue": None, "age_days": 5, "created_at": "", "updated_at": "",
-            "last_status_update": "—",
+            "last_status_update": "—", "last_status_update_at": "—",
+            "last_status_author": "—", "updates_count": 0,
             "_overdue": m.due_date < TODAY, "_at_risk": False,
         } for m in active],
         "closed_rows": [{
@@ -711,7 +712,8 @@ async def test_load_caches_from_db_restores_every_artifact(monkeypatch):
     mrs.clear_caches()
 
     loaded = await mrs.load_caches_from_db(session)
-    assert loaded == {"summary": True, "ai_insights": True, "report": True}
+    assert loaded == {
+        mrs.KIND_SUMMARY: True, mrs.KIND_AI_INSIGHTS: True, mrs.KIND_REPORT: True}
     status = mrs.cache_status()
     assert status["summary"] and status["ai_insights"] and status["report"]
 
@@ -930,18 +932,40 @@ async def _collected(missions, monkeypatch):
     return await mrs.collect_report_data(_FakeSession())
 
 
-async def test_open_row_carries_the_last_status_update(monkeypatch):
+async def test_open_row_carries_the_last_status_update_TEXT(monkeypatch):
+    """The column named "עדכון סטטוס אחרון" must hold the report, not its timestamp."""
     data = await _collected([_make_mission(id=1, updates=[
-        _make_update(id=1, created_at=datetime.datetime(2026, 7, 13, 6, 30)),
-        _make_update(id=2, created_at=datetime.datetime(2026, 7, 14, 12, 5)),
+        _make_update(id=1, text="הוזמן מבודד", created_at=datetime.datetime(2026, 7, 13, 6, 30)),
+        _make_update(id=2, text="המבודד הוחלף, נותרה בדיקת בידוד",
+                     created_at=datetime.datetime(2026, 7, 14, 12, 5)),
     ])], monkeypatch)
-    # 12:05 UTC → 15:05 Israel local.
-    assert data["open_rows"][0]["last_status_update"] == "14/07/2026 15:05"
+    row = data["open_rows"][0]
+    assert row["last_status_update"] == "המבודד הוחלף, נותרה בדיקת בידוד"
+    # 12:05 UTC → 15:05 Israel local, now in its own column.
+    assert row["last_status_update_at"] == "14/07/2026 15:05"
+    assert row["last_status_author"] == "דני"
+    assert row["updates_count"] == 2
+
+
+async def test_multiline_update_is_flattened_to_one_cell_line(monkeypatch):
+    data = await _collected([_make_mission(id=1, updates=[
+        _make_update(text="שלב א הושלם\n\nשלב ב  בביצוע")])], monkeypatch)
+    assert data["open_rows"][0]["last_status_update"] == "שלב א הושלם שלב ב בביצוע"
+
+
+async def test_closing_note_is_marked(monkeypatch):
+    data = await _collected([_make_mission(id=1, updates=[
+        _make_update(text="נסגר בהצלחה", kind="close")])], monkeypatch)
+    assert data["open_rows"][0]["last_status_update"] == "🔒 נסגר בהצלחה"
 
 
 async def test_open_row_shows_a_dash_when_nobody_reported(monkeypatch):
     data = await _collected([_make_mission(id=1, updates=[])], monkeypatch)
-    assert data["open_rows"][0]["last_status_update"] == "—"
+    row = data["open_rows"][0]
+    assert row["last_status_update"] == "—"
+    assert row["last_status_update_at"] == "—"
+    assert row["last_status_author"] == "—"
+    assert row["updates_count"] == 0
 
 
 async def test_last_status_update_is_independent_of_updated_at(monkeypatch):
@@ -953,27 +977,51 @@ async def test_last_status_update_is_independent_of_updated_at(monkeypatch):
     assert row["last_status_update"] == "—"
 
 
-def test_open_sheet_appends_the_column_without_shifting_the_others():
+def test_open_sheet_appends_the_columns_without_shifting_the_others():
     """Saved filters and column references depend on the existing positions."""
-    assert mrs.OPEN_HEADERS[-1] == "עדכון סטטוס אחרון"
-    assert mrs.OPEN_HEADERS[-2] == "עודכנה לאחרונה"
+    assert mrs.OPEN_HEADERS[:16][-2:] == ["עודכנה לאחרונה", "עדכון סטטוס אחרון"]
+    assert mrs.OPEN_HEADERS[16:] == [
+        "תאריך עדכון הסטטוס", "מדווח העדכון", "מס' עדכונים"]
     assert len(mrs.OPEN_HEADERS) == len(mrs.OPEN_WIDTHS)
 
 
-def test_workbook_open_sheet_writes_the_new_column():
+def test_workbook_open_sheet_writes_the_status_text_and_its_metadata():
     from openpyxl import load_workbook
 
     data = _sample_data()
-    data["open_rows"][0]["last_status_update"] = "14/07/2026 15:05"
+    data["open_rows"][0].update(
+        last_status_update="המבודד הוחלף, נותרה בדיקת בידוד",
+        last_status_update_at="14/07/2026 15:05",
+        last_status_author="דני",
+        updates_count=2,
+    )
     ws = load_workbook(BytesIO(mrs.build_workbook(data)))[mrs.SHEET_OPEN]
 
     assert [c.value for c in ws[1]] == mrs.OPEN_HEADERS
-    col = mrs.OPEN_HEADERS.index("עדכון סטטוס אחרון") + 1
-    assert ws.cell(2, col).value == "14/07/2026 15:05"
-    # The filter must span the new column too, or it is invisible to filtering.
+
+    def cell(name):
+        return ws.cell(2, mrs.OPEN_HEADERS.index(name) + 1)
+
+    assert cell("עדכון סטטוס אחרון").value == "המבודד הוחלף, נותרה בדיקת בידוד"
+    assert cell("תאריך עדכון הסטטוס").value == "14/07/2026 15:05"
+    assert cell("מדווח העדכון").value == "דני"
+    assert cell("מס' עדכונים").value == 2
+    # The filter must span the new columns too, or they are invisible to filtering.
     assert ws.auto_filter.ref.split(":")[1].startswith(
         __import__("openpyxl").utils.get_column_letter(len(mrs.OPEN_HEADERS))
     )
+
+
+def test_date_and_text_columns_are_pinned_to_the_text_format():
+    """Excel re-typing "14/07/2026 15:05" as a serial number is what showed a number."""
+    from openpyxl import load_workbook
+
+    data = _sample_data()
+    data["open_rows"][0].update(
+        last_status_update="80%", last_status_update_at="14/07/2026 15:05")
+    ws = load_workbook(BytesIO(mrs.build_workbook(data)))[mrs.SHEET_OPEN]
+    for ci in mrs.OPEN_TEXT_COLS:
+        assert ws.cell(2, ci).number_format == "@", mrs.OPEN_HEADERS[ci - 1]
 
 
 # ── Timestamps are Israel-local, matching the sheet's own header ───────────
