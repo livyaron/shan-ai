@@ -28,6 +28,11 @@ AT_RISK_DAYS = 3
 # Active missions untouched for this long are flagged as stale on the summary sheet.
 STALE_DAYS = 30
 
+# Shorter horizon, used for the AI focus summary and the wall display: a mission
+# in the at-risk window that nobody reported on for two weeks is already a
+# management signal, long before the 30-day staleness mark.
+SILENT_DAYS = 14
+
 # Ceiling on how many missions are spelled out in the AI summary prompt. The
 # owner-load header above the list is computed from the whole board either way,
 # so the model still sees the shape of the backlog.
@@ -278,6 +283,26 @@ def _update_text(u) -> str:
     flat = " ".join((u.text or "").split())
     prefix = "🔒 " if getattr(u, "kind", None) == "close" else ""
     return f"{prefix}{flat}"
+
+
+def _days_since_update(m: Mission, today: datetime.date) -> int | None:
+    """Days since anyone reported on this mission; None when nobody ever did."""
+    at = _last_update_at(m)
+    return None if at is None else (today - at.date()).days
+
+
+def _recent_updates_text(m: Mission, limit: int = 3) -> str:
+    """The last `limit` status updates, newest first, as one prompt-safe line."""
+    updates = [u for u in oms.get_mission_updates(m) if u.created_at and (u.text or "").strip()]
+    if not updates:
+        return ""
+    updates.sort(key=lambda u: u.created_at, reverse=True)
+    parts = []
+    for u in updates[:limit]:
+        who = u.author_name or (u.author.username if getattr(u, "author", None) else "—")
+        flat = " ".join((u.text or "").split())
+        parts.append(f"[{u.created_at.strftime('%d/%m')} {_sanitize(who)}] {_sanitize(flat)[:180]}")
+    return " ; ".join(parts)
 
 
 def due_bucket(due: datetime.date | None, today: datetime.date) -> str:
@@ -980,9 +1005,15 @@ _SUMMARY_PROMPT = f"""אתה ראש חדר מבצעים באגף תשתיות ח
 
 חסמים ותלויות
 • 1 עד 3 נקודות: מה עלול למנוע סגירה היום. אם אין — כתוב: אין חסמים ידועים.
+• בסס את הקטע הזה בעיקר על דיווחי הסטטוס שצורפו לכל משימה (השדה 'דיווחים אחרונים'):
+  ממתין לגורם חיצוני, חוסר חומר, אישור שלא התקבל, כוח אדם.
+• אם אותו חסם חוזר בשתי משימות או יותר — אמור זאת במפורש ונקוב במספר.
 
 לטיפול הנהלה
-• רק משימות באיחור של יותר משבוע, או דחופות וחשובות שלא זזות.
+• רק משימות באיחור של יותר משבוע, דחופות וחשובות שלא זזות, או משימות שאין עליהן
+  דיווח סטטוס זמן רב (השדה 'ללא דיווח').
+• אם דיווחי הסטטוס חוזרים על עצמם ולא מראים התקדמות (למשל אותו אחוז ביצוע פעמיים) —
+  סמן זאת כקיפאון, גם אם המשימה עדיין לא באיחור.
 • לכל נקודה כתוב מה ההחלטה הנדרשת מההנהלה. אם אין — כתוב: אין.
 
 כללים מחייבים:
@@ -1063,6 +1094,16 @@ def _format_at_risk_plain(groups: dict[str, list[Mission]], today: datetime.date
     deep = [m for m in groups["late"] if m.due_date and (today - m.due_date).days > 7]
     if deep:
         lines.append(f"• {len(deep)} משימות באיחור של מעל שבוע.")
+    # `or 999` would be wrong here: a mission reported TODAY has 0 days since the
+    # last update, which is falsy — it must not be counted as quiet.
+    quiet = []
+    for group in groups.values():
+        for m in group:
+            days = _days_since_update(m, today)
+            if days is None or days >= SILENT_DAYS:
+                quiet.append(m)
+    if quiet:
+        lines.append(f"• {len(quiet)} משימות בסיכון ללא דיווח סטטוס מעל {SILENT_DAYS} ימים.")
 
     lines.append("")
     lines.append("<b>✅ משימות לביצוע היום</b>")
@@ -1109,6 +1150,19 @@ def _at_risk_context(groups: dict[str, list[Mission]], today: datetime.date) -> 
             lines.append(f"- {_sanitize(name)}: {n} משימות")
         lines.append("")
 
+    # Reporting discipline is its own signal: a mission can be on time and still
+    # be one nobody has said a word about for a month.
+    all_at_risk = [m for group in groups.values() for m in group]
+    never = sum(1 for m in all_at_risk if _days_since_update(m, today) is None)
+    stale = sum(1 for m in all_at_risk
+                if (_days_since_update(m, today) or 0) >= SILENT_DAYS)
+    if all_at_risk:
+        lines.append(
+            f"דיווחי סטטוס: {len(all_at_risk) - never} משימות דווחו לפחות פעם אחת, "
+            f"{never} מעולם לא דווחו, {stale} לא דווחו מעל {SILENT_DAYS} ימים."
+        )
+        lines.append("")
+
     # The prompt used to grow linearly with the board — ~300 chars of detail per
     # mission with no cap, which is what made a cold build slow on a busy board.
     # Buckets are walked worst-first, so the cap only ever drops the least urgent.
@@ -1132,11 +1186,20 @@ def _at_risk_context(groups: dict[str, list[Mission]], today: datetime.date) -> 
             age = _age_days(m.created_at, today)
             if age is not None:
                 bits.append(f"נפתחה לפני {age} ימים")
+            silent = _days_since_update(m, today)
+            bits.append("ללא דיווח מעולם" if silent is None else
+                        ("דווח היום" if silent == 0 else f"ללא דיווח {silent} ימים"))
             line = f"- {_sanitize(m.title)} | " + " | ".join(bits)
-            detail = _description_with_updates(m)
-            if detail:
-                line += f" | פירוט: {_sanitize(detail)[:300]}"
+            if m.description:
+                line += f" | תיאור: {_sanitize(m.description)[:200]}"
             lines.append(line)
+            # The status updates get their own line, newest first: flattening them
+            # into the description and cutting at 300 chars used to throw away the
+            # newest report on any mission with a long log — exactly the part that
+            # says whether the work is moving.
+            recent = _recent_updates_text(m)
+            if recent:
+                lines.append(f"  דיווחים אחרונים: {recent}")
         lines.append("")
     return "\n".join(lines)
 

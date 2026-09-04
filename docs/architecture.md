@@ -12,6 +12,10 @@
 - `decision_service.py`: Classification (INFO/NORMAL/CRITICAL/UNCERTAIN).
 - `embedding_service.py`: FastEmbed (384 dims).
 - `knowledge_service.py`: pgvector RAG retrieval.
+- `war_room_wall.py`: shaping for the חדר מבצעים wall display (`?style=wall`) —
+  colour tone per mission (time-to-target, never the quadrant), worst-first
+  ordering, and the pagination the TV screen rotates through. Pure functions over
+  loaded ORM objects; the router only queries and passes the result to the template.
 - `analysis_cache.py`: short-TTL (15 min) in-process cache for the ◈ ניתוח AI dashboard
   panels. Losing it costs one rebuild — unlike the חדר מבצעים day-cache in
   `missions_report_service.py`, which is a shared once-a-day artifact and is

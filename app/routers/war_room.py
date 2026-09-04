@@ -17,6 +17,7 @@ from app.models import Mission, MissionStatusEnum, MissionUpdate, User, RoleEnum
 from app.routers.login import get_current_user
 from app.services import missions_menu_service as oms
 from app.services import war_room_styles as wrs
+from app.services import war_room_wall as wall
 
 logger = logging.getLogger(__name__)
 
@@ -105,6 +106,7 @@ async def war_room_page(
     status: str = "active",
     q: str = "",
     style: str | None = None,
+    tv: int = 0,
 ):
     today = oms.today_il()
     active_style = wrs.resolve(style, current_user.war_room_style)
@@ -177,6 +179,9 @@ async def war_room_page(
         "styles": wrs.STYLES,
         "current_style": active_style,
         "style_labels": wrs.STYLE_LABELS,
+        # Kiosk mode: ?tv=1 drops the navigation chrome so a wall-mounted screen
+        # shows board data only. Every other entry point is unchanged.
+        "tv": bool(tv),
     }
 
     # Per-style extras. Each block only runs for the style that needs it, so the
@@ -214,10 +219,21 @@ async def _focus_context(session: AsyncSession, user: User, today: datetime.date
 
 
 async def _wall_context(session: AsyncSession, today: datetime.date) -> dict:
-    """What a room needs to see from four metres: what burns, who carries it, what just closed."""
+    """What a room needs to see from four metres — the WHOLE active board, rotating.
+
+    The old wall showed the five nearest due dates and nothing else: an undated
+    mission, or the sixth-worst one, was invisible to the room forever. Now every
+    active mission is shaped into a card, sorted worst-first and cut into pages
+    the browser cycles through, so the screen eventually says everything.
+    """
     active = list((await session.scalars(
         select(Mission)
-        .options(selectinload(Mission.owner))
+        .options(
+            selectinload(Mission.owner),
+            # The card carries the latest status update — without this the
+            # template gets [] from get_mission_updates and the wall goes silent.
+            selectinload(Mission.updates).selectinload(MissionUpdate.author),
+        )
         .where(Mission.status.in_(oms.ACTIVE_STATUSES))
         .order_by(Mission.due_date.asc().nulls_last(), Mission.id.desc())
     )).all())
@@ -230,18 +246,62 @@ async def _wall_context(session: AsyncSession, today: datetime.date) -> dict:
 
     closed = list((await session.scalars(
         select(Mission)
-        .options(selectinload(Mission.owner))
+        .options(
+            selectinload(Mission.owner),
+            selectinload(Mission.updates).selectinload(MissionUpdate.author),
+        )
         .where(Mission.status == MissionStatusEnum.DONE.value)
         .order_by(Mission.completed_at.desc().nulls_last(), Mission.id.desc())
-        .limit(4)
+        .limit(wall.WALL_PAGE_SIZE)
     )).all())
 
+    pages = wall.build_pages(active, closed, today)
+
+    # Board-wide status feed for the bottom ticker: the room should see that work
+    # is being reported even while the cards it belongs to are on another page.
+    # Two single-entity queries on purpose: a multi-entity select would have to
+    # carry loader options that bind to one of the entities implicitly, and the
+    # titles are a cheap id→title lookup either way.
+    feed_updates = list((await session.scalars(
+        select(MissionUpdate)
+        .options(selectinload(MissionUpdate.author))
+        .order_by(MissionUpdate.created_at.desc().nulls_last(), MissionUpdate.id.desc())
+        .limit(10)
+    )).all())
+    titles: dict[int, str] = {}
+    if feed_updates:
+        titles = {
+            mid: title or ""
+            for mid, title in (await session.execute(
+                select(Mission.id, Mission.title)
+                .where(Mission.id.in_([u.mission_id for u in feed_updates]))
+            )).all()
+        }
+    wall_feed = [
+        {
+            "mission": titles.get(u.mission_id, ""),
+            "text": " ".join((u.text or "").split()),
+            "who": u.author_name or (u.author.username if u.author else "—"),
+            "when": oms.format_stamp_il(u.created_at),
+            "close": u.kind == "close",
+        }
+        for u in feed_updates
+    ]
+
+    silent = sum(1 for p in pages if p["kind"] == "missions"
+                 for c in p["cards"] if c["is_silent"])
+
     return {
-        # Only dated missions can burn; an undated one has nothing to be late for.
-        "wall_urgent": [m for m in active if m.due_date is not None][:5],
+        "wall_pages": pages,
+        "wall_rotate_ms": wall.ROTATE_SECONDS * 1000,
+        "wall_refresh": wall.refresh_seconds(len(pages)),
+        "wall_legend": wall.LEGEND,
+        "wall_active_total": len(active),
+        "wall_silent": silent,
+        "wall_silent_days": wall.SILENT_DAYS,
+        "wall_feed": wall_feed,
         "owner_load": owner_load,
         "owner_load_max": max((c for _, c in owner_load), default=1),
-        "wall_closed": closed,
     }
 
 

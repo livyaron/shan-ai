@@ -295,6 +295,75 @@ def test_focus_summary_plain_fallback_lists_buckets():
     assert "אינו זמין" in text
 
 
+def test_at_risk_context_spells_out_the_status_updates():
+    """The AI summary must see the reports themselves, newest first.
+
+    They used to be flattened into the description and cut at 300 chars, so on
+    any mission with a long log the NEWEST report — the one that says whether the
+    work is moving — was the first thing thrown away.
+    """
+    a = _make_user(id=1, username="דני")
+    m = _make_mission(
+        id=1, owner=a, due_date=TODAY - timedelta(days=2),
+        description="החלפת מבודדים בתחנה",
+        updates=[
+            _make_update(id=1, text="הוזמן ציוד", created_at=datetime.datetime(2026, 6, 20, 8, 0)),
+            _make_update(id=2, text="ממתין לאישור בטיחות",
+                         created_at=datetime.datetime(2026, 7, 14, 8, 0)),
+        ],
+    )
+    ctx = mrs._at_risk_context({"late": [m], "today": [], "soon": [], "nodate": []}, TODAY)
+    assert "דיווחים אחרונים" in ctx
+    # Newest first — the order is what tells the model the direction of travel.
+    assert ctx.index("ממתין לאישור בטיחות") < ctx.index("הוזמן ציוד")
+    assert "ללא דיווח 1 ימים" in ctx
+    assert "החלפת מבודדים בתחנה" in ctx
+
+
+def test_at_risk_context_flags_a_mission_nobody_reported_on():
+    a = _make_user(id=1, username="דני")
+    m = _make_mission(id=1, owner=a, due_date=TODAY, updates=[])
+    ctx = mrs._at_risk_context({"late": [], "today": [m], "soon": [], "nodate": []}, TODAY)
+    assert "ללא דיווח מעולם" in ctx
+    assert "מעולם לא דווחו" in ctx  # the board-level reporting-discipline line
+
+
+def test_at_risk_context_counts_reporting_discipline():
+    a = _make_user(id=1, username="דני")
+    fresh = _make_mission(id=1, owner=a, due_date=TODAY,
+                          updates=[_make_update(id=1, created_at=NOW)])
+    old = _make_mission(
+        id=2, owner=a, due_date=TODAY,
+        updates=[_make_update(id=2, created_at=datetime.datetime(2026, 6, 1, 8, 0))],
+    )
+    ctx = mrs._at_risk_context({"late": [], "today": [fresh, old], "soon": [], "nodate": []}, TODAY)
+    assert f"1 לא דווחו מעל {mrs.SILENT_DAYS} ימים" in ctx
+
+
+def test_updates_reach_the_prompt_without_a_lazy_load():
+    """A mission whose log was not eager-loaded degrades to no reports, never raises."""
+    a = _make_user(id=1, username="דני")
+    m = _make_mission(id=1, owner=a, due_date=TODAY)  # updates deliberately unloaded
+    ctx = mrs._at_risk_context({"late": [], "today": [m], "soon": [], "nodate": []}, TODAY)
+    assert "דיווחים אחרונים" not in ctx
+
+
+def test_summary_prompt_asks_the_model_to_use_the_reports():
+    """The prompt and the context must stay in step — the field name is the contract."""
+    assert "דיווחים אחרונים" in mrs._SUMMARY_PROMPT
+    assert "ללא דיווח" in mrs._SUMMARY_PROMPT
+
+
+def test_plain_fallback_counts_unreported_missions():
+    a = _make_user(id=1, username="דני")
+    silent = _make_mission(id=1, owner=a, due_date=TODAY - timedelta(days=1), updates=[])
+    reported = _make_mission(id=2, owner=a, due_date=TODAY,
+                             updates=[_make_update(id=2, created_at=NOW)])
+    text = mrs._format_at_risk_plain(
+        {"late": [silent], "today": [reported], "soon": [], "nodate": []}, TODAY)
+    assert f"1 משימות בסיכון ללא דיווח סטטוס מעל {mrs.SILENT_DAYS} ימים" in text
+
+
 def test_focus_summary_plain_fallback_when_board_clean():
     groups = {"late": [], "today": [], "soon": [], "nodate": []}
     text = mrs._format_at_risk_plain(groups, TODAY)

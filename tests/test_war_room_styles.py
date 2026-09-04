@@ -11,8 +11,10 @@ from types import SimpleNamespace
 import pytest
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
+from app.models import Mission, MissionUpdate, User
 from app.services import missions_menu_service as oms
 from app.services import war_room_styles as wrs
+from app.services import war_room_wall as wall
 
 TODAY = datetime.date(2026, 8, 22)
 
@@ -67,21 +69,22 @@ def test_every_style_has_a_label_and_a_template_file():
 # --------------------------------------------------------------------------
 
 def _mission(mid, title, owner, due, quadrant="do", status="open", updates=()):
+    """Transient ORM objects rather than stand-ins: the wall reads the status log
+    through SQLAlchemy's loaded/unloaded inspection, which a fake never triggers."""
     urgent, important = oms.quadrant_flags(quadrant)
-    return SimpleNamespace(
-        id=mid, title=title, description="תיאור בדיקה",
-        owner=SimpleNamespace(username=owner), owner_id=1,
-        created_by=SimpleNamespace(username=owner),
+    m = Mission(
+        id=mid, title=title, description="תיאור בדיקה", owner_id=1,
         due_date=due, status=status, is_urgent=urgent, is_important=important,
-        completed_at=None, updates=list(updates),
     )
+    m.owner = User(username=owner)
+    m.created_by = User(username=owner)
+    m.updates = list(updates)
+    return m
 
 
 def _update(text, author="אבי"):
-    return SimpleNamespace(
-        text=text, author_name=author, author=SimpleNamespace(username=author),
-        kind=None, created_at=datetime.datetime(2026, 8, 21, 14, 20),
-    )
+    return MissionUpdate(text=text, author_name=author, kind=None,
+                         created_at=datetime.datetime(2026, 8, 21, 14, 20))
 
 
 def _context(style, is_viewer=False):
@@ -95,6 +98,10 @@ def _context(style, is_viewer=False):
     quadrants = {key: [] for key, *_ in oms.QUADRANTS}
     for m in missions:
         quadrants[oms.quadrant_key(m)].append(m)
+
+    closed = _mission(9, "נסגר", "דנה", TODAY, status="done")
+    closed.completed_at = datetime.datetime(2026, 8, 21, 9, 0)
+    wall_pages = wall.build_pages(missions, [closed], TODAY)
 
     return {
         "request": SimpleNamespace(url=SimpleNamespace(path="/dashboard/war-room")),
@@ -118,11 +125,22 @@ def _context(style, is_viewer=False):
         "styles": wrs.STYLES,
         "current_style": style,
         "style_labels": wrs.STYLE_LABELS,
+        "tv": False,
         # per-style extras, mirroring the router
         "my_due_now": [late, today_due], "my_upcoming": [planned],
         "my_undated": [undated], "my_total": 4,
-        "wall_urgent": [late, today_due, planned], "owner_load": [("אבי", 3), ("דנה", 1)],
-        "owner_load_max": 3, "wall_closed": [_mission(9, "נסגר", "דנה", TODAY, status="done")],
+        "owner_load": [("אבי", 3), ("דנה", 1)], "owner_load_max": 3,
+        # Built through the real shaping code, so a change there fails the render
+        # test instead of quietly drifting from what the router passes.
+        "wall_pages": wall_pages,
+        "wall_rotate_ms": wall.ROTATE_SECONDS * 1000,
+        "wall_refresh": wall.refresh_seconds(len(wall_pages)),
+        "wall_legend": wall.LEGEND,
+        "wall_active_total": len(missions),
+        "wall_silent": 3,
+        "wall_silent_days": wall.SILENT_DAYS,
+        "wall_feed": [{"mission": "החלפת מפסק ראשי", "text": "ממתין לאישור בטיחות",
+                       "who": "אבי", "when": "21/08 14:20", "close": False}],
     }
 
 
@@ -176,7 +194,44 @@ def test_wall_layout_offers_no_write_actions_at_all():
 
 
 def test_wall_layout_refreshes_itself():
-    assert 'http-equiv="refresh"' in _render("wall")
+    """Still self-refreshing — but only after a full rotation cycle, never mid-page."""
+    html = _render("wall")
+    assert 'http-equiv="refresh"' in html
+    assert f'content="{wall.refresh_seconds(len(_context("wall")["wall_pages"]))}"' in html
+
+
+def test_wall_layout_rotates_through_every_active_mission():
+    """The board's whole active list must reach the screen, undated included —
+    the old wall cut it at five dated missions and dropped the rest forever."""
+    html = _render("wall")
+    for title in ("החלפת מפסק ראשי", "ליקוי בטיחות", "בדיקת ממסרים", "מיפוי מלאי"):
+        assert title in html
+    assert 'class="wl-page' in html
+    assert "wlPager" in html
+
+
+def test_wall_layout_shows_the_latest_status_update():
+    html = _render("wall")
+    assert "ממתין לאישור בטיחות" in html      # on the card
+    assert "wlFeed" in html                    # and in the board-wide ticker
+
+
+def test_wall_layout_colours_by_time_not_by_quadrant():
+    """Every tone in the registry has a CSS class and a legend entry."""
+    html = _render("wall")
+    for key, label in wall.LEGEND:
+        assert f"--t-{key}" in html
+        assert label in html
+
+
+def test_tv_mode_drops_the_navigation_chrome():
+    """?tv=1 is the wall-mounted screen: board data only, no nav, no switcher."""
+    env = Environment(loader=FileSystemLoader("app/templates"), undefined=StrictUndefined)
+    ctx = _context("wall")
+    ctx["tv"] = True
+    html = env.get_template(wrs.template_for("wall")).render(**ctx)
+    assert "/dashboard/war-room/style" not in html
+    assert "החלפת מפסק ראשי" in html
 
 
 def test_table_layout_wires_batch_actions():

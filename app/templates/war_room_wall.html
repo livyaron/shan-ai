@@ -1,13 +1,17 @@
-{# חדר מבצעים — "לוח מצב": the wall display. Sized to be read from ~4m on a TV,
-   refreshes itself, and carries no write actions at all — a screen that talks,
-   not a screen you work in. Reachable without a user of its own via
-   /dashboard/war-room?style=wall. #}
+{# חדר מבצעים — "לוח מצב": the wall display. Sized to be read from ~4m on a TV.
+   Shows the WHOLE active board by rotating through pages of cards, colours every
+   card by time-to-target, carries the latest status update on each card plus a
+   board-wide update ticker, and holds no write actions at all — a screen that
+   talks, not a screen you work in.
+   /dashboard/war-room?style=wall — add &tv=1 for a chrome-free kiosk screen. #}
 <!DOCTYPE html>
 <html lang="he" dir="rtl">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta http-equiv="refresh" content="60">
+{# Reloads only at the END of a full rotation cycle: a fixed 60s refresh used to
+   cut the cycle short, so the later pages were never seen. #}
+<meta http-equiv="refresh" content="{{ wall_refresh }}">
 <title>חדר מבצעים · לוח מצב — SHAN-AI</title>
 <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;700;900&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
 <style>
@@ -15,6 +19,9 @@
   --bg:#08090b; --panel:#16181d; --panel-2:#101216; --line:#23262c;
   --ink:#f2f4f7; --ink-2:#9aa1ab; --ink-3:#6b7280;
   --red:#ff3b2f; --red-2:#ff5d4d; --amber:#ffb02e; --green:#35d05a; --green-2:#7ee08a;
+  /* Colour = time to target. The quadrant rides as a text tag, never as colour. */
+  --t-late-deep:#ff2118; --t-late:#ff5d4d; --t-today:#ff9f1c; --t-soon:#ffd23f;
+  --t-week:#4aa3ff; --t-nodate:#b07cff; --t-later:#6b7280;
   --wrs-bg:#16181d; --wrs-fg:#f2f4f7;
   --ui:'Heebo',sans-serif,'Segoe UI Emoji','Apple Color Emoji','Noto Color Emoji';
   --mono:'IBM Plex Mono',monospace,'Segoe UI Emoji','Noto Color Emoji';
@@ -32,32 +39,61 @@ a{color:var(--amber);text-decoration:none}
 .wl-date{font-family:var(--mono);font-size:1.15rem;color:var(--ink-2)}
 .wl-grid{display:grid;grid-template-columns:minmax(0,1.65fr) minmax(0,1fr);gap:24px;padding:22px 32px;
   flex-grow:1;align-content:start}
-.wl-h{display:flex;align-items:baseline;gap:16px;margin-bottom:14px}
+.wl-h{display:flex;align-items:baseline;gap:16px;margin-bottom:14px;flex-wrap:wrap}
 .wl-h .t{font-size:1.45rem;font-weight:700;color:var(--red-2)}
 .wl-h .s{font-size:1.05rem;color:var(--ink-2)}
+.wl-h .p{margin-inline-start:auto;font-family:var(--mono);font-size:1.05rem;color:var(--ink-2)}
+
+/* ── rotation ─────────────────────────────────────────────────────────── */
+.wl-page{display:none}
+.wl-page.on{display:block;animation:wlIn .45s ease}
+@keyframes wlIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+.wl-prog{height:5px;background:var(--line);border-radius:3px;overflow:hidden;margin-bottom:14px}
+.wl-prog>span{display:block;height:5px;background:var(--ink-3);width:0}
+
 .wl-item{display:flex;align-items:center;gap:20px;background:var(--panel);border-radius:8px;
-  padding:18px 22px;margin-bottom:14px;border-inline-start:7px solid var(--line)}
-.wl-item.late{border-inline-start-color:var(--red)}
-.wl-item.today{border-inline-start-color:var(--amber)}
-.wl-when{font-family:var(--mono);font-size:2.4rem;font-weight:700;min-width:140px;text-align:center;line-height:1}
-.wl-when .u{font-size:.8rem;white-space:nowrap;color:var(--ink-2);font-family:var(--ui);font-weight:500;display:block;margin-top:4px}
-.wl-when.soft{font-size:1.7rem;color:#c3c9d2}
-.wl-t{font-size:1.55rem;font-weight:700;line-height:1.3;unicode-bidi:isolate}
-.wl-m{font-size:1.1rem;color:var(--ink-2);margin-top:5px;unicode-bidi:isolate}
+  padding:14px 20px;margin-bottom:11px;border-inline-start:9px solid var(--t-later)}
+.wl-item.t-late-deep{border-inline-start-color:var(--t-late-deep);background:linear-gradient(90deg,rgba(255,33,24,.14),var(--panel) 55%)}
+.wl-item.t-late{border-inline-start-color:var(--t-late)}
+.wl-item.t-today{border-inline-start-color:var(--t-today)}
+.wl-item.t-soon{border-inline-start-color:var(--t-soon)}
+.wl-item.t-week{border-inline-start-color:var(--t-week)}
+.wl-item.t-nodate{border-inline-start-color:var(--t-nodate)}
+.wl-item.silent{outline:2px dashed rgba(154,161,171,.55);outline-offset:-4px}
+.wl-when{font-family:var(--mono);font-size:2.3rem;font-weight:700;min-width:150px;text-align:center;line-height:1}
+.wl-when .u{font-size:.78rem;white-space:nowrap;color:var(--ink-2);font-family:var(--ui);font-weight:500;display:block;margin-top:5px}
+.t-late-deep .wl-when{color:var(--t-late-deep);animation:wlPulse 1.8s ease-in-out infinite}
+.t-late .wl-when{color:var(--t-late)}
+.t-today .wl-when{color:var(--t-today)}
+.t-soon .wl-when{color:var(--t-soon)}
+.t-week .wl-when,.t-later .wl-when,.t-nodate .wl-when{font-size:1.6rem;color:#c3c9d2}
+@keyframes wlPulse{0%,100%{opacity:1}50%{opacity:.45}}
+.wl-t{font-size:1.5rem;font-weight:700;line-height:1.25;unicode-bidi:isolate}
+.wl-m{font-size:1.02rem;color:var(--ink-2);margin-top:4px;unicode-bidi:isolate}
+.wl-upd{font-size:1.02rem;color:#c3c9d2;margin-top:6px;unicode-bidi:isolate;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+.wl-upd .w{color:var(--ink-3)}
+.wl-quiet{color:var(--t-nodate);font-weight:600}
+.wl-done-h{font-size:1.35rem;font-weight:700;color:var(--green-2);margin-bottom:14px}
+.wl-tag{font-size:.85rem;font-weight:700;border-radius:4px;padding:2px 8px;background:var(--line);color:var(--ink-2)}
+
 .wl-kpis{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-bottom:16px}
 .wl-kpi{background:var(--panel);border-radius:8px;padding:16px 18px}
 .wl-kpi .l{font-size:.98rem;color:var(--ink-2);font-weight:500}
-.wl-kpi .n{font-family:var(--mono);font-size:3.4rem;font-weight:700;line-height:1.05}
-.wl-panel{background:var(--panel);border-radius:8px;padding:18px 20px}
+.wl-kpi .n{font-family:var(--mono);font-size:3.2rem;font-weight:700;line-height:1.05}
+.wl-panel{background:var(--panel);border-radius:8px;padding:18px 20px;margin-bottom:16px}
 .wl-panel h3{font-size:1.1rem;font-weight:700;margin-bottom:16px}
 .wl-load{display:flex;flex-direction:column;gap:13px}
 .wl-load .r{display:flex;justify-content:space-between;font-size:1.05rem;margin-bottom:5px}
 .wl-load .r b{font-family:var(--mono);font-weight:600}
 .wl-bar{height:10px;background:var(--line);border-radius:5px;overflow:hidden}
 .wl-bar>span{display:block;height:10px;border-radius:5px;background:#6b7280}
-.wl-foot{flex-shrink:0;margin-top:auto;display:flex;align-items:center;gap:16px;min-height:58px;background:var(--panel-2);
-  border-top:2px solid var(--line);padding:10px 32px;font-size:1.1rem;flex-wrap:wrap}
-.wl-chip{background:var(--green);color:#06210d;font-weight:700;border-radius:4px;padding:4px 12px;font-size:.92rem}
+.wl-legend{display:flex;flex-wrap:wrap;gap:10px 18px;font-size:.95rem;color:var(--ink-2)}
+.wl-legend i{display:inline-block;width:14px;height:14px;border-radius:3px;margin-inline-end:7px;vertical-align:-2px}
+.wl-foot{flex-shrink:0;margin-top:auto;display:flex;align-items:center;gap:16px;min-height:62px;background:var(--panel-2);
+  border-top:2px solid var(--line);padding:10px 32px;font-size:1.15rem;flex-wrap:wrap}
+.wl-chip{background:var(--green);color:#06210d;font-weight:700;border-radius:4px;padding:4px 12px;font-size:.92rem;flex-shrink:0}
+.wl-feed{flex-grow:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;unicode-bidi:isolate;color:#c3c9d2}
 .wl-empty{background:var(--panel);border-radius:8px;padding:34px;text-align:center;color:var(--ink-2);font-size:1.3rem}
 @media (max-width:1100px){
   .wl-grid{grid-template-columns:1fr}
@@ -66,45 +102,63 @@ a{color:var(--amber);text-decoration:none}
 </style>
 </head>
 <body>
-{% include "_navbar.html" %}
+{% if not tv %}{% include "_navbar.html" %}{% endif %}
 
 <div class="wl-top">
   <div class="wl-name">חדר מבצעים</div>
   <div class="wl-sub">תחנות משנה · מצב חי</div>
   <div style="margin-inline-start:auto;display:flex;align-items:center;gap:22px;flex-wrap:wrap">
-    <span class="wl-live"><span class="wl-dot"></span>מתעדכן כל 60 שניות</span>
+    <span class="wl-live"><span class="wl-dot"></span>{{ wall_active_total }} משימות פעילות במחזור</span>
     <span class="wl-clock" id="wlClock">--:--</span>
     <span class="wl-date">{{ today.strftime('%d/%m/%Y') }}</span>
-    {% include "_war_room_style_switcher.html" %}
+    {% if not tv %}{% include "_war_room_style_switcher.html" %}{% endif %}
   </div>
 </div>
 
 <div class="wl-grid">
   <div>
     <div class="wl-h">
-      <span class="t">דורש טיפול עכשיו</span>
-      <span class="s">{{ stats.do_now }} דחופות · {{ stats.overdue }} באיחור</span>
+      <span class="t">מצב המשימות</span>
+      <span class="s">{{ stats.overdue }} באיחור · {{ stats.do_now }} דחופות · {{ wall_silent }} ללא דיווח מעל {{ wall_silent_days }} ימים</span>
+      <span class="p" id="wlPager">עמוד 1/{{ wall_pages|length }}</span>
     </div>
+    <div class="wl-prog"><span id="wlProg"></span></div>
 
-    {% if not wall_urgent %}
-    <div class="wl-empty">אין משימה עם תאריך יעד פתוח. הלוח נקי.</div>
-    {% endif %}
-
-    {% for m in wall_urgent %}
-    {% set late = m.due_date < today %}
-    {% set is_today = m.due_date == today %}
-    <div class="wl-item {% if late %}late{% elif is_today %}today{% endif %}">
-      {% if late %}
-      <div class="wl-when" style="color:var(--red-2)">{{ (today - m.due_date).days }}<span class="u">ימים באיחור</span></div>
-      {% elif is_today %}
-      <div class="wl-when" style="color:var(--amber);font-size:1.7rem">היום</div>
+    {% for page in wall_pages %}
+    <div class="wl-page{% if loop.first %} on{% endif %}" data-kind="{{ page.kind }}">
+      {% if page.kind == 'closed' %}
+        <div class="wl-done-h">✅ נסגרו לאחרונה</div>
+        {% for c in page.cards %}
+        <div class="wl-item" style="border-inline-start-color:var(--green)">
+          <div class="wl-when" style="color:var(--green);font-size:1.5rem">✅<span class="u">{{ c.when }}</span></div>
+          <div style="flex-grow:1;min-width:0">
+            <div class="wl-t" dir="auto">{{ c.title }}</div>
+            <div class="wl-m" dir="auto">{{ c.owner }} · {{ c.quadrant }}</div>
+            {% if c.note %}<div class="wl-upd" dir="auto">🔒 {{ c.note }}</div>{% endif %}
+          </div>
+        </div>
+        {% endfor %}
+      {% elif not page.cards %}
+        <div class="wl-empty">אין משימות פעילות. הלוח נקי.</div>
       {% else %}
-      <div class="wl-when soft">{{ m.due_date.strftime('%d/%m') }}</div>
+        {% for c in page.cards %}
+        <div class="wl-item t-{{ c.tone }}{% if c.is_silent %} silent{% endif %}">
+          <div class="wl-when">{{ c.big }}{% if c.unit %}<span class="u">{{ c.unit }}</span>{% endif %}</div>
+          <div style="flex-grow:1;min-width:0">
+            <div class="wl-t" dir="auto">{{ c.title }}</div>
+            <div class="wl-m" dir="auto">{{ c.owner }} · {{ c.quadrant }}
+              {% if c.is_silent and c.silent_days is not none %}<span class="wl-tag">🔇 ללא דיווח {{ c.silent_days }} ימים</span>{% endif %}
+            </div>
+            {% if c.update_text %}
+            <div class="wl-upd" dir="auto">💬 {{ c.update_text }}
+              <span class="w">— {{ c.update_who }}, {{ c.update_when }}</span></div>
+            {% else %}
+            <div class="wl-upd wl-quiet">💬 טרם דווח סטטוס</div>
+            {% endif %}
+          </div>
+        </div>
+        {% endfor %}
       {% endif %}
-      <div style="flex-grow:1">
-        <div class="wl-t" dir="auto">{{ m.title }}</div>
-        <div class="wl-m" dir="auto">{{ m.owner.username if m.owner else '—' }} · {{ quadrant_of(m) }}</div>
-      </div>
     </div>
     {% endfor %}
   </div>
@@ -130,31 +184,73 @@ a{color:var(--amber);text-decoration:none}
         {% endfor %}
       </div>
     </div>
+
+    <div class="wl-panel">
+      <h3>מקרא צבעים</h3>
+      <div class="wl-legend">
+        {% for key, label in wall_legend %}
+        <span><i style="background:var(--t-{{ key }})"></i>{{ label }}</span>
+        {% endfor %}
+        <span><i style="background:transparent;border:2px dashed rgba(154,161,171,.85)"></i>ללא דיווח</span>
+      </div>
+    </div>
   </div>
 </div>
 
 <div class="wl-foot">
-  {% if wall_closed %}
-  <span class="wl-chip">נסגר לאחרונה</span>
-  {% for m in wall_closed %}
-  <span style="color:#c3c9d2" dir="auto">{{ m.title }} · {{ m.owner.username if m.owner else '—' }}</span>
-  {% if not loop.last %}<span style="color:var(--ink-3)">•</span>{% endif %}
-  {% endfor %}
-  {% else %}
-  <span style="color:var(--ink-3)">טרם נסגרו משימות.</span>
-  {% endif %}
-  <span style="margin-inline-start:auto;color:var(--ink-3);font-size:1rem">מסך תצוגה · ללא עריכה</span>
+  <span class="wl-chip">עדכון אחרון</span>
+  <span class="wl-feed" id="wlFeed" dir="auto">
+    {% if wall_feed %}{{ wall_feed[0].mission }} — {{ wall_feed[0].text }} ({{ wall_feed[0].who }}, {{ wall_feed[0].when }}){% else %}טרם דווחו עדכוני סטטוס.{% endif %}
+  </span>
+  <span style="margin-inline-start:auto;color:var(--ink-3);font-size:1rem;flex-shrink:0">מסך תצוגה · ללא עריכה</span>
 </div>
 
 <script>
-// The page reloads itself every 60s; the clock keeps the screen looking alive
-// between reloads so nobody has to guess whether the display has frozen.
-function wlTick(){
-  const d = new Date();
-  document.getElementById('wlClock').textContent =
-    String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0');
-}
-wlTick(); setInterval(wlTick, 10000);
+// Everything below is display-only: no writes, no fetches. The page rotates
+// through the server-rendered pages so the room eventually sees every active
+// mission, then the meta refresh reloads it at the end of a full cycle.
+(function () {
+  var ROTATE = {{ wall_rotate_ms }};
+  var pages = Array.prototype.slice.call(document.querySelectorAll('.wl-page'));
+  var pager = document.getElementById('wlPager');
+  var prog  = document.getElementById('wlProg');
+  var idx = 0, t0 = Date.now();
+
+  function show(i) {
+    pages.forEach(function (p, n) { p.classList.toggle('on', n === i); });
+    if (pager) pager.textContent = 'עמוד ' + (i + 1) + '/' + pages.length;
+    t0 = Date.now();
+  }
+  if (pages.length > 1) {
+    setInterval(function () { idx = (idx + 1) % pages.length; show(idx); }, ROTATE);
+    setInterval(function () {
+      if (prog) prog.style.width = Math.min(100, ((Date.now() - t0) / ROTATE) * 100) + '%';
+    }, 200);
+  } else if (prog) {
+    prog.style.width = '100%';
+  }
+
+  // Board-wide status feed: one line at a time, so it stays readable from 4m.
+  var feed = {{ wall_feed | tojson }};
+  var el = document.getElementById('wlFeed'), fi = 0;
+  if (feed.length > 1 && el) {
+    setInterval(function () {
+      fi = (fi + 1) % feed.length;
+      var u = feed[fi];
+      el.textContent = (u.close ? '🔒 ' : '') + u.mission + ' — ' + u.text +
+                       ' (' + u.who + ', ' + u.when + ')';
+    }, 6000);
+  }
+
+  // The clock keeps the screen looking alive between reloads so nobody has to
+  // guess whether the display has frozen.
+  function tick() {
+    var d = new Date();
+    document.getElementById('wlClock').textContent =
+      String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+  }
+  tick(); setInterval(tick, 10000);
+})();
 </script>
 </body>
 </html>
