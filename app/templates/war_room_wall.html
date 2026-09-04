@@ -90,6 +90,15 @@ a{color:var(--amber);text-decoration:none}
 .wl-bar>span{display:block;height:10px;border-radius:5px;background:#6b7280}
 .wl-legend{display:flex;flex-wrap:wrap;gap:10px 18px;font-size:.95rem;color:var(--ink-2)}
 .wl-legend i{display:inline-block;width:14px;height:14px;border-radius:3px;margin-inline-end:7px;vertical-align:-2px}
+/* The hourly line: a real quote plus one AI sentence about the board. */
+.wl-motto{flex-shrink:0;display:flex;align-items:center;gap:26px;padding:14px 32px;
+  border-top:2px solid var(--line);background:linear-gradient(90deg,rgba(74,163,255,.10),transparent 60%)}
+.wl-motto.wry{background:linear-gradient(90deg,rgba(255,176,46,.12),transparent 60%)}
+.wl-motto .q{font-size:1.5rem;font-weight:700;line-height:1.25;unicode-bidi:isolate}
+.wl-motto .a{font-size:1.05rem;font-weight:500;color:var(--ink-2);margin-inline-start:12px;white-space:nowrap}
+.wl-motto .l{font-size:1.2rem;color:#c3c9d2;unicode-bidi:isolate;
+  border-inline-start:3px solid var(--t-week);padding-inline-start:18px;flex-shrink:0;max-width:42%}
+.wl-motto.wry .l{border-inline-start-color:var(--amber)}
 .wl-foot{flex-shrink:0;margin-top:auto;display:flex;align-items:center;gap:16px;min-height:62px;background:var(--panel-2);
   border-top:2px solid var(--line);padding:10px 32px;font-size:1.15rem;flex-wrap:wrap}
 .wl-chip{background:var(--green);color:#06210d;font-weight:700;border-radius:4px;padding:4px 12px;font-size:.92rem;flex-shrink:0}
@@ -195,6 +204,11 @@ a{color:var(--amber);text-decoration:none}
       </div>
     </div>
   </div>
+</div>
+
+<div class="wl-motto {{ wall_motto.kind }}">
+  <div class="q" dir="auto">{{ '😏 ' if wall_motto.kind == 'wry' else '' }}«{{ wall_motto.quote }}»<span class="a">— {{ wall_motto.author }}</span></div>
+  <div class="l" style="margin-inline-start:auto" dir="auto">{{ wall_motto.line }}</div>
 </div>
 
 <div class="wl-foot">

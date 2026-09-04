@@ -14,6 +14,7 @@ from jinja2 import Environment, FileSystemLoader, StrictUndefined
 from app.models import Mission, MissionUpdate, User
 from app.services import missions_menu_service as oms
 from app.services import war_room_styles as wrs
+from app.services import war_room_motto as wrm
 from app.services import war_room_wall as wall
 
 TODAY = datetime.date(2026, 8, 22)
@@ -141,6 +142,8 @@ def _context(style, is_viewer=False):
         "wall_silent_days": wall.SILENT_DAYS,
         "wall_feed": [{"mission": "החלפת מפסק ראשי", "text": "ממתין לאישור בטיחות",
                        "who": "אבי", "when": "21/08 14:20", "close": False}],
+        "wall_motto": {"quote": wrm.STOIC[0][0], "author": wrm.STOIC[0][1],
+                       "kind": "stoic", "line": "סוגרים היום את שתי המשימות באיחור."},
     }
 
 
@@ -222,6 +225,14 @@ def test_wall_layout_colours_by_time_not_by_quadrant():
     for key, label in wall.LEGEND:
         assert f"--t-{key}" in html
         assert label in html
+
+
+def test_wall_layout_carries_the_hourly_line():
+    """A real quote plus the sentence that ties it to the board — both on screen."""
+    html = _render("wall")
+    assert wrm.STOIC[0][0] in html
+    assert wrm.STOIC[0][1] in html
+    assert "סוגרים היום את שתי המשימות באיחור." in html
 
 
 def test_tv_mode_drops_the_navigation_chrome():

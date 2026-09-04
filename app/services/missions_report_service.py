@@ -162,6 +162,17 @@ async def _db_cache_put(
             pass
 
 
+async def day_cache_get(session: AsyncSession, kind: str):
+    """Today's persisted artifact of this kind, or None. Public entry point for
+    other services (the wall's hourly motto) — never raises."""
+    return await _db_cache_get(session, kind)
+
+
+async def day_cache_put(session: AsyncSession, kind: str, text: str) -> None:
+    """Persist a text artifact into today's cache. Never raises."""
+    await _db_cache_put(session, kind, text=text)
+
+
 def cache_status() -> dict:
     """Which of today's artifacts are already warm in memory (diagnostics)."""
     key = oms.today_il().isoformat()

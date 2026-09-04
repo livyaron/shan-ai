@@ -44,4 +44,5 @@ jobs:
             tests/test_llm_fallback.py \
             tests/test_health_provenance.py \
             tests/test_war_room_styles.py \
-            tests/test_war_room_wall.py
+            tests/test_war_room_wall.py \
+            tests/test_war_room_motto.py

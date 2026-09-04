@@ -18,6 +18,7 @@ from app.routers.login import get_current_user
 from app.services import missions_menu_service as oms
 from app.services import war_room_styles as wrs
 from app.services import war_room_wall as wall
+from app.services import war_room_motto as motto
 
 logger = logging.getLogger(__name__)
 
@@ -189,7 +190,7 @@ async def war_room_page(
     if active_style == "focus":
         ctx.update(await _focus_context(session, current_user, today))
     elif active_style == "wall":
-        ctx.update(await _wall_context(session, today))
+        ctx.update(await _wall_context(session, today, ctx["stats"]))
 
     return templates.TemplateResponse(wrs.template_for(active_style), ctx)
 
@@ -218,7 +219,7 @@ async def _focus_context(session: AsyncSession, user: User, today: datetime.date
     }
 
 
-async def _wall_context(session: AsyncSession, today: datetime.date) -> dict:
+async def _wall_context(session: AsyncSession, today: datetime.date, stats: dict) -> dict:
     """What a room needs to see from four metres — the WHOLE active board, rotating.
 
     The old wall showed the five nearest due dates and nothing else: an undated
@@ -291,7 +292,12 @@ async def _wall_context(session: AsyncSession, today: datetime.date) -> dict:
     silent = sum(1 for p in pages if p["kind"] == "missions"
                  for c in p["cards"] if c["is_silent"])
 
+    # The hourly line. Served from cache; a miss returns the computed line at once
+    # and fills the cache in the background, so the screen never waits for Groq.
+    wall_motto = await motto.get_motto(session, {**stats, "silent": silent})
+
     return {
+        "wall_motto": wall_motto,
         "wall_pages": pages,
         "wall_rotate_ms": wall.ROTATE_SECONDS * 1000,
         "wall_refresh": wall.refresh_seconds(len(pages)),
