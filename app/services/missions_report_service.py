@@ -46,11 +46,19 @@ MANAGER_ROLES = (
 OPEN_HEADERS = [
     "מזהה", "כותרת", "תיאור", "רביע", "דחוף", "חשוב", "סטטוס", "אחראי", "נוצר ע\"י",
     "תאריך יעד", "ימים ליעד", "ימים באיחור", "גיל המשימה (ימים)", "נוצרה בתאריך",
-    "עודכנה לאחרונה", "עדכון סטטוס אחרון",
+    "עודכנה לאחרונה", "עדכון סטטוס אחרון", "תאריך עדכון הסטטוס", "מדווח העדכון",
+    "מס' עדכונים",
 ]
 # New columns go on the END: inserting one would silently shift every saved
 # filter and column reference someone has built on top of this sheet.
-OPEN_WIDTHS = [8, 42, 50, 20, 8, 8, 14, 18, 18, 14, 12, 14, 18, 16, 16, 18]
+OPEN_WIDTHS = [8, 42, 50, 20, 8, 8, 14, 18, 18, 14, 12, 14, 18, 16, 16, 70, 18, 18, 12]
+
+# Columns that must stay literal text: the pre-formatted dates, and the reported
+# status text (which is often just "80%" or "3"). Excel re-reads "14/07/2026
+# 15:05" as a serial number, and "80%" as 0.8, the moment someone re-saves or
+# pastes the sheet — which is how a text column ends up showing 46216. Forcing
+# the text format ("@") keeps what we wrote.
+OPEN_TEXT_COLS = [10, 14, 15, 16, 17]
 
 CLOSED_HEADERS = [
     "מזהה", "כותרת", "רביע", "סטטוס", "אחראי", "תאריך יעד", "הושלמה בתאריך",
@@ -77,7 +85,11 @@ _report_cache: dict[str, tuple[bytes, str, str]] = {} # date -> (xlsx bytes, fil
 _summary_cache: dict[str, str] = {}                  # date -> focus summary HTML
 
 KIND_AI_INSIGHTS = "ai_insights"
-KIND_REPORT = "report"
+# Versioned on purpose: the cache is keyed by (day, kind), so a deploy that
+# changes the sheet layout would keep serving today's workbook built by the old
+# code until 04:10 tomorrow. Bump this whenever OPEN_HEADERS/CLOSED_HEADERS
+# change — the old row simply stops matching and today's report is rebuilt once.
+KIND_REPORT = "report_v2"
 KIND_SUMMARY = "summary"
 
 
@@ -239,14 +251,33 @@ def _age_days(created: datetime.datetime | None, today: datetime.date) -> int | 
     return None if created is None else (today - created.date()).days
 
 
-def _last_update_at(m: Mission) -> datetime.datetime | None:
-    """When someone last reported on this mission, or None if nobody ever has.
+def _last_update(m: Mission):
+    """The newest status update on a mission, or None if nobody ever reported.
 
     This is the status-update log, not `updated_at` — editing a due date is not
     a report on the work.
     """
-    stamps = [u.created_at for u in oms.get_mission_updates(m) if u.created_at]
-    return max(stamps) if stamps else None
+    updates = [u for u in oms.get_mission_updates(m) if u.created_at]
+    return max(updates, key=lambda u: u.created_at) if updates else None
+
+
+def _last_update_at(m: Mission) -> datetime.datetime | None:
+    """When someone last reported on this mission, or None if nobody ever has."""
+    u = _last_update(m)
+    return u.created_at if u else None
+
+
+def _update_text(u) -> str:
+    """The reported text itself, flattened to one line so the cell stays filterable.
+
+    Newlines inside a cell survive the file but break sorting and eyeballing in a
+    40-row column, and the full multi-line log is already in "תיאור".
+    """
+    if u is None or not (u.text or "").strip():
+        return "—"
+    flat = " ".join((u.text or "").split())
+    prefix = "🔒 " if getattr(u, "kind", None) == "close" else ""
+    return f"{prefix}{flat}"
 
 
 def due_bucket(due: datetime.date | None, today: datetime.date) -> str:
@@ -326,6 +357,7 @@ async def collect_report_data(session: AsyncSession) -> dict:
     open_rows = []
     for m in active:
         delta = _days_until(m.due_date, today)
+        last_upd = _last_update(m)
         open_rows.append({
             "id": m.id,
             "title": m.title or "",
@@ -342,9 +374,19 @@ async def collect_report_data(session: AsyncSession) -> dict:
             "age_days": _age_days(m.created_at, today),
             "created_at": _fmt_dt(m.created_at),
             "updated_at": _fmt_dt(m.updated_at),
-            # Distinct from updated_at on purpose: that moves on any edit, this
-            # only when someone actually reported on the work. "—" means nobody has.
-            "last_status_update": _fmt_dt(_last_update_at(m)) or "—",
+            # The report used to put only a timestamp under "עדכון סטטוס אחרון",
+            # so the column a reader expects to hold the report held a date. The
+            # text is the column now; the timestamp moved to its own column
+            # beside it. "—" means nobody has reported. Distinct from updated_at
+            # on purpose: that moves on any edit, this only on a real report.
+            "last_status_update": _update_text(last_upd),
+            "last_status_update_at": _fmt_dt(last_upd.created_at) if last_upd else "—",
+            # author_name is a snapshot, so a deleted user still shows here; the
+            # `author` relationship is deliberately not touched (not eager-loaded).
+            "last_status_author": (
+                (last_upd.author_name or "—") if last_upd else "—"
+            ),
+            "updates_count": len(oms.get_mission_updates(m)),
             "_overdue": oms.is_overdue(m, today),
             "_at_risk": delta is not None and 0 <= delta <= AT_RISK_DAYS,
         })
@@ -788,9 +830,15 @@ def build_workbook(data: dict, ai_text: str = "") -> bytes:
             row["important"], row["status"], row["owner"], row["created_by"], row["due"],
             row["days_to_due"], row["days_overdue"], row["age_days"],
             row["created_at"], row["updated_at"], row["last_status_update"],
+            row["last_status_update_at"], row["last_status_author"],
+            row["updates_count"],
         ]
         for ci, value in enumerate(values, 1):
-            ws2.cell(ri, ci, value)
+            cell = ws2.cell(ri, ci, value)
+            if ci in OPEN_TEXT_COLS:
+                cell.number_format = "@"
+        # The reported text is prose, not a code — let it breathe like "תיאור".
+        ws2.cell(ri, OPEN_HEADERS.index("עדכון סטטוס אחרון") + 1).alignment = wrap
         fill = overdue_fill if row["_overdue"] else (at_risk_fill if row["_at_risk"] else None)
         if fill:
             for ci in range(1, len(OPEN_HEADERS) + 1):
