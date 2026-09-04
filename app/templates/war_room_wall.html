@@ -114,27 +114,35 @@ a{color:var(--amber);text-decoration:none}
 .wl-empty{grid-column:1/-1;background:var(--panel);border-radius:8px;padding:34px;
   text-align:center;color:var(--ink-2);font-size:1.3rem}
 
-/* ── the hourly line: a real quote plus one AI sentence about the board ── */
-.wl-motto{flex:0 0 auto;display:flex;align-items:center;gap:26px;padding:1.2vh 30px;
-  border-top:2px solid var(--line);background:linear-gradient(90deg,rgba(74,163,255,.10),transparent 60%);
-  overflow:hidden}
-.wl-motto.wry{background:linear-gradient(90deg,rgba(255,176,46,.12),transparent 60%)}
-.wl-motto .q{min-width:0}
-/* The attribution sits on its OWN line: squeezed onto the end of the quote it
-   was the first thing the browser clipped, and a half-eaten "מרו" under a
-   Stoic line is worse than no attribution at all. */
-.wl-motto .txt{font-size:clamp(1rem,2.4vh,1.7rem);font-weight:700;line-height:1.2;
-  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.wl-motto .a{font-size:clamp(.75rem,1.6vh,1.05rem);font-weight:500;color:var(--ink-2);margin-top:.3vh}
-.wl-motto .l{font-size:clamp(.85rem,1.9vh,1.3rem);color:#c3c9d2;unicode-bidi:isolate;
-  border-inline-start:3px solid var(--t-week);padding-inline-start:18px;
-  margin-inline-start:auto;flex-shrink:0;max-width:42%}
-.wl-motto.wry .l{border-inline-start-color:var(--amber)}
+/* ── the hourly line: a real quote plus one AI sentence about the board ──
+   Last band on the screen, and deliberately the only one that is not the board's
+   grey: its own tinted ground and accent rule, so the eye reads it as a remark
+   about the board rather than another row of data. */
+.wl-motto{flex:0 0 auto;display:flex;align-items:center;gap:clamp(16px,2vw,34px);
+  padding:1.5vh 30px;position:relative;overflow:hidden;
+  border-top:3px solid #4aa3ff;
+  background:linear-gradient(100deg,rgba(74,163,255,.17),rgba(176,124,255,.10) 45%,rgba(13,17,25,0) 85%),#0d1119}
+.wl-motto.wry{border-top-color:var(--amber);
+  background:linear-gradient(100deg,rgba(255,176,46,.18),rgba(255,93,77,.09) 45%,rgba(13,17,25,0) 85%),#0d1119}
+.wl-motto .q{flex:1 1 58%;min-width:0;position:relative}
+/* The attribution gets its OWN line and is never clipped: squeezed next to the
+   quote — or starved by a flex sibling that refused to shrink — it came out as a
+   half-eaten "מרו", which is worse than no attribution at all. */
+.wl-motto .txt{font-size:clamp(1rem,2.5vh,1.75rem);font-weight:700;line-height:1.25;color:#eef2f8;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.wl-motto .a{font-size:clamp(.75rem,1.6vh,1.1rem);font-weight:600;color:var(--amber);margin-top:.4vh}
+.wl-motto.wry .a{color:var(--t-soon)}
+.wl-motto .l{flex:1 1 34%;min-width:0;max-width:44%;font-size:clamp(.85rem,1.9vh,1.3rem);
+  color:#d5dae2;unicode-bidi:isolate;margin-inline-start:auto;
+  border-inline-start:3px solid rgba(74,163,255,.75);padding-inline-start:18px;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.wl-motto.wry .l{border-inline-start-color:rgba(255,176,46,.8)}
 
 /* ── footer feed ──────────────────────────────────────────────────────── */
 .wl-foot{flex:0 0 auto;display:flex;align-items:center;gap:16px;background:var(--panel-2);
   border-top:2px solid var(--line);padding:.9vh 30px;font-size:clamp(.8rem,1.8vh,1.2rem);overflow:hidden}
-.wl-chip{background:var(--green);color:#06210d;font-weight:700;border-radius:4px;padding:3px 12px;
+.wl-chip{background:rgba(154,161,171,.14);color:var(--ink-2);border:1px solid var(--line);
+  font-weight:600;border-radius:4px;padding:3px 12px;
   font-size:clamp(.7rem,1.5vh,.95rem);flex-shrink:0}
 .wl-feed{flex-grow:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
   unicode-bidi:isolate;color:#c3c9d2}
@@ -216,6 +224,13 @@ a{color:var(--amber);text-decoration:none}
   {% endfor %}
 </div>
 
+<div class="wl-foot">
+  <span class="wl-chip">עדכון אחרון</span>
+  <span class="wl-feed" id="wlFeed" dir="auto">
+    {% if wall_feed %}{{ wall_feed[0].mission }} — {{ wall_feed[0].text }} ({{ wall_feed[0].who }}, {{ wall_feed[0].when }}){% else %}טרם דווחו עדכוני סטטוס.{% endif %}
+  </span>
+</div>
+
 <div class="wl-motto {{ wall_motto.kind }}">
   <div class="q">
     <div class="txt" dir="rtl">{{ '😏 ' if wall_motto.kind == 'wry' else '' }}{{ wall_motto.quote }}</div>
@@ -224,13 +239,6 @@ a{color:var(--amber);text-decoration:none}
   <div class="l" dir="auto">{{ wall_motto.line }}</div>
 </div>
 
-<div class="wl-foot">
-  <span class="wl-chip">עדכון אחרון</span>
-  <span class="wl-feed" id="wlFeed" dir="auto">
-    {% if wall_feed %}{{ wall_feed[0].mission }} — {{ wall_feed[0].text }} ({{ wall_feed[0].who }}, {{ wall_feed[0].when }}){% else %}טרם דווחו עדכוני סטטוס.{% endif %}
-  </span>
-  <span style="margin-inline-start:auto;color:var(--ink-3);font-size:clamp(.7rem,1.5vh,1rem);flex-shrink:0">מסך תצוגה · ללא עריכה</span>
-</div>
 
 <script>
 // Everything below is display-only: no writes, no fetches. The page rotates

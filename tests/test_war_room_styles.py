@@ -270,6 +270,25 @@ def test_wall_motto_attribution_is_on_its_own_line():
     assert '<div class="a" dir="rtl">— ' in html
 
 
+def test_wall_motto_is_the_last_band_on_the_screen():
+    """The hourly line closes the screen, below the status feed."""
+    html = _render("wall")
+    assert html.index('class="wl-foot"') < html.index('class="wl-motto')
+
+
+def test_wall_screen_carries_no_filler_text():
+    """Every line on a wall screen has to earn its pixels. (The layout picker's
+    own description of this style is not screen furniture and may say it.)"""
+    html = _render("wall")
+    assert "מסך תצוגה" not in html
+
+
+def test_wall_feed_label_is_not_a_traffic_light():
+    """A bright green chip next to a neutral status feed reads as an alert."""
+    html = _render("wall")
+    assert ".wl-chip{background:var(--green)" not in html
+
+
 def test_tv_mode_drops_the_navigation_chrome():
     """?tv=1 is the wall-mounted screen: board data only, no nav, no switcher."""
     env = Environment(loader=FileSystemLoader("app/templates"), undefined=StrictUndefined)
