@@ -17,9 +17,12 @@ from app.services.gemma_client import redact
 
 logger = logging.getLogger(__name__)
 
-# Cheapest possible round-trip: enough to prove the key and the quota, no more.
+# Cheap, but not so cheap it lies. At 8 tokens the gemma models spent the whole
+# budget on their chain-of-thought preamble and returned a candidate with no text
+# at all — so the probe reported the provider dead when the only thing that had
+# failed was the probe's own ceiling. Same trap as the wall's hourly line.
 _PROBE_MESSAGES = [{"role": "user", "content": "Reply with the single word: OK"}]
-_PROBE_MAX_TOKENS = 8
+_PROBE_MAX_TOKENS = 256
 
 
 async def _probe_models(chat, models: list[str]) -> dict[str, str]:

@@ -35,3 +35,23 @@ def test_the_health_probe_redacts_what_it_returns():
     src = inspect.getsource(llm_health)
     assert src.count("redact(") >= 3
     assert 'f"{type(e).__name__}: {str(e)[:200]}"' not in src   # the un-scrubbed shape
+
+
+# --------------------------------------------------------------------------
+# a probe that starves the model is not a health check
+# --------------------------------------------------------------------------
+
+def test_the_probe_budget_is_not_starvation_tight():
+    """At 8 tokens the gemma models spent the whole budget on a reasoning preamble
+    and returned no text — the probe called the provider dead over its own ceiling."""
+    from app.services import llm_health
+    assert llm_health._PROBE_MAX_TOKENS >= 128
+
+
+def test_a_textless_candidate_reports_why_not_keyerror():
+    """'KeyError: parts' told nobody anything. finishReason does."""
+    import inspect
+    from app.services import gemma_client
+    src = inspect.getsource(gemma_client)
+    assert 'data["candidates"][0]["content"]["parts"]' not in src
+    assert "finishReason" in src

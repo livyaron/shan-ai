@@ -183,9 +183,22 @@ async def gemma_chat(
                 resp = await client.post(url, json=payload)
                 resp.raise_for_status()
                 data = resp.json()
-                parts = data["candidates"][0]["content"]["parts"]
+                # Defensive, not decorative: when the model spends its whole
+                # budget on a chain-of-thought preamble, or a safety filter fires,
+                # the candidate comes back with NO "parts" key at all. Indexing it
+                # raised a bare KeyError that said nothing about the cause — the
+                # health probe reported 'KeyError: parts' for what is really
+                # "answer truncated before any text". finishReason names it.
+                candidate = (data.get("candidates") or [{}])[0]
+                parts = (candidate.get("content") or {}).get("parts") or []
                 text_parts = [p["text"] for p in parts if not p.get("thought") and "text" in p]
                 text = " ".join(text_parts).strip()
+                if not text:
+                    raise ValueError(
+                        f"gemma_chat: no text from {model} "
+                        f"(finishReason={candidate.get('finishReason')}, "
+                        f"parts={len(parts)}, max_tokens={max_tokens})"
+                    )
                 if json_mode:
                     text = _strip_json_fences(text)
                 else:
