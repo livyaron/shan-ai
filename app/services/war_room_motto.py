@@ -12,6 +12,10 @@ Three hard rules shape this module:
 3. **The screen never waits for Groq.** A cache miss returns the computed line
    immediately and fills the cache in the background, so the wall renders at the
    same speed whether the LLM answers in 200ms, in 8s, or never.
+4. **The two lines take turns.** The quote holds for the hour, but the sentence
+   under it alternates between the AI one and the computed one every
+   SWAP_MINUTES — the strip is the only thing on the wall that can change
+   inside an hour, so it should.
 
 One LLM call per clock hour at most, and only while somebody is actually looking
 at the wall.
@@ -113,6 +117,22 @@ def pick_quote(now: datetime.datetime) -> tuple[str, str, str]:
     return shelf[_cycle_order(key, size, slot // size)[slot % size]]
 
 
+# How long each of the two lines holds the bottom strip before the other takes
+# over. The hour is split into bands of this many minutes, alternating:
+#
+#   :00-:04 computed   :05-:09 AI   :10-:14 computed   ...
+#
+# Two reasons the computed line opens the hour rather than the AI one. First,
+# the AI sentence for a new hour does not exist yet at :00 — get_motto returns
+# immediately and fills the cache in the background — so the opening band is
+# the only line there is. Second, a strip that never changes inside an hour is
+# a strip people stop reading; alternating gives someone crossing the corridor
+# twice a chance to see two different things.
+#
+# Must divide 60, or the bands drift across the hour boundary and the opening
+# band stops being the computed one.
+SWAP_MINUTES = 5
+
 # The computed line, per board condition. This is what the wall shows whenever
 # the LLM is unavailable — which, per the provider notes in gemma_client.py and
 # llm_router.py, is not a rare event. A single hardcoded sentence per condition
@@ -121,6 +141,13 @@ def pick_quote(now: datetime.datetime) -> tuple[str, str, str]:
 #
 # Same register as the quotes: mostly straight, occasionally dry. Every line has
 # to survive being read from four metres away by somebody who is late.
+#
+# EVERY SHELF MUST HOLD AN ODD NUMBER OF LINES, and more than six of them.
+# The computed line takes every OTHER band, so it walks its shelf two steps at
+# a time; on an even-length shelf that stride only ever reaches half the lines,
+# and the six computed slots in an hour become three sentences shown twice.
+# An odd length makes the stride coprime with the shelf and covers all of it.
+# A test enforces both.
 _FALLBACKS: dict[str, list[str]] = {
     "overdue": [
         "{n} משימות באיחור. השעה הקרובה שווה יותר מכל הסבר.",
@@ -129,6 +156,7 @@ _FALLBACKS: dict[str, list[str]] = {
         "{n} משימות עברו את היעד. תאריך יעד שחלף הוא החלטה שלא קיבלנו.",
         "{n} משימות באיחור. נסגור אחת היום — זו כבר מגמה.",
         "{n} משימות באיחור. או שמזיזים את היעד, או שמזיזים את המשימה.",
+        "{n} משימות באיחור. הן לא נעלמות — הן רק מצטברות בשקט.",
     ],
     "silent": [
         "{n} משימות בלי דיווח. עדכון של שורה אחת חוסך ישיבה שלמה.",
@@ -136,35 +164,59 @@ _FALLBACKS: dict[str, list[str]] = {
         "{n} משימות בלי עדכון. מי שלא מדווח בעצמו, מדווחים עליו.",
         "{n} משימות בלי דיווח. שתי דקות כתיבה חוסכות שבוע ניחושים.",
         "{n} משימות ללא סימן חיים. נעדכן סטטוס לפני שמישהו ישאל.",
+        "{n} משימות בלי דיווח. אין חדשות זה לא בהכרח חדשות טובות.",
+        "{n} משימות שקטות. דיווח קצר עכשיו עדיף על הסבר ארוך אחר כך.",
     ],
     "do_now": [
         "{n} משימות דחופות על השולחן. אחת בכל פעם, עד הסוף.",
         "{n} משימות ברביע דחוף וחשוב. איתן פותחים את היום, לא איתן מסיימים.",
         "{n} משימות דחופות. ריבוי דחיפויות הוא בדרך כלל תכנון שנדחה.",
         "{n} משימות דחופות. נבחר אחת ונסגור אותה — לא נפתח את כולן.",
+        "{n} משימות דחופות. דחוף אינו אומר בבת אחת — הוא אומר קודם.",
+        "{n} משימות דחופות. מה שלא ייסגר היום יחזור מחר גדול יותר.",
+        "{n} משימות דחופות. נסמן מי אחראי על כל אחת — עכשיו, לא בישיבה.",
     ],
     "clean": [
         "הלוח נקי. זה הזמן לתכנן את השבוע הבא, לא לנוח בו.",
         "הלוח נקי. שקט כזה נמשך בדיוק עד הטלפון הבא.",
         "אין איחורים ואין שתיקות. נשתמש בשעה הזאת לתכנן, לא לכבות.",
         "הלוח נקי. עכשיו מטפלים במה שחשוב ואינו דחוף.",
+        "אין איחורים על הלוח. זה מצב שמחזיקים, לא מצב שמגיע מעצמו.",
+        "הלוח נקי. השעה הזאת שווה יותר מכל שעה שנרוץ בה אחר כך.",
+        "אין באיחור ואין שתיקות. נשאל את עצמנו מה חסר בלוח, לא מה בו.",
     ],
 }
 
 
+def _band(now: datetime.datetime) -> int:
+    """This minute's swap band, counted from day zero.
+
+    Absolute rather than per-hour so the computed line's phrasing keeps moving
+    across hours instead of resetting to the same sentence every :00.
+    """
+    return (now.toordinal() * 24 * 60 + now.hour * 60 + now.minute) // SWAP_MINUTES
+
+
+def shows_computed(now: datetime.datetime) -> bool:
+    """True while the strip belongs to the computed line rather than the AI one."""
+    return (now.minute // SWAP_MINUTES) % 2 == 0
+
+
 def fallback_line(stats: dict, now: datetime.datetime | None = None) -> str:
-    """The connecting sentence when the LLM is unavailable — computed, never empty.
+    """The computed connecting sentence — never empty, never needs the LLM.
 
     Ordered by what actually deserves the room's attention: lateness first,
     silence second, load third. Within the chosen condition the phrasing rotates
-    with the hour, so an LLM outage does not pin one sentence to the wall.
+    with the swap band, so the three times it comes up in an hour are three
+    different sentences, and an LLM outage does not pin one line to the wall for
+    the afternoon.
     """
     now = now or datetime.datetime.now(oms._IL_TZ)
-    tick = now.toordinal() * 24 + now.hour
+    band = _band(now)
 
     def _say(condition: str, n: int = 0) -> str:
         shelf = _FALLBACKS[condition]
-        return shelf[tick % len(shelf)].format(n=n)
+        return shelf[band % len(shelf)].format(n=n)
 
     overdue = int(stats.get("overdue") or 0)
     silent = int(stats.get("silent") or 0)
@@ -298,6 +350,18 @@ async def _db_get(session: AsyncSession, key: str) -> dict | None:
     return {"quote": quote, "author": author, "kind": kind, "line": line}
 
 
+def _present(motto: dict, stats: dict, now: datetime.datetime) -> dict:
+    """Which of the two lines this minute shows.
+
+    Only the connecting line alternates. The QUOTE stays whatever the hour
+    picked: a wall that swaps its quote mid-hour reads as a broken screen, not
+    as a richer one.
+    """
+    if shows_computed(now):
+        return {**motto, "line": fallback_line(stats, now)}
+    return motto
+
+
 def _spawn(session_factory, stats: dict, now: datetime.datetime) -> None:
     """Fill this hour's cache without making the current render wait for it."""
     key = cache_key(now)
@@ -327,7 +391,7 @@ async def get_motto(
     now = now or datetime.datetime.now(oms._IL_TZ)
     key = cache_key(now)
     if key in _cache:
-        return _cache[key]
+        return _present(_cache[key], stats, now)
 
     try:
         stored = await _db_get(session, key)
@@ -337,7 +401,7 @@ async def get_motto(
     if stored:
         _cache.clear()
         _cache[key] = stored
-        return stored
+        return _present(stored, stats, now)
 
     from app.database import async_session_maker
     _spawn(async_session_maker, stats, now)
