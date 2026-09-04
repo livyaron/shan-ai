@@ -1,13 +1,15 @@
 """חדר מבצעים wall — the hourly line: a curated quote plus one AI sentence that
 ties it to what the board actually looks like right now.
 
-Two hard rules shape this module:
+Three hard rules shape this module:
 
 1. **The quote is never generated.** Models invent plausible-sounding Stoics, and
    a fabricated Marcus Aurelius on a wall screen in front of 500 engineers is a
-   lie with a font size. The quotes below are a curated list; the model only
-   writes the one sentence that connects a REAL quote to REAL board numbers.
-2. **The screen never waits for Groq.** A cache miss returns the computed line
+   lie with a font size. `war_room_quotes.QUOTES` is a curated library; the
+   model only writes the one sentence connecting a REAL quote to REAL numbers.
+2. **No quote repeats until the whole shelf has been shown.** A wall screen
+   that recycles its library every day becomes wallpaper — see `pick_quote`.
+3. **The screen never waits for Groq.** A cache miss returns the computed line
    immediately and fills the cache in the background, so the wall renders at the
    same speed whether the LLM answers in 200ms, in 8s, or never.
 
@@ -18,36 +20,17 @@ at the wall.
 import asyncio
 import datetime
 import logging
+import random
+from functools import lru_cache
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services import missions_menu_service as oms
+from app.services import war_room_quotes as _quotes
 
 logger = logging.getLogger(__name__)
 
-# (quote, attribution, kind). kind "wry" is the dry-humour shelf — it rotates in
-# every HUMOR_EVERY hours so the screen does not preach all day long.
-#
-# Attributions are deliberately author-only: naming a chapter and verse we are
-# not certain of would be exactly the fabrication this module exists to avoid.
-QUOTES: list[tuple[str, str, str]] = [
-    ("המכשול שבדרך הופך להיות הדרך.", "מרקוס אורליוס", "stoic"),
-    ("אל תבזבז עוד זמן בוויכוח על מה שאדם טוב צריך להיות. היה כזה.", "מרקוס אורליוס", "stoic"),
-    ("עשה כל מעשה בחייך כאילו הוא האחרון.", "מרקוס אורליוס", "stoic"),
-    ("לא האירועים מטרידים את האדם, אלא דעתו על האירועים.", "אפיקטטוס", "stoic"),
-    ("קבע תחילה מה ברצונך להיות, ואז עשה את הנדרש.", "אפיקטטוס", "stoic"),
-    ("אנו סובלים יותר בדמיון מאשר במציאות.", "סנקה", "stoic"),
-    ("לספינה שאינה יודעת לאיזה נמל היא חותרת, שום רוח אינה טובה.", "סנקה", "stoic"),
-    ("אין הזמן קצר — אנחנו מבזבזים ממנו הרבה.", "סנקה", "stoic"),
-    ("אל תסביר את הפילוסופיה שלך. גלם אותה.", "אפיקטטוס", "stoic"),
-    ("שום תוכנית קרב אינה שורדת את המפגש הראשון עם האויב.", "הלמוט פון מולטקה", "wry"),
-    ("אם משהו יכול להשתבש — הוא ישתבש.", "חוק מרפי", "wry"),
-    ("עבודה מתרחבת כך שתמלא את כל הזמן שהוקצב לה.", "חוק פרקינסון", "wry"),
-    ("תשעים האחוזים הראשונים לוקחים תשעים אחוז מהזמן. עשרת האחוזים הנותרים — את השאר.",
-     "חוק 90-90 (טום קרגיל)", "wry"),
-    ("אין דבר קבוע יותר מפתרון זמני.", "פתגם הנדסי", "wry"),
-]
-
+QUOTES = _quotes.QUOTES
 STOIC = [q for q in QUOTES if q[2] == "stoic"]
 WRY = [q for q in QUOTES if q[2] == "wry"]
 
@@ -76,31 +59,123 @@ def cache_key(now: datetime.datetime) -> str:
     return now.strftime("%Y-%m-%d %H")
 
 
-def pick_quote(now: datetime.datetime) -> tuple[str, str, str]:
-    """Which quote this hour shows. Deterministic: two renders of the same hour
-    must show the same line, or the wall looks like it is glitching."""
+# Which hours land on which shelf. Derived from HUMOR_EVERY rather than spelled
+# out, so changing that constant moves the schedule and the rotation together.
+_WRY_HOURS = [h for h in range(24) if h % HUMOR_EVERY == 1]
+_STOIC_HOURS = [h for h in range(24) if h % HUMOR_EVERY != 1]
+_WRY_RANK = {h: i for i, h in enumerate(_WRY_HOURS)}
+_STOIC_RANK = {h: i for i, h in enumerate(_STOIC_HOURS)}
+
+
+def _slot(now: datetime.datetime) -> tuple[list, str, int]:
+    """(shelf, shelf key, slot number) for this hour.
+
+    The slot number counts that shelf's showings since day zero, so it advances
+    by exactly one every time the shelf comes up — which is what lets the
+    rotation below hand out each quote once and only once.
+    """
     hour = now.hour
-    shelf = WRY if (hour % HUMOR_EVERY == 1 and WRY) else STOIC
-    index = (now.toordinal() * 24 + hour) % len(shelf)
-    return shelf[index]
+    if WRY and hour in _WRY_RANK:
+        return WRY, "wry", now.toordinal() * len(_WRY_HOURS) + _WRY_RANK[hour]
+    return STOIC, "stoic", now.toordinal() * len(_STOIC_HOURS) + _STOIC_RANK[hour]
 
 
-def fallback_line(stats: dict) -> str:
+@lru_cache(maxsize=8)
+def _cycle_order(shelf_key: str, size: int, cycle: int) -> tuple[int, ...]:
+    """A shuffled permutation of a shelf, fixed for the whole cycle.
+
+    Seeded by (shelf, cycle) and nothing else: two containers, two browsers and
+    a redeploy in the middle must all compute the same order for the same hour,
+    or the wall looks like it is glitching. `random.Random(str)` hashes its seed
+    with SHA-512, so this is stable across processes and PYTHONHASHSEED.
+    """
+    order = list(range(size))
+    random.Random(f"{shelf_key}:{cycle}").shuffle(order)
+    return tuple(order)
+
+
+def pick_quote(now: datetime.datetime) -> tuple[str, str, str]:
+    """Which quote this hour shows.
+
+    Deterministic (two renders of the same hour must match) and exhaustive: a
+    shelf is walked in a shuffled order and every quote in it is shown exactly
+    once before any of them comes back. With today's library that is a full
+    cycle of about eight days per shelf, versus the single day the first
+    14-quote version managed.
+
+    The one seam: the last quote of a cycle and the first of the next are drawn
+    independently, so back-to-back repeats are possible at odds of 1/len(shelf).
+    Closing that would mean deriving each cycle from the previous one all the
+    way back to day zero — not worth it for a 0.7% chance of one repeat.
+    """
+    shelf, key, slot = _slot(now)
+    size = len(shelf)
+    return shelf[_cycle_order(key, size, slot // size)[slot % size]]
+
+
+# The computed line, per board condition. This is what the wall shows whenever
+# the LLM is unavailable — which, per the provider notes in gemma_client.py and
+# llm_router.py, is not a rare event. A single hardcoded sentence per condition
+# meant the room read the SAME line every time Groq had a bad afternoon, so each
+# condition carries a small shelf of its own and rotates with the hour.
+#
+# Same register as the quotes: mostly straight, occasionally dry. Every line has
+# to survive being read from four metres away by somebody who is late.
+_FALLBACKS: dict[str, list[str]] = {
+    "overdue": [
+        "{n} משימות באיחור. השעה הקרובה שווה יותר מכל הסבר.",
+        "{n} משימות באיחור. אף אחת מהן לא תסגור את עצמה עד הישיבה הבאה.",
+        "{n} משימות באיחור. נתחיל מהוותיקה שבהן — היא כבר מכירה אותנו.",
+        "{n} משימות עברו את היעד. תאריך יעד שחלף הוא החלטה שלא קיבלנו.",
+        "{n} משימות באיחור. נסגור אחת היום — זו כבר מגמה.",
+        "{n} משימות באיחור. או שמזיזים את היעד, או שמזיזים את המשימה.",
+    ],
+    "silent": [
+        "{n} משימות בלי דיווח. עדכון של שורה אחת חוסך ישיבה שלמה.",
+        "{n} משימות שותקות. שקט בלוח אינו סימן טוב — הוא חוסר מידע.",
+        "{n} משימות בלי עדכון. מי שלא מדווח בעצמו, מדווחים עליו.",
+        "{n} משימות בלי דיווח. שתי דקות כתיבה חוסכות שבוע ניחושים.",
+        "{n} משימות ללא סימן חיים. נעדכן סטטוס לפני שמישהו ישאל.",
+    ],
+    "do_now": [
+        "{n} משימות דחופות על השולחן. אחת בכל פעם, עד הסוף.",
+        "{n} משימות ברביע דחוף וחשוב. איתן פותחים את היום, לא איתן מסיימים.",
+        "{n} משימות דחופות. ריבוי דחיפויות הוא בדרך כלל תכנון שנדחה.",
+        "{n} משימות דחופות. נבחר אחת ונסגור אותה — לא נפתח את כולן.",
+    ],
+    "clean": [
+        "הלוח נקי. זה הזמן לתכנן את השבוע הבא, לא לנוח בו.",
+        "הלוח נקי. שקט כזה נמשך בדיוק עד הטלפון הבא.",
+        "אין איחורים ואין שתיקות. נשתמש בשעה הזאת לתכנן, לא לכבות.",
+        "הלוח נקי. עכשיו מטפלים במה שחשוב ואינו דחוף.",
+    ],
+}
+
+
+def fallback_line(stats: dict, now: datetime.datetime | None = None) -> str:
     """The connecting sentence when the LLM is unavailable — computed, never empty.
 
     Ordered by what actually deserves the room's attention: lateness first,
-    silence second, load third.
+    silence second, load third. Within the chosen condition the phrasing rotates
+    with the hour, so an LLM outage does not pin one sentence to the wall.
     """
+    now = now or datetime.datetime.now(oms._IL_TZ)
+    tick = now.toordinal() * 24 + now.hour
+
+    def _say(condition: str, n: int = 0) -> str:
+        shelf = _FALLBACKS[condition]
+        return shelf[tick % len(shelf)].format(n=n)
+
     overdue = int(stats.get("overdue") or 0)
     silent = int(stats.get("silent") or 0)
     do_now = int(stats.get("do_now") or 0)
     if overdue:
-        return f"{overdue} משימות באיחור. השעה הקרובה שווה יותר מכל הסבר."
+        return _say("overdue", overdue)
     if silent:
-        return f"{silent} משימות בלי דיווח. עדכון של שורה אחת חוסך ישיבה שלמה."
+        return _say("silent", silent)
     if do_now:
-        return f"{do_now} משימות דחופות על השולחן. אחת בכל פעם, עד הסוף."
-    return "הלוח נקי. זה הזמן לתכנן את השבוע הבא, לא לנוח בו."
+        return _say("do_now", do_now)
+    return _say("clean")
 
 
 def _hebrew_ratio(text: str) -> float:
@@ -191,7 +266,7 @@ async def build(session: AsyncSession, stats: dict, now: datetime.datetime | Non
             f"war_room_motto: model answer unusable ({len(raw or '')} chars raw, "
             f"{len(line)} kept: {line!r}) — serving the computed line"
         )
-        return _motto(quote, fallback_line(stats))
+        return _motto(quote, fallback_line(stats, now))
 
     motto = _motto(quote, line)
     _cache.clear()
@@ -266,4 +341,4 @@ async def get_motto(
 
     from app.database import async_session_maker
     _spawn(async_session_maker, stats, now)
-    return _motto(pick_quote(now), fallback_line(stats))
+    return _motto(pick_quote(now), fallback_line(stats, now))
