@@ -130,7 +130,6 @@ def _context(style, is_viewer=False):
         # per-style extras, mirroring the router
         "my_due_now": [late, today_due], "my_upcoming": [planned],
         "my_undated": [undated], "my_total": 4,
-        "owner_load": [("אבי", 3), ("דנה", 1)], "owner_load_max": 3,
         # Built through the real shaping code, so a change there fails the render
         # test instead of quietly drifting from what the router passes.
         "wall_pages": wall_pages,
@@ -140,6 +139,7 @@ def _context(style, is_viewer=False):
         "wall_active_total": len(missions),
         "wall_silent": 3,
         "wall_silent_days": wall.SILENT_DAYS,
+        "wall_page_size": wall.WALL_PAGE_SIZE,
         "wall_feed": [{"mission": "החלפת מפסק ראשי", "text": "ממתין לאישור בטיחות",
                        "who": "אבי", "when": "21/08 14:20", "close": False}],
         "wall_motto": {"quote": wrm.STOIC[0][0], "author": wrm.STOIC[0][1],
@@ -233,6 +233,41 @@ def test_wall_layout_carries_the_hourly_line():
     assert wrm.STOIC[0][0] in html
     assert wrm.STOIC[0][1] in html
     assert "סוגרים היום את שתי המשימות באיחור." in html
+
+
+def test_wall_layout_carries_no_app_navbar():
+    """The wall's top row is the board itself — every row of chrome costs a card."""
+    html = _render("wall")
+    assert "navbar" not in html
+    assert 'action="/dashboard/war-room/style"' in html   # the way back out stays
+
+
+def test_wall_layout_shows_no_per_owner_ranking():
+    """A wall screen ranking named people by load is a public scoreboard of who
+    looks slow. That figure belongs in the report and the AI summary, not here."""
+    html = _render("wall")
+    assert "עומס לפי אחראי" not in html
+
+
+def test_wall_layout_states_each_figure_once():
+    """The header line used to repeat the numbers already in the tiles."""
+    html = _render("wall")
+    assert html.count("באיחור</div>") <= 1
+    assert "wl-prog" not in html          # the countdown bar is gone
+
+
+def test_wall_layout_fits_one_viewport():
+    """A TV browser has no scrollbar: anything below the fold is simply lost."""
+    html = _render("wall")
+    assert "height:100vh;overflow:hidden" in html
+    assert "--rows:%d" % wall.WALL_PAGE_SIZE in html
+
+
+def test_wall_motto_attribution_is_on_its_own_line():
+    """Squeezed onto the end of the quote, the author was the first thing the
+    browser clipped — a half-eaten name under a Stoic line."""
+    html = _render("wall")
+    assert '<div class="a" dir="rtl">— ' in html
 
 
 def test_tv_mode_drops_the_navigation_chrome():

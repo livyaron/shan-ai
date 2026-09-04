@@ -3,6 +3,13 @@
    card by time-to-target, carries the latest status update on each card plus a
    board-wide update ticker, and holds no write actions at all — a screen that
    talks, not a screen you work in.
+
+   The whole page is exactly one viewport high and never scrolls: every row is
+   sized in vh and the card area takes what is left, so a 1080p TV, a 4K panel
+   and a laptop all show the SAME six cards. A TV browser has no scrollbar and
+   nobody walks up to a wall screen to scroll it — anything below the fold is
+   simply lost, which is what the old fixed-height cards did to half the board.
+
    /dashboard/war-room?style=wall — add &tv=1 for a chrome-free kiosk screen. #}
 <!DOCTYPE html>
 <html lang="he" dir="rtl">
@@ -27,32 +34,54 @@
   --mono:'IBM Plex Mono',monospace,'Segoe UI Emoji','Noto Color Emoji';
 }
 *{box-sizing:border-box;margin:0;padding:0}
-body{background:var(--bg);color:var(--ink);font-family:var(--ui);min-height:100vh;
-  display:flex;flex-direction:column}
+html,body{height:100%}
+/* One viewport, no scrolling — see the note at the top of this file. */
+body{background:var(--bg);color:var(--ink);font-family:var(--ui);
+  height:100vh;overflow:hidden;display:flex;flex-direction:column}
 a{color:var(--amber);text-decoration:none}
-.wl-top{flex-shrink:0;display:flex;align-items:center;gap:24px;padding:0 32px;height:76px;border-bottom:2px solid var(--line);flex-wrap:wrap}
-.wl-name{font-size:1.9rem;font-weight:900;letter-spacing:.5px}
-.wl-sub{font-size:1.15rem;color:var(--ink-2);font-weight:500}
-.wl-live{display:flex;align-items:center;gap:9px;font-size:1.05rem;color:var(--green-2);font-family:var(--mono)}
-.wl-dot{width:11px;height:11px;border-radius:50%;background:var(--green);display:inline-block}
-.wl-clock{font-family:var(--mono);font-size:2rem;font-weight:700;letter-spacing:1px}
-.wl-date{font-family:var(--mono);font-size:1.15rem;color:var(--ink-2)}
-.wl-grid{display:grid;grid-template-columns:minmax(0,1.65fr) minmax(0,1fr);gap:24px;padding:22px 32px;
-  flex-grow:1;align-content:start}
-.wl-h{display:flex;align-items:baseline;gap:16px;margin-bottom:14px;flex-wrap:wrap}
-.wl-h .t{font-size:1.45rem;font-weight:700;color:var(--red-2)}
-.wl-h .s{font-size:1.05rem;color:var(--ink-2)}
-.wl-h .p{margin-inline-start:auto;font-family:var(--mono);font-size:1.05rem;color:var(--ink-2)}
 
-/* ── rotation ─────────────────────────────────────────────────────────── */
-.wl-page{display:none}
-.wl-page.on{display:block;animation:wlIn .45s ease}
+/* ── header ───────────────────────────────────────────────────────────── */
+.wl-top{flex:0 0 auto;display:flex;align-items:center;gap:24px;padding:0 30px;
+  height:8.4vh;min-height:54px;border-bottom:2px solid var(--line);overflow:hidden}
+.wl-name{font-size:clamp(1.3rem,3.1vh,2.2rem);font-weight:900;letter-spacing:.5px;white-space:nowrap}
+.wl-sub{font-size:clamp(.85rem,1.8vh,1.3rem);color:var(--ink-2);font-weight:500;white-space:nowrap}
+.wl-live{display:flex;align-items:center;gap:9px;font-size:clamp(.8rem,1.7vh,1.15rem);
+  color:var(--green-2);font-family:var(--mono);white-space:nowrap}
+.wl-dot{width:11px;height:11px;border-radius:50%;background:var(--green);display:inline-block}
+.wl-clock{font-family:var(--mono);font-size:clamp(1.3rem,3.2vh,2.2rem);font-weight:700;letter-spacing:1px}
+.wl-date{font-family:var(--mono);font-size:clamp(.8rem,1.8vh,1.2rem);color:var(--ink-2)}
+
+/* ── the four figures ─────────────────────────────────────────────────── */
+.wl-kpis{flex:0 0 auto;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));
+  gap:14px;padding:1.5vh 30px 0}
+.wl-kpi{background:var(--panel);border-radius:8px;padding:.9vh 18px;
+  display:flex;align-items:center;justify-content:space-between;gap:12px;overflow:hidden}
+.wl-kpi .l{font-size:clamp(.85rem,1.9vh,1.35rem);color:var(--ink-2);font-weight:500;white-space:nowrap}
+.wl-kpi .n{font-family:var(--mono);font-size:clamp(1.5rem,4.4vh,3.1rem);font-weight:700;line-height:1}
+
+/* ── title + legend + pager ───────────────────────────────────────────── */
+.wl-h{flex:0 0 auto;display:flex;align-items:center;gap:18px;padding:1.5vh 30px .9vh;overflow:hidden}
+.wl-h .t{font-size:clamp(1rem,2.3vh,1.6rem);font-weight:700;color:var(--red-2);white-space:nowrap}
+.wl-h .p{margin-inline-start:auto;font-family:var(--mono);
+  font-size:clamp(.8rem,1.8vh,1.2rem);color:var(--ink-2);white-space:nowrap;flex-shrink:0}
+.wl-legend{display:flex;gap:4px 14px;font-size:clamp(.7rem,1.5vh,1rem);color:var(--ink-2);
+  min-width:0;overflow:hidden;flex-wrap:nowrap;white-space:nowrap}
+.wl-legend i{display:inline-block;width:12px;height:12px;border-radius:3px;
+  margin-inline-end:6px;vertical-align:-1px}
+
+/* ── rotation stage: every page is exactly as tall as what is left ────── */
+.wl-stage{flex:1 1 auto;min-height:0;padding:0 30px}
+.wl-page{display:none;height:100%}
+/* A row is always the height it would have on a FULL page (--rows of them), so a
+   card is the same size on every page; a page with fewer cards centres its rows
+   instead of stretching them into banners. */
+.wl-page.on{display:grid;gap:1vh;align-content:center;animation:wlIn .45s ease;
+  grid-template-rows:repeat(var(--n),calc((100% - (var(--rows) - 1) * 1vh) / var(--rows)))}
+.wl-page.closed.on{grid-template-rows:auto repeat(var(--n),calc((100% - var(--rows) * 1vh) / var(--rows)))}
 @keyframes wlIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
-.wl-prog{height:5px;background:var(--line);border-radius:3px;overflow:hidden;margin-bottom:14px}
-.wl-prog>span{display:block;height:5px;background:var(--ink-3);width:0}
 
 .wl-item{display:flex;align-items:center;gap:20px;background:var(--panel);border-radius:8px;
-  padding:14px 20px;margin-bottom:11px;border-inline-start:9px solid var(--t-later)}
+  padding:0 20px;border-inline-start:9px solid var(--t-later);min-height:0;overflow:hidden}
 .wl-item.t-late-deep{border-inline-start-color:var(--t-late-deep);background:linear-gradient(90deg,rgba(255,33,24,.14),var(--panel) 55%)}
 .wl-item.t-late{border-inline-start-color:var(--t-late)}
 .wl-item.t-today{border-inline-start-color:var(--t-today)}
@@ -60,63 +89,64 @@ a{color:var(--amber);text-decoration:none}
 .wl-item.t-week{border-inline-start-color:var(--t-week)}
 .wl-item.t-nodate{border-inline-start-color:var(--t-nodate)}
 .wl-item.silent{outline:2px dashed rgba(154,161,171,.55);outline-offset:-4px}
-.wl-when{font-family:var(--mono);font-size:2.3rem;font-weight:700;min-width:150px;text-align:center;line-height:1}
-.wl-when .u{font-size:.78rem;white-space:nowrap;color:var(--ink-2);font-family:var(--ui);font-weight:500;display:block;margin-top:5px}
+.wl-when{font-family:var(--mono);font-size:clamp(1.4rem,3.6vh,2.6rem);font-weight:700;
+  min-width:clamp(96px,9vw,160px);text-align:center;line-height:1;flex-shrink:0}
+.wl-when .u{font-size:clamp(.6rem,1.25vh,.85rem);white-space:nowrap;color:var(--ink-2);
+  font-family:var(--ui);font-weight:500;display:block;margin-top:.5vh}
 .t-late-deep .wl-when{color:var(--t-late-deep);animation:wlPulse 1.8s ease-in-out infinite}
 .t-late .wl-when{color:var(--t-late)}
 .t-today .wl-when{color:var(--t-today)}
 .t-soon .wl-when{color:var(--t-soon)}
-.t-week .wl-when,.t-later .wl-when,.t-nodate .wl-when{font-size:1.6rem;color:#c3c9d2}
+.t-week .wl-when,.t-later .wl-when,.t-nodate .wl-when{font-size:clamp(1rem,2.4vh,1.7rem);color:#c3c9d2}
 @keyframes wlPulse{0%,100%{opacity:1}50%{opacity:.45}}
-.wl-t{font-size:1.5rem;font-weight:700;line-height:1.25;unicode-bidi:isolate}
-.wl-m{font-size:1.02rem;color:var(--ink-2);margin-top:4px;unicode-bidi:isolate}
-.wl-upd{font-size:1.02rem;color:#c3c9d2;margin-top:6px;unicode-bidi:isolate;
-  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+.wl-body{flex-grow:1;min-width:0}
+.wl-t{font-size:clamp(1.05rem,2.5vh,1.8rem);font-weight:700;line-height:1.2;unicode-bidi:isolate;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.wl-m{font-size:clamp(.75rem,1.7vh,1.15rem);color:var(--ink-2);margin-top:.4vh;unicode-bidi:isolate;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.wl-upd{font-size:clamp(.75rem,1.7vh,1.15rem);color:#c3c9d2;margin-top:.5vh;unicode-bidi:isolate;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .wl-upd .w{color:var(--ink-3)}
 .wl-quiet{color:var(--t-nodate);font-weight:600}
-.wl-done-h{font-size:1.35rem;font-weight:700;color:var(--green-2);margin-bottom:14px}
-.wl-tag{font-size:.85rem;font-weight:700;border-radius:4px;padding:2px 8px;background:var(--line);color:var(--ink-2)}
+.wl-done-h{font-size:clamp(1rem,2.3vh,1.5rem);font-weight:700;color:var(--green-2);padding-bottom:.4vh}
+.wl-tag{font-size:clamp(.65rem,1.4vh,.9rem);font-weight:700;border-radius:4px;padding:2px 8px;
+  background:var(--line);color:var(--ink-2)}
+.wl-empty{grid-column:1/-1;background:var(--panel);border-radius:8px;padding:34px;
+  text-align:center;color:var(--ink-2);font-size:1.3rem}
 
-.wl-kpis{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-bottom:16px}
-.wl-kpi{background:var(--panel);border-radius:8px;padding:16px 18px}
-.wl-kpi .l{font-size:.98rem;color:var(--ink-2);font-weight:500}
-.wl-kpi .n{font-family:var(--mono);font-size:3.2rem;font-weight:700;line-height:1.05}
-.wl-panel{background:var(--panel);border-radius:8px;padding:18px 20px;margin-bottom:16px}
-.wl-panel h3{font-size:1.1rem;font-weight:700;margin-bottom:16px}
-.wl-load{display:flex;flex-direction:column;gap:13px}
-.wl-load .r{display:flex;justify-content:space-between;font-size:1.05rem;margin-bottom:5px}
-.wl-load .r b{font-family:var(--mono);font-weight:600}
-.wl-bar{height:10px;background:var(--line);border-radius:5px;overflow:hidden}
-.wl-bar>span{display:block;height:10px;border-radius:5px;background:#6b7280}
-.wl-legend{display:flex;flex-wrap:wrap;gap:10px 18px;font-size:.95rem;color:var(--ink-2)}
-.wl-legend i{display:inline-block;width:14px;height:14px;border-radius:3px;margin-inline-end:7px;vertical-align:-2px}
-/* The hourly line: a real quote plus one AI sentence about the board. */
-.wl-motto{flex-shrink:0;display:flex;align-items:center;gap:26px;padding:14px 32px;
-  border-top:2px solid var(--line);background:linear-gradient(90deg,rgba(74,163,255,.10),transparent 60%)}
+/* ── the hourly line: a real quote plus one AI sentence about the board ── */
+.wl-motto{flex:0 0 auto;display:flex;align-items:center;gap:26px;padding:1.2vh 30px;
+  border-top:2px solid var(--line);background:linear-gradient(90deg,rgba(74,163,255,.10),transparent 60%);
+  overflow:hidden}
 .wl-motto.wry{background:linear-gradient(90deg,rgba(255,176,46,.12),transparent 60%)}
-.wl-motto .q{font-size:1.5rem;font-weight:700;line-height:1.25;unicode-bidi:isolate}
-.wl-motto .a{font-size:1.05rem;font-weight:500;color:var(--ink-2);margin-inline-start:12px;white-space:nowrap}
-.wl-motto .l{font-size:1.2rem;color:#c3c9d2;unicode-bidi:isolate;
-  border-inline-start:3px solid var(--t-week);padding-inline-start:18px;flex-shrink:0;max-width:42%}
+.wl-motto .q{min-width:0}
+/* The attribution sits on its OWN line: squeezed onto the end of the quote it
+   was the first thing the browser clipped, and a half-eaten "מרו" under a
+   Stoic line is worse than no attribution at all. */
+.wl-motto .txt{font-size:clamp(1rem,2.4vh,1.7rem);font-weight:700;line-height:1.2;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.wl-motto .a{font-size:clamp(.75rem,1.6vh,1.05rem);font-weight:500;color:var(--ink-2);margin-top:.3vh}
+.wl-motto .l{font-size:clamp(.85rem,1.9vh,1.3rem);color:#c3c9d2;unicode-bidi:isolate;
+  border-inline-start:3px solid var(--t-week);padding-inline-start:18px;
+  margin-inline-start:auto;flex-shrink:0;max-width:42%}
 .wl-motto.wry .l{border-inline-start-color:var(--amber)}
-.wl-foot{flex-shrink:0;margin-top:auto;display:flex;align-items:center;gap:16px;min-height:62px;background:var(--panel-2);
-  border-top:2px solid var(--line);padding:10px 32px;font-size:1.15rem;flex-wrap:wrap}
-.wl-chip{background:var(--green);color:#06210d;font-weight:700;border-radius:4px;padding:4px 12px;font-size:.92rem;flex-shrink:0}
-.wl-feed{flex-grow:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;unicode-bidi:isolate;color:#c3c9d2}
-.wl-empty{background:var(--panel);border-radius:8px;padding:34px;text-align:center;color:var(--ink-2);font-size:1.3rem}
-@media (max-width:1100px){
-  .wl-grid{grid-template-columns:1fr}
-  .wl-name{font-size:1.5rem}
-}
+
+/* ── footer feed ──────────────────────────────────────────────────────── */
+.wl-foot{flex:0 0 auto;display:flex;align-items:center;gap:16px;background:var(--panel-2);
+  border-top:2px solid var(--line);padding:.9vh 30px;font-size:clamp(.8rem,1.8vh,1.2rem);overflow:hidden}
+.wl-chip{background:var(--green);color:#06210d;font-weight:700;border-radius:4px;padding:3px 12px;
+  font-size:clamp(.7rem,1.5vh,.95rem);flex-shrink:0}
+.wl-feed{flex-grow:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  unicode-bidi:isolate;color:#c3c9d2}
 </style>
 </head>
 <body>
-{% if not tv %}{% include "_navbar.html" %}{% endif %}
-
+{# No app navbar here on purpose: on a wall screen the top row must be the board
+   itself, and every row of chrome costs a mission card. #}
 <div class="wl-top">
   <div class="wl-name">חדר מבצעים</div>
   <div class="wl-sub">תחנות משנה · מצב חי</div>
-  <div style="margin-inline-start:auto;display:flex;align-items:center;gap:22px;flex-wrap:wrap">
+  <div style="margin-inline-start:auto;display:flex;align-items:center;gap:22px">
     <span class="wl-live"><span class="wl-dot"></span>{{ wall_active_total }} משימות פעילות במחזור</span>
     <span class="wl-clock" id="wlClock">--:--</span>
     <span class="wl-date">{{ today.strftime('%d/%m/%Y') }}</span>
@@ -124,91 +154,74 @@ a{color:var(--amber);text-decoration:none}
   </div>
 </div>
 
-<div class="wl-grid">
-  <div>
-    <div class="wl-h">
-      <span class="t">מצב המשימות</span>
-      <span class="s">{{ stats.overdue }} באיחור · {{ stats.do_now }} דחופות · {{ wall_silent }} ללא דיווח מעל {{ wall_silent_days }} ימים</span>
-      <span class="p" id="wlPager">עמוד 1/{{ wall_pages|length }}</span>
-    </div>
-    <div class="wl-prog"><span id="wlProg"></span></div>
+<div class="wl-kpis">
+  <div class="wl-kpi"><div class="l">פתוחות</div><div class="n">{{ stats.open }}</div></div>
+  <div class="wl-kpi"><div class="l" style="color:#ff8a7d">באיחור</div>
+    <div class="n" style="color:var(--red-2)">{{ stats.overdue }}</div></div>
+  <div class="wl-kpi"><div class="l">ללא דיווח {{ wall_silent_days }} ימים</div>
+    <div class="n" style="color:var(--t-nodate)">{{ wall_silent }}</div></div>
+  <div class="wl-kpi"><div class="l" style="color:var(--green-2)">נסגרו השבוע</div>
+    <div class="n" style="color:var(--green)">{{ stats.done_week }}</div></div>
+</div>
 
-    {% for page in wall_pages %}
-    <div class="wl-page{% if loop.first %} on{% endif %}" data-kind="{{ page.kind }}">
-      {% if page.kind == 'closed' %}
-        <div class="wl-done-h">✅ נסגרו לאחרונה</div>
-        {% for c in page.cards %}
-        <div class="wl-item" style="border-inline-start-color:var(--green)">
-          <div class="wl-when" style="color:var(--green);font-size:1.5rem">✅<span class="u">{{ c.when }}</span></div>
-          <div style="flex-grow:1;min-width:0">
-            <div class="wl-t" dir="auto">{{ c.title }}</div>
-            <div class="wl-m" dir="auto">{{ c.owner }} · {{ c.quadrant }}</div>
-            {% if c.note %}<div class="wl-upd" dir="auto">🔒 {{ c.note }}</div>{% endif %}
-          </div>
-        </div>
-        {% endfor %}
-      {% elif not page.cards %}
-        <div class="wl-empty">אין משימות פעילות. הלוח נקי.</div>
-      {% else %}
-        {% for c in page.cards %}
-        <div class="wl-item t-{{ c.tone }}{% if c.is_silent %} silent{% endif %}">
-          <div class="wl-when">{{ c.big }}{% if c.unit %}<span class="u">{{ c.unit }}</span>{% endif %}</div>
-          <div style="flex-grow:1;min-width:0">
-            <div class="wl-t" dir="auto">{{ c.title }}</div>
-            <div class="wl-m" dir="auto">{{ c.owner }} · {{ c.quadrant }}
-              {% if c.is_silent and c.silent_days is not none %}<span class="wl-tag">🔇 ללא דיווח {{ c.silent_days }} ימים</span>{% endif %}
-            </div>
-            {% if c.update_text %}
-            <div class="wl-upd" dir="auto">💬 {{ c.update_text }}
-              <span class="w">— {{ c.update_who }}, {{ c.update_when }}</span></div>
-            {% else %}
-            <div class="wl-upd wl-quiet">💬 טרם דווח סטטוס</div>
-            {% endif %}
-          </div>
-        </div>
-        {% endfor %}
-      {% endif %}
-    </div>
+<div class="wl-h">
+  <span class="t">מצב המשימות</span>
+  <span class="wl-legend">
+    {% for key, label in wall_legend %}
+    <span><i style="background:var(--t-{{ key }})"></i>{{ label }}</span>
     {% endfor %}
-  </div>
+    <span><i style="background:transparent;border:2px dashed rgba(154,161,171,.85)"></i>ללא דיווח</span>
+  </span>
+  <span class="p" id="wlPager">עמוד 1/{{ wall_pages|length }}</span>
+</div>
 
-  <div>
-    <div class="wl-kpis">
-      <div class="wl-kpi"><div class="l">פתוחות</div><div class="n">{{ stats.open }}</div></div>
-      <div class="wl-kpi"><div class="l" style="color:#ff8a7d">באיחור</div><div class="n" style="color:var(--red-2)">{{ stats.overdue }}</div></div>
-      <div class="wl-kpi"><div class="l">בצע עכשיו</div><div class="n">{{ stats.do_now }}</div></div>
-      <div class="wl-kpi"><div class="l" style="color:var(--green-2)">נסגרו השבוע</div><div class="n" style="color:var(--green)">{{ stats.done_week }}</div></div>
-    </div>
-
-    <div class="wl-panel">
-      <h3>עומס לפי אחראי</h3>
-      <div class="wl-load">
-        {% for name, count in owner_load %}
-        <div>
-          <div class="r"><span>{{ name }}</span><b>{{ count }}</b></div>
-          <div class="wl-bar"><span style="width:{{ (count * 100 // owner_load_max) }}%"></span></div>
+<div class="wl-stage" style="--rows:{{ wall_page_size }}">
+  {% for page in wall_pages %}
+  <div class="wl-page{% if page.kind == 'closed' %} closed{% endif %}{% if loop.first %} on{% endif %}"
+       style="--n:{{ page.cards|length or 1 }}" data-kind="{{ page.kind }}">
+    {% if page.kind == 'closed' %}
+      <div class="wl-done-h">✅ נסגרו לאחרונה</div>
+      {% for c in page.cards %}
+      <div class="wl-item" style="border-inline-start-color:var(--green)">
+        <div class="wl-when" style="color:var(--green);font-size:clamp(1rem,2.4vh,1.6rem)">✅<span class="u">{{ c.when }}</span></div>
+        <div class="wl-body">
+          <div class="wl-t" dir="auto">{{ c.title }}</div>
+          <div class="wl-m" dir="auto">{{ c.owner }} · {{ c.quadrant }}</div>
+          {% if c.note %}<div class="wl-upd" dir="auto">🔒 {{ c.note }}</div>{% endif %}
         </div>
-        {% else %}
-        <div style="color:var(--ink-2);font-size:1.05rem">אין משימות פתוחות.</div>
-        {% endfor %}
       </div>
-    </div>
-
-    <div class="wl-panel">
-      <h3>מקרא צבעים</h3>
-      <div class="wl-legend">
-        {% for key, label in wall_legend %}
-        <span><i style="background:var(--t-{{ key }})"></i>{{ label }}</span>
-        {% endfor %}
-        <span><i style="background:transparent;border:2px dashed rgba(154,161,171,.85)"></i>ללא דיווח</span>
+      {% endfor %}
+    {% elif not page.cards %}
+      <div class="wl-empty">אין משימות פעילות. הלוח נקי.</div>
+    {% else %}
+      {% for c in page.cards %}
+      <div class="wl-item t-{{ c.tone }}{% if c.is_silent %} silent{% endif %}">
+        <div class="wl-when">{{ c.big }}{% if c.unit %}<span class="u">{{ c.unit }}</span>{% endif %}</div>
+        <div class="wl-body">
+          <div class="wl-t" dir="auto">{{ c.title }}</div>
+          <div class="wl-m" dir="auto">{{ c.owner }} · {{ c.quadrant }}
+            {% if c.is_silent and c.silent_days is not none %}<span class="wl-tag">🔇 ללא דיווח {{ c.silent_days }} ימים</span>{% endif %}
+          </div>
+          {% if c.update_text %}
+          <div class="wl-upd" dir="auto">💬 {{ c.update_text }}
+            <span class="w">— {{ c.update_who }}, {{ c.update_when }}</span></div>
+          {% else %}
+          <div class="wl-upd wl-quiet">💬 טרם דווח סטטוס</div>
+          {% endif %}
+        </div>
       </div>
-    </div>
+      {% endfor %}
+    {% endif %}
   </div>
+  {% endfor %}
 </div>
 
 <div class="wl-motto {{ wall_motto.kind }}">
-  <div class="q" dir="auto">{{ '😏 ' if wall_motto.kind == 'wry' else '' }}«{{ wall_motto.quote }}»<span class="a">— {{ wall_motto.author }}</span></div>
-  <div class="l" style="margin-inline-start:auto" dir="auto">{{ wall_motto.line }}</div>
+  <div class="q">
+    <div class="txt" dir="rtl">{{ '😏 ' if wall_motto.kind == 'wry' else '' }}{{ wall_motto.quote }}</div>
+    <div class="a" dir="rtl">— {{ wall_motto.author }}</div>
+  </div>
+  <div class="l" dir="auto">{{ wall_motto.line }}</div>
 </div>
 
 <div class="wl-foot">
@@ -216,7 +229,7 @@ a{color:var(--amber);text-decoration:none}
   <span class="wl-feed" id="wlFeed" dir="auto">
     {% if wall_feed %}{{ wall_feed[0].mission }} — {{ wall_feed[0].text }} ({{ wall_feed[0].who }}, {{ wall_feed[0].when }}){% else %}טרם דווחו עדכוני סטטוס.{% endif %}
   </span>
-  <span style="margin-inline-start:auto;color:var(--ink-3);font-size:1rem;flex-shrink:0">מסך תצוגה · ללא עריכה</span>
+  <span style="margin-inline-start:auto;color:var(--ink-3);font-size:clamp(.7rem,1.5vh,1rem);flex-shrink:0">מסך תצוגה · ללא עריכה</span>
 </div>
 
 <script>
@@ -227,21 +240,14 @@ a{color:var(--amber);text-decoration:none}
   var ROTATE = {{ wall_rotate_ms }};
   var pages = Array.prototype.slice.call(document.querySelectorAll('.wl-page'));
   var pager = document.getElementById('wlPager');
-  var prog  = document.getElementById('wlProg');
-  var idx = 0, t0 = Date.now();
+  var idx = 0;
 
   function show(i) {
     pages.forEach(function (p, n) { p.classList.toggle('on', n === i); });
     if (pager) pager.textContent = 'עמוד ' + (i + 1) + '/' + pages.length;
-    t0 = Date.now();
   }
   if (pages.length > 1) {
     setInterval(function () { idx = (idx + 1) % pages.length; show(idx); }, ROTATE);
-    setInterval(function () {
-      if (prog) prog.style.width = Math.min(100, ((Date.now() - t0) / ROTATE) * 100) + '%';
-    }, 200);
-  } else if (prog) {
-    prog.style.width = '100%';
   }
 
   // Board-wide status feed: one line at a time, so it stays readable from 4m.

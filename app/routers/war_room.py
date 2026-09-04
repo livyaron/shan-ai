@@ -226,6 +226,11 @@ async def _wall_context(session: AsyncSession, today: datetime.date, stats: dict
     mission, or the sixth-worst one, was invisible to the room forever. Now every
     active mission is shaped into a card, sorted worst-first and cut into pages
     the browser cycles through, so the screen eventually says everything.
+
+    Deliberately no per-owner load panel: a wall screen ranking named people by
+    how much they are carrying is a public scoreboard of who looks slow, which is
+    a management conversation, not a display. The figure lives in the XLSX report
+    and the AI summary, where it reaches managers only.
     """
     active = list((await session.scalars(
         select(Mission)
@@ -238,12 +243,6 @@ async def _wall_context(session: AsyncSession, today: datetime.date, stats: dict
         .where(Mission.status.in_(oms.ACTIVE_STATUSES))
         .order_by(Mission.due_date.asc().nulls_last(), Mission.id.desc())
     )).all())
-
-    load: dict[str, int] = {}
-    for m in active:
-        name = m.owner.username if m.owner else "—"
-        load[name] = load.get(name, 0) + 1
-    owner_load = sorted(load.items(), key=lambda kv: -kv[1])[:6]
 
     closed = list((await session.scalars(
         select(Mission)
@@ -306,8 +305,7 @@ async def _wall_context(session: AsyncSession, today: datetime.date, stats: dict
         "wall_silent": silent,
         "wall_silent_days": wall.SILENT_DAYS,
         "wall_feed": wall_feed,
-        "owner_load": owner_load,
-        "owner_load_max": max((c for _, c in owner_load), default=1),
+        "wall_page_size": wall.WALL_PAGE_SIZE,
     }
 
 
