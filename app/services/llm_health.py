@@ -31,9 +31,13 @@ async def _probe_models(chat, models: list[str]) -> dict[str, str]:
     out: dict[str, str] = {}
     for model in models:
         try:
-            await chat(_PROBE_MESSAGES, max_tokens=_PROBE_MAX_TOKENS,
-                       temperature=0, models=[model])
-            out[model] = "ok"
+            reply = await chat(_PROBE_MESSAGES, max_tokens=_PROBE_MAX_TOKENS,
+                               temperature=0, models=[model])
+            # The reply itself, not just a tick: a model that answers a one-word
+            # question with a paragraph of reasoning is "reachable" and still
+            # unusable — this is where that shows.
+            flat = " ".join((reply or "").split())
+            out[model] = f"ok · {flat[:60]}" if flat else "ok"
         except Exception as e:
             out[model] = redact(f"{type(e).__name__}: {str(e)}")[:120]
     return out
@@ -131,7 +135,7 @@ def summarize(providers: dict, routing: dict | None = None) -> dict:
         # down — that is exactly the state a dead model id at the head of the list
         # produces, and calling it "no provider available" sends people to check
         # the account instead of the model list.
-        return any(v == "ok" for v in (p.get("per_model") or {}).values())
+        return any(str(v).startswith("ok") for v in (p.get("per_model") or {}).values())
 
     usable = [name for name, p in providers.items() if _usable(p)]
     healthy = bool(usable)
@@ -217,8 +221,10 @@ def format_report_he(providers: dict, routing: dict, probed: bool) -> str:
 
         per_model = data.get("per_model") or {}
         for model, result in per_model.items():
-            if result == "ok":
-                lines.append(f"  ✅ <code>{_html.escape(model)}</code>")
+            if str(result).startswith("ok"):
+                tail = str(result)[2:].strip(" ·")
+                lines.append(f"  ✅ <code>{_html.escape(model)}</code>"
+                             + (f" — {_html.escape(tail)}" if tail else ""))
             else:
                 lines.append(f"  ❌ <code>{_html.escape(model)}</code> — "
                              f"{_html.escape(redact(result)[:_ERR_CHARS])}")

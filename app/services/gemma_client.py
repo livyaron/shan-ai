@@ -19,7 +19,10 @@ logger = logging.getLogger(__name__)
 GEMMA_MODELS = [
     "gemma-4-31b-it",          # works on free tier; larger/better of the two
     "gemma-4-26b-a4b-it",      # MoE variant, separate quota — works on free tier
-    "gemini-2.5-flash",        # clean JSON when available, but usually 429 on free tier
+    "gemini-3.5-flash",        # replaces gemini-2.5-flash, which the probe found
+                               # permanently 429 on this key. Unverified quota —
+                               # it is the last resort either way, so it cannot be
+                               # worse than an id that is known exhausted.
 ]
 
 _BASE = "https://generativelanguage.googleapis.com/v1beta/models"

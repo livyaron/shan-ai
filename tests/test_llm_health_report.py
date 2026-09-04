@@ -157,3 +157,37 @@ def test_the_models_subcommand_is_wired():
     assert "מודלים" in src
     assert "available_models" in src
     assert "format_models_he" in src
+
+
+# --------------------------------------------------------------------------
+# the model list itself is a decision, and a testable one
+# --------------------------------------------------------------------------
+
+def test_no_speech_or_classifier_model_is_routed_chat_traffic():
+    """The account also offers whisper, TTS and prompt-guard ids. Routing chat
+    at one of those fails at runtime, not at review time."""
+    from app.services.groq_client import MODELS
+    banned = ("whisper", "orpheus", "prompt-guard", "safeguard", "tts")
+    for model in MODELS:
+        assert not any(b in model for b in banned), model
+
+
+def test_no_chain_of_thought_family_is_used():
+    """qwen thinking mode leaks its reasoning into the answer — the same failure
+    that put a two-letter stub on the wall display."""
+    from app.services.groq_client import MODELS
+    assert not any("qwen" in m for m in MODELS)
+
+
+def test_there_is_a_second_model_behind_the_first():
+    from app.services.groq_client import MODELS
+    assert len(MODELS) >= 2
+
+
+def test_the_probe_reports_what_a_model_actually_said():
+    """'ok' hides a model that answers a one-word question with an essay."""
+    providers = {"groq": {"configured": True, "status": "ok", "ms": 300,
+                          "per_model": {"openai/gpt-oss-120b": "ok · OK"}}}
+    out = health.format_report_he(providers, {}, probed=True)
+    assert "✅" in out and "OK" in out
+    assert health.summarize(providers, {})["healthy"] is True

@@ -8,17 +8,24 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 
 # Tried in order — each has a separate rate-limit bucket on Groq.
-# scout FIRST: its 30k TPM fits a typical RAG/decision request (~8.5k tokens) in one
-# shot. 70b's 12k TPM 429s on big context almost every time, then falls to scout
-# anyway — so leading with 70b doubled token spend per call (a 429'd request still
-# counts against the daily TPD budget). scout-first halves that waste. 70b kept as a
-# quality backup for the rare call small enough to fit its bucket.
-# 8b dropped: free-tier TPM only 6,000 — too small, 429s every time.
-# Callers needing a tiny+fast model can still pass models=["llama-3.1-8b-instant"].
+#
+# 2026-09-04: both previous entries (llama-4-scout, llama-3.3-70b-versatile) were
+# retired by Groq and answered 404 model_not_found on every request for weeks.
+# `/llm מודלים` asks the account what it can actually call; of the 14 ids it
+# returned, only these two are general chat models worth routing to:
+#   - openai/gpt-oss-120b — the large one, for the reasoning-heavy usages
+#   - openai/gpt-oss-20b  — smaller and faster, the in-provider backup
+# Deliberately NOT used:
+#   - qwen/qwen3.6-27b, qwen/qwen3.8-27b — same family as the qwen3-32b that was
+#     dropped before: thinking mode leaks chain-of-thought into the answer, which
+#     is the exact failure that put a two-letter stub on the wall display.
+#   - groq/compound, groq/compound-mini — agentic systems with built-in tools,
+#     not plain chat completions.
+#   - whisper-* (speech), orpheus-* (TTS), llama-prompt-guard-* (classifiers),
+#     allam-2-7b (Arabic-focused, 7b) — wrong tool for this app's calls.
 MODELS = [
-    "meta-llama/llama-4-scout-17b-16e-instruct",  # 30k TPM — most headroom, fits big context
-    "llama-3.3-70b-versatile",                    # higher quality, 12k TPM — backup
-    # qwen/qwen3-32b removed — thinking mode leaks chain-of-thought into answers
+    "openai/gpt-oss-120b",   # quality first — summaries, decisions, RAG answers
+    "openai/gpt-oss-20b",    # faster fallback inside the same provider
 ]
 
 
