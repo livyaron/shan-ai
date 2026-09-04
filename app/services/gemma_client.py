@@ -19,10 +19,11 @@ logger = logging.getLogger(__name__)
 GEMMA_MODELS = [
     "gemma-4-31b-it",          # works on free tier; larger/better of the two
     "gemma-4-26b-a4b-it",      # MoE variant, separate quota — works on free tier
-    "gemini-3.5-flash",        # replaces gemini-2.5-flash, which the probe found
-                               # permanently 429 on this key. Unverified quota —
-                               # it is the last resort either way, so it cannot be
-                               # worse than an id that is known exhausted.
+    # gemini-3.5-flash removed 2026-09-04: the live probe hit a ReadTimeout on it.
+    # A third model here is only ever reached when both above have failed, and at
+    # a 60s client timeout it would freeze a Telegram answer for a minute before
+    # llm_router could fail over. Since Groq is healthy again, that cross-provider
+    # fallback is the better third option — it answers in ~440ms.
 ]
 
 _BASE = "https://generativelanguage.googleapis.com/v1beta/models"

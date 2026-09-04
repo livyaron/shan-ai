@@ -55,3 +55,11 @@ def test_a_textless_candidate_reports_why_not_keyerror():
     src = inspect.getsource(gemma_client)
     assert 'data["candidates"][0]["content"]["parts"]' not in src
     assert "finishReason" in src
+
+
+def test_no_model_that_times_out_sits_in_the_fallback_chain():
+    """A last-resort model that ReadTimeouts costs a full 60s client timeout
+    before the router can fail over — worse than not having it."""
+    from app.services.gemma_client import GEMMA_MODELS
+    assert "gemini-3.5-flash" not in GEMMA_MODELS
+    assert GEMMA_MODELS, "the backup provider still needs at least one model"
