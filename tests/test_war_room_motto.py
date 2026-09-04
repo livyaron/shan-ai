@@ -16,6 +16,11 @@ def _at(hour, day=4):
     return datetime.datetime(2026, 9, day, hour, 30, tzinfo=IL)
 
 
+def _after(days, hour):
+    """Same clock hour, `days` later — _at() alone cannot leave September."""
+    return _at(hour) + datetime.timedelta(days=days)
+
+
 @pytest.fixture(autouse=True)
 def _clean_cache():
     motto._cache.clear()
@@ -37,6 +42,59 @@ def test_quotes_are_curated_not_generated():
     for text, author, kind in motto.QUOTES:
         assert text.strip() and author.strip()
         assert kind in ("stoic", "wry")
+
+
+def test_the_library_is_large_enough_to_not_be_wallpaper():
+    """The first version held 14 quotes, so the wall recycled itself every day.
+
+    A screen people walk past all week has to outlast the week: each shelf must
+    carry at least seven days of slots before it comes back around.
+    """
+    assert len(motto.QUOTES) >= 150
+    assert len(motto.STOIC) / len(motto._STOIC_HOURS) >= 7
+    assert len(motto.WRY) / len(motto._WRY_HOURS) >= 7
+
+
+def test_no_quote_carries_a_straight_double_quote():
+    """Hebrew strings feed JSON prompts — gershayim only (see CLAUDE.md)."""
+    for text, author, _ in motto.QUOTES:
+        assert '"' not in text and '"' not in author
+
+
+def test_attribution_is_author_only():
+    """No chapter and verse: a citation we are not certain of is a fabrication."""
+    for _, author, _ in motto.QUOTES:
+        assert author.strip() == author
+        assert "," not in author and ":" not in author
+
+
+def test_a_cycle_order_is_a_permutation_of_the_whole_shelf():
+    for key, shelf in (("stoic", motto.STOIC), ("wry", motto.WRY)):
+        for cycle in range(3):
+            order = motto._cycle_order(key, len(shelf), cycle)
+            assert sorted(order) == list(range(len(shelf)))
+
+
+def test_a_shelf_is_exhausted_before_any_quote_repeats():
+    """The point of the rotation: every line shows once before any line returns.
+
+    Walked hour by hour from the start of a cycle, exactly as the wall does it.
+    """
+    for shelf, hours, _key in ((motto.STOIC, motto._STOIC_HOURS, "stoic"),
+                               (motto.WRY, motto._WRY_HOURS, "wry")):
+        size = len(shelf)
+        moments = [_after(d, h) for d in range(60) for h in hours]
+        start = next(i for i, m in enumerate(moments) if motto._slot(m)[2] % size == 0)
+        window = moments[start:start + size]
+        assert len(window) == size          # 60 days must cover a full cycle
+        assert len({motto.pick_quote(m)[0] for m in window}) == size
+
+
+def test_the_rotation_does_not_depend_on_process_state():
+    """Two containers rendering the same hour must agree — the seed is the hour."""
+    first = motto.pick_quote(_after(11, 14))
+    motto._cycle_order.cache_clear()
+    assert motto.pick_quote(_after(11, 14)) == first
 
 
 def test_the_same_hour_always_shows_the_same_quote():
@@ -67,17 +125,42 @@ def test_a_full_day_spreads_across_the_shelf():
 # --------------------------------------------------------------------------
 
 def test_fallback_line_puts_lateness_first():
-    line = motto.fallback_line({"overdue": 4, "silent": 9, "do_now": 7})
-    assert line.startswith("4 משימות באיחור")
+    for hour in range(24):
+        line = motto.fallback_line({"overdue": 4, "silent": 9, "do_now": 7}, _at(hour))
+        assert line.startswith("4 משימות")
 
 
 def test_fallback_line_falls_through_to_silence_then_load():
-    assert "בלי דיווח" in motto.fallback_line({"overdue": 0, "silent": 3, "do_now": 7})
-    assert "דחופות" in motto.fallback_line({"overdue": 0, "silent": 0, "do_now": 7})
+    for hour in range(24):
+        silent = motto.fallback_line({"overdue": 0, "silent": 3, "do_now": 7}, _at(hour))
+        load = motto.fallback_line({"overdue": 0, "silent": 0, "do_now": 7}, _at(hour))
+        assert silent in [t.format(n=3) for t in motto._FALLBACKS["silent"]]
+        assert load in [t.format(n=7) for t in motto._FALLBACKS["do_now"]]
 
 
 def test_fallback_line_on_a_clean_board_is_not_empty():
     assert motto.fallback_line({}).strip()
+
+
+def test_fallback_line_rotates_so_an_outage_is_not_one_sentence_on_repeat():
+    """Groq goes down for whole afternoons — the wall must not freeze on a line."""
+    stats = {"overdue": 4}
+    said = {motto.fallback_line(stats, _at(h)) for h in range(24)}
+    assert len(said) == len(motto._FALLBACKS["overdue"])
+
+
+def test_fallback_line_is_stable_inside_one_hour():
+    at = datetime.datetime(2026, 9, 4, 9, 0, tzinfo=IL)
+    late = datetime.datetime(2026, 9, 4, 9, 59, tzinfo=IL)
+    assert motto.fallback_line({"silent": 2}, at) == motto.fallback_line({"silent": 2}, late)
+
+
+def test_every_fallback_shelf_carries_the_count_it_promises():
+    """A line that drops {n} would put a bare imperative on the wall with no number."""
+    for condition, shelf in motto._FALLBACKS.items():
+        for text in shelf:
+            assert '"' not in text
+            assert ("{n}" in text) == (condition != "clean")
 
 
 # --------------------------------------------------------------------------
@@ -134,7 +217,7 @@ async def test_llm_failure_serves_the_computed_line_and_is_not_cached(monkeypatc
     monkeypatch.setattr(llm_router, "llm_chat", boom)
 
     m = await motto.build(None, {"overdue": 3}, _at(9))
-    assert m["line"] == motto.fallback_line({"overdue": 3})
+    assert m["line"] == motto.fallback_line({"overdue": 3}, _at(9))
     # A transient outage must not pin the fallback for the rest of the hour.
     assert motto.cache_key(_at(9)) not in motto._cache
 
@@ -147,7 +230,7 @@ async def test_an_empty_model_answer_also_falls_back(monkeypatch):
     monkeypatch.setattr(llm_router, "llm_chat", empty)
 
     m = await motto.build(None, {"silent": 2}, _at(9))
-    assert "בלי דיווח" in m["line"]
+    assert m["line"] == motto.fallback_line({"silent": 2}, _at(9))
 
 
 async def test_a_cache_miss_never_waits_for_the_model(monkeypatch):
@@ -156,7 +239,7 @@ async def test_a_cache_miss_never_waits_for_the_model(monkeypatch):
     monkeypatch.setattr(motto, "_spawn", lambda f, s, n: spawned.append(n))
 
     m = await motto.get_motto(None, {"overdue": 5}, _at(9))
-    assert m["line"] == motto.fallback_line({"overdue": 5})
+    assert m["line"] == motto.fallback_line({"overdue": 5}, _at(9))
     assert m["quote"] == motto.pick_quote(_at(9))[0]
     assert spawned == [_at(9)]
 
@@ -190,7 +273,7 @@ async def test_a_stub_answer_is_refused_and_not_cached(monkeypatch):
     monkeypatch.setattr(llm_router, "llm_chat", stub)
 
     m = await motto.build(None, {"overdue": 7}, _at(9))
-    assert m["line"] == motto.fallback_line({"overdue": 7})
+    assert m["line"] == motto.fallback_line({"overdue": 7}, _at(9))
     assert motto.cache_key(_at(9)) not in motto._cache
 
 
@@ -244,4 +327,4 @@ async def test_a_stub_already_in_the_cache_is_not_served(monkeypatch):
     monkeypatch.setattr(motto, "_spawn", lambda f, s, n: None)
 
     m = await motto.get_motto(None, {"overdue": 2}, _at(9))
-    assert m["line"] == motto.fallback_line({"overdue": 2})
+    assert m["line"] == motto.fallback_line({"overdue": 2}, _at(9))
