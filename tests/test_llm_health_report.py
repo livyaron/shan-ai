@@ -122,3 +122,38 @@ def test_a_provider_with_no_live_model_is_still_called_dead():
     dead = {"groq": {"configured": True, "status": "error",
                      "per_model": {"a": "404", "b": "404"}}}
     assert health.summarize(dead, ROUTING)["healthy"] is False
+
+
+# --------------------------------------------------------------------------
+# /llm מודלים — what the account may actually call
+# --------------------------------------------------------------------------
+
+def test_the_model_report_flags_what_the_code_asks_for_but_cannot_call():
+    """Both ids in MODELS 404'd on every request for weeks with nothing naming
+    the replacement. This is the line that would have said it in one look."""
+    available = {"groq": ["llama-3.1-8b-instant", "openai/gpt-oss-120b"]}
+    out = health.format_models_he(available, {"groq": ["llama-3.3-70b-versatile"]})
+    assert "בקוד אבל לא בחשבון" in out
+    assert "llama-3.3-70b-versatile" in out
+    assert "llama-3.1-8b-instant" in out
+
+
+def test_a_model_in_use_is_marked():
+    available = {"groq": ["a-model", "b-model"]}
+    out = health.format_models_he(available, {"groq": ["a-model"]})
+    assert "🔵" in out and "▫️" in out
+
+
+def test_a_provider_error_is_shown_not_swallowed():
+    out = health.format_models_he({"groq": "AuthenticationError: 401"}, {"groq": []})
+    assert "401" in out
+    assert "❌" in out
+
+
+def test_the_models_subcommand_is_wired():
+    import inspect
+    from app.services import telegram_polling as tp
+    src = inspect.getsource(type(tp.telegram_bot).handle_llm)
+    assert "מודלים" in src
+    assert "available_models" in src
+    assert "format_models_he" in src

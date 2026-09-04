@@ -239,3 +239,46 @@ def format_report_he(providers: dict, routing: dict, probed: bool) -> str:
         lines.append("<i>‏/llm בדיקה — מריץ קריאה אמיתית לכל מודל.</i>")
 
     return "\n".join(lines).strip()
+
+
+async def available_models() -> dict[str, list[str] | str]:
+    """What each provider says this account may call. Never raises."""
+    out: dict[str, list[str] | str] = {}
+    from app.services import groq_client, gemma_client
+    for name, lister in (("groq", groq_client.list_models),
+                         ("gemma", gemma_client.list_models)):
+        try:
+            out[name] = await lister()
+        except Exception as e:
+            out[name] = redact(f"{type(e).__name__}: {str(e)}")[:160]
+    return out
+
+
+def format_models_he(available: dict, configured: dict[str, list[str]]) -> str:
+    """The account's real model list against the one the code asks for.
+
+    A model in the code that the account cannot call is a 404 on every request;
+    the point of this report is to make that a line you can read, not a mystery.
+    """
+    import html as _html
+
+    lines = ["‏📋 <b>מודלים זמינים בחשבון</b>", ""]
+    for provider, models in available.items():
+        label = _PROVIDER_LABELS.get(provider, provider)
+        if isinstance(models, str):
+            lines.append(f"❌ <b>{label}</b> — {_html.escape(models)}")
+            lines.append("")
+            continue
+        in_use = configured.get(provider, [])
+        missing = [m for m in in_use if m not in models]
+        lines.append(f"<b>{label}</b> — {len(models)} מודלים")
+        for m in models[:25]:
+            mark = "🔵" if m in in_use else "▫️"
+            lines.append(f"  {mark} <code>{_html.escape(m)}</code>")
+        if len(models) > 25:
+            lines.append(f"  <i>…ועוד {len(models) - 25}</i>")
+        if missing:
+            lines.append(f"‏⚠️ בקוד אבל לא בחשבון: {', '.join(_html.escape(m) for m in missing)}")
+        lines.append("")
+    lines.append("<i>🔵 = בשימוש בקוד כרגע</i>")
+    return "\n".join(lines).strip()

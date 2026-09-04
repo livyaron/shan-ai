@@ -466,7 +466,9 @@ class TelegramPollingBot:
     async def handle_llm(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """/llm — are the AI providers alive? Admin only.
 
-        Bare /llm reads configuration and routing (free, instant). `/llm בדיקה`
+        Bare /llm reads configuration and routing (free, instant). `/llm מודלים`
+        asks each provider which model ids this account may actually call — the
+        answer a hardcoded MODELS list cannot give you. `/llm בדיקה`
         (or `/llm probe`) actually calls every model with a one-word prompt — the
         only way to catch a decommissioned model or an exhausted quota before a
         user does. The live probe walks every model of both providers, so it can
@@ -482,6 +484,20 @@ class TelegramPollingBot:
                 return
 
             arg = (context.args[0].strip().lower() if context.args else "")
+
+            if arg in ("models", "מודלים", "רשימה", "list"):
+                await update.message.reply_text("‏📋 שואל את הספקים אילו מודלים זמינים…")
+                from app.services.groq_client import MODELS as GROQ_MODELS
+                from app.services.gemma_client import GEMMA_MODELS
+                available = await health.available_models()
+                await update.message.reply_text(
+                    health.format_models_he(
+                        available, {"groq": GROQ_MODELS, "gemma": GEMMA_MODELS}
+                    ),
+                    parse_mode="HTML",
+                )
+                return
+
             probe = arg in ("probe", "בדיקה", "live", "full")
             if probe:
                 await update.message.reply_text(

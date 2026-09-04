@@ -234,3 +234,19 @@ async def gemma_chat(
                     await asyncio.sleep(1)
 
     raise last_error or RuntimeError("gemma_chat: all models exhausted")
+
+
+async def list_models() -> list[str]:
+    """Model names this key can call for text generation, straight from Google."""
+    if not settings.GOOGLE_AI_API_KEY:
+        raise RuntimeError("gemma list_models: GOOGLE_AI_API_KEY is not set")
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        resp = await client.get(f"{_BASE}?key={settings.GOOGLE_AI_API_KEY}&pageSize=200")
+        resp.raise_for_status()
+        out = []
+        for m in resp.json().get("models", []):
+            methods = m.get("supportedGenerationMethods") or []
+            if methods and "generateContent" not in methods:
+                continue          # embeddings and the like are not chat models
+            out.append((m.get("name") or "").removeprefix("models/"))
+    return sorted(n for n in out if n)

@@ -96,3 +96,14 @@ async def groq_chat(
         if rnd < MAX_ROUNDS - 1 and len(dead) < len(model_list):
             await asyncio.sleep(1)   # brief pause before one more full pass
     raise last_error
+
+
+async def list_models() -> list[str]:
+    """Model ids this API key can actually use, straight from Groq.
+
+    Hardcoding a model list means a provider retirement shows up as a 404 on every
+    request with no way to see what replaced it — which is exactly what happened
+    to both entries in MODELS. Asking the account is a two-second answer.
+    """
+    resp = await get_client().models.list()
+    return sorted(m.id for m in resp.data)
