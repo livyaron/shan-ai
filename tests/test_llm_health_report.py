@@ -63,6 +63,25 @@ def test_the_free_mode_says_it_did_not_actually_call():
     assert "/llm בדיקה" in out
 
 
+def test_the_free_mode_never_claims_the_providers_are_available():
+    """A key on disk is not a provider that answers. This report said "both
+    providers are available, there is a backup" while one provider's first model
+    was answering 404 on every call in production."""
+    providers = {"groq": {"configured": True, "status": "not_probed"},
+                 "gemma": {"configured": True, "status": "not_probed"}}
+    out = health.format_report_he(providers, {}, probed=False)
+    assert "זמינים" not in out
+    assert "יש גיבוי" not in out
+    assert "לא נבדק" in out
+
+
+def test_the_free_mode_still_shouts_when_no_key_is_set_at_all():
+    providers = {"groq": {"configured": False, "status": "not_configured"},
+                 "gemma": {"configured": False, "status": "not_configured"}}
+    out = health.format_report_he(providers, {}, probed=False)
+    assert "❌" in out
+
+
 def test_fallback_disabled_is_flagged():
     routing = {"by_provider": {"groq": 23}, "fallback_disabled_for": ["rag_answer", "eval_judge"]}
     out = health.format_report_he(PRODUCTION_SHAPE, routing, probed=True)

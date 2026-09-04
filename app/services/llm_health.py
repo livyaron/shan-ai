@@ -182,7 +182,19 @@ def format_report_he(providers: dict, routing: dict, probed: bool) -> str:
     mode = "בדיקה חיה" if probed else "בדיקת הגדרות בלבד"
     lines = ["‏🩺 <b>תקינות ספקי ה-AI</b>", f"<i>{mode} · {stamp}</i>", ""]
 
-    lines.append(summarize(providers, routing)["verdict"])
+    if probed:
+        lines.append(summarize(providers, routing)["verdict"])
+    else:
+        # A configuration check proves keys exist, nothing more. Saying "both
+        # providers are available" off the back of it is a promise this check
+        # cannot make — and it was made while one provider's first model was
+        # answering 404 on every call.
+        configured = [k for k, v in providers.items() if v.get("configured")]
+        if not configured:
+            lines.append("‏❌ אין מפתח לאף ספק — כל הקריאות ייכשלו.")
+        else:
+            lines.append(f"‏🔑 {len(configured)} ספקים מוגדרים. "
+                         "האם הם עונים בפועל — לא נבדק.")
     lines.append("")
 
     for key, data in providers.items():
