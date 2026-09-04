@@ -158,6 +158,7 @@ class TelegramPollingBot:
         self.application.add_handler(CommandHandler("ask", self.handle_ask))
         self.application.add_handler(CommandHandler("report", self.handle_report))
         self.application.add_handler(CommandHandler("gold", self.handle_gold))
+        self.application.add_handler(CommandHandler("llm", self.handle_llm))
         self.application.add_handler(CallbackQueryHandler(self.handle_callback))
         self.application.add_handler(
             MessageHandler(filters.Document.ALL, self.handle_document)
@@ -460,6 +461,39 @@ class TelegramPollingBot:
                   f"‏<b>הצעה:</b> {_html.escape(proposal['answer'])}"),
             parse_mode="HTML",
             reply_markup=gtg.gold_keyboard(cand["id"]),
+        )
+
+    async def handle_llm(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """/llm — are the AI providers alive? Admin only.
+
+        Bare /llm reads configuration and routing (free, instant). `/llm בדיקה`
+        (or `/llm probe`) actually calls every model with a one-word prompt — the
+        only way to catch a decommissioned model or an exhausted quota before a
+        user does. The live probe walks every model of both providers, so it can
+        take ~20 seconds; the "checking" message is what stops it looking hung.
+        """
+        from app.services import llm_health as health
+
+        telegram_id = update.effective_user.id
+        async with async_session_maker() as session:
+            user = await session.scalar(select(User).where(User.telegram_id == telegram_id))
+            if not user or not user.is_admin:
+                await update.message.reply_text("‏🔒 פקודה זו זמינה למנהלי מערכת בלבד.")
+                return
+
+            arg = (context.args[0].strip().lower() if context.args else "")
+            probe = arg in ("probe", "בדיקה", "live", "full")
+            if probe:
+                await update.message.reply_text(
+                    "‏🩺 בודק את הספקים בקריאה אמיתית — עד 20 שניות…"
+                )
+
+            providers = await health.check_providers(probe=probe)
+            routing = await health.check_routing(session)
+
+        await update.message.reply_text(
+            health.format_report_he(providers, routing, probed=probe),
+            parse_mode="HTML",
         )
 
     # ------------------------------------------------------------------

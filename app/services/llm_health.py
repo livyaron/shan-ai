@@ -123,7 +123,15 @@ def summarize(providers: dict, routing: dict | None = None) -> dict:
     """One-line verdict: is there a working primary, and is there a real backup?"""
     def _usable(p: dict) -> bool:
         # "not_probed" counts as usable: configured, just not spot-checked.
-        return p.get("configured", False) and p.get("status") != "error"
+        if not p.get("configured", False):
+            return False
+        if p.get("status") != "error":
+            return True
+        # A provider whose call failed but which still has ONE live model is not
+        # down — that is exactly the state a dead model id at the head of the list
+        # produces, and calling it "no provider available" sends people to check
+        # the account instead of the model list.
+        return any(v == "ok" for v in (p.get("per_model") or {}).values())
 
     usable = [name for name, p in providers.items() if _usable(p)]
     healthy = bool(usable)
@@ -144,3 +152,78 @@ def summarize(providers: dict, routing: dict | None = None) -> dict:
         out["warning"] = (f"‏⚠️ ל-{n} שימושים כובה המעבר לגיבוי — הם ייכשלו "
                           f"אם הספק הראשי שלהם ייפול.")
     return out
+
+
+# ── Hebrew report ──────────────────────────────────────────────────────────
+
+_PROVIDER_LABELS = {"groq": "Groq", "gemma": "Gemma (Google)"}
+
+# A provider error is a full API payload; on a phone screen only the head of it
+# is readable, and the rest pushes the useful lines off the message.
+_ERR_CHARS = 110
+
+
+def _status_icon(status: str) -> str:
+    return {"ok": "✅", "error": "❌", "not_configured": "🔑", "not_probed": "➖"}.get(status, "❔")
+
+
+def format_report_he(providers: dict, routing: dict, probed: bool) -> str:
+    """The health check as one Telegram message. Pure formatting — no I/O, no bot.
+
+    Per-model lines are the point: "Groq is down" sent people looking at the
+    account, when the truth was one decommissioned model id at the head of a list
+    with a working model behind it.
+    """
+    import datetime
+    import html as _html
+    from app.services import missions_menu_service as oms
+
+    stamp = datetime.datetime.now(oms._IL_TZ).strftime("%d/%m %H:%M")
+    mode = "בדיקה חיה" if probed else "בדיקת הגדרות בלבד"
+    lines = ["‏🩺 <b>תקינות ספקי ה-AI</b>", f"<i>{mode} · {stamp}</i>", ""]
+
+    lines.append(summarize(providers, routing)["verdict"])
+    lines.append("")
+
+    for key, data in providers.items():
+        label = _PROVIDER_LABELS.get(key, key)
+        status = data.get("status", "unknown")
+        head = f"{_status_icon(status)} <b>{label}</b>"
+        if not data.get("configured"):
+            lines.append(f"{head} — אין מפתח מוגדר")
+            lines.append("")
+            continue
+        if status == "not_probed":
+            lines.append(f"{head} — מוגדר, לא נבדק בפועל")
+            lines.append("")
+            continue
+        if status == "ok":
+            head += f" — תקין ({data.get('ms', 0)} מ״ש)"
+        else:
+            head += " — נכשל"
+        lines.append(head)
+
+        per_model = data.get("per_model") or {}
+        for model, result in per_model.items():
+            if result == "ok":
+                lines.append(f"  ✅ <code>{_html.escape(model)}</code>")
+            else:
+                lines.append(f"  ❌ <code>{_html.escape(model)}</code> — "
+                             f"{_html.escape(redact(result)[:_ERR_CHARS])}")
+        if not per_model and status == "error":
+            lines.append(f"  {_html.escape(redact(str(data.get('error', '')))[:_ERR_CHARS])}")
+        lines.append("")
+
+    if routing:
+        by = routing.get("by_provider", {})
+        spread = " · ".join(f"{_PROVIDER_LABELS.get(k, k)}: {v}" for k, v in sorted(by.items()))
+        lines.append(f"<b>ניתוב שימושים</b> — {spread}")
+        off = routing.get("fallback_disabled_for") or []
+        if off:
+            lines.append(f"‏⚠️ גיבוי מכובה ב-{len(off)} שימושים: {', '.join(off[:5])}")
+
+    if not probed:
+        lines.append("")
+        lines.append("<i>‏/llm בדיקה — מריץ קריאה אמיתית לכל מודל.</i>")
+
+    return "\n".join(lines).strip()
