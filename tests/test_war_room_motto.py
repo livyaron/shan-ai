@@ -12,8 +12,10 @@ from app.services import war_room_motto as motto
 IL = datetime.timezone(datetime.timedelta(hours=3))
 
 
-def _at(hour, day=4):
-    return datetime.datetime(2026, 9, day, hour, 30, tzinfo=IL)
+def _at(hour, day=4, minute=5):
+    """Minute 5 by default: an AI band, so a test that does not care about the
+    swap keeps seeing the model's sentence (see motto.SWAP_MINUTES)."""
+    return datetime.datetime(2026, 9, day, hour, minute, tzinfo=IL)
 
 
 def _after(days, hour):
@@ -145,14 +147,75 @@ def test_fallback_line_on_a_clean_board_is_not_empty():
 def test_fallback_line_rotates_so_an_outage_is_not_one_sentence_on_repeat():
     """Groq goes down for whole afternoons — the wall must not freeze on a line."""
     stats = {"overdue": 4}
-    said = {motto.fallback_line(stats, _at(h)) for h in range(24)}
-    assert len(said) == len(motto._FALLBACKS["overdue"])
+    shelf = motto._FALLBACKS["overdue"]
+    bands = [_at(9) + datetime.timedelta(minutes=motto.SWAP_MINUTES * i)
+             for i in range(len(shelf))]
+    assert len({motto.fallback_line(stats, b) for b in bands}) == len(shelf)
 
 
-def test_fallback_line_is_stable_inside_one_hour():
-    at = datetime.datetime(2026, 9, 4, 9, 0, tzinfo=IL)
-    late = datetime.datetime(2026, 9, 4, 9, 59, tzinfo=IL)
+def test_fallback_line_is_stable_inside_one_band():
+    """It may not change under a viewer mid-band — only when the band turns over."""
+    at = _at(9, minute=0)
+    late = _at(9, minute=motto.SWAP_MINUTES - 1)
+    nxt = _at(9, minute=motto.SWAP_MINUTES)
     assert motto.fallback_line({"silent": 2}, at) == motto.fallback_line({"silent": 2}, late)
+    assert motto.fallback_line({"silent": 2}, at) != motto.fallback_line({"silent": 2}, nxt)
+
+
+def test_every_computed_slot_in_an_hour_is_a_different_sentence():
+    """The computed line takes every OTHER band, so it strides its shelf by two.
+
+    On an even-length shelf that stride reaches half the lines and the hour shows
+    three sentences twice each — which is the repetition the shelves exist to
+    avoid. Odd lengths make the stride coprime with the shelf.
+    """
+    for stats in ({"overdue": 4}, {"silent": 3}, {"do_now": 2}, {}):
+        shown = [motto.fallback_line(stats, _at(9, minute=m))
+                 for m in range(0, 60, motto.SWAP_MINUTES)
+                 if motto.shows_computed(_at(9, minute=m))]
+        assert len(shown) == 6
+        assert len(set(shown)) == 6
+
+
+def test_every_fallback_shelf_is_odd_and_outlasts_the_hour():
+    for condition, shelf in motto._FALLBACKS.items():
+        assert len(shelf) % 2 == 1, f"{condition}: an even shelf repeats within the hour"
+        assert len(shelf) > 60 // motto.SWAP_MINUTES // 2
+
+
+# --------------------------------------------------------------------------
+# the two lines take turns
+# --------------------------------------------------------------------------
+
+def test_the_hour_opens_on_the_computed_line():
+    """At :00 the model has not answered for this hour yet — nothing else exists."""
+    assert motto.shows_computed(_at(9, minute=0))
+
+
+def test_the_swap_bands_split_the_hour_evenly():
+    computed = [m for m in range(60) if motto.shows_computed(_at(9, minute=m))]
+    assert len(computed) == 30
+    assert 60 % motto.SWAP_MINUTES == 0      # or the bands drift off the hour
+
+
+async def test_a_cached_ai_line_still_yields_the_strip_every_other_band(monkeypatch):
+    """The point of the swap: one cached AI sentence, two different strips."""
+    from app.services import llm_router
+
+    async def fake(*a, **k):
+        return "עשר משימות באיחור אצל שני אחראים — סוגרים שתיים לפני סוף היום."
+    monkeypatch.setattr(llm_router, "llm_chat", fake)
+
+    stats = {"overdue": 10}
+    await motto.build(None, stats, _at(9))
+    ai = await motto.get_motto(None, stats, _at(9, minute=5))
+    computed = await motto.get_motto(None, stats, _at(9, minute=10))
+
+    assert ai["line"] == "עשר משימות באיחור אצל שני אחראים — סוגרים שתיים לפני סוף היום."
+    assert computed["line"] == motto.fallback_line(stats, _at(9, minute=10))
+    # ...and the quote does not move with it. A wall that swaps its quote
+    # mid-hour reads as a broken screen, not as a richer one.
+    assert (ai["quote"], ai["author"]) == (computed["quote"], computed["author"])
 
 
 def test_every_fallback_shelf_carries_the_count_it_promises():
