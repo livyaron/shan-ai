@@ -434,3 +434,50 @@ def test_close_prompt_text_differs_for_done_and_cancel():
     from app.services.missions_menu_service import close_prompt_text
     assert "מה בוצע" in close_prompt_text("done")
     assert "סיבת הביטול" in close_prompt_text("cancelled")
+
+
+# ── "משימה חדשה" — the 24-hour window ──────────────────────────────────────
+
+def test_is_new_covers_exactly_the_declared_window():
+    """The window is one constant; every screen and the XLSX read it from here."""
+    from app.services.missions_menu_service import NEW_MISSION_HOURS, is_new
+    now = datetime.datetime(2026, 7, 15, 12, 0)
+    assert NEW_MISSION_HOURS == 24
+
+    assert is_new(_make_mission(created_at=now - timedelta(minutes=1)), now)
+    assert is_new(_make_mission(created_at=now - timedelta(hours=23, minutes=59)), now)
+    # Exactly on the edge is already old — the window is "the last 24 hours".
+    assert not is_new(_make_mission(created_at=now - timedelta(hours=24)), now)
+    assert not is_new(_make_mission(created_at=now - timedelta(days=3)), now)
+
+
+def test_is_new_survives_a_stamp_from_the_future_and_a_missing_one():
+    """Clock skew between the app and Postgres must not un-new a fresh mission."""
+    from app.services.missions_menu_service import is_new
+    now = datetime.datetime(2026, 7, 15, 12, 0)
+    assert is_new(_make_mission(created_at=now + timedelta(minutes=2)), now)
+    assert not is_new(_make_mission(created_at=None), now)
+
+
+def test_created_stamp_carries_the_time_in_israel_local():
+    """A bare date cannot answer "מתי בדיוק נפתחה" — and UTC would answer it wrong."""
+    from app.services.missions_menu_service import format_created_il
+    # 01/07 08:00 UTC is 11:00 in Israel (UTC+3 in July).
+    assert format_created_il(datetime.datetime(2026, 7, 1, 8, 0)) == "01/07/2026 11:00"
+    assert format_created_il(None) == "—"
+
+
+def test_mission_card_states_when_the_mission_was_opened():
+    from app.services.missions_menu_service import build_mission_card
+    card = build_mission_card(_make_mission(created_at=datetime.datetime(2026, 7, 1, 8, 0)))
+    assert "01/07/2026 11:00" in card
+
+
+def test_mission_card_and_list_line_flag_a_mission_opened_today():
+    from app.services.missions_menu_service import build_mission_card, format_mission_line
+    fresh = _make_mission(created_at=datetime.datetime.utcnow() - timedelta(hours=1))
+    old = _make_mission(created_at=datetime.datetime.utcnow() - timedelta(days=5))
+    assert "🆕" in build_mission_card(fresh)
+    assert "🆕" in format_mission_line(fresh)
+    assert "🆕" not in build_mission_card(old)
+    assert "🆕" not in format_mission_line(old)

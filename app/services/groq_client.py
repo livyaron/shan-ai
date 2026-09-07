@@ -8,17 +8,24 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 
 # Tried in order — each has a separate rate-limit bucket on Groq.
-# scout FIRST: its 30k TPM fits a typical RAG/decision request (~8.5k tokens) in one
-# shot. 70b's 12k TPM 429s on big context almost every time, then falls to scout
-# anyway — so leading with 70b doubled token spend per call (a 429'd request still
-# counts against the daily TPD budget). scout-first halves that waste. 70b kept as a
-# quality backup for the rare call small enough to fit its bucket.
-# 8b dropped: free-tier TPM only 6,000 — too small, 429s every time.
-# Callers needing a tiny+fast model can still pass models=["llama-3.1-8b-instant"].
+#
+# 2026-09-04: both previous entries (llama-4-scout, llama-3.3-70b-versatile) were
+# retired by Groq and answered 404 model_not_found on every request for weeks.
+# `/llm מודלים` asks the account what it can actually call; of the 14 ids it
+# returned, only these two are general chat models worth routing to:
+#   - openai/gpt-oss-120b — the large one, for the reasoning-heavy usages
+#   - openai/gpt-oss-20b  — smaller and faster, the in-provider backup
+# Deliberately NOT used:
+#   - qwen/qwen3.6-27b, qwen/qwen3.8-27b — same family as the qwen3-32b that was
+#     dropped before: thinking mode leaks chain-of-thought into the answer, which
+#     is the exact failure that put a two-letter stub on the wall display.
+#   - groq/compound, groq/compound-mini — agentic systems with built-in tools,
+#     not plain chat completions.
+#   - whisper-* (speech), orpheus-* (TTS), llama-prompt-guard-* (classifiers),
+#     allam-2-7b (Arabic-focused, 7b) — wrong tool for this app's calls.
 MODELS = [
-    "meta-llama/llama-4-scout-17b-16e-instruct",  # 30k TPM — most headroom, fits big context
-    "llama-3.3-70b-versatile",                    # higher quality, 12k TPM — backup
-    # qwen/qwen3-32b removed — thinking mode leaks chain-of-thought into answers
+    "openai/gpt-oss-120b",   # quality first — summaries, decisions, RAG answers
+    "openai/gpt-oss-20b",    # faster fallback inside the same provider
 ]
 
 
@@ -66,8 +73,13 @@ async def groq_chat(
     # the other provider is even tried.
     MAX_ROUNDS = 2
     last_error = None
+    # A model that answered 404/400 is not coming back inside this call — asking
+    # it again on round 2 only burns latency.
+    dead: set[str] = set()
     for rnd in range(MAX_ROUNDS):
         for i, model in enumerate(model_list):
+            if model in dead:
+                continue
             try:
                 resp = await _client.chat.completions.create(model=model, **kwargs)
                 if i > 0 or rnd > 0:
@@ -78,8 +90,27 @@ async def groq_chat(
                 logger.warning(f"Rate limit on {model} (round {rnd})")
                 # No sleep between models — different buckets, retrying the next
                 # one immediately is free.
-            except Exception:
-                raise
-        if rnd < MAX_ROUNDS - 1:
+            except Exception as e:
+                # Was: `raise`. One decommissioned model at the head of the list
+                # therefore took the WHOLE provider down without the healthy model
+                # behind it ever being tried — which is exactly how a 404 on
+                # llama-4-scout made every AI feature in the app fail while
+                # llama-3.3-70b sat there working. A per-model failure is now a
+                # per-model failure; only an empty list of survivors is an outage.
+                last_error = e
+                dead.add(model)
+                logger.warning(f"Model {model} failed ({type(e).__name__}: {str(e)[:120]}) — trying the next")
+        if rnd < MAX_ROUNDS - 1 and len(dead) < len(model_list):
             await asyncio.sleep(1)   # brief pause before one more full pass
     raise last_error
+
+
+async def list_models() -> list[str]:
+    """Model ids this API key can actually use, straight from Groq.
+
+    Hardcoding a model list means a provider retirement shows up as a 404 on every
+    request with no way to see what replaced it — which is exactly what happened
+    to both entries in MODELS. Asking the account is a two-second answer.
+    """
+    resp = await get_client().models.list()
+    return sorted(m.id for m in resp.data)

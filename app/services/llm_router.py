@@ -71,6 +71,7 @@ USAGE_LABELS: dict[str, str] = {
     # Operations room (חדר מבצעים) reporting
     "missions_insights":       "תובנות AI לדוח חדר מבצעים",
     "missions_summary":        "סיכום משימות בסיכון (חדר מבצעים)",
+    "wall_motto":              "משפט השעה על מסך לוח המצב",
 }
 
 

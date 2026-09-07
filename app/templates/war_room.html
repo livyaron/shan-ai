@@ -55,6 +55,12 @@ body{background:var(--bg-deep);color:var(--text-1);font-family:var(--ui);min-hei
 /* mission card */
 .wr-card{background:var(--bg-deep);border:1px solid var(--border);border-radius:10px;padding:12px 14px}
 .wr-card.overdue{border-color:var(--red)}
+/* A mission opened in the last new_hours. Its own colour (green), never the red
+   of "late": the two say opposite things and must never look alike. Lateness
+   still wins the border when a card is both — a new mission cannot be late
+   unless someone back-dated its target, and then late is the louder fact. */
+.wr-card.fresh{border-color:var(--green);background:linear-gradient(180deg,rgba(16,185,129,.10),var(--bg-deep) 60%)}
+.wr-card.fresh.overdue{border-color:var(--red)}
 .wr-card .m-title{font-weight:600;unicode-bidi:isolate}
 .wr-card .m-desc{color:var(--text-2);font-size:.85rem;margin-top:4px;unicode-bidi:isolate}
 .wr-card .m-meta{display:flex;flex-wrap:wrap;gap:10px;margin-top:8px;font-size:.8rem;color:var(--text-2);font-family:var(--mono)}
@@ -62,6 +68,9 @@ body{background:var(--bg-deep);color:var(--text-1);font-family:var(--ui);min-hei
 .wr-chip{display:inline-block;border:1px solid var(--border-hi);border-radius:20px;padding:1px 10px;font-size:.75rem}
 .wr-chip.st-open{color:var(--text-1)}
 .wr-chip.st-done{color:var(--green);border-color:var(--green)} .wr-chip.st-cancelled{color:var(--text-2)}
+/* After .wr-chip on purpose: the chip's `border` shorthand would otherwise
+   repaint this badge's green edge grey. */
+.m-new{color:var(--green);border-color:var(--green);font-weight:700}
 .wr-card .m-updates{margin-top:8px;border-inline-start:2px solid var(--border-hi);padding-inline-start:8px}
 .wr-card .m-upd{color:var(--text-2);font-size:.8rem;margin-top:4px;unicode-bidi:isolate}
 .wr-card .m-upd .upd-meta{font-family:var(--mono);color:var(--text-1);opacity:.75}
@@ -180,8 +189,9 @@ dialog.wr-dlg::backdrop{background:rgba(3,6,12,.75)}
         {% endif %}
         {% for m in quadrants[qkey] %}
         {% set late = m.due_date and m.status in active_statuses and m.due_date < today %}
-        <div class="wr-card{% if late %} overdue{% endif %}">
-          <div class="m-title" dir="auto">{{ m.title }}</div>
+        {% set fresh = is_new(m) %}
+        <div class="wr-card{% if late %} overdue{% endif %}{% if fresh %} fresh{% endif %}">
+          <div class="m-title" dir="auto">{% if fresh %}<span class="wr-chip m-new">🆕 חדשה</span> {% endif %}{{ m.title }}</div>
           {% if m.description %}<div class="m-desc" dir="auto">{{ m.description }}</div>{% endif %}
           {% if m.updates %}
           {% set last_upd = m.updates[-1] %}
@@ -203,6 +213,7 @@ dialog.wr-dlg::backdrop{background:rgba(3,6,12,.75)}
             {% if m.due_date %}
             <span{% if late %} class="late"{% endif %}>📅 {{ m.due_date.strftime('%d/%m/%Y') }}{% if late %} ⚠️{% endif %}</span>
             {% endif %}
+            <span{% if fresh %} class="m-new"{% endif %}>🕒 נוצרה {{ fmt_created(m.created_at) }}</span>
             <span>נפתחה ע"י {{ m.created_by.username if m.created_by else '—' }}</span>
           </div>
           {% if not is_viewer %}

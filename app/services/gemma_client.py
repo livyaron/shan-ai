@@ -19,10 +19,35 @@ logger = logging.getLogger(__name__)
 GEMMA_MODELS = [
     "gemma-4-31b-it",          # works on free tier; larger/better of the two
     "gemma-4-26b-a4b-it",      # MoE variant, separate quota — works on free tier
-    "gemini-2.5-flash",        # clean JSON when available, but usually 429 on free tier
+    # gemini-3.5-flash removed 2026-09-04: the live probe hit a ReadTimeout on it.
+    # A third model here is only ever reached when both above have failed, and at
+    # a 60s client timeout it would freeze a Telegram answer for a minute before
+    # llm_router could fail over. Since Groq is healthy again, that cross-provider
+    # fallback is the better third option — it answers in ~440ms.
 ]
 
 _BASE = "https://generativelanguage.googleapis.com/v1beta/models"
+
+
+# The key is a query parameter on every Google AI URL, so an httpx error string
+# carries it verbatim — into the logs, and out through the /llm-health endpoint.
+# That is a credential leak with no attacker required, so nothing that leaves this
+# module is allowed to contain one.
+_KEY_PATTERNS = [
+    re.compile(r"([?&]key=)[^&\s\"']+"),
+    re.compile(r"\bAIza[0-9A-Za-z_\-]{10,}"),
+    re.compile(r"\bgsk_[0-9A-Za-z]{10,}"),
+    re.compile(r"\bsk-ant-[0-9A-Za-z_\-]{10,}"),
+]
+
+
+def redact(text: str) -> str:
+    """Strip API keys out of a message before it is logged or returned."""
+    out = text or ""
+    out = _KEY_PATTERNS[0].sub(r"\1<redacted>", out)
+    for pattern in _KEY_PATTERNS[1:]:
+        out = pattern.sub("<redacted>", out)
+    return out
 
 
 def _to_google_format(messages: list) -> tuple[str | None, list]:
@@ -162,9 +187,22 @@ async def gemma_chat(
                 resp = await client.post(url, json=payload)
                 resp.raise_for_status()
                 data = resp.json()
-                parts = data["candidates"][0]["content"]["parts"]
+                # Defensive, not decorative: when the model spends its whole
+                # budget on a chain-of-thought preamble, or a safety filter fires,
+                # the candidate comes back with NO "parts" key at all. Indexing it
+                # raised a bare KeyError that said nothing about the cause — the
+                # health probe reported 'KeyError: parts' for what is really
+                # "answer truncated before any text". finishReason names it.
+                candidate = (data.get("candidates") or [{}])[0]
+                parts = (candidate.get("content") or {}).get("parts") or []
                 text_parts = [p["text"] for p in parts if not p.get("thought") and "text" in p]
                 text = " ".join(text_parts).strip()
+                if not text:
+                    raise ValueError(
+                        f"gemma_chat: no text from {model} "
+                        f"(finishReason={candidate.get('finishReason')}, "
+                        f"parts={len(parts)}, max_tokens={max_tokens})"
+                    )
                 if json_mode:
                     text = _strip_json_fences(text)
                 else:
@@ -184,7 +222,12 @@ async def gemma_chat(
                     if i < len(model_list) - 1:
                         await asyncio.sleep(1)
                 else:
-                    raise
+                    # Same lesson as groq_client: one dead model must not take the
+                    # whole provider with it while a working one waits behind it.
+                    last_error = e
+                    logger.warning(
+                        f"gemma_chat: {e.response.status_code} on {model} — trying the next"
+                    )
             except (KeyError, IndexError, ValueError) as e:
                 # ValueError = empty response (model returned nothing usable).
                 # Treat like a transient failure and try the next model instead of
@@ -195,3 +238,19 @@ async def gemma_chat(
                     await asyncio.sleep(1)
 
     raise last_error or RuntimeError("gemma_chat: all models exhausted")
+
+
+async def list_models() -> list[str]:
+    """Model names this key can call for text generation, straight from Google."""
+    if not settings.GOOGLE_AI_API_KEY:
+        raise RuntimeError("gemma list_models: GOOGLE_AI_API_KEY is not set")
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        resp = await client.get(f"{_BASE}?key={settings.GOOGLE_AI_API_KEY}&pageSize=200")
+        resp.raise_for_status()
+        out = []
+        for m in resp.json().get("models", []):
+            methods = m.get("supportedGenerationMethods") or []
+            if methods and "generateContent" not in methods:
+                continue          # embeddings and the like are not chat models
+            out.append((m.get("name") or "").removeprefix("models/"))
+    return sorted(n for n in out if n)

@@ -17,7 +17,7 @@
   --wrs-bg:#ffffff; --wrs-fg:#161616;
   --ui:'IBM Plex Sans Hebrew',sans-serif,'Segoe UI Emoji','Apple Color Emoji','Noto Color Emoji';
   --mono:'IBM Plex Mono',monospace,'Segoe UI Emoji','Noto Color Emoji';
-  --cols:32px minmax(0,1fr) 120px 96px 78px 104px 220px;
+  --cols:32px minmax(0,1fr) 120px 96px 78px 104px 200px 116px;
 }
 *{box-sizing:border-box;margin:0;padding:0}
 body{background:var(--bg);color:var(--ink);font-family:var(--ui);min-height:100vh}
@@ -52,6 +52,11 @@ a{color:var(--blue);text-decoration:none} a:hover{color:var(--blue-4)}
 .tb-row{display:grid;grid-template-columns:var(--cols);align-items:center;padding:9px 20px;
   border-bottom:1px solid var(--line-2);font-size:.85rem}
 .tb-row:hover{background:#f8f8f8}
+/* Opened in the last new_hours. Declared BEFORE .late on purpose: same
+   specificity, so a row that is both new and late keeps the red — late is the
+   fact that needs acting on today. */
+.tb-row.fresh{background:#eefaf0}
+.tb-new{color:#1a7f4b;font-weight:700;font-size:.72rem}
 .tb-row.late{background:var(--red-bg)}
 .tb-row.sel{background:var(--blue-2)}
 .tb-row.cur{box-shadow:inset 3px 0 0 var(--blue)}
@@ -79,8 +84,8 @@ dialog.tb-dlg input,dialog.tb-dlg textarea,dialog.tb-dlg select{width:100%;backg
   border-radius:6px;padding:10px 16px;z-index:50;box-shadow:0 6px 20px rgba(0,0,0,.15);font-size:.85rem}
 @media (max-width:1000px){
   :root{--cols:32px minmax(0,1fr) 96px 84px 64px}
-  .tb-head span:nth-child(6),.tb-head span:nth-child(7),
-  .tb-row>*:nth-child(6),.tb-row>*:nth-child(7){display:none}
+  .tb-head span:nth-child(6),.tb-head span:nth-child(7),.tb-head span:nth-child(8),
+  .tb-row>*:nth-child(6),.tb-row>*:nth-child(7),.tb-row>*:nth-child(8){display:none}
 }
 </style>
 </head>
@@ -149,6 +154,7 @@ dialog.tb-dlg input,dialog.tb-dlg textarea,dialog.tb-dlg select{width:100%;backg
   <span data-sort="late">פיגור</span>
   <span>סטטוס</span>
   <span>עדכון אחרון</span>
+  <span data-sort="created">נוצרה</span>
 </div>
 
 <div id="tbBody">
@@ -166,16 +172,18 @@ dialog.tb-dlg input,dialog.tb-dlg textarea,dialog.tb-dlg select{width:100%;backg
 {% for m in quadrants[qkey] %}
 {% set late = m.due_date and m.status in active_statuses and m.due_date < today %}
 {% set is_today = m.due_date and m.status in active_statuses and m.due_date == today %}
-<div class="tb-row{% if late %} late{% endif %}" id="row-{{ m.id }}" data-id="{{ m.id }}"
+{% set fresh = is_new(m) %}
+<div class="tb-row{% if late %} late{% endif %}{% if fresh %} fresh{% endif %}" id="row-{{ m.id }}" data-id="{{ m.id }}"
      data-title="{{ m.title }}" data-owner="{{ m.owner.username if m.owner else '' }}"
      data-due="{{ m.due_date.isoformat() if m.due_date else '' }}"
+     data-created="{{ m.created_at.isoformat() if m.created_at else '' }}"
      data-late="{% if late %}{{ (today - m.due_date).days }}{% else %}0{% endif %}">
   <span>
     {% if not is_viewer %}
     <input type="checkbox" class="tb-cb" value="{{ m.id }}" onchange="syncSel()" aria-label="בחר משימה">
     {% endif %}
   </span>
-  <span class="tb-t" dir="auto" title="{{ m.title }}">{{ m.title }}</span>
+  <span class="tb-t" dir="auto" title="{{ m.title }}">{% if fresh %}<span class="tb-new">🆕</span> {% endif %}{{ m.title }}</span>
   <span style="color:var(--ink-2)">{{ m.owner.username if m.owner else '—' }}</span>
   <span class="tb-mono" style="{% if late %}color:var(--red){% elif is_today %}color:var(--amber){% endif %}">
     {{ m.due_date.strftime('%d/%m') if m.due_date else '—' }}</span>
@@ -184,6 +192,8 @@ dialog.tb-dlg input,dialog.tb-dlg textarea,dialog.tb-dlg select{width:100%;backg
   <span><span class="tb-chip">{{ status_labels.get(m.status, m.status) }}</span></span>
   <span class="tb-last" dir="auto">
     {% if m.updates %}{{ m.updates[-1].text }}{% else %}—{% endif %}</span>
+  <span class="tb-mono{% if fresh %} tb-new{% endif %}" style="font-size:.75rem{% if not fresh %};color:var(--ink-3){% endif %}"
+        title="נוצרה {{ fmt_created(m.created_at) }}">{{ fmt_created(m.created_at) }}</span>
 
   {% if not is_viewer and m.status in active_statuses %}
   <div class="tb-exp" id="notebox-{{ m.id }}">

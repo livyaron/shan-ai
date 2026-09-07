@@ -5,16 +5,25 @@ render against a hand-built context, so it runs in CI without Postgres. The
 render tests use StrictUndefined — a layout that reads a context key the router
 does not pass fails here instead of at 500 in production.
 """
+import contextlib
 import datetime
 from types import SimpleNamespace
 
 import pytest
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
+from app.models import Mission, MissionUpdate, User
 from app.services import missions_menu_service as oms
 from app.services import war_room_styles as wrs
+from app.services import war_room_motto as wrm
+from app.services import war_room_wall as wall
 
 TODAY = datetime.date(2026, 8, 22)
+# A fixed "now" so "was this mission opened in the last 24h?" is a decision the
+# test makes, not something that changes with the wall clock in CI.
+NOW = datetime.datetime.combine(TODAY, datetime.time(11, 0))
+FRESH_AT = NOW - datetime.timedelta(hours=2)
+OLD_AT = NOW - datetime.timedelta(days=9)
 
 
 # --------------------------------------------------------------------------
@@ -66,28 +75,48 @@ def test_every_style_has_a_label_and_a_template_file():
 # rendering
 # --------------------------------------------------------------------------
 
-def _mission(mid, title, owner, due, quadrant="do", status="open", updates=()):
+def _mission(mid, title, owner, due, quadrant="do", status="open", updates=(),
+             created_at=OLD_AT):
+    """Transient ORM objects rather than stand-ins: the wall reads the status log
+    through SQLAlchemy's loaded/unloaded inspection, which a fake never triggers."""
     urgent, important = oms.quadrant_flags(quadrant)
-    return SimpleNamespace(
-        id=mid, title=title, description="תיאור בדיקה",
-        owner=SimpleNamespace(username=owner), owner_id=1,
-        created_by=SimpleNamespace(username=owner),
+    m = Mission(
+        id=mid, title=title, description="תיאור בדיקה", owner_id=1,
         due_date=due, status=status, is_urgent=urgent, is_important=important,
-        completed_at=None, updates=list(updates),
+        created_at=created_at,
     )
+    m.owner = User(username=owner)
+    m.created_by = User(username=owner)
+    m.updates = list(updates)
+    return m
+
+
+@contextlib.contextmanager
+def _frozen_now():
+    """Pin oms.is_new's clock while the wall's cards are shaped.
+
+    war_room_wall.card_for asks oms.is_new(m) without a `now` — production wants
+    the wall clock, a test wants a decision it made itself.
+    """
+    real = oms.is_new
+    oms.is_new = lambda m, now=None: real(m, now or NOW)
+    try:
+        yield
+    finally:
+        oms.is_new = real
 
 
 def _update(text, author="אבי"):
-    return SimpleNamespace(
-        text=text, author_name=author, author=SimpleNamespace(username=author),
-        kind=None, created_at=datetime.datetime(2026, 8, 21, 14, 20),
-    )
+    return MissionUpdate(text=text, author_name=author, kind=None,
+                         created_at=datetime.datetime(2026, 8, 21, 14, 20))
 
 
 def _context(style, is_viewer=False):
     late = _mission(1, "החלפת מפסק ראשי", "אבי", TODAY - datetime.timedelta(days=2),
                     updates=[_update("ממתין לאישור בטיחות")])
-    today_due = _mission(2, "ליקוי בטיחות", "דנה", TODAY)
+    # The one mission opened in the last NEW_MISSION_HOURS — every layout has to
+    # paint it differently from the other three.
+    today_due = _mission(2, "ליקוי בטיחות", "דנה", TODAY, created_at=FRESH_AT)
     planned = _mission(3, "בדיקת ממסרים", "שרון", TODAY + datetime.timedelta(days=14), "plan")
     undated = _mission(4, "מיפוי מלאי", "יעל", None, "backlog")
     missions = [late, today_due, planned, undated]
@@ -95,6 +124,11 @@ def _context(style, is_viewer=False):
     quadrants = {key: [] for key, *_ in oms.QUADRANTS}
     for m in missions:
         quadrants[oms.quadrant_key(m)].append(m)
+
+    closed = _mission(9, "נסגר", "דנה", TODAY, status="done")
+    closed.completed_at = datetime.datetime(2026, 8, 21, 9, 0)
+    with _frozen_now():
+        wall_pages = wall.build_pages(missions, [closed], TODAY)
 
     return {
         "request": SimpleNamespace(url=SimpleNamespace(path="/dashboard/war-room")),
@@ -113,16 +147,34 @@ def _context(style, is_viewer=False):
         "filters": {"owner": None, "status": "active", "q": ""},
         "is_viewer": is_viewer,
         "fmt_stamp": oms.format_stamp_il,
+        # Mirrors the router, with `now` pinned so the "new mission" band does
+        # not depend on when CI happens to run.
+        "fmt_created": oms.format_created_il,
+        "is_new": lambda m: oms.is_new(m, NOW),
+        "new_hours": oms.NEW_MISSION_HOURS,
         "quadrant_of": lambda m: oms.quadrant_label(oms.quadrant_key(m)),
         "msg": "",
         "styles": wrs.STYLES,
         "current_style": style,
         "style_labels": wrs.STYLE_LABELS,
+        "tv": False,
         # per-style extras, mirroring the router
         "my_due_now": [late, today_due], "my_upcoming": [planned],
         "my_undated": [undated], "my_total": 4,
-        "wall_urgent": [late, today_due, planned], "owner_load": [("אבי", 3), ("דנה", 1)],
-        "owner_load_max": 3, "wall_closed": [_mission(9, "נסגר", "דנה", TODAY, status="done")],
+        # Built through the real shaping code, so a change there fails the render
+        # test instead of quietly drifting from what the router passes.
+        "wall_pages": wall_pages,
+        "wall_rotate_ms": wall.ROTATE_SECONDS * 1000,
+        "wall_refresh": wall.refresh_seconds(len(wall_pages)),
+        "wall_legend": wall.LEGEND,
+        "wall_active_total": len(missions),
+        "wall_silent": 3,
+        "wall_silent_days": wall.SILENT_DAYS,
+        "wall_page_size": wall.WALL_PAGE_SIZE,
+        "wall_feed": [{"mission": "החלפת מפסק ראשי", "text": "ממתין לאישור בטיחות",
+                       "who": "אבי", "when": "21/08 14:20", "close": False}],
+        "wall_motto": {"quote": wrm.STOIC[0][0], "author": wrm.STOIC[0][1],
+                       "kind": "stoic", "line": "סוגרים היום את שתי המשימות באיחור."},
     }
 
 
@@ -176,7 +228,136 @@ def test_wall_layout_offers_no_write_actions_at_all():
 
 
 def test_wall_layout_refreshes_itself():
-    assert 'http-equiv="refresh"' in _render("wall")
+    """Still self-refreshing — but only after a full rotation cycle, never mid-page."""
+    html = _render("wall")
+    assert 'http-equiv="refresh"' in html
+    assert f'content="{wall.refresh_seconds(len(_context("wall")["wall_pages"]))}"' in html
+
+
+def test_wall_layout_rotates_through_every_active_mission():
+    """The board's whole active list must reach the screen, undated included —
+    the old wall cut it at five dated missions and dropped the rest forever."""
+    html = _render("wall")
+    for title in ("החלפת מפסק ראשי", "ליקוי בטיחות", "בדיקת ממסרים", "מיפוי מלאי"):
+        assert title in html
+    assert 'class="wl-page' in html
+    assert "wlPager" in html
+
+
+def test_wall_layout_shows_the_latest_status_update():
+    html = _render("wall")
+    assert "ממתין לאישור בטיחות" in html      # on the card
+    assert "wlFeed" in html                    # and in the board-wide ticker
+
+
+def test_wall_layout_colours_by_time_not_by_quadrant():
+    """Every tone in the registry has a CSS class and a legend entry."""
+    html = _render("wall")
+    for key, label in wall.LEGEND:
+        assert f"--t-{key}" in html
+        assert label in html
+
+
+def test_wall_layout_carries_the_hourly_line():
+    """A real quote plus the sentence that ties it to the board — both on screen."""
+    html = _render("wall")
+    assert wrm.STOIC[0][0] in html
+    assert wrm.STOIC[0][1] in html
+    assert "סוגרים היום את שתי המשימות באיחור." in html
+
+
+def test_wall_layout_carries_no_app_navbar():
+    """The wall's top row is the board itself — every row of chrome costs a card."""
+    html = _render("wall")
+    assert "navbar" not in html
+    assert 'action="/dashboard/war-room/style"' in html   # the way back out stays
+
+
+def test_wall_layout_shows_no_per_owner_ranking():
+    """A wall screen ranking named people by load is a public scoreboard of who
+    looks slow. That figure belongs in the report and the AI summary, not here."""
+    html = _render("wall")
+    assert "עומס לפי אחראי" not in html
+
+
+def test_wall_layout_states_each_figure_once():
+    """The header line used to repeat the numbers already in the tiles."""
+    html = _render("wall")
+    assert html.count("באיחור</div>") <= 1
+    assert "wl-prog" not in html          # the countdown bar is gone
+
+
+def test_wall_layout_fits_one_viewport():
+    """A TV browser has no scrollbar: anything below the fold is simply lost."""
+    html = _render("wall")
+    assert "height:100vh;overflow:hidden" in html
+    assert "--rows:%d" % wall.WALL_PAGE_SIZE in html
+
+
+def test_wall_motto_attribution_is_on_its_own_line():
+    """Squeezed onto the end of the quote, the author was the first thing the
+    browser clipped — a half-eaten name under a Stoic line."""
+    html = _render("wall")
+    assert '<div class="a" dir="rtl">— ' in html
+
+
+def test_wall_motto_is_the_last_band_on_the_screen():
+    """The hourly line closes the screen, below the status feed."""
+    html = _render("wall")
+    assert html.index('class="wl-foot"') < html.index('class="wl-motto')
+
+
+def test_wall_screen_carries_no_filler_text():
+    """Every line on a wall screen has to earn its pixels. (The layout picker's
+    own description of this style is not screen furniture and may say it.)"""
+    html = _render("wall")
+    assert "מסך תצוגה" not in html
+
+
+def test_wall_feed_label_is_not_a_traffic_light():
+    """A bright green chip next to a neutral status feed reads as an alert."""
+    html = _render("wall")
+    assert ".wl-chip{background:var(--green)" not in html
+
+
+def test_wall_motto_band_does_no_css_clipping():
+    """Every string in the band is capped in Python. The band itself must not
+    clip: on the room's TV the browser's own cut left a three-letter fragment
+    that read like a word."""
+    import pathlib
+    css = pathlib.Path("app/templates/war_room_wall.html").read_text(encoding="utf-8")
+    # From the first rule, not the section comment — the comment names the very
+    # constructs this test forbids.
+    band = css[css.index(".wl-motto{"):css.index("── footer feed")]
+    for construct in ("nowrap", "text-overflow", "line-clamp", "overflow:hidden"):
+        assert construct not in band, construct
+
+
+def test_wall_switcher_menu_is_not_trapped_in_the_clipped_top_bar():
+    """The wall's top bar is exactly one row tall and hides its overflow, so the
+    shared picker's menu — absolutely positioned under its own button — was cut
+    off a few pixels below it: on the room's TV that read as a menu opening
+    behind the header, and the wall became a screen you could not leave."""
+    import pathlib
+    import re
+    css = pathlib.Path("app/templates/war_room_wall.html").read_text(encoding="utf-8")
+    assert "overflow:hidden}" in re.search(r"\.wl-top\{[^}]*\}", css).group(0)
+    rule = re.search(r"\.wl-top \.wrs-menu\{([^}]*)\}", css)
+    assert rule, "the wall must re-position the switcher menu out of its clipped bar"
+    assert "position:fixed" in rule.group(1)
+    # Anchored to the bar's own height, so changing the header cannot desync it.
+    assert "var(--wl-top-h)" in rule.group(1)
+    assert "var(--wl-top-h)" in re.search(r"\.wl-top\{[^}]*\}", css).group(0)
+
+
+def test_tv_mode_drops_the_navigation_chrome():
+    """?tv=1 is the wall-mounted screen: board data only, no nav, no switcher."""
+    env = Environment(loader=FileSystemLoader("app/templates"), undefined=StrictUndefined)
+    ctx = _context("wall")
+    ctx["tv"] = True
+    html = env.get_template(wrs.template_for("wall")).render(**ctx)
+    assert "/dashboard/war-room/style" not in html
+    assert "החלפת מפסק ראשי" in html
 
 
 def test_table_layout_wires_batch_actions():
@@ -196,3 +377,29 @@ def test_layouts_do_not_hardcode_the_public_url():
     """Same rule as the rest of the app — no baked-in host names in templates."""
     for key in wrs.STYLE_KEYS:
         assert "shan-ai.up.railway.app" not in _render(key)
+
+
+# --------------------------------------------------------------------------
+# a mission opened in the last 24 hours
+# --------------------------------------------------------------------------
+
+@pytest.mark.parametrize("style", wrs.STYLE_KEYS)
+def test_every_layout_states_when_a_mission_was_opened(style):
+    """Creation date AND time, on every screen — the same stamp the XLSX carries."""
+    html = _render(style)
+    assert oms.format_created_il(FRESH_AT) in html
+
+
+@pytest.mark.parametrize("style", wrs.STYLE_KEYS)
+def test_every_layout_paints_a_mission_opened_in_the_last_day(style):
+    """It must be findable without reading a date: a badge plus a class of its own."""
+    html = _render(style)
+    assert "🆕" in html
+    assert ("fresh" in html) or ("is-new" in html)
+
+
+def test_the_new_mission_marker_is_not_painted_on_every_card():
+    """A highlight everything wears highlights nothing — exactly one of the four
+    missions in the fixture was opened inside the window."""
+    for style in wrs.STYLE_KEYS:
+        assert _render(style).count("🆕") == 1

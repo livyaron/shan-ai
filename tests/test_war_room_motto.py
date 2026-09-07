@@ -1,0 +1,393 @@
+"""חדר מבצעים wall — the hourly line (quote + one AI sentence about the board).
+
+DB-free: the LLM leg is monkeypatched and every cache call is made with
+session=None, which the day-cache treats as "no cache" rather than an error.
+"""
+import datetime
+
+import pytest
+
+from app.services import war_room_motto as motto
+
+IL = datetime.timezone(datetime.timedelta(hours=3))
+
+
+def _at(hour, day=4, minute=5):
+    """Minute 5 by default: an AI band, so a test that does not care about the
+    swap keeps seeing the model's sentence (see motto.SWAP_MINUTES)."""
+    return datetime.datetime(2026, 9, day, hour, minute, tzinfo=IL)
+
+
+def _after(days, hour):
+    """Same clock hour, `days` later — _at() alone cannot leave September."""
+    return _at(hour) + datetime.timedelta(days=days)
+
+
+@pytest.fixture(autouse=True)
+def _clean_cache():
+    motto._cache.clear()
+    motto._inflight.clear()
+    yield
+    motto._cache.clear()
+    motto._inflight.clear()
+
+
+# --------------------------------------------------------------------------
+# the quotes themselves
+# --------------------------------------------------------------------------
+
+def test_quotes_are_curated_not_generated():
+    """The wall must never show a quote a model invented — this list is the source."""
+    assert motto.STOIC and motto.WRY
+    texts = [q[0] for q in motto.QUOTES]
+    assert len(texts) == len(set(texts))
+    for text, author, kind in motto.QUOTES:
+        assert text.strip() and author.strip()
+        assert kind in ("stoic", "wry")
+
+
+def test_the_library_is_large_enough_to_not_be_wallpaper():
+    """The first version held 14 quotes, so the wall recycled itself every day.
+
+    A screen people walk past all week has to outlast the week: each shelf must
+    carry at least seven days of slots before it comes back around.
+    """
+    assert len(motto.QUOTES) >= 150
+    assert len(motto.STOIC) / len(motto._STOIC_HOURS) >= 7
+    assert len(motto.WRY) / len(motto._WRY_HOURS) >= 7
+
+
+def test_no_quote_carries_a_straight_double_quote():
+    """Hebrew strings feed JSON prompts — gershayim only (see CLAUDE.md)."""
+    for text, author, _ in motto.QUOTES:
+        assert '"' not in text and '"' not in author
+
+
+def test_attribution_is_author_only():
+    """No chapter and verse: a citation we are not certain of is a fabrication."""
+    for _, author, _ in motto.QUOTES:
+        assert author.strip() == author
+        assert "," not in author and ":" not in author
+
+
+def test_a_cycle_order_is_a_permutation_of_the_whole_shelf():
+    for key, shelf in (("stoic", motto.STOIC), ("wry", motto.WRY)):
+        for cycle in range(3):
+            order = motto._cycle_order(key, len(shelf), cycle)
+            assert sorted(order) == list(range(len(shelf)))
+
+
+def test_a_shelf_is_exhausted_before_any_quote_repeats():
+    """The point of the rotation: every line shows once before any line returns.
+
+    Walked hour by hour from the start of a cycle, exactly as the wall does it.
+    """
+    for shelf, hours, _key in ((motto.STOIC, motto._STOIC_HOURS, "stoic"),
+                               (motto.WRY, motto._WRY_HOURS, "wry")):
+        size = len(shelf)
+        moments = [_after(d, h) for d in range(60) for h in hours]
+        start = next(i for i, m in enumerate(moments) if motto._slot(m)[2] % size == 0)
+        window = moments[start:start + size]
+        assert len(window) == size          # 60 days must cover a full cycle
+        assert len({motto.pick_quote(m)[0] for m in window}) == size
+
+
+def test_the_rotation_does_not_depend_on_process_state():
+    """Two containers rendering the same hour must agree — the seed is the hour."""
+    first = motto.pick_quote(_after(11, 14))
+    motto._cycle_order.cache_clear()
+    assert motto.pick_quote(_after(11, 14)) == first
+
+
+def test_the_same_hour_always_shows_the_same_quote():
+    """Two renders inside one hour must match, or the screen looks like it glitches."""
+    assert motto.pick_quote(_at(9)) == motto.pick_quote(
+        datetime.datetime(2026, 9, 4, 9, 59, tzinfo=IL))
+
+
+def test_the_quote_changes_between_hours():
+    assert motto.pick_quote(_at(9)) != motto.pick_quote(_at(10))
+
+
+def test_humor_rotates_in_on_schedule():
+    """Dry humour every HUMOR_EVERY hours — the screen should not preach all day."""
+    wry_hours = [h for h in range(24) if motto.pick_quote(_at(h))[2] == "wry"]
+    assert wry_hours == [h for h in range(24) if h % motto.HUMOR_EVERY == 1]
+    assert 4 <= len(wry_hours) <= 8
+
+
+def test_a_full_day_spreads_across_the_shelf():
+    """A day must not land on the same two lines over and over."""
+    picked = {motto.pick_quote(_at(h))[0] for h in range(24)}
+    assert len(picked) >= 8
+
+
+# --------------------------------------------------------------------------
+# the connecting line
+# --------------------------------------------------------------------------
+
+def test_fallback_line_puts_lateness_first():
+    for hour in range(24):
+        line = motto.fallback_line({"overdue": 4, "silent": 9, "do_now": 7}, _at(hour))
+        assert line.startswith("4 משימות")
+
+
+def test_fallback_line_falls_through_to_silence_then_load():
+    for hour in range(24):
+        silent = motto.fallback_line({"overdue": 0, "silent": 3, "do_now": 7}, _at(hour))
+        load = motto.fallback_line({"overdue": 0, "silent": 0, "do_now": 7}, _at(hour))
+        assert silent in [t.format(n=3) for t in motto._FALLBACKS["silent"]]
+        assert load in [t.format(n=7) for t in motto._FALLBACKS["do_now"]]
+
+
+def test_fallback_line_on_a_clean_board_is_not_empty():
+    assert motto.fallback_line({}).strip()
+
+
+def test_fallback_line_rotates_so_an_outage_is_not_one_sentence_on_repeat():
+    """Groq goes down for whole afternoons — the wall must not freeze on a line."""
+    stats = {"overdue": 4}
+    shelf = motto._FALLBACKS["overdue"]
+    bands = [_at(9) + datetime.timedelta(minutes=motto.SWAP_MINUTES * i)
+             for i in range(len(shelf))]
+    assert len({motto.fallback_line(stats, b) for b in bands}) == len(shelf)
+
+
+def test_fallback_line_is_stable_inside_one_band():
+    """It may not change under a viewer mid-band — only when the band turns over."""
+    at = _at(9, minute=0)
+    late = _at(9, minute=motto.SWAP_MINUTES - 1)
+    nxt = _at(9, minute=motto.SWAP_MINUTES)
+    assert motto.fallback_line({"silent": 2}, at) == motto.fallback_line({"silent": 2}, late)
+    assert motto.fallback_line({"silent": 2}, at) != motto.fallback_line({"silent": 2}, nxt)
+
+
+def test_every_computed_slot_in_an_hour_is_a_different_sentence():
+    """The computed line takes every OTHER band, so it strides its shelf by two.
+
+    On an even-length shelf that stride reaches half the lines and the hour shows
+    three sentences twice each — which is the repetition the shelves exist to
+    avoid. Odd lengths make the stride coprime with the shelf.
+    """
+    for stats in ({"overdue": 4}, {"silent": 3}, {"do_now": 2}, {}):
+        shown = [motto.fallback_line(stats, _at(9, minute=m))
+                 for m in range(0, 60, motto.SWAP_MINUTES)
+                 if motto.shows_computed(_at(9, minute=m))]
+        assert len(shown) == 6
+        assert len(set(shown)) == 6
+
+
+def test_every_fallback_shelf_is_odd_and_outlasts_the_hour():
+    for condition, shelf in motto._FALLBACKS.items():
+        assert len(shelf) % 2 == 1, f"{condition}: an even shelf repeats within the hour"
+        assert len(shelf) > 60 // motto.SWAP_MINUTES // 2
+
+
+# --------------------------------------------------------------------------
+# the two lines take turns
+# --------------------------------------------------------------------------
+
+def test_the_hour_opens_on_the_computed_line():
+    """At :00 the model has not answered for this hour yet — nothing else exists."""
+    assert motto.shows_computed(_at(9, minute=0))
+
+
+def test_the_swap_bands_split_the_hour_evenly():
+    computed = [m for m in range(60) if motto.shows_computed(_at(9, minute=m))]
+    assert len(computed) == 30
+    assert 60 % motto.SWAP_MINUTES == 0      # or the bands drift off the hour
+
+
+async def test_a_cached_ai_line_still_yields_the_strip_every_other_band(monkeypatch):
+    """The point of the swap: one cached AI sentence, two different strips."""
+    from app.services import llm_router
+
+    async def fake(*a, **k):
+        return "עשר משימות באיחור אצל שני אחראים — סוגרים שתיים לפני סוף היום."
+    monkeypatch.setattr(llm_router, "llm_chat", fake)
+
+    stats = {"overdue": 10}
+    await motto.build(None, stats, _at(9))
+    ai = await motto.get_motto(None, stats, _at(9, minute=5))
+    computed = await motto.get_motto(None, stats, _at(9, minute=10))
+
+    assert ai["line"] == "עשר משימות באיחור אצל שני אחראים — סוגרים שתיים לפני סוף היום."
+    assert computed["line"] == motto.fallback_line(stats, _at(9, minute=10))
+    # ...and the quote does not move with it. A wall that swaps its quote
+    # mid-hour reads as a broken screen, not as a richer one.
+    assert (ai["quote"], ai["author"]) == (computed["quote"], computed["author"])
+
+
+def test_every_fallback_shelf_carries_the_count_it_promises():
+    """A line that drops {n} would put a bare imperative on the wall with no number."""
+    for condition, shelf in motto._FALLBACKS.items():
+        for text in shelf:
+            assert '"' not in text
+            assert ("{n}" in text) == (condition != "clean")
+
+
+# --------------------------------------------------------------------------
+# building and caching
+# --------------------------------------------------------------------------
+
+async def test_build_uses_the_model_sentence_but_keeps_our_quote(monkeypatch):
+    """The model writes the connecting sentence only — the quote stays curated,
+    even when the model answers with a fabricated one of its own."""
+    from app.services import llm_router
+
+    async def fake(*a, **k):
+        return "«ציטוט מומצא» — אריסטו. סוגרים היום את שתי המשימות באיחור."
+    monkeypatch.setattr(llm_router, "llm_chat", fake)
+
+    m = await motto.build(None, {"overdue": 2}, _at(9))
+    assert (m["quote"], m["author"], m["kind"]) == motto.pick_quote(_at(9))
+    assert "אריסטו" in m["line"]          # the model's sentence is kept as written
+    assert m["quote"] != "ציטוט מומצא"    # but it never becomes the quote
+
+
+async def test_build_caches_the_hour(monkeypatch):
+    from app.services import llm_router
+    calls = []
+
+    async def fake(*a, **k):
+        calls.append(1)
+        return "עשר משימות באיחור אצל שני אחראים — סוגרים שתיים לפני סוף היום."
+    monkeypatch.setattr(llm_router, "llm_chat", fake)
+
+    await motto.build(None, {"overdue": 1}, _at(9))
+    again = await motto.get_motto(None, {"overdue": 1}, _at(9))
+    assert again["line"] == "עשר משימות באיחור אצל שני אחראים — סוגרים שתיים לפני סוף היום."
+    assert len(calls) == 1
+
+
+async def test_a_new_hour_is_a_new_entry(monkeypatch):
+    from app.services import llm_router
+
+    async def fake(*a, **k):
+        return "עשר משימות באיחור — נסגור שתיים מהן לפני סוף היום."
+    monkeypatch.setattr(llm_router, "llm_chat", fake)
+
+    await motto.build(None, {}, _at(9))
+    assert motto.cache_key(_at(10)) not in motto._cache
+    assert len(motto._cache) == 1          # the cache never grows past the hour
+
+
+async def test_llm_failure_serves_the_computed_line_and_is_not_cached(monkeypatch):
+    from app.services import llm_router
+
+    async def boom(*a, **k):
+        raise RuntimeError("groq down")
+    monkeypatch.setattr(llm_router, "llm_chat", boom)
+
+    m = await motto.build(None, {"overdue": 3}, _at(9))
+    assert m["line"] == motto.fallback_line({"overdue": 3}, _at(9))
+    # A transient outage must not pin the fallback for the rest of the hour.
+    assert motto.cache_key(_at(9)) not in motto._cache
+
+
+async def test_an_empty_model_answer_also_falls_back(monkeypatch):
+    from app.services import llm_router
+
+    async def empty(*a, **k):
+        return "   "
+    monkeypatch.setattr(llm_router, "llm_chat", empty)
+
+    m = await motto.build(None, {"silent": 2}, _at(9))
+    assert m["line"] == motto.fallback_line({"silent": 2}, _at(9))
+
+
+async def test_a_cache_miss_never_waits_for_the_model(monkeypatch):
+    """The render path returns immediately and fills the cache in the background."""
+    spawned = []
+    monkeypatch.setattr(motto, "_spawn", lambda f, s, n: spawned.append(n))
+
+    m = await motto.get_motto(None, {"overdue": 5}, _at(9))
+    assert m["line"] == motto.fallback_line({"overdue": 5}, _at(9))
+    assert m["quote"] == motto.pick_quote(_at(9))[0]
+    assert spawned == [_at(9)]
+
+
+async def test_model_bullets_and_quote_marks_are_stripped(monkeypatch):
+    from app.services import llm_router
+
+    async def messy(*a, **k):
+        return '- "סוגרים היום שתי משימות באיחור ומדווחים סטטוס על השאר"'
+    monkeypatch.setattr(llm_router, "llm_chat", messy)
+
+    m = await motto.build(None, {}, _at(9))
+    assert m["line"] == "סוגרים היום שתי משימות באיחור ומדווחים סטטוס על השאר"
+
+
+# --------------------------------------------------------------------------
+# what the model sends back is not always a sentence
+# --------------------------------------------------------------------------
+
+async def test_a_stub_answer_is_refused_and_not_cached(monkeypatch):
+    """The bug the room actually saw: a two-letter stub of a sentence on the wall.
+
+    It happens when the answering provider spends the token budget on a reasoning
+    preamble and the sentence itself is cut off mid-word. A stub is not a sentence
+    — the computed line is better — and it must not be cached for the hour.
+    """
+    from app.services import llm_router
+
+    async def stub(*a, **k):
+        return "עם"
+    monkeypatch.setattr(llm_router, "llm_chat", stub)
+
+    m = await motto.build(None, {"overdue": 7}, _at(9))
+    assert m["line"] == motto.fallback_line({"overdue": 7}, _at(9))
+    assert motto.cache_key(_at(9)) not in motto._cache
+
+
+async def test_a_reasoning_preamble_is_dropped(monkeypatch):
+    """A provider that leaks its thinking must not put English on the wall."""
+    from app.services import llm_router
+
+    async def chatty(*a, **k):
+        return ("Okay, let me think about this. The board has ten late missions.\n"
+                "I should keep it short and practical.\n"
+                "עשר משימות באיחור — בוחרים שתיים וסוגרים אותן לפני סוף היום.")
+    monkeypatch.setattr(llm_router, "llm_chat", chatty)
+
+    m = await motto.build(None, {"overdue": 10}, _at(9))
+    assert m["line"] == "עשר משימות באיחור — בוחרים שתיים וסוגרים אותן לפני סוף היום."
+    assert "Okay" not in m["line"]
+
+
+def test_pick_sentence_takes_the_hebrew_line():
+    assert motto._pick_sentence("Reasoning here\nמשפט בעברית שהוא התשובה") == \
+        "משפט בעברית שהוא התשובה"
+    assert motto._pick_sentence("only english") == ""
+    assert motto._pick_sentence("") == ""
+
+
+async def test_the_hourly_call_gets_a_real_token_budget(monkeypatch):
+    """A tight ceiling is what let a reasoning preamble eat the answer —
+    gemma_client.py carries the same warning."""
+    from app.services import llm_router
+    seen = {}
+
+    async def fake(*a, **k):
+        seen.update(k)
+        return "עשר משימות באיחור — סוגרים שתיים לפני סוף היום ומדווחים על השאר."
+    monkeypatch.setattr(llm_router, "llm_chat", fake)
+
+    await motto.build(None, {}, _at(9))
+    assert seen["max_tokens"] >= 500
+    assert motto.MAX_TOKENS >= 500
+
+
+async def test_a_stub_already_in_the_cache_is_not_served(monkeypatch):
+    """A bad line written before the guard existed must not hold the hour."""
+    class _Row:
+        text = "המכשול שבדרך הופך להיות הדרך.|מרקוס אורליוס|עם"
+
+    async def fake_get(session, kind):
+        return _Row()
+    from app.services import missions_report_service as mrs
+    monkeypatch.setattr(mrs, "day_cache_get", fake_get)
+    monkeypatch.setattr(motto, "_spawn", lambda f, s, n: None)
+
+    m = await motto.get_motto(None, {"overdue": 2}, _at(9))
+    assert m["line"] == motto.fallback_line({"overdue": 2}, _at(9))

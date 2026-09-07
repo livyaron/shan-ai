@@ -28,6 +28,11 @@ AT_RISK_DAYS = 3
 # Active missions untouched for this long are flagged as stale on the summary sheet.
 STALE_DAYS = 30
 
+# Shorter horizon, used for the AI focus summary and the wall display: a mission
+# in the at-risk window that nobody reported on for two weeks is already a
+# management signal, long before the 30-day staleness mark.
+SILENT_DAYS = 14
+
 # Ceiling on how many missions are spelled out in the AI summary prompt. The
 # owner-load header above the list is computed from the whole board either way,
 # so the model still sees the shape of the backlog.
@@ -46,17 +51,28 @@ MANAGER_ROLES = (
 OPEN_HEADERS = [
     "מזהה", "כותרת", "תיאור", "רביע", "דחוף", "חשוב", "סטטוס", "אחראי", "נוצר ע\"י",
     "תאריך יעד", "ימים ליעד", "ימים באיחור", "גיל המשימה (ימים)", "נוצרה בתאריך",
-    "עודכנה לאחרונה", "עדכון סטטוס אחרון",
+    "עודכנה לאחרונה", "עדכון סטטוס אחרון", "תאריך עדכון הסטטוס", "מדווח העדכון",
+    "מס' עדכונים", "חדשה?",
 ]
 # New columns go on the END: inserting one would silently shift every saved
 # filter and column reference someone has built on top of this sheet.
-OPEN_WIDTHS = [8, 42, 50, 20, 8, 8, 14, 18, 18, 14, 12, 14, 18, 16, 16, 18]
+OPEN_WIDTHS = [8, 42, 50, 20, 8, 8, 14, 18, 18, 14, 12, 14, 18, 16, 16, 70, 18, 18, 12, 10]
+
+# Columns that must stay literal text: the pre-formatted dates, and the reported
+# status text (which is often just "80%" or "3"). Excel re-reads "14/07/2026
+# 15:05" as a serial number, and "80%" as 0.8, the moment someone re-saves or
+# pastes the sheet — which is how a text column ends up showing 46216. Forcing
+# the text format ("@") keeps what we wrote.
+OPEN_TEXT_COLS = [10, 14, 15, 16, 17]
 
 CLOSED_HEADERS = [
     "מזהה", "כותרת", "רביע", "סטטוס", "אחראי", "תאריך יעד", "הושלמה בתאריך",
     "ימי ביצוע", "עמדה ביעד?", "נוצרה בתאריך",
 ]
 CLOSED_WIDTHS = [8, 42, 20, 14, 18, 14, 16, 12, 14, 16]
+# Same reason as OPEN_TEXT_COLS: "14/07/2026 15:05" is a date to a human and a
+# serial number to Excel the moment the sheet is re-saved.
+CLOSED_TEXT_COLS = [6, 7, 10]
 
 SHEET_SUMMARY = "סיכום ותובנות"
 SHEET_OPEN = "משימות פתוחות"
@@ -77,7 +93,11 @@ _report_cache: dict[str, tuple[bytes, str, str]] = {} # date -> (xlsx bytes, fil
 _summary_cache: dict[str, str] = {}                  # date -> focus summary HTML
 
 KIND_AI_INSIGHTS = "ai_insights"
-KIND_REPORT = "report"
+# Versioned on purpose: the cache is keyed by (day, kind), so a deploy that
+# changes the sheet layout would keep serving today's workbook built by the old
+# code until 04:10 tomorrow. Bump this whenever OPEN_HEADERS/CLOSED_HEADERS
+# change — the old row simply stops matching and today's report is rebuilt once.
+KIND_REPORT = "report_v3"
 KIND_SUMMARY = "summary"
 
 
@@ -143,6 +163,17 @@ async def _db_cache_put(
             await session.rollback()
         except Exception:
             pass
+
+
+async def day_cache_get(session: AsyncSession, kind: str):
+    """Today's persisted artifact of this kind, or None. Public entry point for
+    other services (the wall's hourly motto) — never raises."""
+    return await _db_cache_get(session, kind)
+
+
+async def day_cache_put(session: AsyncSession, kind: str, text: str) -> None:
+    """Persist a text artifact into today's cache. Never raises."""
+    await _db_cache_put(session, kind, text=text)
 
 
 def cache_status() -> dict:
@@ -239,14 +270,53 @@ def _age_days(created: datetime.datetime | None, today: datetime.date) -> int | 
     return None if created is None else (today - created.date()).days
 
 
-def _last_update_at(m: Mission) -> datetime.datetime | None:
-    """When someone last reported on this mission, or None if nobody ever has.
+def _last_update(m: Mission):
+    """The newest status update on a mission, or None if nobody ever reported.
 
     This is the status-update log, not `updated_at` — editing a due date is not
     a report on the work.
     """
-    stamps = [u.created_at for u in oms.get_mission_updates(m) if u.created_at]
-    return max(stamps) if stamps else None
+    updates = [u for u in oms.get_mission_updates(m) if u.created_at]
+    return max(updates, key=lambda u: u.created_at) if updates else None
+
+
+def _last_update_at(m: Mission) -> datetime.datetime | None:
+    """When someone last reported on this mission, or None if nobody ever has."""
+    u = _last_update(m)
+    return u.created_at if u else None
+
+
+def _update_text(u) -> str:
+    """The reported text itself, flattened to one line so the cell stays filterable.
+
+    Newlines inside a cell survive the file but break sorting and eyeballing in a
+    40-row column, and the full multi-line log is already in "תיאור".
+    """
+    if u is None or not (u.text or "").strip():
+        return "—"
+    flat = " ".join((u.text or "").split())
+    prefix = "🔒 " if getattr(u, "kind", None) == "close" else ""
+    return f"{prefix}{flat}"
+
+
+def _days_since_update(m: Mission, today: datetime.date) -> int | None:
+    """Days since anyone reported on this mission; None when nobody ever did."""
+    at = _last_update_at(m)
+    return None if at is None else (today - at.date()).days
+
+
+def _recent_updates_text(m: Mission, limit: int = 3) -> str:
+    """The last `limit` status updates, newest first, as one prompt-safe line."""
+    updates = [u for u in oms.get_mission_updates(m) if u.created_at and (u.text or "").strip()]
+    if not updates:
+        return ""
+    updates.sort(key=lambda u: u.created_at, reverse=True)
+    parts = []
+    for u in updates[:limit]:
+        who = u.author_name or (u.author.username if getattr(u, "author", None) else "—")
+        flat = " ".join((u.text or "").split())
+        parts.append(f"[{u.created_at.strftime('%d/%m')} {_sanitize(who)}] {_sanitize(flat)[:180]}")
+    return " ; ".join(parts)
 
 
 def due_bucket(due: datetime.date | None, today: datetime.date) -> str:
@@ -326,6 +396,7 @@ async def collect_report_data(session: AsyncSession) -> dict:
     open_rows = []
     for m in active:
         delta = _days_until(m.due_date, today)
+        last_upd = _last_update(m)
         open_rows.append({
             "id": m.id,
             "title": m.title or "",
@@ -342,9 +413,23 @@ async def collect_report_data(session: AsyncSession) -> dict:
             "age_days": _age_days(m.created_at, today),
             "created_at": _fmt_dt(m.created_at),
             "updated_at": _fmt_dt(m.updated_at),
-            # Distinct from updated_at on purpose: that moves on any edit, this
-            # only when someone actually reported on the work. "—" means nobody has.
-            "last_status_update": _fmt_dt(_last_update_at(m)) or "—",
+            # The report used to put only a timestamp under "עדכון סטטוס אחרון",
+            # so the column a reader expects to hold the report held a date. The
+            # text is the column now; the timestamp moved to its own column
+            # beside it. "—" means nobody has reported. Distinct from updated_at
+            # on purpose: that moves on any edit, this only on a real report.
+            "last_status_update": _update_text(last_upd),
+            "last_status_update_at": _fmt_dt(last_upd.created_at) if last_upd else "—",
+            # author_name is a snapshot, so a deleted user still shows here; the
+            # `author` relationship is deliberately not touched (not eager-loaded).
+            "last_status_author": (
+                (last_upd.author_name or "—") if last_upd else "—"
+            ),
+            "updates_count": len(oms.get_mission_updates(m)),
+            # Opened in the last oms.NEW_MISSION_HOURS — the same window the board
+            # and the wall paint green, so a filter on this column reproduces
+            # exactly what the screens highlight.
+            "is_new": "כן" if oms.is_new(m, now) else "לא",
             "_overdue": oms.is_overdue(m, today),
             "_at_risk": delta is not None and 0 <= delta <= AT_RISK_DAYS,
         })
@@ -788,9 +873,15 @@ def build_workbook(data: dict, ai_text: str = "") -> bytes:
             row["important"], row["status"], row["owner"], row["created_by"], row["due"],
             row["days_to_due"], row["days_overdue"], row["age_days"],
             row["created_at"], row["updated_at"], row["last_status_update"],
+            row["last_status_update_at"], row["last_status_author"],
+            row["updates_count"], row["is_new"],
         ]
         for ci, value in enumerate(values, 1):
-            ws2.cell(ri, ci, value)
+            cell = ws2.cell(ri, ci, value)
+            if ci in OPEN_TEXT_COLS:
+                cell.number_format = "@"
+        # The reported text is prose, not a code — let it breathe like "תיאור".
+        ws2.cell(ri, OPEN_HEADERS.index("עדכון סטטוס אחרון") + 1).alignment = wrap
         fill = overdue_fill if row["_overdue"] else (at_risk_fill if row["_at_risk"] else None)
         if fill:
             for ci in range(1, len(OPEN_HEADERS) + 1):
@@ -813,7 +904,9 @@ def build_workbook(data: dict, ai_text: str = "") -> bytes:
             row["created_at"],
         ]
         for ci, value in enumerate(values, 1):
-            ws3.cell(ri, ci, value)
+            cell = ws3.cell(ri, ci, value)
+            if ci in CLOSED_TEXT_COLS:
+                cell.number_format = "@"
     ws3.freeze_panes = "A2"
     ws3.auto_filter.ref = f"A1:{get_column_letter(len(CLOSED_HEADERS))}{max(1, len(data['closed_rows']) + 1)}"
 
@@ -932,9 +1025,15 @@ _SUMMARY_PROMPT = f"""אתה ראש חדר מבצעים באגף תשתיות ח
 
 חסמים ותלויות
 • 1 עד 3 נקודות: מה עלול למנוע סגירה היום. אם אין — כתוב: אין חסמים ידועים.
+• בסס את הקטע הזה בעיקר על דיווחי הסטטוס שצורפו לכל משימה (השדה 'דיווחים אחרונים'):
+  ממתין לגורם חיצוני, חוסר חומר, אישור שלא התקבל, כוח אדם.
+• אם אותו חסם חוזר בשתי משימות או יותר — אמור זאת במפורש ונקוב במספר.
 
 לטיפול הנהלה
-• רק משימות באיחור של יותר משבוע, או דחופות וחשובות שלא זזות.
+• רק משימות באיחור של יותר משבוע, דחופות וחשובות שלא זזות, או משימות שאין עליהן
+  דיווח סטטוס זמן רב (השדה 'ללא דיווח').
+• אם דיווחי הסטטוס חוזרים על עצמם ולא מראים התקדמות (למשל אותו אחוז ביצוע פעמיים) —
+  סמן זאת כקיפאון, גם אם המשימה עדיין לא באיחור.
 • לכל נקודה כתוב מה ההחלטה הנדרשת מההנהלה. אם אין — כתוב: אין.
 
 כללים מחייבים:
@@ -1015,6 +1114,16 @@ def _format_at_risk_plain(groups: dict[str, list[Mission]], today: datetime.date
     deep = [m for m in groups["late"] if m.due_date and (today - m.due_date).days > 7]
     if deep:
         lines.append(f"• {len(deep)} משימות באיחור של מעל שבוע.")
+    # `or 999` would be wrong here: a mission reported TODAY has 0 days since the
+    # last update, which is falsy — it must not be counted as quiet.
+    quiet = []
+    for group in groups.values():
+        for m in group:
+            days = _days_since_update(m, today)
+            if days is None or days >= SILENT_DAYS:
+                quiet.append(m)
+    if quiet:
+        lines.append(f"• {len(quiet)} משימות בסיכון ללא דיווח סטטוס מעל {SILENT_DAYS} ימים.")
 
     lines.append("")
     lines.append("<b>✅ משימות לביצוע היום</b>")
@@ -1061,6 +1170,19 @@ def _at_risk_context(groups: dict[str, list[Mission]], today: datetime.date) -> 
             lines.append(f"- {_sanitize(name)}: {n} משימות")
         lines.append("")
 
+    # Reporting discipline is its own signal: a mission can be on time and still
+    # be one nobody has said a word about for a month.
+    all_at_risk = [m for group in groups.values() for m in group]
+    never = sum(1 for m in all_at_risk if _days_since_update(m, today) is None)
+    stale = sum(1 for m in all_at_risk
+                if (_days_since_update(m, today) or 0) >= SILENT_DAYS)
+    if all_at_risk:
+        lines.append(
+            f"דיווחי סטטוס: {len(all_at_risk) - never} משימות דווחו לפחות פעם אחת, "
+            f"{never} מעולם לא דווחו, {stale} לא דווחו מעל {SILENT_DAYS} ימים."
+        )
+        lines.append("")
+
     # The prompt used to grow linearly with the board — ~300 chars of detail per
     # mission with no cap, which is what made a cold build slow on a busy board.
     # Buckets are walked worst-first, so the cap only ever drops the least urgent.
@@ -1084,11 +1206,20 @@ def _at_risk_context(groups: dict[str, list[Mission]], today: datetime.date) -> 
             age = _age_days(m.created_at, today)
             if age is not None:
                 bits.append(f"נפתחה לפני {age} ימים")
+            silent = _days_since_update(m, today)
+            bits.append("ללא דיווח מעולם" if silent is None else
+                        ("דווח היום" if silent == 0 else f"ללא דיווח {silent} ימים"))
             line = f"- {_sanitize(m.title)} | " + " | ".join(bits)
-            detail = _description_with_updates(m)
-            if detail:
-                line += f" | פירוט: {_sanitize(detail)[:300]}"
+            if m.description:
+                line += f" | תיאור: {_sanitize(m.description)[:200]}"
             lines.append(line)
+            # The status updates get their own line, newest first: flattening them
+            # into the description and cutting at 300 chars used to throw away the
+            # newest report on any mission with a long log — exactly the part that
+            # says whether the work is moving.
+            recent = _recent_updates_text(m)
+            if recent:
+                lines.append(f"  דיווחים אחרונים: {recent}")
         lines.append("")
     return "\n".join(lines)
 

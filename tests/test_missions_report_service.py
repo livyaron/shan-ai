@@ -220,7 +220,8 @@ def _sample_data():
             "urgent": "כן", "important": "כן", "status": "פתוחה", "owner": "דני",
             "created_by": "דני", "due": "01/01/2026", "days_to_due": 1,
             "days_overdue": None, "age_days": 5, "created_at": "", "updated_at": "",
-            "last_status_update": "—",
+            "last_status_update": "—", "last_status_update_at": "—",
+            "last_status_author": "—", "updates_count": 0, "is_new": "לא",
             "_overdue": m.due_date < TODAY, "_at_risk": False,
         } for m in active],
         "closed_rows": [{
@@ -292,6 +293,75 @@ def test_focus_summary_plain_fallback_lists_buckets():
     assert text.startswith("‏")  # RTL mark on the first line (CLAUDE.md §5)
     assert "באיחור" in text
     assert "אינו זמין" in text
+
+
+def test_at_risk_context_spells_out_the_status_updates():
+    """The AI summary must see the reports themselves, newest first.
+
+    They used to be flattened into the description and cut at 300 chars, so on
+    any mission with a long log the NEWEST report — the one that says whether the
+    work is moving — was the first thing thrown away.
+    """
+    a = _make_user(id=1, username="דני")
+    m = _make_mission(
+        id=1, owner=a, due_date=TODAY - timedelta(days=2),
+        description="החלפת מבודדים בתחנה",
+        updates=[
+            _make_update(id=1, text="הוזמן ציוד", created_at=datetime.datetime(2026, 6, 20, 8, 0)),
+            _make_update(id=2, text="ממתין לאישור בטיחות",
+                         created_at=datetime.datetime(2026, 7, 14, 8, 0)),
+        ],
+    )
+    ctx = mrs._at_risk_context({"late": [m], "today": [], "soon": [], "nodate": []}, TODAY)
+    assert "דיווחים אחרונים" in ctx
+    # Newest first — the order is what tells the model the direction of travel.
+    assert ctx.index("ממתין לאישור בטיחות") < ctx.index("הוזמן ציוד")
+    assert "ללא דיווח 1 ימים" in ctx
+    assert "החלפת מבודדים בתחנה" in ctx
+
+
+def test_at_risk_context_flags_a_mission_nobody_reported_on():
+    a = _make_user(id=1, username="דני")
+    m = _make_mission(id=1, owner=a, due_date=TODAY, updates=[])
+    ctx = mrs._at_risk_context({"late": [], "today": [m], "soon": [], "nodate": []}, TODAY)
+    assert "ללא דיווח מעולם" in ctx
+    assert "מעולם לא דווחו" in ctx  # the board-level reporting-discipline line
+
+
+def test_at_risk_context_counts_reporting_discipline():
+    a = _make_user(id=1, username="דני")
+    fresh = _make_mission(id=1, owner=a, due_date=TODAY,
+                          updates=[_make_update(id=1, created_at=NOW)])
+    old = _make_mission(
+        id=2, owner=a, due_date=TODAY,
+        updates=[_make_update(id=2, created_at=datetime.datetime(2026, 6, 1, 8, 0))],
+    )
+    ctx = mrs._at_risk_context({"late": [], "today": [fresh, old], "soon": [], "nodate": []}, TODAY)
+    assert f"1 לא דווחו מעל {mrs.SILENT_DAYS} ימים" in ctx
+
+
+def test_updates_reach_the_prompt_without_a_lazy_load():
+    """A mission whose log was not eager-loaded degrades to no reports, never raises."""
+    a = _make_user(id=1, username="דני")
+    m = _make_mission(id=1, owner=a, due_date=TODAY)  # updates deliberately unloaded
+    ctx = mrs._at_risk_context({"late": [], "today": [m], "soon": [], "nodate": []}, TODAY)
+    assert "דיווחים אחרונים" not in ctx
+
+
+def test_summary_prompt_asks_the_model_to_use_the_reports():
+    """The prompt and the context must stay in step — the field name is the contract."""
+    assert "דיווחים אחרונים" in mrs._SUMMARY_PROMPT
+    assert "ללא דיווח" in mrs._SUMMARY_PROMPT
+
+
+def test_plain_fallback_counts_unreported_missions():
+    a = _make_user(id=1, username="דני")
+    silent = _make_mission(id=1, owner=a, due_date=TODAY - timedelta(days=1), updates=[])
+    reported = _make_mission(id=2, owner=a, due_date=TODAY,
+                             updates=[_make_update(id=2, created_at=NOW)])
+    text = mrs._format_at_risk_plain(
+        {"late": [silent], "today": [reported], "soon": [], "nodate": []}, TODAY)
+    assert f"1 משימות בסיכון ללא דיווח סטטוס מעל {mrs.SILENT_DAYS} ימים" in text
 
 
 def test_focus_summary_plain_fallback_when_board_clean():
@@ -711,7 +781,8 @@ async def test_load_caches_from_db_restores_every_artifact(monkeypatch):
     mrs.clear_caches()
 
     loaded = await mrs.load_caches_from_db(session)
-    assert loaded == {"summary": True, "ai_insights": True, "report": True}
+    assert loaded == {
+        mrs.KIND_SUMMARY: True, mrs.KIND_AI_INSIGHTS: True, mrs.KIND_REPORT: True}
     status = mrs.cache_status()
     assert status["summary"] and status["ai_insights"] and status["report"]
 
@@ -930,18 +1001,40 @@ async def _collected(missions, monkeypatch):
     return await mrs.collect_report_data(_FakeSession())
 
 
-async def test_open_row_carries_the_last_status_update(monkeypatch):
+async def test_open_row_carries_the_last_status_update_TEXT(monkeypatch):
+    """The column named "עדכון סטטוס אחרון" must hold the report, not its timestamp."""
     data = await _collected([_make_mission(id=1, updates=[
-        _make_update(id=1, created_at=datetime.datetime(2026, 7, 13, 6, 30)),
-        _make_update(id=2, created_at=datetime.datetime(2026, 7, 14, 12, 5)),
+        _make_update(id=1, text="הוזמן מבודד", created_at=datetime.datetime(2026, 7, 13, 6, 30)),
+        _make_update(id=2, text="המבודד הוחלף, נותרה בדיקת בידוד",
+                     created_at=datetime.datetime(2026, 7, 14, 12, 5)),
     ])], monkeypatch)
-    # 12:05 UTC → 15:05 Israel local.
-    assert data["open_rows"][0]["last_status_update"] == "14/07/2026 15:05"
+    row = data["open_rows"][0]
+    assert row["last_status_update"] == "המבודד הוחלף, נותרה בדיקת בידוד"
+    # 12:05 UTC → 15:05 Israel local, now in its own column.
+    assert row["last_status_update_at"] == "14/07/2026 15:05"
+    assert row["last_status_author"] == "דני"
+    assert row["updates_count"] == 2
+
+
+async def test_multiline_update_is_flattened_to_one_cell_line(monkeypatch):
+    data = await _collected([_make_mission(id=1, updates=[
+        _make_update(text="שלב א הושלם\n\nשלב ב  בביצוע")])], monkeypatch)
+    assert data["open_rows"][0]["last_status_update"] == "שלב א הושלם שלב ב בביצוע"
+
+
+async def test_closing_note_is_marked(monkeypatch):
+    data = await _collected([_make_mission(id=1, updates=[
+        _make_update(text="נסגר בהצלחה", kind="close")])], monkeypatch)
+    assert data["open_rows"][0]["last_status_update"] == "🔒 נסגר בהצלחה"
 
 
 async def test_open_row_shows_a_dash_when_nobody_reported(monkeypatch):
     data = await _collected([_make_mission(id=1, updates=[])], monkeypatch)
-    assert data["open_rows"][0]["last_status_update"] == "—"
+    row = data["open_rows"][0]
+    assert row["last_status_update"] == "—"
+    assert row["last_status_update_at"] == "—"
+    assert row["last_status_author"] == "—"
+    assert row["updates_count"] == 0
 
 
 async def test_last_status_update_is_independent_of_updated_at(monkeypatch):
@@ -953,27 +1046,51 @@ async def test_last_status_update_is_independent_of_updated_at(monkeypatch):
     assert row["last_status_update"] == "—"
 
 
-def test_open_sheet_appends_the_column_without_shifting_the_others():
+def test_open_sheet_appends_the_columns_without_shifting_the_others():
     """Saved filters and column references depend on the existing positions."""
-    assert mrs.OPEN_HEADERS[-1] == "עדכון סטטוס אחרון"
-    assert mrs.OPEN_HEADERS[-2] == "עודכנה לאחרונה"
+    assert mrs.OPEN_HEADERS[:16][-2:] == ["עודכנה לאחרונה", "עדכון סטטוס אחרון"]
+    assert mrs.OPEN_HEADERS[16:] == [
+        "תאריך עדכון הסטטוס", "מדווח העדכון", "מס' עדכונים", "חדשה?"]
     assert len(mrs.OPEN_HEADERS) == len(mrs.OPEN_WIDTHS)
 
 
-def test_workbook_open_sheet_writes_the_new_column():
+def test_workbook_open_sheet_writes_the_status_text_and_its_metadata():
     from openpyxl import load_workbook
 
     data = _sample_data()
-    data["open_rows"][0]["last_status_update"] = "14/07/2026 15:05"
+    data["open_rows"][0].update(
+        last_status_update="המבודד הוחלף, נותרה בדיקת בידוד",
+        last_status_update_at="14/07/2026 15:05",
+        last_status_author="דני",
+        updates_count=2,
+    )
     ws = load_workbook(BytesIO(mrs.build_workbook(data)))[mrs.SHEET_OPEN]
 
     assert [c.value for c in ws[1]] == mrs.OPEN_HEADERS
-    col = mrs.OPEN_HEADERS.index("עדכון סטטוס אחרון") + 1
-    assert ws.cell(2, col).value == "14/07/2026 15:05"
-    # The filter must span the new column too, or it is invisible to filtering.
+
+    def cell(name):
+        return ws.cell(2, mrs.OPEN_HEADERS.index(name) + 1)
+
+    assert cell("עדכון סטטוס אחרון").value == "המבודד הוחלף, נותרה בדיקת בידוד"
+    assert cell("תאריך עדכון הסטטוס").value == "14/07/2026 15:05"
+    assert cell("מדווח העדכון").value == "דני"
+    assert cell("מס' עדכונים").value == 2
+    # The filter must span the new columns too, or they are invisible to filtering.
     assert ws.auto_filter.ref.split(":")[1].startswith(
         __import__("openpyxl").utils.get_column_letter(len(mrs.OPEN_HEADERS))
     )
+
+
+def test_date_and_text_columns_are_pinned_to_the_text_format():
+    """Excel re-typing "14/07/2026 15:05" as a serial number is what showed a number."""
+    from openpyxl import load_workbook
+
+    data = _sample_data()
+    data["open_rows"][0].update(
+        last_status_update="80%", last_status_update_at="14/07/2026 15:05")
+    ws = load_workbook(BytesIO(mrs.build_workbook(data)))[mrs.SHEET_OPEN]
+    for ci in mrs.OPEN_TEXT_COLS:
+        assert ws.cell(2, ci).number_format == "@", mrs.OPEN_HEADERS[ci - 1]
 
 
 # ── Timestamps are Israel-local, matching the sheet's own header ───────────
@@ -1051,3 +1168,26 @@ async def test_summary_falls_back_to_the_plain_list_when_both_providers_are_down
     assert "סיכום ה-AI אינו זמין" in text
     assert "משימות לביצוע היום" in text, "the computed listing still names the work"
     assert mrs.cache_status()["summary"] is False
+
+
+async def test_open_row_marks_a_mission_opened_in_the_last_day(monkeypatch):
+    """The sheet must answer the same question the board paints green, so a filter
+    on "חדשה?" reproduces exactly what the screens highlight."""
+    fresh = _make_mission(id=1, created_at=datetime.datetime.utcnow() - timedelta(hours=2))
+    old = _make_mission(id=2, created_at=datetime.datetime.utcnow() - timedelta(days=6))
+    data = await _collected([fresh, old], monkeypatch)
+    by_id = {r["id"]: r for r in data["open_rows"]}
+    assert by_id[1]["is_new"] == "כן"
+    assert by_id[2]["is_new"] == "לא"
+    # And the creation stamp itself carries the hour, not just the day.
+    assert by_id[2]["created_at"] == mrs.oms.format_created_il(old.created_at)
+
+
+def test_closed_sheet_pins_its_date_columns_to_text_too():
+    """Same trap as the open sheet: Excel re-reads "06/07/2026 08:00" as a serial."""
+    from openpyxl import load_workbook
+    ws = load_workbook(BytesIO(mrs.build_workbook(_sample_data())))[mrs.SHEET_CLOSED]
+    for name in ("תאריך יעד", "הושלמה בתאריך", "נוצרה בתאריך"):
+        col = mrs.CLOSED_HEADERS.index(name) + 1
+        assert col in mrs.CLOSED_TEXT_COLS
+        assert ws.cell(2, col).number_format == "@"
