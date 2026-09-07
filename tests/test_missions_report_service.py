@@ -221,7 +221,7 @@ def _sample_data():
             "created_by": "דני", "due": "01/01/2026", "days_to_due": 1,
             "days_overdue": None, "age_days": 5, "created_at": "", "updated_at": "",
             "last_status_update": "—", "last_status_update_at": "—",
-            "last_status_author": "—", "updates_count": 0,
+            "last_status_author": "—", "updates_count": 0, "is_new": "לא",
             "_overdue": m.due_date < TODAY, "_at_risk": False,
         } for m in active],
         "closed_rows": [{
@@ -1050,7 +1050,7 @@ def test_open_sheet_appends_the_columns_without_shifting_the_others():
     """Saved filters and column references depend on the existing positions."""
     assert mrs.OPEN_HEADERS[:16][-2:] == ["עודכנה לאחרונה", "עדכון סטטוס אחרון"]
     assert mrs.OPEN_HEADERS[16:] == [
-        "תאריך עדכון הסטטוס", "מדווח העדכון", "מס' עדכונים"]
+        "תאריך עדכון הסטטוס", "מדווח העדכון", "מס' עדכונים", "חדשה?"]
     assert len(mrs.OPEN_HEADERS) == len(mrs.OPEN_WIDTHS)
 
 
@@ -1168,3 +1168,26 @@ async def test_summary_falls_back_to_the_plain_list_when_both_providers_are_down
     assert "סיכום ה-AI אינו זמין" in text
     assert "משימות לביצוע היום" in text, "the computed listing still names the work"
     assert mrs.cache_status()["summary"] is False
+
+
+async def test_open_row_marks_a_mission_opened_in_the_last_day(monkeypatch):
+    """The sheet must answer the same question the board paints green, so a filter
+    on "חדשה?" reproduces exactly what the screens highlight."""
+    fresh = _make_mission(id=1, created_at=datetime.datetime.utcnow() - timedelta(hours=2))
+    old = _make_mission(id=2, created_at=datetime.datetime.utcnow() - timedelta(days=6))
+    data = await _collected([fresh, old], monkeypatch)
+    by_id = {r["id"]: r for r in data["open_rows"]}
+    assert by_id[1]["is_new"] == "כן"
+    assert by_id[2]["is_new"] == "לא"
+    # And the creation stamp itself carries the hour, not just the day.
+    assert by_id[2]["created_at"] == mrs.oms.format_created_il(old.created_at)
+
+
+def test_closed_sheet_pins_its_date_columns_to_text_too():
+    """Same trap as the open sheet: Excel re-reads "06/07/2026 08:00" as a serial."""
+    from openpyxl import load_workbook
+    ws = load_workbook(BytesIO(mrs.build_workbook(_sample_data())))[mrs.SHEET_CLOSED]
+    for name in ("תאריך יעד", "הושלמה בתאריך", "נוצרה בתאריך"):
+        col = mrs.CLOSED_HEADERS.index(name) + 1
+        assert col in mrs.CLOSED_TEXT_COLS
+        assert ws.cell(2, col).number_format == "@"

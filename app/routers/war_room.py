@@ -174,6 +174,11 @@ async def war_room_page(
         "filters": {"owner": owner, "status": status, "q": q},
         "is_viewer": current_user.role == RoleEnum.VIEWER,
         "fmt_stamp": oms.format_stamp_il,
+        # Creation stamp + "is this mission brand new?" — both come from
+        # missions_menu_service so every layout paints the same missions "new".
+        "fmt_created": oms.format_created_il,
+        "is_new": oms.is_new,
+        "new_hours": oms.NEW_MISSION_HOURS,
         "quadrant_of": _quadrant_of,
         "msg": request.query_params.get("msg", ""),
         # The style switcher renders in every layout, so every layout gets these.

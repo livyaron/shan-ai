@@ -159,12 +159,18 @@ def card_for(m: Mission, today: datetime.date) -> dict:
         big, unit = m.due_date.strftime("%d/%m"), f"בעוד {(m.due_date - today).days} ימים"
 
     text = shorten(upd.text, UPDATE_CHARS) if upd else ""
+    fresh = oms.is_new(m)
     return {
         "id": m.id,
         "title": shorten(m.title, TITLE_CHARS),
         "owner": (m.owner.username if m.owner else "—"),
         "quadrant": oms.quadrant_label(oms.quadrant_key(m)),
         "tone": tone,
+        # A mission opened in the last oms.NEW_MISSION_HOURS. Deliberately NOT a
+        # tone: on this screen colour means time-to-target and nothing else, so
+        # "new" rides as its own badge and ring instead of stealing a band.
+        "is_new": fresh,
+        "created": oms.format_created_il(m.created_at),
         "big": big,
         "unit": unit,
         "update_text": text,
@@ -172,8 +178,12 @@ def card_for(m: Mission, today: datetime.date) -> dict:
         "update_when": relative_day(silent),
         "update_close": bool(upd is not None and getattr(upd, "kind", None) == "close"),
         "silent_days": silent,
-        # Never reported, or not reported in SILENT_DAYS — both are "nobody is talking".
-        "is_silent": (silent is None) or (silent >= SILENT_DAYS),
+        # Never reported, or not reported in SILENT_DAYS — both are "nobody is
+        # talking". A mission opened in the last oms.NEW_MISSION_HOURS is exempt:
+        # demanding a status report on something opened this morning is not a
+        # management signal, and a card wearing 🆕 and "ללא דיווח" at once reads
+        # as a broken screen.
+        "is_silent": (not fresh) and ((silent is None) or (silent >= SILENT_DAYS)),
     }
 
 

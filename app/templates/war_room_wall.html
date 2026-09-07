@@ -92,6 +92,16 @@ a{color:var(--amber);text-decoration:none}
 .wl-item.t-week{border-inline-start-color:var(--t-week)}
 .wl-item.t-nodate{border-inline-start-color:var(--t-nodate)}
 .wl-item.silent{outline:2px dashed rgba(154,161,171,.55);outline-offset:-4px}
+/* Opened in the last new_hours. An inset ring + a green wash rather than a tone
+   of its own: on this screen the border-inline-start colour means time-to-target
+   and nothing else, and a mission cannot be both "new" and "three days late" in
+   the same stripe. inset box-shadow so it composes with .silent's outline
+   instead of fighting it. */
+.wl-item.is-new{box-shadow:inset 0 0 0 3px rgba(53,208,90,.55)}
+/* The green wash yields to the deep-late red wash: a mission that is both was
+   opened against a target already a week gone, and that is the louder fact. */
+.wl-item.is-new:not(.t-late-deep){background:linear-gradient(90deg,rgba(53,208,90,.16),var(--panel) 60%)}
+.wl-tag.new{background:rgba(53,208,90,.20);color:var(--green-2)}
 .wl-when{font-family:var(--mono);font-size:clamp(1.4rem,3.6vh,2.6rem);font-weight:700;
   min-width:clamp(96px,9vw,160px);text-align:center;line-height:1;flex-shrink:0}
 .wl-when .u{font-size:clamp(.6rem,1.25vh,.85rem);white-space:nowrap;color:var(--ink-2);
@@ -201,6 +211,7 @@ a{color:var(--amber);text-decoration:none}
     <span><i style="background:var(--t-{{ key }})"></i>{{ label }}</span>
     {% endfor %}
     <span><i style="background:transparent;border:2px dashed rgba(154,161,171,.85)"></i>ללא דיווח</span>
+    <span><i style="background:transparent;border:2px solid var(--green)"></i>חדשה ({{ new_hours }} שעות)</span>
   </span>
   <span class="p" id="wlPager">עמוד 1/{{ wall_pages|length }}</span>
 </div>
@@ -225,11 +236,12 @@ a{color:var(--amber);text-decoration:none}
       <div class="wl-empty">אין משימות פעילות. הלוח נקי.</div>
     {% else %}
       {% for c in page.cards %}
-      <div class="wl-item t-{{ c.tone }}{% if c.is_silent %} silent{% endif %}">
+      <div class="wl-item t-{{ c.tone }}{% if c.is_silent %} silent{% endif %}{% if c.is_new %} is-new{% endif %}">
         <div class="wl-when">{{ c.big }}{% if c.unit %}<span class="u">{{ c.unit }}</span>{% endif %}</div>
         <div class="wl-body">
           <div class="wl-t" dir="auto">{{ c.title }}</div>
           <div class="wl-m" dir="auto">{{ c.owner }} · {{ c.quadrant }}
+            {% if c.is_new %}<span class="wl-tag new">🆕 נוצרה {{ c.created }}</span>{% endif %}
             {% if c.is_silent and c.silent_days is not none %}<span class="wl-tag">🔇 ללא דיווח {{ c.silent_days }} ימים</span>{% endif %}
           </div>
           {% if c.update_text %}

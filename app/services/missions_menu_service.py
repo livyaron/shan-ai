@@ -55,6 +55,12 @@ DUE_QUICK_PICKS = [
 PAGE_SIZE = 10
 HISTORY_LIMIT = 15
 
+# How long a mission stays "new" after it was opened. Every surface — the four
+# web layouts, the wall display, the Telegram card and the XLSX — asks this
+# module, so "חדשה" means exactly the same thing on all of them; never re-spell
+# the window inline.
+NEW_MISSION_HOURS = 24
+
 
 # ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -69,6 +75,40 @@ def format_stamp_il(dt: datetime.datetime | None) -> str:
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=datetime.timezone.utc)
     return dt.astimezone(_IL_TZ).strftime("%d/%m %H:%M")
+
+
+def format_created_il(dt: datetime.datetime | None) -> str:
+    """Naive-UTC timestamp (as stored) → Israel-local 'DD/MM/YYYY HH:MM'.
+
+    Creation carries the year on purpose: format_stamp_il drops it, which is
+    fine for "the last status update" but reads as a lie on a mission opened
+    last December.
+    """
+    if dt is None:
+        return "—"
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=datetime.timezone.utc)
+    return dt.astimezone(_IL_TZ).strftime("%d/%m/%Y %H:%M")
+
+
+def is_new(m: Mission, now: datetime.datetime | None = None) -> bool:
+    """Was this mission opened within the last NEW_MISSION_HOURS?
+
+    created_at is stored naive-UTC (Column default=datetime.utcnow), so the
+    comparison is done in UTC and never in Israel local time — mixing the two
+    would make a mission look 3 hours older or younger than it is.
+    """
+    if m.created_at is None:
+        return False
+    created = m.created_at
+    if created.tzinfo is not None:
+        created = created.astimezone(datetime.timezone.utc).replace(tzinfo=None)
+    now = now or datetime.datetime.utcnow()
+    if now.tzinfo is not None:
+        now = now.astimezone(datetime.timezone.utc).replace(tzinfo=None)
+    # `>` rather than a two-sided window: a row whose stamp is slightly in the
+    # future (clock skew between the app and Postgres) was just created too.
+    return created > now - datetime.timedelta(hours=NEW_MISSION_HOURS)
 
 
 def quadrant_key(m: Mission) -> str:
@@ -365,7 +405,8 @@ def format_mission_line(m: Mission, today: datetime.date | None = None) -> str:
         title = title[:40] + "…"
     key = quadrant_key(m)
     emoji = next(e for k, e, _v, _a in QUADRANTS if k == key)
-    parts = [f"{emoji} {_html.escape(title)}"]
+    badge = "🆕 " if is_new(m) else ""
+    parts = [f"{emoji} {badge}{_html.escape(title)}"]
     owner_name = m.owner.username if m.owner else None
     if owner_name:
         parts.append(f"👤 {_html.escape(owner_name)}")
@@ -455,7 +496,10 @@ def build_mission_card(m: Mission, show_all_updates: bool = False) -> str:
         due_line += " ⚠️ באיחור"
     owner_name = m.owner.username if m.owner else "—"
     creator = m.created_by.username if m.created_by else "—"
-    created_str = m.created_at.strftime("%d/%m/%Y") if m.created_at else "—"
+    # Date AND time: "מתי בדיוק נפתחה" is the first thing asked about a mission
+    # that appeared overnight, and a bare date cannot answer it.
+    created_str = format_created_il(m.created_at)
+    fresh = is_new(m)
     desc = f"\n📝 {_html.escape(m.description)}\n" if m.description else ""
     updates = format_updates_block(
         m,
@@ -465,7 +509,7 @@ def build_mission_card(m: Mission, show_all_updates: bool = False) -> str:
     if updates:
         desc += f"\n{updates}\n"
     return (
-        f"‏🎯 <b>משימה #{m.id}</b>\n"
+        f"‏🎯 <b>משימה #{m.id}</b>{' 🆕 <b>חדשה</b>' if fresh else ''}\n"
         f"<b>{_html.escape(m.title or '')}</b>\n"
         "──────────────────\n"
         f"{quadrant_label(key, with_axis=True)}\n"

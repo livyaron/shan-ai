@@ -52,11 +52,11 @@ OPEN_HEADERS = [
     "מזהה", "כותרת", "תיאור", "רביע", "דחוף", "חשוב", "סטטוס", "אחראי", "נוצר ע\"י",
     "תאריך יעד", "ימים ליעד", "ימים באיחור", "גיל המשימה (ימים)", "נוצרה בתאריך",
     "עודכנה לאחרונה", "עדכון סטטוס אחרון", "תאריך עדכון הסטטוס", "מדווח העדכון",
-    "מס' עדכונים",
+    "מס' עדכונים", "חדשה?",
 ]
 # New columns go on the END: inserting one would silently shift every saved
 # filter and column reference someone has built on top of this sheet.
-OPEN_WIDTHS = [8, 42, 50, 20, 8, 8, 14, 18, 18, 14, 12, 14, 18, 16, 16, 70, 18, 18, 12]
+OPEN_WIDTHS = [8, 42, 50, 20, 8, 8, 14, 18, 18, 14, 12, 14, 18, 16, 16, 70, 18, 18, 12, 10]
 
 # Columns that must stay literal text: the pre-formatted dates, and the reported
 # status text (which is often just "80%" or "3"). Excel re-reads "14/07/2026
@@ -70,6 +70,9 @@ CLOSED_HEADERS = [
     "ימי ביצוע", "עמדה ביעד?", "נוצרה בתאריך",
 ]
 CLOSED_WIDTHS = [8, 42, 20, 14, 18, 14, 16, 12, 14, 16]
+# Same reason as OPEN_TEXT_COLS: "14/07/2026 15:05" is a date to a human and a
+# serial number to Excel the moment the sheet is re-saved.
+CLOSED_TEXT_COLS = [6, 7, 10]
 
 SHEET_SUMMARY = "סיכום ותובנות"
 SHEET_OPEN = "משימות פתוחות"
@@ -94,7 +97,7 @@ KIND_AI_INSIGHTS = "ai_insights"
 # changes the sheet layout would keep serving today's workbook built by the old
 # code until 04:10 tomorrow. Bump this whenever OPEN_HEADERS/CLOSED_HEADERS
 # change — the old row simply stops matching and today's report is rebuilt once.
-KIND_REPORT = "report_v2"
+KIND_REPORT = "report_v3"
 KIND_SUMMARY = "summary"
 
 
@@ -423,6 +426,10 @@ async def collect_report_data(session: AsyncSession) -> dict:
                 (last_upd.author_name or "—") if last_upd else "—"
             ),
             "updates_count": len(oms.get_mission_updates(m)),
+            # Opened in the last oms.NEW_MISSION_HOURS — the same window the board
+            # and the wall paint green, so a filter on this column reproduces
+            # exactly what the screens highlight.
+            "is_new": "כן" if oms.is_new(m, now) else "לא",
             "_overdue": oms.is_overdue(m, today),
             "_at_risk": delta is not None and 0 <= delta <= AT_RISK_DAYS,
         })
@@ -867,7 +874,7 @@ def build_workbook(data: dict, ai_text: str = "") -> bytes:
             row["days_to_due"], row["days_overdue"], row["age_days"],
             row["created_at"], row["updated_at"], row["last_status_update"],
             row["last_status_update_at"], row["last_status_author"],
-            row["updates_count"],
+            row["updates_count"], row["is_new"],
         ]
         for ci, value in enumerate(values, 1):
             cell = ws2.cell(ri, ci, value)
@@ -897,7 +904,9 @@ def build_workbook(data: dict, ai_text: str = "") -> bytes:
             row["created_at"],
         ]
         for ci, value in enumerate(values, 1):
-            ws3.cell(ri, ci, value)
+            cell = ws3.cell(ri, ci, value)
+            if ci in CLOSED_TEXT_COLS:
+                cell.number_format = "@"
     ws3.freeze_panes = "A2"
     ws3.auto_filter.ref = f"A1:{get_column_letter(len(CLOSED_HEADERS))}{max(1, len(data['closed_rows']) + 1)}"
 

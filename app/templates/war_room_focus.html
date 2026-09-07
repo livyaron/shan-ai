@@ -38,6 +38,13 @@ a{color:var(--late);text-decoration:none}
   box-shadow:0 1px 3px rgba(60,45,25,.05);margin-top:14px}
 .fc-card.late{border-inline-start:4px solid var(--late)}
 .fc-card.today{border-inline-start:4px solid var(--today)}
+/* Opened in the last new_hours — a warm ground and its own tag, so a mission
+   that appeared since the last look is found without reading a single date. */
+.fc-card.fresh{background:linear-gradient(180deg,#f3f9f1,var(--card) 65%)}
+.fc-tag.fresh{background:#e2f2df;color:#2f6b34}
+.fc-row.fresh{background:#f6fbf5}
+.fc-new{font-size:.78rem;font-weight:600;color:#2f6b34;white-space:nowrap}
+.fc-born{font-size:.8rem;color:var(--ink-3);margin-top:8px;font-variant-numeric:tabular-nums}
 .fc-tag{border-radius:999px;padding:4px 12px;font-size:.78rem;font-weight:600}
 .fc-tag.late{background:var(--late-bg);color:var(--late-ink)}
 .fc-tag.today{background:var(--today-bg);color:var(--today-ink)}
@@ -118,13 +125,15 @@ dialog.fc-dlg input,dialog.fc-dlg textarea,dialog.fc-dlg select{width:100%;backg
       {% endif %}
       {% for m in my_due_now %}
       {% set late = m.due_date < today %}
-      <div class="fc-card {% if late %}late{% else %}today{% endif %}">
+      {% set fresh = is_new(m) %}
+      <div class="fc-card {% if late %}late{% else %}today{% endif %}{% if fresh %} fresh{% endif %}">
         <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
           {% if late %}
           <span class="fc-tag late">באיחור {{ (today - m.due_date).days }} ימים</span>
           {% else %}
           <span class="fc-tag today">היעד היום</span>
           {% endif %}
+          {% if fresh %}<span class="fc-tag fresh">🆕 חדשה</span>{% endif %}
           <span style="font-size:.8rem;color:var(--ink-3)">{{ quadrant_of(m) }}</span>
         </div>
         <div class="fc-title" dir="auto">{{ m.title }}</div>
@@ -133,6 +142,7 @@ dialog.fc-dlg input,dialog.fc-dlg textarea,dialog.fc-dlg select{width:100%;backg
         {% set u = m.updates[-1] %}
         <div class="fc-upd" dir="auto">{{ fmt_stamp(u.created_at) }} · {{ u.author_name or '—' }} — {{ u.text }}</div>
         {% endif %}
+        <div class="fc-born">🕒 נוצרה {{ fmt_created(m.created_at) }}</div>
         {% if not is_viewer %}
         <div class="fc-acts">
           <button class="fc-btn go" onclick="toggleNote({{ m.id }})">כתוב עדכון</button>
@@ -163,9 +173,11 @@ dialog.fc-dlg input,dialog.fc-dlg textarea,dialog.fc-dlg select{width:100%;backg
       <div class="fc-sec">בהמשך</div>
       <div class="fc-rows">
         {% for m in my_upcoming %}
-        <div class="fc-row">
+        {% set fresh = is_new(m) %}
+        <div class="fc-row{% if fresh %} fresh{% endif %}">
           <span class="fc-when">{{ m.due_date.strftime('%d/%m') }}</span>
           <span class="fc-rowt" dir="auto">{{ m.title }}</span>
+          {% if fresh %}<span class="fc-new">🆕 נוצרה {{ fmt_created(m.created_at) }}</span>{% endif %}
           {% if not is_viewer %}
           <button class="fc-btn sm" onclick="toggleNote({{ m.id }})">עדכון</button>
           <button class="fc-btn sm" onclick="toggleClose({{ m.id }}, 'done')">בוצע</button>
@@ -195,9 +207,11 @@ dialog.fc-dlg input,dialog.fc-dlg textarea,dialog.fc-dlg select{width:100%;backg
       <div class="fc-sec">ללא תאריך יעד</div>
       <div class="fc-rows">
         {% for m in my_undated %}
-        <div class="fc-row">
+        {% set fresh = is_new(m) %}
+        <div class="fc-row{% if fresh %} fresh{% endif %}">
           <span class="fc-when">—</span>
           <span class="fc-rowt" dir="auto">{{ m.title }}</span>
+          {% if fresh %}<span class="fc-new">🆕 נוצרה {{ fmt_created(m.created_at) }}</span>{% endif %}
           {% if not is_viewer %}
           <input type="date" id="due-{{ m.id }}" style="border:1px solid var(--line-2);border-radius:8px;padding:7px 10px;font-family:var(--ui)">
           <button class="fc-btn sm" onclick="setDue({{ m.id }})">קבע יעד</button>

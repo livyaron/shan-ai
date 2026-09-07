@@ -194,3 +194,41 @@ def test_card_text_is_capped_before_it_reaches_the_template():
     card = wall.card_for(m, TODAY)
     assert len(card["title"]) <= wall.TITLE_CHARS + 1
     assert len(card["update_text"]) <= wall.UPDATE_CHARS + 1
+
+
+# --------------------------------------------------------------------------
+# a mission opened in the last day
+# --------------------------------------------------------------------------
+
+def _fresh(mid=90, **kw):
+    m = _mission(mid, **kw)
+    m.created_at = datetime.datetime.utcnow() - datetime.timedelta(hours=2)
+    return m
+
+
+def _old(mid=91, **kw):
+    m = _mission(mid, **kw)
+    m.created_at = datetime.datetime.utcnow() - datetime.timedelta(days=30)
+    return m
+
+
+def test_card_flags_a_mission_opened_in_the_last_day():
+    fresh = wall.card_for(_fresh(due=_days(4)), TODAY)
+    assert fresh["is_new"] is True
+    assert fresh["created"] != "—"
+    assert wall.card_for(_old(due=_days(4)), TODAY)["is_new"] is False
+
+
+def test_new_is_a_badge_and_never_a_colour_band():
+    """Colour on this screen means time-to-target only — see TONES."""
+    assert "new" not in wall.TONES
+    assert wall.card_for(_fresh(due=_days(4)), TODAY)["tone"] == "week"
+    assert wall.card_for(_fresh(due=_days(-9)), TODAY)["tone"] == "late-deep"
+
+
+def test_a_mission_opened_this_morning_is_not_called_unreported():
+    """🆕 and "ללא דיווח" on the same card reads as a broken screen, and demanding
+    a status report on something opened two hours ago is not a signal."""
+    assert wall.card_for(_fresh(due=_days(4)), TODAY)["is_silent"] is False
+    # Same mission, opened a month ago and never reported: still unreported.
+    assert wall.card_for(_old(due=_days(4)), TODAY)["is_silent"] is True

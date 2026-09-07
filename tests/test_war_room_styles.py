@@ -5,6 +5,7 @@ render against a hand-built context, so it runs in CI without Postgres. The
 render tests use StrictUndefined — a layout that reads a context key the router
 does not pass fails here instead of at 500 in production.
 """
+import contextlib
 import datetime
 from types import SimpleNamespace
 
@@ -18,6 +19,11 @@ from app.services import war_room_motto as wrm
 from app.services import war_room_wall as wall
 
 TODAY = datetime.date(2026, 8, 22)
+# A fixed "now" so "was this mission opened in the last 24h?" is a decision the
+# test makes, not something that changes with the wall clock in CI.
+NOW = datetime.datetime.combine(TODAY, datetime.time(11, 0))
+FRESH_AT = NOW - datetime.timedelta(hours=2)
+OLD_AT = NOW - datetime.timedelta(days=9)
 
 
 # --------------------------------------------------------------------------
@@ -69,18 +75,35 @@ def test_every_style_has_a_label_and_a_template_file():
 # rendering
 # --------------------------------------------------------------------------
 
-def _mission(mid, title, owner, due, quadrant="do", status="open", updates=()):
+def _mission(mid, title, owner, due, quadrant="do", status="open", updates=(),
+             created_at=OLD_AT):
     """Transient ORM objects rather than stand-ins: the wall reads the status log
     through SQLAlchemy's loaded/unloaded inspection, which a fake never triggers."""
     urgent, important = oms.quadrant_flags(quadrant)
     m = Mission(
         id=mid, title=title, description="תיאור בדיקה", owner_id=1,
         due_date=due, status=status, is_urgent=urgent, is_important=important,
+        created_at=created_at,
     )
     m.owner = User(username=owner)
     m.created_by = User(username=owner)
     m.updates = list(updates)
     return m
+
+
+@contextlib.contextmanager
+def _frozen_now():
+    """Pin oms.is_new's clock while the wall's cards are shaped.
+
+    war_room_wall.card_for asks oms.is_new(m) without a `now` — production wants
+    the wall clock, a test wants a decision it made itself.
+    """
+    real = oms.is_new
+    oms.is_new = lambda m, now=None: real(m, now or NOW)
+    try:
+        yield
+    finally:
+        oms.is_new = real
 
 
 def _update(text, author="אבי"):
@@ -91,7 +114,9 @@ def _update(text, author="אבי"):
 def _context(style, is_viewer=False):
     late = _mission(1, "החלפת מפסק ראשי", "אבי", TODAY - datetime.timedelta(days=2),
                     updates=[_update("ממתין לאישור בטיחות")])
-    today_due = _mission(2, "ליקוי בטיחות", "דנה", TODAY)
+    # The one mission opened in the last NEW_MISSION_HOURS — every layout has to
+    # paint it differently from the other three.
+    today_due = _mission(2, "ליקוי בטיחות", "דנה", TODAY, created_at=FRESH_AT)
     planned = _mission(3, "בדיקת ממסרים", "שרון", TODAY + datetime.timedelta(days=14), "plan")
     undated = _mission(4, "מיפוי מלאי", "יעל", None, "backlog")
     missions = [late, today_due, planned, undated]
@@ -102,7 +127,8 @@ def _context(style, is_viewer=False):
 
     closed = _mission(9, "נסגר", "דנה", TODAY, status="done")
     closed.completed_at = datetime.datetime(2026, 8, 21, 9, 0)
-    wall_pages = wall.build_pages(missions, [closed], TODAY)
+    with _frozen_now():
+        wall_pages = wall.build_pages(missions, [closed], TODAY)
 
     return {
         "request": SimpleNamespace(url=SimpleNamespace(path="/dashboard/war-room")),
@@ -121,6 +147,11 @@ def _context(style, is_viewer=False):
         "filters": {"owner": None, "status": "active", "q": ""},
         "is_viewer": is_viewer,
         "fmt_stamp": oms.format_stamp_il,
+        # Mirrors the router, with `now` pinned so the "new mission" band does
+        # not depend on when CI happens to run.
+        "fmt_created": oms.format_created_il,
+        "is_new": lambda m: oms.is_new(m, NOW),
+        "new_hours": oms.NEW_MISSION_HOURS,
         "quadrant_of": lambda m: oms.quadrant_label(oms.quadrant_key(m)),
         "msg": "",
         "styles": wrs.STYLES,
@@ -346,3 +377,29 @@ def test_layouts_do_not_hardcode_the_public_url():
     """Same rule as the rest of the app — no baked-in host names in templates."""
     for key in wrs.STYLE_KEYS:
         assert "shan-ai.up.railway.app" not in _render(key)
+
+
+# --------------------------------------------------------------------------
+# a mission opened in the last 24 hours
+# --------------------------------------------------------------------------
+
+@pytest.mark.parametrize("style", wrs.STYLE_KEYS)
+def test_every_layout_states_when_a_mission_was_opened(style):
+    """Creation date AND time, on every screen — the same stamp the XLSX carries."""
+    html = _render(style)
+    assert oms.format_created_il(FRESH_AT) in html
+
+
+@pytest.mark.parametrize("style", wrs.STYLE_KEYS)
+def test_every_layout_paints_a_mission_opened_in_the_last_day(style):
+    """It must be findable without reading a date: a badge plus a class of its own."""
+    html = _render(style)
+    assert "🆕" in html
+    assert ("fresh" in html) or ("is-new" in html)
+
+
+def test_the_new_mission_marker_is_not_painted_on_every_card():
+    """A highlight everything wears highlights nothing — exactly one of the four
+    missions in the fixture was opened inside the window."""
+    for style in wrs.STYLE_KEYS:
+        assert _render(style).count("🆕") == 1
