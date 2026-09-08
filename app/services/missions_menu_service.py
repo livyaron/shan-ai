@@ -688,7 +688,13 @@ async def set_status(session: AsyncSession, m: Mission, new_status: str) -> Miss
     if m.status == new_status:
         return m
     m.status = new_status
-    if new_status == MissionStatusEnum.DONE.value:
+    # Stamped for CANCELLED too, not only DONE: a cancelled mission also left the
+    # board at a specific moment, and leaving the stamp NULL is what left every
+    # cancelled row in the XLSX with no closing date and sorted to the bottom.
+    # Nothing that counts "done" reads this field alone — every such query filters
+    # status == DONE first (see missions_report_service._compute_stats, the wall's
+    # closed page and get_done_history).
+    if new_status in (MissionStatusEnum.DONE.value, MissionStatusEnum.CANCELLED.value):
         m.completed_at = datetime.datetime.utcnow()
     elif new_status in ACTIVE_STATUSES:
         m.completed_at = None

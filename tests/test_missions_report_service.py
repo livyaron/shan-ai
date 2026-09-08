@@ -228,6 +228,8 @@ def _sample_data():
             "id": 10, "title": "סגורה", "quadrant": "בצע עכשיו", "status": "הושלמה",
             "owner": "דני", "due": "10/07/2026", "completed_at": "06/07/2026 08:00",
             "cycle_days": 5, "on_time": "כן", "created_at": "",
+            "closed_at": "06/07/2026 08:00", "last_status_update": "🔒 בוצע",
+            "last_status_update_at": "06/07/2026 08:00", "last_status_author": "דני",
         }],
         "stats": stats,
         "meta": {"generated_at": "15/07/2026 06:00", "date_slug": "15-07-2026"},
@@ -1191,3 +1193,92 @@ def test_closed_sheet_pins_its_date_columns_to_text_too():
         col = mrs.CLOSED_HEADERS.index(name) + 1
         assert col in mrs.CLOSED_TEXT_COLS
         assert ws.cell(2, col).number_format == "@"
+
+
+# ── Closed sheet: how a mission ended, and when ────────────────────────────
+
+async def test_closed_row_carries_the_closing_note_and_its_metadata(monkeypatch):
+    """A closed mission's row must say WHY it closed, not only that it did."""
+    m = _make_mission(
+        id=1, status="done", completed_at=datetime.datetime(2026, 7, 14, 12, 5),
+        updates=[
+            _make_update(id=1, text="הוזמן מבודד",
+                         created_at=datetime.datetime(2026, 7, 13, 6, 30)),
+            _make_update(id=2, text="הוחלף ונבדק", kind="close", author_name="שרון",
+                         created_at=datetime.datetime(2026, 7, 14, 12, 5)),
+        ],
+    )
+    row = (await _collected([m], monkeypatch))["closed_rows"][0]
+    assert row["last_status_update"] == "🔒 הוחלף ונבדק"      # 🔒 = this is the closing note
+    assert row["last_status_update_at"] == "14/07/2026 15:05"  # 12:05 UTC → 15:05 IL
+    assert row["last_status_author"] == "שרון"
+    assert row["closed_at"] == "14/07/2026 15:05"
+
+
+async def test_closed_row_does_not_pass_off_a_progress_report_as_a_closing_note(monkeypatch):
+    """Closed with no note: the last update shows, but without the 🔒 mark."""
+    m = _make_mission(
+        id=1, status="done", completed_at=datetime.datetime(2026, 7, 14, 12, 5),
+        updates=[_make_update(id=1, text="בביצוע",
+                              created_at=datetime.datetime(2026, 7, 13, 6, 30))],
+    )
+    row = (await _collected([m], monkeypatch))["closed_rows"][0]
+    assert row["last_status_update"] == "בביצוע"
+    assert "🔒" not in row["last_status_update"]
+
+
+async def test_a_cancelled_mission_still_gets_a_closing_date(monkeypatch):
+    """Cancelling never stamped completed_at, so every cancelled row used to show
+    "—" where its closing date belongs. The closing note stands in."""
+    m = _make_mission(
+        id=1, status="cancelled", completed_at=None,
+        updates=[_make_update(id=1, text="בוטל — הקבלן פרש", kind="close",
+                              created_at=datetime.datetime(2026, 7, 10, 7, 0))],
+    )
+    row = (await _collected([m], monkeypatch))["closed_rows"][0]
+    assert row["completed_at"] == ""                  # the raw column is untouched
+    assert row["closed_at"] == "10/07/2026 10:00"     # 07:00 UTC → 10:00 IL
+
+
+async def test_closing_date_falls_back_to_updated_at_when_nothing_else_exists(monkeypatch):
+    m = _make_mission(id=1, status="cancelled", completed_at=None, updates=[],
+                      updated_at=datetime.datetime(2026, 7, 9, 5, 0))
+    row = (await _collected([m], monkeypatch))["closed_rows"][0]
+    assert row["closed_at"] == "09/07/2026 08:00"
+
+
+async def test_closed_rows_are_ordered_newest_first_across_both_statuses(monkeypatch):
+    """Sorting on completed_at alone parked every cancelled mission at the bottom,
+    however recently it was actually closed."""
+    done_old = _make_mission(id=1, status="done",
+                             completed_at=datetime.datetime(2026, 7, 1, 8, 0))
+    cancelled_recent = _make_mission(
+        id=2, status="cancelled", completed_at=None,
+        updates=[_make_update(id=9, text="בוטל", kind="close",
+                              created_at=datetime.datetime(2026, 7, 14, 8, 0))],
+    )
+    data = await _collected([done_old, cancelled_recent], monkeypatch)
+    assert [r["id"] for r in data["closed_rows"]] == [2, 1]
+
+
+def test_closed_sheet_writes_the_new_columns_without_shifting_the_others():
+    from openpyxl import load_workbook
+    assert mrs.CLOSED_HEADERS[:10][-1] == "נוצרה בתאריך"
+    assert mrs.CLOSED_HEADERS[10:] == [
+        "נסגרה בתאריך", "עדכון אחרון", "תאריך העדכון האחרון", "מדווח העדכון"]
+    assert len(mrs.CLOSED_HEADERS) == len(mrs.CLOSED_WIDTHS)
+
+    ws = load_workbook(BytesIO(mrs.build_workbook(_sample_data())))[mrs.SHEET_CLOSED]
+    assert [c.value for c in ws[1]] == mrs.CLOSED_HEADERS
+
+    def cell(name):
+        return ws.cell(2, mrs.CLOSED_HEADERS.index(name) + 1)
+
+    assert cell("עדכון אחרון").value == "🔒 בוצע"
+    assert cell("תאריך העדכון האחרון").value == "06/07/2026 08:00"
+    assert cell("מדווח העדכון").value == "דני"
+    assert cell("נסגרה בתאריך").value == "06/07/2026 08:00"
+    # The filter must span the new columns too, or they are invisible to filtering.
+    assert ws.auto_filter.ref.split(":")[1].startswith(
+        __import__("openpyxl").utils.get_column_letter(len(mrs.CLOSED_HEADERS))
+    )

@@ -481,3 +481,28 @@ def test_mission_card_and_list_line_flag_a_mission_opened_today():
     assert "🆕" in format_mission_line(fresh)
     assert "🆕" not in build_mission_card(old)
     assert "🆕" not in format_mission_line(old)
+
+
+# ── Closing a mission stamps WHEN it closed ────────────────────────────────
+
+class _NullSession:
+    """Just enough session for set_status: it only commits."""
+    async def commit(self):
+        return None
+
+
+async def test_cancelling_a_mission_stamps_completed_at_like_completing_one():
+    """A cancelled mission also left the board at a moment. Leaving the stamp NULL
+    is what left every cancelled row in the XLSX with no closing date."""
+    from app.services.missions_menu_service import set_status
+
+    done = await set_status(_NullSession(), _make_mission(status="open"), "done")
+    cancelled = await set_status(_NullSession(), _make_mission(status="open"), "cancelled")
+    assert done.completed_at is not None
+    assert cancelled.completed_at is not None
+
+
+async def test_reopening_clears_the_closing_stamp():
+    from app.services.missions_menu_service import set_status
+    m = _make_mission(status="cancelled", completed_at=datetime.datetime(2026, 7, 1, 8, 0))
+    assert (await set_status(_NullSession(), m, "open")).completed_at is None
