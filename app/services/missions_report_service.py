@@ -68,11 +68,17 @@ OPEN_TEXT_COLS = [10, 14, 15, 16, 17]
 CLOSED_HEADERS = [
     "מזהה", "כותרת", "רביע", "סטטוס", "אחראי", "תאריך יעד", "הושלמה בתאריך",
     "ימי ביצוע", "עמדה ביעד?", "נוצרה בתאריך",
+    # Appended at the END, same rule as OPEN_HEADERS. "הושלמה בתאריך" is
+    # completed_at raw and stays where it is; "נסגרה בתאריך" is the one to read
+    # for a cancelled mission, whose completed_at was left NULL until this was
+    # fixed — see _closed_at.
+    "נסגרה בתאריך", "עדכון אחרון", "תאריך העדכון האחרון", "מדווח העדכון",
 ]
-CLOSED_WIDTHS = [8, 42, 20, 14, 18, 14, 16, 12, 14, 16]
+CLOSED_WIDTHS = [8, 42, 20, 14, 18, 14, 16, 12, 14, 16, 16, 70, 18, 18]
 # Same reason as OPEN_TEXT_COLS: "14/07/2026 15:05" is a date to a human and a
-# serial number to Excel the moment the sheet is re-saved.
-CLOSED_TEXT_COLS = [6, 7, 10]
+# serial number to Excel the moment the sheet is re-saved. The reported text is
+# in here too — a closing note is often just "בוצע" or "80%".
+CLOSED_TEXT_COLS = [6, 7, 10, 11, 12, 13]
 
 SHEET_SUMMARY = "סיכום ותובנות"
 SHEET_OPEN = "משימות פתוחות"
@@ -97,7 +103,7 @@ KIND_AI_INSIGHTS = "ai_insights"
 # changes the sheet layout would keep serving today's workbook built by the old
 # code until 04:10 tomorrow. Bump this whenever OPEN_HEADERS/CLOSED_HEADERS
 # change — the old row simply stops matching and today's report is rebuilt once.
-KIND_REPORT = "report_v3"
+KIND_REPORT = "report_v4"
 KIND_SUMMARY = "summary"
 
 
@@ -299,6 +305,36 @@ def _update_text(u) -> str:
     return f"{prefix}{flat}"
 
 
+def _close_update(m: Mission):
+    """The note written while closing the mission (kind == "close"), or None.
+
+    Distinct from _last_update: a mission can be closed without a note, and then
+    the newest update is an ordinary progress report — reading that as "why it
+    was closed" is exactly the misreading this separation prevents.
+    """
+    closers = [u for u in oms.get_mission_updates(m)
+               if u.created_at and getattr(u, "kind", None) == "close"]
+    return max(closers, key=lambda u: u.created_at) if closers else None
+
+
+def _closed_at(m: Mission) -> datetime.datetime | None:
+    """When the mission actually left the board — the column to read for ANY
+    closed mission, done or cancelled.
+
+    completed_at is the truth when it is there. It is missing on every mission
+    cancelled before oms.set_status started stamping it, so the closing note's
+    own timestamp stands in, and updated_at last: an edit-time stamp is a worse
+    answer than the closing note, and both beat an empty cell on a mission that
+    is demonstrably closed.
+    """
+    if m.completed_at:
+        return m.completed_at
+    closer = _close_update(m)
+    if closer and closer.created_at:
+        return closer.created_at
+    return m.updated_at
+
+
 def _days_since_update(m: Mission, today: datetime.date) -> int | None:
     """Days since anyone reported on this mission; None when nobody ever did."""
     at = _last_update_at(m)
@@ -391,7 +427,10 @@ async def collect_report_data(session: AsyncSession) -> dict:
         m.due_date or datetime.date.max,
         -(m.id or 0),
     ))
-    closed.sort(key=lambda m: (m.completed_at or datetime.datetime.min), reverse=True)
+    # Newest-closed first, by _closed_at rather than completed_at: sorting on the
+    # raw column parked every cancelled mission (completed_at NULL) at the bottom
+    # of the sheet in id order, whenever it was actually closed.
+    closed.sort(key=lambda m: (_closed_at(m) or datetime.datetime.min), reverse=True)
 
     open_rows = []
     for m in active:
@@ -436,6 +475,7 @@ async def collect_report_data(session: AsyncSession) -> dict:
 
     closed_rows = []
     for m in closed:
+        last_upd = _last_update(m)
         cycle = None
         if m.completed_at and m.created_at:
             cycle = max((m.completed_at - m.created_at).days, 0)
@@ -453,6 +493,12 @@ async def collect_report_data(session: AsyncSession) -> dict:
             "cycle_days": cycle,
             "on_time": on_time,
             "created_at": _fmt_dt(m.created_at),
+            "closed_at": _fmt_dt(_closed_at(m)),
+            # The closing note when there is one — _update_text marks it 🔒 — and
+            # otherwise the last thing anyone reported before the mission closed.
+            "last_status_update": _update_text(last_upd),
+            "last_status_update_at": _fmt_dt(last_upd.created_at) if last_upd else "—",
+            "last_status_author": (last_upd.author_name or "—") if last_upd else "—",
         })
 
     stats = _compute_stats(active, closed, today, now)
@@ -901,12 +947,15 @@ def build_workbook(data: dict, ai_text: str = "") -> bytes:
         values = [
             row["id"], row["title"], row["quadrant"], row["status"], row["owner"],
             row["due"], row["completed_at"], row["cycle_days"], row["on_time"],
-            row["created_at"],
+            row["created_at"], row["closed_at"], row["last_status_update"],
+            row["last_status_update_at"], row["last_status_author"],
         ]
         for ci, value in enumerate(values, 1):
             cell = ws3.cell(ri, ci, value)
             if ci in CLOSED_TEXT_COLS:
                 cell.number_format = "@"
+        # The closing note is prose, not a code — let it breathe like "תיאור".
+        ws3.cell(ri, CLOSED_HEADERS.index("עדכון אחרון") + 1).alignment = wrap
     ws3.freeze_panes = "A2"
     ws3.auto_filter.ref = f"A1:{get_column_letter(len(CLOSED_HEADERS))}{max(1, len(data['closed_rows']) + 1)}"
 
