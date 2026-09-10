@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, or_, exists, update, delete, desc
 
 from app.database import get_db_session
-from app.models import Decision, User, DecisionTypeEnum, DecisionStatusEnum, RoleEnum, DecisionDistribution, DistributionTypeEnum, DistributionStatusEnum, DecisionFeedback, DecisionRaciRole, RaciRoleEnum, LessonLearned, Message, KnowledgeFile, QueryLog, RACISuggestion, RACISuggestionStatusEnum, RACIRule, ReportHistory, Mission, MissionUpdate
+from app.models import Decision, User, DecisionTypeEnum, DecisionStatusEnum, RoleEnum, DecisionDistribution, DistributionTypeEnum, DistributionStatusEnum, DecisionFeedback, DecisionRaciRole, RaciRoleEnum, LessonLearned, Message, KnowledgeFile, QueryLog, RACISuggestion, RACISuggestionStatusEnum, RACIRule, ReportHistory, Mission, MissionUpdate, MissionDueChange
 from app.routers.login import get_current_user
 
 logger = logging.getLogger(__name__)
@@ -411,6 +411,10 @@ async def delete_user(
         await session.execute(update(Mission).where(Mission.owner_id == user_id).values(owner_id=current_user.id))
         # Status updates keep their author_name snapshot, so the log survives the deletion
         await session.execute(update(MissionUpdate).where(MissionUpdate.author_id == user_id).values(author_id=None))
+        # Same for the target-date history: requested_by / changed_by_name are
+        # snapshots, so who asked for a delay outlives the account that asked.
+        await session.execute(update(MissionDueChange).where(MissionDueChange.requested_by_id == user_id).values(requested_by_id=None))
+        await session.execute(update(MissionDueChange).where(MissionDueChange.changed_by_id == user_id).values(changed_by_id=None))
 
         # Delete non-nullable FK records referencing this user
         await session.execute(delete(DecisionFeedback).where(DecisionFeedback.user_id == user_id))

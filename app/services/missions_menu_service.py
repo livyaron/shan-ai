@@ -13,7 +13,7 @@ from sqlalchemy import select, func, case
 from sqlalchemy.ext.asyncio import AsyncSession
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
-from app.models import Mission, MissionStatusEnum, MissionUpdate, User, RoleEnum
+from app.models import Mission, MissionDueChange, MissionStatusEnum, MissionUpdate, User, RoleEnum
 
 _IL_TZ = ZoneInfo("Asia/Jerusalem")
 
@@ -179,6 +179,54 @@ def parse_due_date_text(text: str, today: datetime.date | None = None) -> dateti
 def format_due(d: datetime.date | None) -> str:
     # DD/MM/YYYY only — digits are direction-neutral so this stays readable in RTL.
     return d.strftime("%d/%m/%Y") if d else "—"
+
+
+def needs_due_reason(m: Mission, new_date: datetime.date | None) -> bool:
+    """Is this due-date change a postponement of a target that already exists?
+
+    The one rule behind both halves of the feature: it decides when the screen
+    (and the bot) must ask for a reason, AND when update_mission writes a
+    history row. Setting a first target is not a postponement, and neither is
+    re-saving the same date — a card that claimed "נדחה פעם אחת" because someone
+    pressed 📅 עדכן twice would be worse than no counter at all.
+    """
+    return m.due_date is not None and new_date != m.due_date
+
+
+def get_due_changes(m: Mission) -> list["MissionDueChange"]:
+    """The postponement log, oldest first. [] when it was not eager-loaded.
+
+    Same contract as get_mission_updates: never triggers a lazy load, which
+    under asyncio raises MissingGreenlet.
+    """
+    from sqlalchemy import inspect as _inspect
+    if "due_changes" in _inspect(m).unloaded:
+        return []
+    return list(m.due_changes or [])
+
+
+def postpone_label(n: int) -> str:
+    """'נדחה פעם אחת' / 'נדחה פעמיים' / 'נדחה 3 פעמים' — Hebrew counts properly."""
+    if n <= 0:
+        return ""
+    if n == 1:
+        return "נדחה פעם אחת"
+    if n == 2:
+        return "נדחה פעמיים"
+    return f"נדחה {n} פעמים"
+
+
+def format_due_change(c: "MissionDueChange") -> str:
+    """One postponement as a plain line: 'מ־10/09/2026 ל־15/09/2026 · סיבה · מי'."""
+    # Words, not an arrow: ← and → are bidi-mirrored characters, so in an RTL
+    # line the arrow can end up pointing at the date it came FROM.
+    parts = [f"מ־{format_due(c.old_date)} ל־{format_due(c.new_date)}"]
+    if c.reason:
+        parts.append(c.reason)
+    who = c.requested_by or c.changed_by_name
+    if who:
+        parts.append(f"ביקש/ה: {who}")
+    return " · ".join(parts)
 
 
 def _chunk(lst: list, n: int):
@@ -500,6 +548,15 @@ def build_mission_card(m: Mission, show_all_updates: bool = False) -> str:
     # that appeared overnight, and a bare date cannot answer it.
     created_str = format_created_il(m.created_at)
     fresh = is_new(m)
+    # A target date that moved says so on the card itself: "יעד: 15/09" alone
+    # hides that the same mission was already promised for the 10th.
+    postponed = get_due_changes(m)
+    postpone_line = ""
+    if postponed:
+        postpone_line = (
+            f"↻ <i>{_html.escape(postpone_label(len(postponed)))} · "
+            f"{_html.escape(format_due_change(postponed[-1]))}</i>\n"
+        )
     desc = f"\n📝 {_html.escape(m.description)}\n" if m.description else ""
     updates = format_updates_block(
         m,
@@ -516,6 +573,7 @@ def build_mission_card(m: Mission, show_all_updates: bool = False) -> str:
         f"📊 <b>סטטוס:</b> {STATUS_LABELS.get(m.status, m.status)}\n"
         f"👤 <b>אחראי:</b> {_html.escape(owner_name)}\n"
         f"📅 <b>יעד:</b> {due_line}\n"
+        f"{postpone_line}"
         f"{desc}"
         "──────────────────\n"
         f"<i>נפתחה ע\"י {_html.escape(creator)} · {created_str}</i>"
@@ -653,6 +711,9 @@ async def get_mission(session: AsyncSession, mission_id: int) -> Mission | None:
             selectinload(Mission.owner),
             selectinload(Mission.created_by),
             selectinload(Mission.updates).selectinload(MissionUpdate.author),
+            # Without this the card's "↻ נדחה" line silently disappears: the log
+            # reads as unloaded and get_due_changes answers [].
+            selectinload(Mission.due_changes),
         )
         .where(Mission.id == mission_id)
     )
@@ -667,6 +728,7 @@ async def create_mission(
     owner_id: int,
     created_by_id: int | None,
     due_date: datetime.date | None,
+    parent_id: int | None = None,
 ) -> Mission:
     m = Mission(
         title=title.strip()[:255],
@@ -676,6 +738,9 @@ async def create_mission(
         owner_id=owner_id,
         created_by_id=created_by_id,
         due_date=due_date,
+        # משימת המשך: the mission this one grew out of. Keyword with a default so
+        # every existing caller (the bot wizard included) is untouched.
+        parent_id=parent_id,
     )
     session.add(m)
     await session.commit()
@@ -737,10 +802,32 @@ async def update_mission(
     owner_id: int | None = None,
     due_date: object = "__unset__",
     quadrant: str | None = None,
+    reason: str | None = None,
+    requested_by: str | None = None,
+    requested_by_id: int | None = None,
+    actor: User | None = None,
 ) -> Mission:
+    """Apply an edit to one mission. A moved target date also writes its history.
+
+    The history row is written HERE, not at the call sites, so no path can move
+    a date without leaving a trace: the board, the batch bar and the Telegram
+    card all reach the same place. Whether the caller must ASK for a reason
+    first is a separate question, answered by needs_due_reason().
+    """
     if owner_id is not None:
         m.owner_id = owner_id
     if due_date != "__unset__":
+        if needs_due_reason(m, due_date):  # type: ignore[arg-type]
+            session.add(MissionDueChange(
+                mission_id=m.id,
+                old_date=m.due_date,
+                new_date=due_date,  # type: ignore[arg-type]
+                reason=(reason or "").strip()[:2000] or None,
+                requested_by=(requested_by or "").strip()[:120] or None,
+                requested_by_id=requested_by_id,
+                changed_by_id=actor.id if actor else None,
+                changed_by_name=(actor.username if actor else None),
+            ))
         m.due_date = due_date  # type: ignore[assignment]
         m.overdue_notified_at = None  # re-arm the overdue alert
     if quadrant is not None:

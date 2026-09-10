@@ -411,13 +411,24 @@ class Mission(Base):
     created_at      = Column(DateTime, default=datetime.utcnow)
     updated_at      = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     completed_at    = Column(DateTime, nullable=True)
+    # משימת המשך: the mission this one grew out of. SET NULL and not CASCADE on
+    # purpose — losing the parent must never delete work that is still open; the
+    # chain simply stops one link earlier.
+    parent_id       = Column(Integer, ForeignKey("missions.id", ondelete="SET NULL"),
+                             nullable=True, index=True)
 
     owner      = relationship("User", foreign_keys=[owner_id])
     created_by = relationship("User", foreign_keys=[created_by_id])
+    parent     = relationship("Mission", remote_side=[id], foreign_keys=[parent_id])
     updates    = relationship(
         "MissionUpdate",
         cascade="all, delete-orphan",
         order_by="MissionUpdate.created_at",
+    )
+    due_changes = relationship(
+        "MissionDueChange",
+        cascade="all, delete-orphan",
+        order_by="MissionDueChange.created_at",
     )
 
     __table_args__ = (Index("ix_missions_status_due", "status", "due_date"),)
@@ -442,6 +453,33 @@ class MissionUpdate(Base):
     created_at  = Column(DateTime, default=datetime.utcnow)
 
     author = relationship("User", foreign_keys=[author_id])
+
+
+class MissionDueChange(Base):
+    """One postponement of a mission's target date (חדר מבצעים). Append-only.
+
+    Written only when an EXISTING target date is moved: setting a first date is
+    not a postponement, and the card's "נדחה N פעמים" counter reads len(rows),
+    so a first-set row would make that counter lie.
+
+    requested_by / changed_by_name are snapshots for the same reason
+    MissionUpdate.author_name is one: deleting a user must never erase who asked
+    for a delay. requested_by also holds names that are not users at all — a
+    committee, a contractor, a customer — which is most of why dates move.
+    """
+    __tablename__ = "mission_due_changes"
+
+    id              = Column(Integer, primary_key=True, index=True)
+    mission_id      = Column(Integer, ForeignKey("missions.id", ondelete="CASCADE"),
+                             nullable=False, index=True)
+    old_date        = Column(Date, nullable=True)   # NULL only on a cleared target
+    new_date        = Column(Date, nullable=True)   # NULL = the target was removed
+    reason          = Column(Text, nullable=True)
+    requested_by    = Column(String(120), nullable=True)   # free text or a username
+    requested_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    changed_by_id   = Column(Integer, ForeignKey("users.id"), nullable=True)
+    changed_by_name = Column(String(100), nullable=True)
+    created_at      = Column(DateTime, default=datetime.utcnow)
 
 
 class MissionReportCache(Base):
