@@ -2,6 +2,58 @@
    Every layout posts to the same endpoints and uses the same element id
    conventions (note-<id>, closenote-<id>, quad-<id>, own-<id>, due-<id>),
    so the behaviour lives here once and a new layout inherits it. #}
+{% if not is_viewer %}
+{# דחיית תאריך יעד — one dialog per page, shared by every card and every layout.
+   It is painted from --wrs-bg/--wrs-fg, the pair each layout already defines for
+   the style switcher, so it looks native on the dark board and on the light
+   table without any layout knowing it exists. #}
+<style>
+dialog.wrx-dlg{background:var(--wrs-bg,#fff);color:var(--wrs-fg,#161616);
+  border:1px solid rgba(128,128,128,.45);border-radius:12px;padding:20px;width:min(430px,92vw);
+  font-family:inherit}
+dialog.wrx-dlg::backdrop{background:rgba(0,0,0,.55)}
+.wrx-h{font-weight:700;font-size:1.02rem;margin-bottom:12px}
+.wrx-dlg label{display:block;font-size:.78rem;opacity:.7;margin:10px 0 4px}
+.wrx-dlg input,.wrx-dlg textarea,.wrx-dlg select{width:100%;background:var(--wrs-bg,#fff);
+  color:var(--wrs-fg,#161616);border:1px solid rgba(128,128,128,.45);border-radius:7px;
+  padding:7px 9px;font-family:inherit;font-size:.88rem;resize:vertical}
+.wrx-dlg input[readonly]{opacity:.65}
+.wrx-move{display:flex;gap:10px}
+.wrx-move>div{flex:1}
+.wrx-acts{display:flex;gap:8px;margin-top:16px}
+.wrx-btn{border:1px solid rgba(128,128,128,.45);background:transparent;color:inherit;border-radius:7px;
+  padding:6px 14px;font-family:inherit;font-size:.86rem;cursor:pointer}
+.wrx-btn.go{background:var(--wrs-fg,#161616);color:var(--wrs-bg,#fff);font-weight:600}
+</style>
+<dialog id="dueDlg" class="wrx-dlg">
+  <div class="wrx-h">↻ דחיית תאריך יעד</div>
+  <div class="wrx-move">
+    <div>
+      <label>תאריך קודם</label>
+      <input id="dueOld" readonly dir="auto">
+    </div>
+    <div>
+      <label>תאריך חדש</label>
+      <input id="dueNew" readonly dir="auto">
+    </div>
+  </div>
+  <label for="dueReason">סיבת הדחייה *</label>
+  <textarea id="dueReason" rows="3" dir="auto" maxlength="2000"
+            placeholder="למה היעד זז? הסיבה נשמרת בהיסטוריית המשימה"></textarea>
+  <label for="dueWho">מי דחה / ביקש את הדחייה</label>
+  <select id="dueWho" onchange="dueWhoChanged()">
+    <option value="">— לא צוין —</option>
+    {% for u in users %}<option value="{{ u.id }}">{{ u.username }}</option>{% endfor %}
+    <option value="__other__">אחר / גורם חיצוני…</option>
+  </select>
+  <input id="dueWhoOther" hidden dir="auto" maxlength="120"
+         placeholder="שם הגורם שביקש את הדחייה (ועדה, קבלן, לקוח…)">
+  <div class="wrx-acts">
+    <button type="button" class="wrx-btn go" onclick="saveDue()">✅ שמור דחייה</button>
+    <button type="button" class="wrx-btn" onclick="closeDueDlg()">ביטול</button>
+  </div>
+</dialog>
+{% endif %}
 <script>
 async function post(url, data){
   const body = new FormData();
@@ -34,12 +86,25 @@ function toggleClose(id, action){
     : 'מה בוצע? יישמר כעדכון סטטוס עם השם שלך והשעה';
   ta.focus();
 }
-async function closeMission(id, withNote){
+// `thenChild` is the real workflow behind משימת המשך: the follow-up is born at
+// the moment the parent closes, so closing can hand straight over to creating it
+// instead of making anyone hunt the closed mission down again.
+async function closeMission(id, withNote, thenChild){
   const action = pendingClose[id];
   if (!action) return;
   const note = withNote ? document.getElementById(`closenote-${id}`).value.trim() : '';
   if (withNote && !note){ alert('נדרש טקסט, או סגור בלי הערה'); return; }
-  if (await post(`/dashboard/war-room/${id}/status`, {action, note})) location.reload();
+  if (!await post(`/dashboard/war-room/${id}/status`, {action, note})) return;
+  const btn = thenChild ? document.querySelector(`[data-child="${id}"]`) : null;
+  if (btn){
+    openChild(btn.dataset);
+    // The board behind the dialog now shows a mission that is already closed;
+    // backing out of the follow-up has to bring the real board back.
+    document.getElementById('createDlg')
+            .addEventListener('close', () => location.reload(), {once: true});
+    return;
+  }
+  location.reload();
 }
 async function addNote(id){
   const note = document.getElementById(`note-${id}`).value.trim();
@@ -54,10 +119,108 @@ async function assign(id){
   const owner_id = document.getElementById(`own-${id}`).value;
   if (await post(`/dashboard/war-room/${id}/assign`, {owner_id})) location.reload();
 }
+// Moving a target date that already exists is a postponement, not an edit:
+// it opens the dialog and asks why. Setting a FIRST date stays one click.
+let dueCtx = null;
 async function setDue(id){
-  const due_date = document.getElementById(`due-${id}`).value;
+  const input = document.getElementById(`due-${id}`);
+  const due_date = input.value;
+  const old = input.dataset.old || '';
+  if (old && due_date !== old){ openDueDlg(id, old, due_date); return; }
   if (await post(`/dashboard/war-room/${id}/due`, {due_date})) location.reload();
 }
+function fmtDate(iso){
+  if (!iso) return 'ללא תאריך';
+  const [y, m, d] = iso.split('-');
+  return `${d}/${m}/${y}`;
+}
+function openDueDlg(id, oldDate, newDate){
+  const dlg = document.getElementById('dueDlg');
+  if (!dlg){   // no dialog in this layout — never silently swallow the change
+    if (confirm('לשנות את תאריך היעד ללא תיעוד סיבה?')) {
+      post(`/dashboard/war-room/${id}/due`, {due_date: newDate}).then(ok => ok && location.reload());
+    }
+    return;
+  }
+  dueCtx = {id, oldDate, newDate};
+  document.getElementById('dueOld').value = fmtDate(oldDate);
+  document.getElementById('dueNew').value = fmtDate(newDate);
+  document.getElementById('dueReason').value = '';
+  const who = document.getElementById('dueWho');
+  if (who) who.value = '';
+  const other = document.getElementById('dueWhoOther');
+  if (other){ other.value = ''; other.hidden = true; }
+  dlg.showModal();
+  document.getElementById('dueReason').focus();
+}
+function dueWhoChanged(){
+  const other = document.getElementById('dueWhoOther');
+  other.hidden = document.getElementById('dueWho').value !== '__other__';
+  if (!other.hidden) other.focus();
+}
+function closeDueDlg(){
+  const dlg = document.getElementById('dueDlg');
+  if (dlg) dlg.close();
+  // The date input still shows the date nobody saved — put the real one back,
+  // so the card never claims a target the board does not hold.
+  if (dueCtx){
+    const input = document.getElementById(`due-${dueCtx.id}`);
+    if (input) input.value = dueCtx.oldDate;
+  }
+  dueCtx = null;
+}
+async function saveDue(){
+  if (!dueCtx) return;
+  const reason = document.getElementById('dueReason').value.trim();
+  if (!reason){ alert('נדרשת סיבת דחייה'); return; }
+  const whoSel = document.getElementById('dueWho');
+  const picked = whoSel ? whoSel.value : '';
+  const data = {due_date: dueCtx.newDate, reason};
+  if (picked === '__other__'){
+    data.requested_by = document.getElementById('dueWhoOther').value.trim();
+  } else if (picked){
+    data.requested_by = whoSel.options[whoSel.selectedIndex].text;
+    data.requested_by_id = picked;
+  }
+  if (await post(`/dashboard/war-room/${dueCtx.id}/due`, data)) location.reload();
+}
+
+// ---- משימת המשך ------------------------------------------------------------
+// The follow-up reuses the board's own create dialog, with the parent link
+// carried in a hidden field — one create path, so a child mission is an
+// ordinary mission in every way that matters.
+function openCreate(){
+  const dlg = document.getElementById('createDlg');
+  if (!dlg) return;
+  const parent = document.getElementById('createParent');
+  if (parent) parent.value = '';
+  const note = document.getElementById('createParentNote');
+  if (note){ note.hidden = true; note.textContent = ''; }
+  const head = document.getElementById('createHead');
+  if (head) head.textContent = '➕ משימה חדשה';
+  dlg.showModal();
+}
+function openChild(ds){
+  const dlg = document.getElementById('createDlg');
+  if (!dlg) return;
+  openCreate();
+  const parent = document.getElementById('createParent');
+  if (parent) parent.value = ds.child;
+  const note = document.getElementById('createParentNote');
+  if (note){ note.textContent = '🔗 משימת המשך ל: ' + (ds.childTitle || ''); note.hidden = false; }
+  const head = document.getElementById('createHead');
+  if (head) head.textContent = '➕ משימת המשך';
+  // The follow-up inherits the parent's owner and quadrant as a starting point;
+  // both stay editable in the dialog.
+  const own = dlg.querySelector('[name=owner_id]');
+  if (own && ds.childOwner) own.value = ds.childOwner;
+  const quad = dlg.querySelector('[name=quadrant]');
+  if (quad && ds.childQuad) quad.value = ds.childQuad;
+  const title = dlg.querySelector('[name=title]');
+  if (title){ title.value = ''; title.focus(); }
+}
+document.querySelectorAll('[data-child]').forEach(btn =>
+  btn.addEventListener('click', () => openChild(btn.dataset)));
 async function openSummary(refresh){
   const dlg  = document.getElementById('summaryDlg');
   const body = document.getElementById('summaryBody');

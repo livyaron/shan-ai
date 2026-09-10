@@ -12,8 +12,9 @@ from types import SimpleNamespace
 import pytest
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
-from app.models import Mission, MissionUpdate, User
+from app.models import Mission, MissionDueChange, MissionUpdate, User
 from app.services import missions_menu_service as oms
+from app.services import war_room_kpis as kpis
 from app.services import war_room_styles as wrs
 from app.services import war_room_motto as wrm
 from app.services import war_room_wall as wall
@@ -88,6 +89,8 @@ def _mission(mid, title, owner, due, quadrant="do", status="open", updates=(),
     m.owner = User(username=owner)
     m.created_by = User(username=owner)
     m.updates = list(updates)
+    # Empty by default, like a mission whose target was never moved.
+    m.due_changes = []
     return m
 
 
@@ -119,6 +122,15 @@ def _context(style, is_viewer=False):
     today_due = _mission(2, "ליקוי בטיחות", "דנה", TODAY, created_at=FRESH_AT)
     planned = _mission(3, "בדיקת ממסרים", "שרון", TODAY + datetime.timedelta(days=14), "plan")
     undated = _mission(4, "מיפוי מלאי", "יעל", None, "backlog")
+    # A target that was moved once, and a mission that grew out of a closed one —
+    # the two histories the board has to be able to draw.
+    planned.due_changes = [MissionDueChange(
+        mission_id=3, old_date=TODAY + datetime.timedelta(days=7),
+        new_date=TODAY + datetime.timedelta(days=14),
+        reason="ממתינים לקבלת התייחסות מהוועדה", requested_by="ישראל ישראלי",
+        changed_by_name="אבי", created_at=datetime.datetime(2026, 8, 20, 8, 30),
+    )]
+    undated.parent_id = 7
     missions = [late, today_due, planned, undated]
 
     quadrants = {key: [] for key, *_ in oms.QUADRANTS}
@@ -144,7 +156,23 @@ def _context(style, is_viewer=False):
         "stats": {"open": 4, "do_now": 2, "overdue": 1, "done_week": 6},
         "users": [SimpleNamespace(id=1, username="אבי"), SimpleNamespace(id=2, username="דנה")],
         "today": TODAY,
-        "filters": {"owner": None, "status": "active", "q": ""},
+        "filters": {"owner": None, "status": "active", "q": "", "kpi": ""},
+        # Mirrors the router: the KPI row is data, and each card knows where a
+        # click on it goes.
+        "kpi_cards": kpis.build_cards(
+            {"open": 4, "do_now": 2, "overdue": 1, "done_week": 6}, "",
+            {"owner": None, "status": "active", "q": "", "style": None},
+        ),
+        "active_kpi": "",
+        "chains": {4: [
+            {"id": 7, "title": "קבלת אישור מהוועדה", "status": "done", "current": False,
+             "done": True, "cancelled": False, "range": "20/08/2026–01/09/2026"},
+            {"id": 4, "title": "מיפוי מלאי", "status": "open", "current": True,
+             "done": False, "cancelled": False, "range": "01/09/2026–היום"},
+        ]},
+        "child_counts": {1: 1},
+        "postpone_label": oms.postpone_label,
+        "fmt_due": oms.format_due,
         "is_viewer": is_viewer,
         "fmt_stamp": oms.format_stamp_il,
         # Mirrors the router, with `now` pinned so the "new mission" band does

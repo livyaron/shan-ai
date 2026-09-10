@@ -28,6 +28,14 @@ body{background:var(--bg-deep);color:var(--text-1);font-family:var(--ui);min-hei
 .wr-stat .lbl{color:var(--text-2);font-size:.8rem;margin-top:2px}
 .wr-stat.c-cyan .num{color:var(--cyan)} .wr-stat.c-red .num{color:var(--red)}
 .wr-stat.c-amber .num{color:var(--amber)} .wr-stat.c-green .num{color:var(--green)}
+/* Each KPI is a filter: one click shows only what it counts, a second click on
+   the same card clears it. Marked, never re-coloured — the tone still says
+   which metric it is. */
+a.wr-stat{display:block;color:inherit;text-decoration:none;transition:border-color .12s}
+a.wr-stat:hover{border-color:var(--border-hi)}
+a.wr-stat.on{border-color:var(--cyan);box-shadow:inset 0 0 0 1px var(--cyan)}
+.wr-stat .kpi-on{color:var(--cyan);font-size:.7rem;font-family:var(--mono);margin-top:6px}
+.wr-stat .kpi-hint{color:var(--text-2);font-size:.7rem;font-family:var(--mono);margin-top:6px;opacity:.55}
 
 /* filter bar */
 .wr-filters{display:flex;flex-wrap:wrap;gap:10px;align-items:center;background:var(--bg-card);
@@ -76,6 +84,24 @@ body{background:var(--bg-deep);color:var(--text-1);font-family:var(--ui);min-hei
 .wr-card .m-upd .upd-meta{font-family:var(--mono);color:var(--text-1);opacity:.75}
 .wr-card .m-updlog{margin-top:6px}
 .wr-card .m-updlog summary{cursor:pointer;color:var(--text-2);font-size:.78rem;opacity:.85}
+/* השתלשלות — the missions this one grew out of. Reads as a quiet trail above
+   the card's own content, never as another mission on the board. */
+.m-chain{margin-top:8px;border:1px dashed var(--border-hi);border-radius:8px;padding:6px 8px}
+.m-chain summary{cursor:pointer;color:var(--text-2);font-size:.78rem}
+.m-chain-step{display:flex;gap:8px;font-size:.78rem;margin-top:6px;align-items:baseline}
+.m-chain-step .mk{font-family:var(--mono);color:var(--text-2)}
+.m-chain-step .wh{font-family:var(--mono);color:var(--text-2);white-space:nowrap}
+.m-chain-step .tt{unicode-bidi:isolate}
+.m-chain-step.cur .mk,.m-chain-step.cur .tt{color:var(--cyan);font-weight:600}
+.m-child{color:var(--purple);font-size:.78rem;margin-top:6px}
+/* ↻ נדחה — the postponement log. Collapsed by default: the card says THAT the
+   target moved, the history says why, and only when asked. */
+.m-post{margin-top:6px}
+.m-post summary{cursor:pointer;color:var(--amber);font-size:.78rem}
+.m-post-row{border-inline-start:2px solid var(--border-hi);padding-inline-start:8px;margin-top:6px;
+  font-size:.78rem;color:var(--text-2);unicode-bidi:isolate}
+.m-post-row .when{font-family:var(--mono);color:var(--text-1);opacity:.75}
+.m-post-row .move{font-family:var(--mono);color:var(--amber)}
 .m-notebox{display:none;margin-top:8px}
 .m-notebox textarea{width:100%;background:var(--bg-card);color:var(--text-1);border:1px solid var(--border-hi);
   border-radius:8px;padding:6px 8px;font-size:.85rem;font-family:var(--ui);resize:vertical}
@@ -130,26 +156,35 @@ dialog.wr-dlg::backdrop{background:rgba(3,6,12,.75)}
     <div style="display:flex;align-items:center;gap:10px">
       {% include "_war_room_style_switcher.html" %}
       {% if not is_viewer %}
-      <button class="wr-btn primary" onclick="document.getElementById('createDlg').showModal()">➕ משימה חדשה</button>
+      <button class="wr-btn primary" onclick="openCreate()">➕ משימה חדשה</button>
       {% endif %}
     </div>
   </div>
 
   <div class="wr-stats">
-    <div class="wr-stat c-cyan"><div class="num">{{ stats.open }}</div><div class="lbl">משימות פתוחות</div></div>
-    <div class="wr-stat c-red"><div class="num">{{ stats.do_now }}</div><div class="lbl">🔥 בצע עכשיו</div></div>
-    <div class="wr-stat c-amber"><div class="num">{{ stats.overdue }}</div><div class="lbl">⚠️ באיחור</div></div>
-    <div class="wr-stat c-green"><div class="num">{{ stats.done_week }}</div><div class="lbl">✅ הושלמו השבוע</div></div>
+    {% for c in kpi_cards %}
+    <a class="wr-stat c-{{ c.tone }}{% if c.active %} on{% endif %}" href="{{ c.href }}"
+       title="{% if c.active %}לחיצה נוספת מבטלת את הסינון{% else %}הצג בלוח רק את המשימות האלה{% endif %}">
+      <div class="num">{{ c.value }}</div>
+      <div class="lbl">{{ c.label }}</div>
+      {% if c.active %}<div class="kpi-on">● סינון פעיל · לחץ לביטול</div>
+      {% else %}<div class="kpi-hint">לחץ לסינון</div>{% endif %}
+    </a>
+    {% endfor %}
   </div>
 
   <form class="wr-filters" method="GET" action="/dashboard/war-room">
+    {# The KPI filter survives a search or an owner change — the two compose. #}
+    <input type="hidden" name="kpi" value="{{ filters.kpi }}">
     <select name="owner">
       <option value="">כל האחראים</option>
       {% for u in users %}
       <option value="{{ u.id }}" {% if filters.owner == u.id %}selected{% endif %}>{{ u.username }}</option>
       {% endfor %}
     </select>
-    <select name="status">
+    {# While a KPI card is on it decides the status itself, so the select stands
+       down rather than silently doing nothing. #}
+    <select name="status" {% if filters.kpi %}disabled title="הסטטוס נקבע לפי כרטיס ה-KPI שנבחר"{% endif %}>
       <option value="active" {% if filters.status == 'active' %}selected{% endif %}>פעילות</option>
       <option value="done" {% if filters.status == 'done' %}selected{% endif %}>הושלמו</option>
       <option value="cancelled" {% if filters.status == 'cancelled' %}selected{% endif %}>בוטלו</option>
@@ -193,6 +228,22 @@ dialog.wr-dlg::backdrop{background:rgba(3,6,12,.75)}
         <div class="wr-card{% if late %} overdue{% endif %}{% if fresh %} fresh{% endif %}">
           <div class="m-title" dir="auto">{% if fresh %}<span class="wr-chip m-new">🆕 חדשה</span> {% endif %}{{ m.title }}</div>
           {% if m.description %}<div class="m-desc" dir="auto">{{ m.description }}</div>{% endif %}
+          {% set chain = chains.get(m.id) %}
+          {% if chain %}
+          <details class="m-chain">
+            <summary>🔗 השתלשלות ({{ chain|length }} משימות)</summary>
+            {% for step in chain %}
+            <div class="m-chain-step{% if step.current %} cur{% endif %}">
+              <span class="mk">{% if step.current %}→{% elif step.cancelled %}🚫{% else %}✓{% endif %}</span>
+              <span class="wh">{{ step.range }}</span>
+              <span class="tt" dir="auto">{{ step.title }}{% if step.current %} <span class="mk">(משימה נוכחית)</span>{% endif %}</span>
+            </div>
+            {% endfor %}
+          </details>
+          {% endif %}
+          {% if child_counts.get(m.id) %}
+          <div class="m-child">↳ נפתחה ממנה משימת המשך{% if child_counts[m.id] > 1 %} ({{ child_counts[m.id] }}){% endif %}</div>
+          {% endif %}
           {% if m.updates %}
           {% set last_upd = m.updates[-1] %}
           <div class="m-updates">
@@ -216,6 +267,22 @@ dialog.wr-dlg::backdrop{background:rgba(3,6,12,.75)}
             <span{% if fresh %} class="m-new"{% endif %}>🕒 נוצרה {{ fmt_created(m.created_at) }}</span>
             <span>נפתחה ע"י {{ m.created_by.username if m.created_by else '—' }}</span>
           </div>
+          {% set moves = m.due_changes %}
+          {% if moves %}
+          <details class="m-post">
+            <summary>↻ {{ postpone_label(moves|length) }}</summary>
+            {% for c in moves %}
+            <div class="m-post-row">
+              <span class="when">{{ fmt_created(c.created_at) }}</span> ·
+              {# Words rather than an arrow: ←/→ are bidi-mirrored, so in RTL the
+                 arrow can render pointing back at the old date. #}
+              <span class="move">מ־{{ fmt_due(c.old_date) }} ל־{{ fmt_due(c.new_date) }}</span><br>
+              סיבה: {{ c.reason or '—' }}<br>
+              נדחה ע"י: {{ c.requested_by or c.changed_by_name or '—' }}
+            </div>
+            {% endfor %}
+          </details>
+          {% endif %}
           {% if not is_viewer %}
           <div class="m-actions">
             {% if m.status in active_statuses %}
@@ -225,6 +292,12 @@ dialog.wr-dlg::backdrop{background:rgba(3,6,12,.75)}
             {% else %}
             <button class="wr-btn" onclick="act({{ m.id }}, 'reopen')">↩️ פתח מחדש</button>
             {% endif %}
+            {# משימת המשך: available on a closed mission too — that is exactly when
+               the follow-up is born. Data attributes, not a JS argument, so a
+               title with quotes in it cannot break the card. #}
+            <button class="wr-btn" data-child="{{ m.id }}" data-child-title="{{ m.title }}"
+                    data-child-owner="{{ m.owner_id }}" data-child-quad="{{ qkey }}"
+                    title="פתיחת משימה חדשה שנגזרת מהמשימה הזו">➕ משימת המשך</button>
           </div>
           {% if m.status in active_statuses %}
           <div class="m-notebox" id="notebox-{{ m.id }}">
@@ -241,6 +314,8 @@ dialog.wr-dlg::backdrop{background:rgba(3,6,12,.75)}
             <div class="m-edit-row">
               <button class="wr-btn primary" onclick="closeMission({{ m.id }}, true)">✅ סגור עם הערה</button>
               <button class="wr-btn" onclick="closeMission({{ m.id }}, false)">⏭ סגור בלי הערה</button>
+              <button class="wr-btn" onclick="closeMission({{ m.id }}, true, true)"
+                      title="סוגר את המשימה ופותח מיד משימת המשך המקושרת אליה">✅ סגור + משימת המשך</button>
               <button class="wr-btn" onclick="toggleClose({{ m.id }}, null)">ביטול</button>
             </div>
           </div>
@@ -265,7 +340,10 @@ dialog.wr-dlg::backdrop{background:rgba(3,6,12,.75)}
               <button class="wr-btn" onclick="assign({{ m.id }})">👤 הקצה</button>
             </div>
             <div class="m-edit-row">
-              <input type="date" id="due-{{ m.id }}" value="{{ m.due_date.isoformat() if m.due_date else '' }}">
+              {# data-old is what turns a change into a postponement: the JS
+                 compares against it and asks for a reason. #}
+              <input type="date" id="due-{{ m.id }}" value="{{ m.due_date.isoformat() if m.due_date else '' }}"
+                     data-old="{{ m.due_date.isoformat() if m.due_date else '' }}">
               <button class="wr-btn" onclick="setDue({{ m.id }})">📅 עדכן</button>
             </div>
           </details>
@@ -281,8 +359,11 @@ dialog.wr-dlg::backdrop{background:rgba(3,6,12,.75)}
 
 {% if not is_viewer %}
 <dialog id="createDlg">
-  <h3>➕ משימה חדשה</h3>
+  <h3 id="createHead">➕ משימה חדשה</h3>
+  <div id="createParentNote" hidden
+       style="font-size:.82rem;color:var(--purple);margin-bottom:8px" dir="auto"></div>
   <form method="POST" action="/dashboard/war-room/create">
+    <input type="hidden" name="parent_id" id="createParent" value="">
     <label>כותרת *</label>
     <input name="title" required maxlength="255" dir="auto">
     <label>תיאור</label>

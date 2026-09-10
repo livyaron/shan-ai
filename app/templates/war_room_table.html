@@ -65,6 +65,26 @@ a{color:var(--blue);text-decoration:none} a:hover{color:var(--blue-4)}
 .tb-chip{border:1px solid var(--edge);border-radius:10px;padding:1px 8px;font-size:.72rem;white-space:nowrap}
 .tb-last{color:var(--ink-3);font-size:.78rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;unicode-bidi:isolate}
 .tb-empty{padding:40px 20px;text-align:center;color:var(--ink-3);font-size:.9rem}
+/* KPI strip — the same four numbers as the board, each one a filter. */
+.tb-kpi{display:flex;gap:8px;padding:8px 20px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.tb-kpi a{display:flex;align-items:baseline;gap:6px;border:1px solid var(--edge);border-radius:4px;
+  padding:5px 12px;font-size:.8rem;color:var(--ink-2);background:var(--bg)}
+.tb-kpi a:hover{border-color:var(--ink-3);color:var(--ink)}
+.tb-kpi a.on{border-color:var(--blue);background:var(--blue-2);color:var(--blue-4);font-weight:600}
+.tb-kpi .n{font-family:var(--mono);font-size:.95rem;font-weight:600}
+.tb-kpi .clear{color:var(--ink-3);font-size:.75rem;align-self:center}
+/* Chain / postponement chips: the row says a history EXISTS, the click opens it. */
+.tb-mark{border:1px solid var(--edge);border-radius:10px;padding:0 6px;font-size:.7rem;
+  color:var(--ink-3);cursor:pointer;background:var(--bg);font-family:var(--mono)}
+.tb-mark:hover{border-color:var(--ink-3);color:var(--ink)}
+.tb-mark.post{color:var(--amber);border-color:var(--amber)}
+.tb-hist{font-size:.8rem;color:var(--ink-2);max-width:820px}
+.tb-hist .step{display:flex;gap:8px;margin-top:4px;align-items:baseline}
+.tb-hist .step.cur{color:var(--blue-4);font-weight:600}
+.tb-hist .when{font-family:var(--mono);color:var(--ink-3);white-space:nowrap}
+.tb-hist .move{font-family:var(--mono);color:var(--amber)}
+.tb-hist .blk{margin-top:8px;padding-inline-start:8px;border-inline-start:2px solid var(--line)}
+.tb-hist h4{font-size:.78rem;color:var(--ink-3);font-weight:600;margin-top:6px}
 .tb-foot{display:flex;align-items:center;gap:16px;padding:12px 20px;font-size:.75rem;color:var(--ink-3);flex-wrap:wrap}
 .kbd{font-family:var(--mono);font-size:.7rem;background:var(--bg-2);border:1px solid #dde1e6;
   border-radius:3px;padding:1px 5px;color:#525252}
@@ -100,20 +120,31 @@ dialog.tb-dlg input,dialog.tb-dlg textarea,dialog.tb-dlg select{width:100%;backg
     <a class="tb-btn" href="/dashboard/war-room/report.xlsx">ייצוא Excel</a>
     <button class="tb-btn" onclick="openSummary()">סיכום AI</button>
     {% if not is_viewer %}
-    <button class="tb-btn go" onclick="document.getElementById('createDlg').showModal()">משימה חדשה</button>
+    <button class="tb-btn go" onclick="openCreate()">משימה חדשה</button>
     {% endif %}
   </span>
 </div>
 
+<div class="tb-kpi">
+  {% for c in kpi_cards %}
+  <a href="{{ c.href }}" class="{% if c.active %}on{% endif %}"
+     title="{% if c.active %}לחיצה נוספת מבטלת את הסינון{% else %}הצג רק את המשימות האלה{% endif %}">
+    <span class="n">{{ c.value }}</span><span>{{ c.label }}</span>
+  </a>
+  {% endfor %}
+  {% if filters.kpi %}<span class="clear">מוצגות רק המשימות של הכרטיס המסומן · לחיצה נוספת עליו מחזירה את הלוח המלא</span>{% endif %}
+</div>
+
 <form class="tb-bar" method="GET" action="/dashboard/war-room">
   <input type="hidden" name="style" value="table">
+  <input type="hidden" name="kpi" value="{{ filters.kpi }}">
   <select name="owner">
     <option value="">אחראי: הכל</option>
     {% for u in users %}
     <option value="{{ u.id }}" {% if filters.owner == u.id %}selected{% endif %}>{{ u.username }}</option>
     {% endfor %}
   </select>
-  <select name="status">
+  <select name="status" {% if filters.kpi %}disabled title="הסטטוס נקבע לפי כרטיס ה-KPI שנבחר"{% endif %}>
     <option value="active" {% if filters.status == 'active' %}selected{% endif %}>פעילות</option>
     <option value="done" {% if filters.status == 'done' %}selected{% endif %}>הושלמו</option>
     <option value="cancelled" {% if filters.status == 'cancelled' %}selected{% endif %}>בוטלו</option>
@@ -140,6 +171,7 @@ dialog.tb-dlg input,dialog.tb-dlg textarea,dialog.tb-dlg select{width:100%;backg
   </select>
   <button type="button" onclick="bulk('move')">החל</button>
   <input type="date" id="bulkDue">
+  <input type="text" id="bulkReason" dir="auto" maxlength="2000" placeholder="סיבת דחייה (חובה בשינוי יעד קיים)">
   <button type="button" onclick="bulk('due')">קבע יעד</button>
   <button type="button" onclick="bulk('done')">סמן כבוצע</button>
   <button type="button" onclick="clearSel()" style="margin-inline-start:auto">ניקוי בחירה</button>
@@ -183,7 +215,13 @@ dialog.tb-dlg input,dialog.tb-dlg textarea,dialog.tb-dlg select{width:100%;backg
     <input type="checkbox" class="tb-cb" value="{{ m.id }}" onchange="syncSel()" aria-label="בחר משימה">
     {% endif %}
   </span>
-  <span class="tb-t" dir="auto" title="{{ m.title }}">{% if fresh %}<span class="tb-new">🆕</span> {% endif %}{{ m.title }}</span>
+  <span class="tb-t" dir="auto" title="{{ m.title }}">{% if fresh %}<span class="tb-new">🆕</span> {% endif %}{{ m.title }}
+    {% if chains.get(m.id) %}<button type="button" class="tb-mark" onclick="toggleHist({{ m.id }})"
+       title="השתלשלות המשימות שקדמו לזו">🔗 {{ chains[m.id]|length }}</button>{% endif %}
+    {% if m.due_changes %}<button type="button" class="tb-mark post" onclick="toggleHist({{ m.id }})"
+       title="{{ postpone_label(m.due_changes|length) }}">↻ {{ m.due_changes|length }}</button>{% endif %}
+    {% if child_counts.get(m.id) %}<span class="tb-mark" title="נפתחה ממנה משימת המשך">↳</span>{% endif %}
+  </span>
   <span style="color:var(--ink-2)">{{ m.owner.username if m.owner else '—' }}</span>
   <span class="tb-mono" style="{% if late %}color:var(--red){% elif is_today %}color:var(--amber){% endif %}">
     {{ m.due_date.strftime('%d/%m') if m.due_date else '—' }}</span>
@@ -194,6 +232,42 @@ dialog.tb-dlg input,dialog.tb-dlg textarea,dialog.tb-dlg select{width:100%;backg
     {% if m.updates %}{{ m.updates[-1].text }}{% else %}—{% endif %}</span>
   <span class="tb-mono{% if fresh %} tb-new{% endif %}" style="font-size:.75rem{% if not fresh %};color:var(--ink-3){% endif %}"
         title="נוצרה {{ fmt_created(m.created_at) }}">{{ fmt_created(m.created_at) }}</span>
+
+  {% if chains.get(m.id) or m.due_changes %}
+  <div class="tb-exp" id="hist-{{ m.id }}">
+    <div class="tb-hist">
+      {% if chains.get(m.id) %}
+      <h4>השתלשלות</h4>
+      {% for step in chains[m.id] %}
+      <div class="step{% if step.current %} cur{% endif %}">
+        <span>{% if step.current %}→{% elif step.cancelled %}🚫{% else %}✓{% endif %}</span>
+        <span class="when">{{ step.range }}</span>
+        <span dir="auto">{{ step.title }}{% if step.current %} (משימה נוכחית){% endif %}</span>
+      </div>
+      {% endfor %}
+      {% endif %}
+      {% if m.due_changes %}
+      <h4>היסטוריית שינויי יעד</h4>
+      {% for c in m.due_changes %}
+      <div class="blk" dir="auto">
+        <span class="when">{{ fmt_created(c.created_at) }}</span> ·
+        <span class="move">מ־{{ fmt_due(c.old_date) }} ל־{{ fmt_due(c.new_date) }}</span><br>
+        סיבה: {{ c.reason or '—' }} · נדחה ע"י: {{ c.requested_by or c.changed_by_name or '—' }}
+      </div>
+      {% endfor %}
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
+
+  {% if not is_viewer and m.status not in active_statuses %}
+  {# A follow-up is usually born the moment the parent closes, so the closed row
+     is exactly where the button has to be. #}
+  <span style="grid-column:1/-1;padding-top:6px">
+    <button type="button" class="tb-btn" data-child="{{ m.id }}" data-child-title="{{ m.title }}"
+            data-child-owner="{{ m.owner_id }}" data-child-quad="{{ qkey }}">➕ משימת המשך</button>
+  </span>
+  {% endif %}
 
   {% if not is_viewer and m.status in active_statuses %}
   <div class="tb-exp" id="notebox-{{ m.id }}">
@@ -214,8 +288,11 @@ dialog.tb-dlg input,dialog.tb-dlg textarea,dialog.tb-dlg select{width:100%;backg
         {% endfor %}
       </select>
       <button class="tb-btn" type="button" onclick="move({{ m.id }})">העבר</button>
-      <input type="date" id="due-{{ m.id }}" value="{{ m.due_date.isoformat() if m.due_date else '' }}">
+      <input type="date" id="due-{{ m.id }}" value="{{ m.due_date.isoformat() if m.due_date else '' }}"
+             data-old="{{ m.due_date.isoformat() if m.due_date else '' }}">
       <button class="tb-btn" type="button" onclick="setDue({{ m.id }})">עדכן יעד</button>
+      <button class="tb-btn" type="button" data-child="{{ m.id }}" data-child-title="{{ m.title }}"
+              data-child-owner="{{ m.owner_id }}" data-child-quad="{{ qkey }}">משימת המשך</button>
     </div>
   </div>
   <div class="tb-exp" id="closebox-{{ m.id }}">
@@ -223,6 +300,8 @@ dialog.tb-dlg input,dialog.tb-dlg textarea,dialog.tb-dlg select{width:100%;backg
     <div class="row">
       <button class="tb-btn go" type="button" onclick="closeMission({{ m.id }}, true)">סגור עם הערה</button>
       <button class="tb-btn" type="button" onclick="closeMission({{ m.id }}, false)">סגור בלי הערה</button>
+      <button class="tb-btn" type="button" onclick="closeMission({{ m.id }}, true, true)"
+              title="סוגר את המשימה ופותח מיד משימת המשך המקושרת אליה">סגור + משימת המשך</button>
       <button class="tb-btn" type="button" onclick="toggleClose({{ m.id }}, null)">ביטול</button>
     </div>
   </div>
@@ -252,8 +331,10 @@ dialog.tb-dlg input,dialog.tb-dlg textarea,dialog.tb-dlg select{width:100%;backg
 
 {% if not is_viewer %}
 <dialog id="createDlg" class="tb-dlg">
-  <div style="font-weight:600">משימה חדשה</div>
+  <div style="font-weight:600" id="createHead">משימה חדשה</div>
+  <div id="createParentNote" hidden style="font-size:.8rem;color:var(--blue-4);margin-top:6px" dir="auto"></div>
   <form method="POST" action="/dashboard/war-room/create">
+    <input type="hidden" name="parent_id" id="createParent" value="">
     <label>כותרת *</label>
     <input name="title" required maxlength="255" dir="auto">
     <label>תיאור</label>
@@ -312,9 +393,28 @@ async function bulk(action){
     data.quadrant = document.getElementById('bulkQuad').value;
     if (!data.quadrant){ alert('בחר רביע'); return; }
   }
-  if (action === 'due') data.due_date = document.getElementById('bulkDue').value;
+  if (action === 'due'){
+    data.due_date = document.getElementById('bulkDue').value;
+    const reason = document.getElementById('bulkReason').value.trim();
+    // Same rule as a single card: moving a target that already exists needs a
+    // reason. Checked here too so the answer is instant instead of a 400.
+    const moving = ids.some(id => {
+      const row = document.getElementById('row-' + id);
+      return row && row.dataset.due && row.dataset.due !== data.due_date;
+    });
+    if (moving && !reason){ alert('נדרשת סיבת דחייה — בבחירה יש משימות עם תאריך יעד קיים'); return; }
+    if (reason) data.reason = reason;
+  }
   if (action === 'done' && !confirm(`לסמן ${ids.length} משימות כבוצעו?`)) return;
   if (await post('/dashboard/war-room/bulk', data)) location.reload();
+}
+
+// The row's history (chain + postponements) opens in place, like every other
+// expander in this table.
+function toggleHist(id){
+  const box = document.getElementById(`hist-${id}`);
+  if (!box) return;
+  box.style.display = box.style.display === 'block' ? 'none' : 'block';
 }
 
 // ---- sorting --------------------------------------------------------------

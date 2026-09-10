@@ -16,6 +16,8 @@ from app.database import get_db_session
 from app.models import Mission, MissionStatusEnum, MissionUpdate, User, RoleEnum
 from app.routers.login import get_current_user
 from app.services import missions_menu_service as oms
+from app.services import war_room_chain as chain
+from app.services import war_room_kpis as kpis
 from app.services import war_room_styles as wrs
 from app.services import war_room_wall as wall
 from app.services import war_room_motto as motto
@@ -106,18 +108,28 @@ async def war_room_page(
     owner: BlankableIntQuery = None,
     status: str = "active",
     q: str = "",
+    kpi: str = "",
     style: str | None = None,
     tv: int = 0,
 ):
     today = oms.today_il()
     active_style = wrs.resolve(style, current_user.war_room_style)
+    active_kpi = kpis.resolve(kpi)
 
     base = select(Mission).options(
         selectinload(Mission.owner),
         selectinload(Mission.created_by),
         selectinload(Mission.updates).selectinload(MissionUpdate.author),
+        # The postponement log is drawn on the card, so it is loaded with it —
+        # a lazy load here would raise MissingGreenlet under asyncio.
+        selectinload(Mission.due_changes),
     )
-    if status == "active":
+    # A KPI card names its own slice of the board (active, or closed this week),
+    # so while one is on it decides the status and the <select> stands down —
+    # otherwise "הושלמו השבוע" would filter itself down to an empty board.
+    if active_kpi:
+        base = kpis.apply_filter(base, active_kpi, today)
+    elif status == "active":
         base = base.where(Mission.status.in_(oms.ACTIVE_STATUSES))
     elif status in (s.value for s in MissionStatusEnum):
         base = base.where(Mission.status == status)
@@ -143,7 +155,9 @@ async def war_room_page(
 
     # Stat row (always board-wide, independent of filters)
     counts, overdue_count = await oms.get_board_counts(session)
-    week_ago = datetime.datetime.utcnow() - datetime.timedelta(days=7)
+    # Same window the "הושלמו השבוע" KPI filter selects on — one definition, so
+    # the count and the list it opens can never disagree.
+    week_ago = kpis.week_ago()
     done_week = await session.scalar(
         select(func.count(Mission.id)).where(
             Mission.status == MissionStatusEnum.DONE.value,
@@ -152,6 +166,12 @@ async def war_room_page(
     ) or 0
 
     users = await oms.list_assignable_users(session)
+
+    # משימת המשך: where each mission on screen came from, and which of them
+    # spawned a follow-up. Both are empty dicts on an ordinary board, so a
+    # mission without a chain costs nothing.
+    chains = await chain.load_chains(session, missions)
+    child_counts = await chain.load_child_counts(session, missions)
 
     ctx = {
         "request": request,
@@ -171,7 +191,25 @@ async def war_room_page(
         },
         "users": users,
         "today": today,
-        "filters": {"owner": owner, "status": status, "q": q},
+        "filters": {"owner": owner, "status": status, "q": q, "kpi": active_kpi},
+        # The KPI row: one click filters the board to what the number counts, a
+        # second click on the same card clears it. The counters stay board-wide.
+        "kpi_cards": kpis.build_cards(
+            {
+                "open": sum(counts.values()),
+                "do_now": counts.get("do", 0),
+                "overdue": overdue_count,
+                "done_week": done_week,
+            },
+            active_kpi,
+            {"owner": owner, "status": status, "q": q,
+             "style": style if wrs.is_known(style) else None},
+        ),
+        "active_kpi": active_kpi,
+        "chains": chains,
+        "child_counts": child_counts,
+        "postpone_label": oms.postpone_label,
+        "fmt_due": oms.format_due,
         "is_viewer": current_user.role == RoleEnum.VIEWER,
         "fmt_stamp": oms.format_stamp_il,
         # Creation stamp + "is this mission brand new?" — both come from
@@ -406,10 +444,16 @@ async def create_mission_web(
     quadrant: str = Form("backlog"),
     owner_id: int = Form(...),
     due_date: str = Form(""),
+    parent_id: BlankableIntForm = Form(None),
 ):
     _require_editor(current_user)
     if not title.strip():
         return RedirectResponse("/dashboard/war-room?msg=נדרשת+כותרת", status_code=303)
+    # משימת המשך: a follow-up keeps the link to the mission it grew out of. An
+    # id that no longer resolves is dropped rather than refused — the follow-up
+    # itself is real work and must not be lost to a stale button.
+    if parent_id is not None and await session.get(Mission, parent_id) is None:
+        parent_id = None
     urg, imp = oms.quadrant_flags(quadrant)
     m = await oms.create_mission(
         session,
@@ -420,9 +464,11 @@ async def create_mission_web(
         owner_id=owner_id,
         created_by_id=current_user.id,
         due_date=_parse_due(due_date),
+        parent_id=parent_id,
     )
     await _notify_owner_via_telegram(session, m, current_user)
-    return RedirectResponse("/dashboard/war-room?msg=המשימה+נוצרה", status_code=303)
+    msg = "משימת+ההמשך+נוצרה" if parent_id else "המשימה+נוצרה"
+    return RedirectResponse(f"/dashboard/war-room?msg={msg}", status_code=303)
 
 
 @router.post("/bulk")
@@ -435,6 +481,8 @@ async def bulk_action(
     due_date: str = Form(""),
     quadrant: str = Form(""),
     note: str = Form(""),
+    reason: str = Form(""),
+    requested_by: str = Form(""),
 ):
     """Apply one change to several missions at once — the table layout's reason to exist.
 
@@ -459,12 +507,30 @@ async def bulk_action(
     if not missions:
         return JSONResponse({"status": "error", "message": "לא נמצאו משימות"}, status_code=404)
 
+    # A batch may not move target dates that already exist without saying why —
+    # the rule is the board's, not the single-mission form's. Checked over the
+    # whole selection BEFORE anything is written, so a batch never half-applies.
+    new_due = _parse_due(due_date)
+    if (action == "due" and not reason.strip()
+            and any(oms.needs_due_reason(m, new_due) for m in missions)):
+        return JSONResponse(
+            {"status": "error",
+             "message": "נדרשת סיבת דחייה — בבחירה יש משימות עם תאריך יעד קיים"},
+            status_code=400,
+        )
+
     for m in missions:
         if action == "assign":
             await oms.update_mission(session, m, owner_id=owner_id)
             await _notify_owner_via_telegram(session, m, current_user)
         elif action == "due":
-            await oms.update_mission(session, m, due_date=_parse_due(due_date))
+            await oms.update_mission(
+                session, m,
+                due_date=new_due,
+                reason=reason,
+                requested_by=requested_by,
+                actor=current_user,
+            )
         elif action == "move":
             await oms.update_mission(session, m, quadrant=quadrant)
         else:
@@ -561,10 +627,32 @@ async def change_due(
     session: AsyncSession = Depends(get_db_session),
     current_user: User = Depends(get_current_user),
     due_date: str = Form(""),
+    reason: str = Form(""),
+    requested_by: str = Form(""),
+    requested_by_id: BlankableIntForm = Form(None),
 ):
+    """Set or move a mission's target date.
+
+    Moving a target that already exists is a postponement: it needs a reason and
+    it is written to the mission's history. Setting a first date is neither, and
+    is saved with one click exactly as before.
+    """
     _require_editor(current_user)
     m = await session.get(Mission, mission_id)
     if not m:
         return JSONResponse({"status": "error", "message": "המשימה לא נמצאה"}, status_code=404)
-    await oms.update_mission(session, m, due_date=_parse_due(due_date))
+    new_due = _parse_due(due_date)
+    if oms.needs_due_reason(m, new_due) and not reason.strip():
+        return JSONResponse(
+            {"status": "error", "message": "נדרשת סיבת דחייה לשינוי תאריך יעד קיים"},
+            status_code=400,
+        )
+    await oms.update_mission(
+        session, m,
+        due_date=new_due,
+        reason=reason,
+        requested_by=requested_by,
+        requested_by_id=requested_by_id,
+        actor=current_user,
+    )
     return JSONResponse({"status": "ok", "message": "תאריך היעד עודכן"})

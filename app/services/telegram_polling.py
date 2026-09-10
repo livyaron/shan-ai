@@ -2988,7 +2988,23 @@ class TelegramPollingBot:
                         return
                     handled, due = oms.resolve_due_quick_pick(value)
                     if handled:
-                        await oms.update_mission(session, m, due_date=due)
+                        # Moving a target date that already exists is a
+                        # postponement: the bot asks why before it moves, exactly
+                        # like the board does. A first date is still one tap.
+                        if oms.needs_due_reason(m, due):
+                            _missions_edit_state[telegram_id] = {
+                                "mission_id": mission_id, "mode": "due_reason",
+                                "pending_due": due, "origin": origin, "page": page,
+                            }
+                            await query.edit_message_text(
+                                "‏↻ <b>דחיית תאריך יעד</b>\n"
+                                f"מ־{oms.format_due(m.due_date)} ל־{oms.format_due(due)}\n"
+                                "שלח עכשיו את <b>סיבת הדחייה</b> — היא תישמר בהיסטוריית המשימה "
+                                "עם השם שלך והשעה.",
+                                parse_mode="HTML", reply_markup=oms.build_cancel_keyboard(),
+                            )
+                            return
+                        await oms.update_mission(session, m, due_date=due, actor=user)
             _missions_edit_state.pop(telegram_id, None)
             await self._render_mission_card(query, mission_id, origin, page)
             return
@@ -3125,6 +3141,37 @@ class TelegramPollingBot:
                 await update.message.reply_text("‏❌ המשימה לא נמצאה.")
             return
 
+        # Edit flow: the reason a target date is being moved (asked before the move)
+        if edit_state and edit_state.get("mode") == "due_reason":
+            if not stripped:
+                await update.message.reply_text(
+                    "‏❌ הטקסט ריק. שלח את סיבת הדחייה, או בטל:",
+                    reply_markup=oms.build_cancel_keyboard(),
+                )
+                return
+            async with async_session_maker() as session:
+                m = await oms.get_mission(session, edit_state["mission_id"])
+                if m:
+                    await oms.update_mission(
+                        session, m,
+                        due_date=edit_state.get("pending_due"),
+                        reason=stripped,
+                        requested_by=user.username,
+                        requested_by_id=user.id,
+                        actor=user,
+                    )
+                    m = await oms.get_mission(session, m.id)
+                    card = oms.build_mission_card(m)
+                    kb = oms.build_mission_card_keyboard(
+                        m, edit_state.get("origin", "my"), edit_state.get("page", 0),
+                    )
+            _missions_edit_state.pop(telegram_id, None)
+            if m:
+                await update.message.reply_text(card, parse_mode="HTML", reply_markup=kb)
+            else:
+                await update.message.reply_text("‏❌ המשימה לא נמצאה.")
+            return
+
         # Edit flow: custom due date on an existing mission
         if edit_state and edit_state.get("mode") == "due_text":
             due = oms.parse_due_date_text(stripped)
@@ -3136,8 +3183,19 @@ class TelegramPollingBot:
                 return
             async with async_session_maker() as session:
                 m = await oms.get_mission(session, edit_state["mission_id"])
+                if m and oms.needs_due_reason(m, due):
+                    _missions_edit_state[telegram_id] = {
+                        **edit_state, "mode": "due_reason", "pending_due": due,
+                    }
+                    await update.message.reply_text(
+                        "‏↻ <b>דחיית תאריך יעד</b>\n"
+                        f"מ־{oms.format_due(m.due_date)} ל־{oms.format_due(due)}\n"
+                        "שלח עכשיו את <b>סיבת הדחייה</b>:",
+                        parse_mode="HTML", reply_markup=oms.build_cancel_keyboard(),
+                    )
+                    return
                 if m:
-                    await oms.update_mission(session, m, due_date=due)
+                    await oms.update_mission(session, m, due_date=due, actor=user)
                     m = await oms.get_mission(session, m.id)
                     card = oms.build_mission_card(m)
                     kb = oms.build_mission_card_keyboard(

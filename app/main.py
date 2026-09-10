@@ -229,6 +229,18 @@ async def startup():
                     "ALTER TABLE mission_updates ADD COLUMN IF NOT EXISTS kind VARCHAR(16)"
                 ))
 
+                # חדר מבצעים: משימת המשך — the mission a follow-up grew out of.
+                # create_all never ALTERs an existing table, so the link column
+                # and its index need their own migration. SET NULL, never
+                # CASCADE: losing a parent must not delete open work.
+                await conn.execute(_text(
+                    "ALTER TABLE missions ADD COLUMN IF NOT EXISTS parent_id INTEGER "
+                    "REFERENCES missions(id) ON DELETE SET NULL"
+                ))
+                await conn.execute(_text(
+                    "CREATE INDEX IF NOT EXISTS ix_missions_parent_id ON missions (parent_id)"
+                ))
+
                 # חדר מבצעים: per-user board layout. NULL means "the default
                 # style", so existing users keep exactly the screen they know.
                 await conn.execute(_text(
