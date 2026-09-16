@@ -321,6 +321,7 @@ async def create_user(
     user = User(
         username=username,
         password_hash=get_default_password_hash(),
+        password_is_default=True,
         job_title=job_title or None,
         role=RoleEnum(role),
         hierarchy_level=_ROLE_HIERARCHY.get(role),
@@ -506,7 +507,7 @@ async def edit_user(
     session: AsyncSession = Depends(get_db_session),
     current_user: User = Depends(get_current_user),
 ):
-    from app.utils.auth import hash_password
+    from app.utils.auth import hash_password, is_default_password
 
     if not current_user.is_admin and current_user.id != user_id:
         return RedirectResponse("/dashboard/users?error=אין+הרשאה+לערוך+משתמש+זה", status_code=303)
@@ -525,11 +526,48 @@ async def edit_user(
     user.manager_id = int(manager_id) if manager_id.strip() else None
     if password.strip():
         user.password_hash = hash_password(password)
+        # Keep the 🔓 badge honest: whatever was typed here, it is not 1234
+        # unless it literally is.
+        user.password_is_default = is_default_password(user.password_hash)
     await session.commit()
     if role_changed:
         await session.refresh(user)
         await _push_keyboard_to_user(user)
     return RedirectResponse("/dashboard/users?msg=פרטי+משתמש+עודכנו", status_code=303)
+
+
+@router.post("/users/{user_id}/reset-password")
+async def reset_password(
+    user_id: int,
+    session: AsyncSession = Depends(get_db_session),
+    current_user: User = Depends(get_current_user),
+):
+    """Generate a new password, store its hash, and return it ONCE.
+
+    This is what "הצג סיסמה קיימת" turns into when passwords are hashed:
+    bcrypt cannot hand back the old password, so the admin gets a new one
+    instead. The clear text exists only in this response body — never in the
+    DB, never in a redirect URL, never in a log line.
+    """
+    from app.utils.auth import generate_password, hash_password
+
+    if not current_user.is_admin:
+        return JSONResponse(
+            {"ok": False, "error": "רק מנהל מערכת יכול לאפס סיסמה"}, status_code=403
+        )
+
+    user = await session.get(User, user_id)
+    if not user:
+        return JSONResponse({"ok": False, "error": "משתמש לא נמצא"}, status_code=404)
+
+    new_password = generate_password()
+    user.password_hash = hash_password(new_password)
+    user.password_is_default = False
+    await session.commit()
+
+    # The username, never the password.
+    logger.info(f"Password reset for user {user.username} by admin {current_user.username}")
+    return JSONResponse({"ok": True, "username": user.username, "password": new_password})
 
 
 # -----------------------------------------------------------------------

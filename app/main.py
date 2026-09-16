@@ -247,6 +247,13 @@ async def startup():
                     "ALTER TABLE users ADD COLUMN IF NOT EXISTS war_room_style VARCHAR(16)"
                 ))
 
+                # "עדיין סיסמת ברירת המחדל?" — cached answer to a bcrypt check
+                # that is far too slow to run per page load. NULL = not checked
+                # yet; the startup backfill fills it in once.
+                await conn.execute(_text(
+                    "ALTER TABLE users ADD COLUMN IF NOT EXISTS password_is_default BOOLEAN"
+                ))
+
                 # LLM config table
                 await conn.execute(_text("""
                     CREATE TABLE IF NOT EXISTS llm_config (
@@ -379,6 +386,19 @@ async def startup():
             await migrate_user_passwords(session)
     except Exception as e:
         print(f"Warning: User password migration failed: {e}")
+
+    # Fill in "עדיין סיסמת ברירת המחדל?" for users that predate the column.
+    # One bcrypt verify each, so it runs in the background — a cold flag only
+    # means the 🔓 badge is missing for a minute, never a failed startup.
+    async def _backfill_password_flags():
+        try:
+            from app.database import async_session_maker
+            from app.utils.migrations import backfill_password_is_default
+            async with async_session_maker() as session:
+                await backfill_password_is_default(session)
+        except Exception as e:
+            print(f"Warning: password default-flag backfill failed: {e}")
+    asyncio.create_task(_backfill_password_flags())
 
     # Start Telegram bot — polling locally, webhook on Railway
     try:

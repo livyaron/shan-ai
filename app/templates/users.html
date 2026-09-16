@@ -285,6 +285,11 @@
                                     {% if user.responsibilities %}
                                     <br><span class="small" style="color:#17a2b8;" title="{{ user.responsibilities }}">🎯 {{ user.responsibilities[:40] }}{% if user.responsibilities|length > 40 %}…{% endif %}</span>
                                     {% endif %}
+                                    {# מי עדיין על סיסמת ברירת המחדל — מידע רגיש, למנהל מערכת בלבד #}
+                                    {% if current_user.is_admin and user.password_is_default %}
+                                    <br><span class="badge" style="background:#3a2a10; color:#ffc107; border:1px solid #ffc107; font-weight:normal;"
+                                              title="המשתמש עדיין משתמש בסיסמת ברירת המחדל שקיבל מהמערכת">🔓 סיסמת ברירת מחדל</span>
+                                    {% endif %}
                                 </td>
                                 <td>
                                     {% if user.role %}
@@ -427,6 +432,28 @@
                                placeholder="השאר ריק לשמירה על הסיסמה הקיימת">
                         <small class="text-muted">💡 אם תרצה להגדיר סיסמה חדשה, הזן אותה כאן</small>
                     </div>
+                    {% if current_user.is_admin %}
+                    <div class="mb-3">
+                        <label class="form-label small" style="color:#a0a8c0;">סיסמה קיימת</label>
+                        <div class="p-2" style="background:#0f1117; border:1px solid #2d3047; border-radius:8px;">
+                            <div class="small text-muted mb-2">
+                                🔒 הסיסמה שמורה מוצפנת (bcrypt) ולא ניתנת לשחזור — גם לא למנהל מערכת.
+                                במקום זאת אפשר לייצר סיסמה חדשה ולראות אותה פעם אחת.
+                            </div>
+                            <button type="button" class="btn btn-sm btn-outline-warning" id="resetPwBtn"
+                                    onclick="resetPassword()">🔑 אפס וקבל סיסמה</button>
+                            <div id="resetPwResult" class="mt-2" style="display:none;">
+                                <div class="d-flex align-items-center gap-2">
+                                    <code id="resetPwValue" style="font-size:1.05rem; color:#ffc107; background:#1a1400; padding:4px 10px; border-radius:6px; letter-spacing:1px;"></code>
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" onclick="copyNewPassword()">📋 העתק</button>
+                                </div>
+                                <div class="small mt-1" style="color:#ffc107;">
+                                    ⚠️ מוצגת פעם אחת בלבד. העתק אותה עכשיו ומסור למשתמש.
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    {% endif %}
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">ביטול</button>
@@ -624,8 +651,11 @@ async function openAiAnalysis(userId, username, refresh) {
     }
 }
 
+let _editUserId = null;
 function openEdit(idx) {
     const u = USERS_DATA[idx];
+    _editUserId = u.id;
+    resetPasswordBoxClear();
     document.getElementById('editForm').action = '/dashboard/users/' + u.id + '/edit';
     document.getElementById('edit_username').value = u.username;
     document.getElementById('edit_role').value = u.role;
@@ -633,6 +663,44 @@ function openEdit(idx) {
     document.getElementById('edit_manager').value = u.manager_id || '';
     document.getElementById('edit_responsibilities').value = u.responsibilities;
     new bootstrap.Modal(document.getElementById('editModal')).show();
+}
+
+// --- איפוס סיסמה: הסיסמה מוצגת פעם אחת ולא נשמרת בשום מקום בטקסט גלוי ---
+function resetPasswordBoxClear() {
+    const box = document.getElementById('resetPwResult');
+    if (!box) return;            // משתמש רגיל — הכפתור לא קיים בכלל
+    box.style.display = 'none';
+    document.getElementById('resetPwValue').textContent = '';
+}
+
+async function resetPassword() {
+    if (!_editUserId) return;
+    if (!confirm('לאפס את הסיסמה של המשתמש? הסיסמה הנוכחית תפסיק לעבוד מיד.')) return;
+    const btn = document.getElementById('resetPwBtn');
+    btn.disabled = true;
+    try {
+        const resp = await fetch(`/dashboard/users/${_editUserId}/reset-password`, { method: 'POST' });
+        const data = await resp.json();
+        if (!data.ok) {
+            alert('❌ ' + (data.error || 'איפוס הסיסמה נכשל'));
+            return;
+        }
+        document.getElementById('resetPwValue').textContent = data.password;
+        document.getElementById('resetPwResult').style.display = 'block';
+    } catch (e) {
+        alert('❌ שגיאת רשת באיפוס הסיסמה');
+    } finally {
+        btn.disabled = false;
+    }
+}
+
+function copyNewPassword() {
+    const pw = document.getElementById('resetPwValue').textContent;
+    if (!pw) return;
+    navigator.clipboard.writeText(pw).then(
+        () => alert('✅ הסיסמה הועתקה'),
+        () => alert('❌ ההעתקה נכשלה — סמן והעתק ידנית')
+    );
 }
 
 // Photo upload
