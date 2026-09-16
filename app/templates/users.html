@@ -326,12 +326,21 @@
                                     {% endif %}
                                 </td>
                                 <td>
+                                    {# הצפייה פתוחה לכולם — השינוי רק למנהל מערכת #}
+                                    {% if current_user.is_admin %}
                                     <form method="POST" action="/dashboard/users/{{ user.id }}/toggle-admin" class="d-inline"
                                           onsubmit="return confirm('{% if user.is_admin %}להסיר הרשאות מנהל מ-{{ user.username }}?{% else %}להגדיר {{ user.username }} כמנהל מערכת?{% endif %}')">
                                         <button type="submit" class="btn btn-sm {% if user.is_admin %}btn-warning{% else %}btn-outline-secondary{% endif %}">
                                             {% if user.is_admin %}👑 מנהל{% else %}—{% endif %}
                                         </button>
                                     </form>
+                                    {% else %}
+                                    <span class="btn btn-sm disabled {% if user.is_admin %}btn-warning{% else %}btn-outline-secondary{% endif %}"
+                                          style="pointer-events:none; opacity:0.75;"
+                                          title="רק מנהל מערכת יכול לשנות הרשאה זו">
+                                        {% if user.is_admin %}👑 מנהל{% else %}—{% endif %}
+                                    </span>
+                                    {% endif %}
                                 </td>
                                 <td>
                                     <!-- Edit button — only for admin or own profile -->

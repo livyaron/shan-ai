@@ -339,6 +339,14 @@ async def toggle_admin(
     session: AsyncSession = Depends(get_db_session),
     current_user: User = Depends(get_current_user),
 ):
+    # Viewing who is an admin is open to everyone; CHANGING the flag is
+    # admin-only. The template hides the button, this is the real gate.
+    if not current_user.is_admin:
+        return RedirectResponse(
+            "/dashboard/users?error=רק+מנהל+מערכת+יכול+לשנות+הרשאת+מנהל",
+            status_code=303,
+        )
+
     user = await session.get(User, user_id)
     if not user:
         return RedirectResponse("/dashboard/users?error=משתמש+לא+נמצא", status_code=303)
