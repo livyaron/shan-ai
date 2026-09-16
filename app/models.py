@@ -51,6 +51,11 @@ class User(Base):
     telegram_id = Column(BigInteger, unique=True, index=True, nullable=True)
     username = Column(String(255), unique=True, index=True)
     password_hash = Column(String(255), nullable=False, default="$2b$12$KIXxPfIPJ0hwi0pYjZlVBe82rJmDreXxB0E8hSXIWkIV9O8Y3bPha")  # default: bcrypt("1234")
+    # "עדיין סיסמת ברירת המחדל?" — bcrypt cannot be asked this per page load
+    # (a checkpw per user would cost seconds), so the answer is cached here and
+    # kept current by every write path. NULL = not checked yet (backfilled at
+    # startup); it never means False.
+    password_is_default = Column(Boolean, nullable=True)
     role = Column(Enum(RoleEnum), nullable=True, default=None)
     email = Column(String(255), nullable=True)
     registration_code = Column(String(10), unique=True, nullable=True, index=True)
