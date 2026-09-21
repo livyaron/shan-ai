@@ -55,10 +55,42 @@ app.include_router(project_reports_router.router)
 app.include_router(war_room_router.router)
 app.include_router(profile_router)
 
+# How often to ask Telegram whether it still points at this container.
+WEBHOOK_WATCHDOG_SECONDS = 300
+
+# The event loop only keeps weak references to tasks, so a fire-and-forget
+# watchdog can be garbage-collected mid-sleep. Holding it here is what keeps
+# it alive for the life of the container.
+_webhook_watchdog_task = None
+
+
+async def _webhook_watchdog() -> None:
+    """Keep Telegram pointed at this container for as long as it lives.
+
+    The webhook is registered once at startup, and anything outside this
+    process can drop it — a local instance starting polling, an overlapping
+    deploy shutting down, a domain change. When that happens FastAPI stays
+    perfectly healthy (the web app answers, /health is green) and the bot goes
+    silent with nothing in the app able to see why. This re-registers it.
+    """
+    while True:
+        await asyncio.sleep(WEBHOOK_WATCHDOG_SECONDS)
+        try:
+            status = await telegram_bot.ensure_webhook()
+            if status.get("repaired"):
+                print(
+                    "Telegram webhook re-registered "
+                    f"(was {status.get('previous_url')!r})."
+                )
+        except Exception as e:
+            from app.services.gemma_client import redact
+            logger.warning(f"Telegram webhook watchdog check failed: {redact(str(e))}")
+
+
 @app.on_event("startup")
 async def startup():
     """Initialize database tables and start Telegram bot polling."""
-    global _polling_task
+    global _polling_task, _webhook_watchdog_task
     import datetime as _startup_dt
     from app.utils.migrations import migrate_user_passwords
 
@@ -417,6 +449,7 @@ async def startup():
         else:
             await telegram_bot.set_webhook()
             print("Telegram bot started and webhook registered.")
+            _webhook_watchdog_task = asyncio.create_task(_webhook_watchdog())
 
         # Start 48-hour feedback scheduler
         asyncio.create_task(run_feedback_scheduler(telegram_bot.application.bot))
@@ -440,9 +473,14 @@ async def shutdown():
             await telegram_bot.application.updater.stop()
         except Exception:
             pass
-        await telegram_bot.delete_webhook()
+        # NEVER delete the webhook here. The registration is global to the bot
+        # token, not to this container: on a Railway deploy the new container
+        # boots and registers the webhook while the old one is still shutting
+        # down, so a deleteWebhook on the way out wipes the registration the
+        # new container just made — the site stays up, the deploy goes green
+        # and the bot is silent until someone restarts it by hand.
         await telegram_bot.stop()
-        print("Telegram bot stopped and webhook removed.")
+        print("Telegram bot stopped (webhook left registered on purpose).")
     except Exception as e:
         print(f"Error stopping bot: {e}")
         logger.error(f"Telegram bot shutdown error: {e}")

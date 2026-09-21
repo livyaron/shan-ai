@@ -51,4 +51,5 @@ jobs:
             tests/test_groq_retry.py \
             tests/test_key_redaction.py \
             tests/test_users_admin_guard.py \
-            tests/test_llm_health_report.py
+            tests/test_llm_health_report.py \
+            tests/test_telegram_webhook_watchdog.py
