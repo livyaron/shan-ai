@@ -63,3 +63,17 @@ def test_no_model_that_times_out_sits_in_the_fallback_chain():
     from app.services.gemma_client import GEMMA_MODELS
     assert "gemini-3.5-flash" not in GEMMA_MODELS
     assert GEMMA_MODELS, "the backup provider still needs at least one model"
+
+
+def test_a_telegram_bot_token_is_redacted():
+    """The webhook diagnostics return error strings to an unauthenticated caller,
+    and every Bot API URL carries the token in its path."""
+    token = "7123456789:AAEhBOweik6ad9r_Qd1vlvpwqABCDEFGHIJ"
+    url = f"ConnectError: https://api.telegram.org/bot{token}/getWebhookInfo failed"
+
+    out = redact(url)
+
+    assert token not in out
+    assert "AAEhBOweik6" not in out
+    assert "getWebhookInfo" in out          # the useful part survives
+    assert token not in redact(f"InvalidToken: {token}")

@@ -38,6 +38,11 @@ _KEY_PATTERNS = [
     re.compile(r"\bAIza[0-9A-Za-z_\-]{10,}"),
     re.compile(r"\bgsk_[0-9A-Za-z]{10,}"),
     re.compile(r"\bsk-ant-[0-9A-Za-z_\-]{10,}"),
+    # The Telegram bot token is a path segment of every Bot API URL, so an
+    # httpx/PTB error string carries it — and the webhook diagnostics return
+    # error strings to an unauthenticated caller.
+    re.compile(r"/bot\d{5,}:[0-9A-Za-z_\-]{20,}"),
+    re.compile(r"\b\d{6,12}:[0-9A-Za-z_\-]{30,}"),
 ]
 
 

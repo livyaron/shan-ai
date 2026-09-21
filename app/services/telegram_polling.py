@@ -1680,11 +1680,12 @@ class TelegramPollingBot:
                     from app.services.raci_service import get_accountable_user_id as _get_acc
                     from app.database import async_session_maker as _sm
                     import html as _html2
+                    from app.models import Decision as _Decision
                     async with _sm() as _sess:
                         accountable_id = await _get_acc(decision_id, _sess)
                         if accountable_id:
                             acc_user = await _sess.get(User, accountable_id)
-                            dec = await _sess.get(Decision, decision_id)
+                            dec = await _sess.get(_Decision, decision_id)
                             if acc_user and acc_user.telegram_id and dec:
                                 crit_keyboard = InlineKeyboardMarkup([[
                                     InlineKeyboardButton("✅ אישור", callback_data=f"approve:{decision_id}"),
@@ -3574,20 +3575,78 @@ class TelegramPollingBot:
         except Exception as e:
             logger.error(f"Error stopping bot application: {e}")
 
-    async def set_webhook(self):
-        """Register the webhook URL with Telegram."""
+    async def set_webhook(self, drop_pending_updates: bool = True):
+        """Register the webhook URL with Telegram.
+
+        `drop_pending_updates` is right at startup (a stale backlog answered
+        hours late reads as a broken bot), and wrong when repairing a live
+        registration: there the gap is minutes and those updates are real
+        questions nobody answered yet.
+        """
         webhook_url = settings.effective_webhook_url
         try:
             await self.application.bot.set_webhook(
                 url=webhook_url,
                 secret_token=settings.WEBHOOK_SECRET_TOKEN or None,
                 allowed_updates=["message", "callback_query", "edited_message"],
-                drop_pending_updates=True,
+                drop_pending_updates=drop_pending_updates,
             )
             logger.info(f"Telegram webhook set to: {webhook_url}")
         except Exception as e:
             logger.error(f"Failed to set webhook: {e}")
             raise
+
+    async def webhook_status(self) -> dict:
+        """What Telegram itself thinks the webhook is.
+
+        This is the only authoritative answer to "why is the bot silent?" —
+        the container can be perfectly healthy while Telegram holds no
+        registration at all, and nothing else in the app can see that.
+        """
+        if self.application is None:
+            raise RuntimeError("Telegram bot application is not initialized")
+        expected = settings.effective_webhook_url
+        info = await self.application.bot.get_webhook_info()
+        url = info.url or ""
+        return {
+            "expected_url": expected,
+            "registered_url": url,
+            "healthy": url == expected,
+            "pending_update_count": info.pending_update_count,
+            "last_error_message": info.last_error_message or None,
+            "last_error_date": (
+                info.last_error_date.isoformat() if info.last_error_date else None
+            ),
+            "ip_address": getattr(info, "ip_address", None),
+            "allowed_updates": list(info.allowed_updates or []),
+        }
+
+    async def ensure_webhook(self) -> dict:
+        """Re-register the webhook whenever Telegram stopped pointing at us.
+
+        A webhook can be dropped by anything outside this container — a local
+        instance starting polling, a `deleteWebhook` from another deploy, a
+        domain change — and nothing tells us. Without this the bot stays
+        silent until someone notices and restarts the service.
+        """
+        status = await self.webhook_status()
+        if status["last_error_message"]:
+            logger.warning(
+                "Telegram reports a webhook delivery error: %s (at %s)",
+                status["last_error_message"], status["last_error_date"],
+            )
+        if status["healthy"]:
+            status["repaired"] = False
+            return status
+        logger.error(
+            "Telegram webhook lost: registered=%r expected=%r — re-registering",
+            status["registered_url"], status["expected_url"],
+        )
+        await self.set_webhook(drop_pending_updates=False)
+        repaired = await self.webhook_status()
+        repaired["repaired"] = True
+        repaired["previous_url"] = status["registered_url"]
+        return repaired
 
     async def delete_webhook(self):
         """Remove the webhook registration from Telegram."""
