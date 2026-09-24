@@ -286,6 +286,19 @@ async def startup():
                     "ALTER TABLE users ADD COLUMN IF NOT EXISTS password_is_default BOOLEAN"
                 ))
 
+                # Pattern engine (PLAN.md P0): master-file columns the sync used
+                # to drop. Same five on the live row and on every snapshot, so a
+                # snapshot is a full picture of the file on its report date.
+                for _tbl in ("projects", "project_snapshots"):
+                    await conn.execute(_text(
+                        f"ALTER TABLE {_tbl} "
+                        "ADD COLUMN IF NOT EXISTS finish_date_text TEXT, "
+                        "ADD COLUMN IF NOT EXISTS controller VARCHAR(255), "
+                        "ADD COLUMN IF NOT EXISTS short_supervisors BOOLEAN, "
+                        "ADD COLUMN IF NOT EXISTS short_testers BOOLEAN, "
+                        "ADD COLUMN IF NOT EXISTS critical_tier VARCHAR(32)"
+                    ))
+
                 # LLM config table
                 await conn.execute(_text("""
                     CREATE TABLE IF NOT EXISTS llm_config (
