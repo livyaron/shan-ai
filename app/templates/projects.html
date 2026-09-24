@@ -981,14 +981,17 @@ $(document).ready(function () {
     }
 
     // ── 4b. Backfill modal (admin): upload many files, poll the status ──
-    const BACKFILL_LABELS = {running: '⏳ בטעינה', done: '✅ נטען', done_with_errors: '⚠️ נטען עם שגיאות', error: '❌ נכשל'};
+    const BACKFILL_LABELS = {queued: '🕓 ממתין', running: '⏳ בטעינה', done: '✅ נטען', done_with_errors: '⚠️ נטען עם שגיאות', error: '❌ נכשל'};
     function renderBackfill(st) {
         const rows = (st.files || []).map(f =>
             `<div>${BACKFILL_LABELS[f.status] || escapeHtml(f.status)} — ${escapeHtml(f.name)}` +
             (f.report_date ? ` (${escapeHtml(f.report_date)})` : '') +
             (f.processed != null ? ` · ${f.processed} פרויקטים` : '') +
             (f.error ? ` · ${escapeHtml(f.error)}` : '') + `</div>`).join('');
-        $('#backfillStatus').html(rows + (st.running ? '<div class="text-muted mt-1">רץ ברקע — אפשר לסגור את החלון.</div>' : ''));
+        const files = st.files || [];
+        const finished = files.filter(f => f.status !== 'queued' && f.status !== 'running').length;
+        const head = files.length ? `<div class="fw-bold mb-1">${finished} מתוך ${files.length} קבצים הושלמו</div>` : '';
+        $('#backfillStatus').html(head + rows + (st.running ? '<div class="text-muted mt-1">רץ ברקע — אפשר לסגור את החלון.</div>' : ''));
     }
     async function pollBackfill() {
         try {
