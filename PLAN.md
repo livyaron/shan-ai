@@ -1,6 +1,6 @@
 # PLAN — Pattern & Risk Engine (second brain, analyst layer)
 
-**Status:** P0 implemented (see §3 P0 notes). P1–P4 not started.
+**Status:** P0 + P1 implemented (see §3 notes). P2–P4 not started.
 **Goal:** Turn the weekly master file (דוח שבועי לסמנכ"ל) into specialist-grade answers — patterns, leading indicators, bottlenecks — delivered to the division manager, the PM department and the three sector managers.
 
 > Exploratory analysis was run on 8 historical weekly files (Mar–Sep 2026) outside the repo. **No project data, names or findings are committed** — the repo is public and the files carry an inside-information notice. Numbers below are shapes, not data.
@@ -56,6 +56,8 @@ P0 capture fix ─► P1 backfill ─► P2 pattern engine ─► P3 delivery (w
 
 ### P1 — Backfill (S)
 One-off admin endpoint / script that ingests historical files in **date order** with their `report_date`. Idempotent (UNIQUE keys). Must not fire the post-sync report/notification hooks (`_trigger_reports_after_sync`) — add a `backfill=True` flag that skips them.
+
+**P1 as built:** admin-only `POST /dashboard/projects/backfill` (many XLSX at once) + `GET …/backfill/status`, button "📚 טעינת היסטוריה" on the projects page. `project_sync.backfill_files` orders files by report date and syncs each with `force_history=True` — live rows untouched, no identifiers, no briefs/reports, in any upload order. `pick_master_sheet` chooses the "…עדכני" sheet (newer files open with a one-cell "מאקרו1" sheet, so "first sheet" synced nothing) — the plain `/upload` route gets it too. Verified locally: 8 files uploaded in shuffled order → 8 report-dated snapshots, 7,092 weekly entries (14.1–16.9), live rows byte-identical.
 
 ### P2 — Pattern engine `app/services/pattern_service.py` (M)
 Pure SQL/pandas. **No LLM computes a number.** Every metric returns `{value, n, confidence, caveat}`.

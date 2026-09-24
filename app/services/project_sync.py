@@ -408,12 +408,16 @@ async def _generate_weekly_brief(weekly_report: str | None) -> str | None:
 
 # ── Main async entry point ────────────────────────────────────────────────
 
-async def sync_projects_file(file_path: str, sheet_name: str | None = None) -> dict:
+async def sync_projects_file(file_path: str, sheet_name: str | None = None,
+                             force_history: bool = False) -> dict:
     """
     Parse project master file and upsert Project records to DB.
 
     Called as a BackgroundTasks callback — creates its own async session.
-    sheet_name: specific sheet to read (detected by process_master_file); None = first sheet.
+    sheet_name: specific sheet to read (detected by process_master_file); None =
+    the weekly-report sheet of an XLSX (pick_master_sheet), else the first sheet.
+    force_history: replay as history even when the report is newer than the DB —
+    the backfill path, which must never touch live rows or notify anyone.
     Returns result dict: {"processed": N, "created": N, "updated": N, "errors": [...]}
     """
     result = {"processed": 0, "created": 0, "updated": 0, "errors": [], "identifiers": []}
@@ -428,6 +432,8 @@ async def sync_projects_file(file_path: str, sheet_name: str | None = None) -> d
 
     # 1. Read file in executor thread (pandas is synchronous/blocking)
     loop = asyncio.get_event_loop()
+    if sheet_name is None:
+        sheet_name = await loop.run_in_executor(None, pick_master_sheet, file_path)
     df = await loop.run_in_executor(None, _read_file, file_path, sheet_name)
 
     if df.empty:
@@ -457,7 +463,7 @@ async def sync_projects_file(file_path: str, sheet_name: str | None = None) -> d
 
     # 3. Open DB session and process rows
     async with async_session_maker() as session:
-        historical = report_date < await _report_horizon(session)
+        historical = force_history or report_date < await _report_horizon(session)
         result["historical"] = historical
         if historical:
             logger.info(f"project_sync: report {report_date} is older than the DB — replaying as history")
@@ -775,3 +781,79 @@ async def generate_all_briefs() -> None:
                     logger.info(f"generate_all_briefs: saved brief for {p.project_identifier}")
 
     logger.info("generate_all_briefs: complete")
+
+
+# ── Backfill (PLAN.md P1) ─────────────────────────────────────────────────
+
+MASTER_SHEET_MARKER = "עדכני"   # "דוח שבועי עדכני" — the sheet that is the record
+
+
+def pick_master_sheet(file_path: str) -> str | None:
+    """The sheet of a master workbook that holds the weekly report.
+
+    Newer files open with a one-cell "מאקרו1" sheet, so "the first sheet" synced
+    nothing. Prefer the "…עדכני" sheet; else the first non-draft sheet with a
+    זיהוי header; else None (first sheet — the old behaviour, and CSV).
+    """
+    if Path(file_path).suffix.lower() not in (".xlsx", ".xls"):
+        return None
+    try:
+        names = pd.ExcelFile(file_path, engine="openpyxl").sheet_names
+    except Exception:
+        return None
+    for n in names:
+        if MASTER_SHEET_MARKER in n and DRAFT_SHEET_MARKER not in n:
+            return n
+    for n in names:
+        if DRAFT_SHEET_MARKER in n:
+            continue
+        df = _read_file(file_path, n)
+        if any(KNOWN_COLUMNS.get(c) == "project_identifier" for c in df.columns):
+            return n
+    return None
+
+
+def _file_report_date(file_path: str):
+    """Report date of a file before syncing it — used only to order a backfill."""
+    sheet = pick_master_sheet(file_path)
+    df = _read_file(file_path, sheet)
+    return resolve_report_date(file_path, [c for c in df.columns if WEEKLY_REPORT_MARKER in c])
+
+
+# Last backfill run, for the admin status poll. One process, one run at a time.
+BACKFILL_STATUS: dict[str, Any] = {"running": False, "files": [], "started_at": None, "finished_at": None}
+
+
+async def backfill_files(paths: list[tuple[str, str]]) -> None:
+    """Replay historical master files, oldest report first, as history only.
+
+    paths: (stored path, original filename). Every file is forced into history
+    mode: live project rows are never touched, no identifiers are returned (so
+    nothing is deactivated), and no briefs or project reports are sent.
+    """
+    loop = asyncio.get_event_loop()
+    BACKFILL_STATUS.update(running=True, files=[], started_at=datetime.utcnow().isoformat(),
+                           finished_at=None)
+    try:
+        dated = []
+        for path, name in paths:
+            try:
+                d = await loop.run_in_executor(None, _file_report_date, path)
+            except Exception as exc:
+                BACKFILL_STATUS["files"].append({"name": name, "status": "error", "error": str(exc)})
+                continue
+            dated.append((d, path, name))
+        dated.sort(key=lambda t: t[0])
+        for d, path, name in dated:
+            entry = {"name": name, "report_date": d.isoformat(), "status": "running"}
+            BACKFILL_STATUS["files"].append(entry)
+            try:
+                r = await sync_projects_file(path, force_history=True)
+                entry.update(status="done" if not r["errors"] else "done_with_errors",
+                             processed=r["processed"], created=r["created"],
+                             errors=r["errors"][:5])
+            except Exception as exc:
+                logger.error(f"backfill: {name} failed: {exc}")
+                entry.update(status="error", error=str(exc))
+    finally:
+        BACKFILL_STATUS.update(running=False, finished_at=datetime.utcnow().isoformat())
