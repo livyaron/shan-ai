@@ -1,19 +1,22 @@
 """Project sync service — parses uploaded XLSX/CSV master file and upserts Project records."""
 
 import asyncio
+import hashlib
 import logging
 import re
-from datetime import datetime
+from datetime import date, datetime, timedelta
+from types import SimpleNamespace
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
 from rapidfuzz import process as rf_process
 from rapidfuzz.utils import default_process as _rf_default_process
-from sqlalchemy import select
+from sqlalchemy import func, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.database import async_session_maker
-from app.models import Project
+from app.models import Project, ProjectSnapshot, ProjectWeeklyEntry
 from app.services import memory_service
 from app.services.llm_router import llm_chat
 from app.services.project_learning_service import save_snapshot
@@ -60,7 +63,15 @@ KNOWN_COLUMNS: dict[str, str] = {
     "יעד חשמול מסתמן":                 "estimated_finish_date",
     "יעד חשמול":                       "estimated_finish_date",
     "חשמול":                           "estimated_finish_date",
+    'תו"ב':                            "controller",
+    "חוסר במשגיחים":                   "short_supervisors",
+    "חוסר בבודקים":                    "short_testers",
+    "פרויקטים קריטים":                 "critical_tier",
 }
+
+BOOL_FIELDS = ("short_supervisors", "short_testers")
+DATE_FIELDS = ("dev_plan_date", "estimated_finish_date")
+DRAFT_SHEET_MARKER = "טיוטה"   # "דוח שבועי טיוטה" — a draft copy, never the record
 
 WEEKLY_REPORT_MARKER = "פירוט שבועי"  # substring match in column name
 FUZZY_CUTOFF = 50  # Lowered from 60 for better coverage
@@ -189,17 +200,121 @@ def _extract_weekly_report(row: pd.Series, weekly_cols: list[str]) -> str | None
 
 # ── Date parser ────────────────────────────────────────────────────────────
 
+_MIN_YEAR, _MAX_YEAR = 2000, 2045   # the file holds typos like year 1
+
+
 def _parse_date(val: Any):
-    """Parse a cell value as a date. Returns datetime.date or None."""
+    """Parse a cell value as a date. Returns datetime.date or None.
+
+    Strings are day-first (Israeli DD/MM/YYYY). Years outside a sane window are
+    typos, not dates — they used to crash date arithmetic downstream.
+    """
     if val is None or (isinstance(val, float) and pd.isna(val)):
         return None
     try:
-        parsed = pd.to_datetime(val, errors="coerce")
+        parsed = pd.to_datetime(val, errors="coerce", dayfirst=isinstance(val, str))
         if pd.isna(parsed):
             return None
-        return parsed.date()
+        d = parsed.date()
+        return d if _MIN_YEAR <= d.year <= _MAX_YEAR else None
     except Exception:
         return None
+
+
+def _split_finish_date(val: Any) -> tuple[Any, str | None]:
+    """יעד חשמול מסתמן → (date | None, prose | None).
+
+    A cell that is a date stays a date. A cell that is prose — even prose that
+    opens with a date, like "01/07/2026 לא אפשרי, יתקבל יעד חדש" — is kept as
+    text: that date is explicitly NOT the target, and dropping the text made
+    those projects vanish from every date metric.
+    """
+    if val is None or (isinstance(val, float) and pd.isna(val)):
+        return None, None
+    if isinstance(val, str):
+        s = val.strip()
+        if not s:
+            return None, None
+        if re.fullmatch(r"\d{1,4}[./-]\d{1,2}[./-]\d{1,4}", s):
+            d = _parse_date(s)
+            return (d, None) if d else (None, s)
+        return None, s
+    return _parse_date(val), None
+
+
+def _parse_bool(val: Any) -> bool | None:
+    """"כן"/"לא" marker cells → True/False; anything else → None."""
+    if val is None or (isinstance(val, float) and pd.isna(val)):
+        return None
+    s = str(val).strip()
+    if s in ("כן", "v", "V", "✓", "x", "X", "1", "True", "TRUE"):
+        return True
+    if s in ("לא", "0", "False", "FALSE"):
+        return False
+    return None
+
+
+# ── Report date & weekly-column dates ─────────────────────────────────────
+
+_DATE_IN_TEXT_RE = re.compile(r"(?<!\d)(\d{1,2})[./](\d{1,2})(?:[./](\d{2,4}))?(?!\d)")
+
+
+def _mk_date(day: int, month: int, year: int):
+    try:
+        d = date(year, month, day)
+    except ValueError:
+        return None
+    return d if _MIN_YEAR <= d.year <= _MAX_YEAR else None
+
+
+def _year4(y: str) -> int:
+    return int(y) + 2000 if len(y) == 2 else int(y)
+
+
+def report_date_from_filename(file_path: str):
+    """"דוח שבועי לסמנכל ... 16.09.2026.xlsx" → date(2026, 9, 16); else None.
+
+    Only a full day.month.year counts — a bare "1.7" inside a name is too
+    ambiguous to date a whole report by.
+    """
+    name = Path(file_path).name
+    for m in _DATE_IN_TEXT_RE.finditer(name):
+        if m.group(3):
+            d = _mk_date(int(m.group(1)), int(m.group(2)), _year4(m.group(3)))
+            if d:
+                return d
+    return None
+
+
+def weekly_column_date(col: str, report_date):
+    """"פירוט שבועי 19/8/2026" → date. Year-less headers ("14.1") take the
+    report's year, stepping back a year when that would land after the report.
+    """
+    m = _DATE_IN_TEXT_RE.search(col.split(WEEKLY_REPORT_MARKER, 1)[-1])
+    if not m:
+        return None
+    day, month = int(m.group(1)), int(m.group(2))
+    if m.group(3):
+        return _mk_date(day, month, _year4(m.group(3)))
+    d = _mk_date(day, month, report_date.year)
+    if d and d > report_date + timedelta(days=7):
+        d = _mk_date(day, month, report_date.year - 1)
+    return d
+
+
+def resolve_report_date(file_path: str, weekly_cols: list[str]):
+    """The date the file reports on: its name, else its newest weekly column,
+    else today. Snapshots are stamped with this — not with the upload day."""
+    d = report_date_from_filename(file_path)
+    if d:
+        return d
+    today = date.today()
+    col_dates = [wd for c in weekly_cols if (wd := weekly_column_date(c, today))]
+    return max(col_dates) if col_dates else today
+
+
+def _text_hash(text: str) -> str:
+    return hashlib.sha1(" ".join(text.split()).encode("utf-8")).hexdigest()[:16]
 
 
 # ── AI Briefing generation ────────────────────────────────────────────────
@@ -305,6 +420,12 @@ async def sync_projects_file(file_path: str, sheet_name: str | None = None) -> d
     change_facts: list[dict] = []   # second-brain temporal facts (Option G)
     dirty_project_ids: list[int] = []   # dossiers to re-drip after this sync
 
+    if sheet_name and DRAFT_SHEET_MARKER in sheet_name:
+        # The master workbook carries a "דוח שבועי טיוטה" draft next to the real
+        # sheet. Syncing it created phantom projects and snapshots.
+        logger.info(f"project_sync: skipping draft sheet '{sheet_name}'")
+        return result
+
     # 1. Read file in executor thread (pandas is synchronous/blocking)
     loop = asyncio.get_event_loop()
     df = await loop.run_in_executor(None, _read_file, file_path, sheet_name)
@@ -327,8 +448,19 @@ async def sync_projects_file(file_path: str, sheet_name: str | None = None) -> d
         )
         return result
 
+    # The date this file reports on — snapshots are stamped with it, and a file
+    # older than what the DB already holds is replayed as history (below).
+    report_date = resolve_report_date(file_path, weekly_cols)
+    result["report_date"] = report_date.isoformat()
+    week_dates = {c: weekly_column_date(c, report_date) for c in weekly_cols}
+    seen_idents: set[str] = set()
+
     # 3. Open DB session and process rows
     async with async_session_maker() as session:
+        historical = report_date < await _report_horizon(session)
+        result["historical"] = historical
+        if historical:
+            logger.info(f"project_sync: report {report_date} is older than the DB — replaying as history")
         for row_idx, row in df.iterrows():
             try:
                 # Extract identifier (required)
@@ -340,6 +472,12 @@ async def sync_projects_file(file_path: str, sheet_name: str | None = None) -> d
                     continue  # skip rows without identifier
 
                 ident = str(raw_ident).strip()
+                if ident in seen_idents:
+                    # The file does repeat an identifier now and then; the first
+                    # row is the record, a later one must not silently replace it.
+                    logger.warning(f"project_sync: duplicate identifier {ident} at row {row_idx} — skipped")
+                    continue
+                seen_idents.add(ident)
 
                 # Build field dict for all mapped columns
                 fields: dict[str, Any] = {}
@@ -347,8 +485,12 @@ async def sync_projects_file(file_path: str, sheet_name: str | None = None) -> d
                     if model_field in ("__weekly__", "project_identifier"):
                         continue
                     val = row[actual_col]
-                    if model_field in ("dev_plan_date", "estimated_finish_date"):
+                    if model_field == "estimated_finish_date":
+                        fields[model_field], fields["finish_date_text"] = _split_finish_date(val)
+                    elif model_field in DATE_FIELDS:
                         fields[model_field] = _parse_date(val)
+                    elif model_field in BOOL_FIELDS:
+                        fields[model_field] = _parse_bool(val)
                     else:
                         if pd.notna(val):
                             s = str(val).strip()
@@ -370,9 +512,15 @@ async def sync_projects_file(file_path: str, sheet_name: str | None = None) -> d
                 existing = (await session.execute(stmt)).scalars().first()
 
                 result["processed"] += 1
-                result["identifiers"].append(ident)
+                if not historical:
+                    # A replayed old report only adds history. Its identifiers are
+                    # withheld on purpose: the caller deactivates every project
+                    # missing from the list, and an old file lacks the new ones.
+                    result["identifiers"].append(ident)
 
-                if existing:
+                if existing and historical:
+                    pass   # the live row belongs to the newest report — untouched
+                elif existing:
                     # Only update fields that actually changed
                     changed = False
                     weekly_changed = False
@@ -410,20 +558,35 @@ async def sync_projects_file(file_path: str, sheet_name: str | None = None) -> d
                         dirty_project_ids.append(existing.id)
                     # else: no-op — last_updated stays as-is
                 else:
-                    # Create new
+                    # Create new. A project first seen in an old report is one
+                    # that has since left the file — keep it, but not as live.
                     project = Project(project_identifier=ident, **fields)
+                    if historical:
+                        project.is_active = False
                     session.add(project)
                     result["created"] += 1
 
                 # Commit per row — progress is saved immediately
                 await session.commit()
-                if not existing:
+                if not existing and not historical:
                     dirty_project_ids.append(project.id)
 
-                # Save daily snapshot for learning / risk tracking
-                _snap_target = existing if existing is not None else project
+                target = existing if existing is not None else project
+                await _save_weekly_entries(session, target.id, row, week_dates, report_date)
+
+                # Snapshot of THIS report: from the live row when the report is
+                # current, from the file row itself when it is replayed history.
+                _snap_source = (
+                    SimpleNamespace(**{
+                        **dict.fromkeys(_SNAPSHOT_SOURCE_FIELDS),
+                        **fields,
+                        "id": target.id, "is_active": True, "weekly_report_brief": None,
+                        "last_updated": datetime.combine(report_date, datetime.min.time()),
+                    })
+                    if historical else target
+                )
                 try:
-                    await save_snapshot(_snap_target, session)
+                    await save_snapshot(_snap_source, session, snapshot_date=report_date)
                     await session.commit()
                 except Exception as snap_exc:
                     logger.warning(f"project_sync: snapshot failed for {ident}: {snap_exc}")
@@ -455,6 +618,10 @@ async def sync_projects_file(file_path: str, sheet_name: str | None = None) -> d
         from app.services.dossier_service import mark_dirty
         asyncio.create_task(mark_dirty(dirty_project_ids))
 
+    if historical:
+        # History changes no live row — nothing to brief, nothing to report.
+        return result
+
     # Spawn brief generation as a background task (don't wait for it)
     asyncio.create_task(generate_all_briefs())
 
@@ -462,6 +629,69 @@ async def sync_projects_file(file_path: str, sheet_name: str | None = None) -> d
     asyncio.create_task(_trigger_reports_after_sync())
 
     return result
+
+
+# ── History helpers (PLAN.md P0) ──────────────────────────────────────────
+
+# Snapshots written before P0 are stamped with the UPLOAD day, which runs a few
+# days ahead of the report date (and further when a file is re-uploaded late).
+# Until report-dated history exists, only a report this far behind them counts
+# as old — otherwise the next genuine weekly file could be mistaken for history.
+_LEGACY_SNAPSHOT_SLACK = timedelta(days=14)
+
+# Every Project attribute save_snapshot reads — a replayed file row may lack
+# some of these columns, and a missing one must read as None, not crash.
+_SNAPSHOT_SOURCE_FIELDS = (
+    "name", "project_type", "stage", "manager", "weekly_report", "risks", "to_handle",
+    "dev_plan_date", "estimated_finish_date", "finish_date_text", "controller",
+    "short_supervisors", "short_testers", "critical_tier",
+)
+
+
+async def _report_horizon(session) -> date:
+    """Newest report date the DB already reflects. A file older than this is
+    replayed as history instead of overwriting the live project rows."""
+    newest_report = await session.scalar(select(func.max(ProjectWeeklyEntry.source_report_date)))
+    if newest_report:
+        return newest_report
+    newest_snapshot = await session.scalar(select(func.max(ProjectSnapshot.snapshot_date)))
+    if newest_snapshot:
+        return newest_snapshot - _LEGACY_SNAPSHOT_SLACK
+    return date.min
+
+
+async def _save_weekly_entries(session, project_id: int, row: pd.Series,
+                               week_dates: dict[str, Any], report_date) -> None:
+    """Upsert every dated `פירוט שבועי` cell of this row. A row already written
+    by a NEWER report is left alone — that report may have corrected it."""
+    rows: dict[Any, dict] = {}   # by week — Postgres rejects one INSERT touching a key twice
+    for col, week_date in week_dates.items():   # left→right, so the right-most column wins
+        if week_date is None or week_date > report_date + timedelta(days=7):
+            continue
+        val = row[col]
+        if pd.isna(val):
+            continue
+        text = str(val).strip()
+        if not text or text.lower() == "nan":
+            continue
+        rows[week_date] = dict(project_id=project_id, week_date=week_date, text=text,
+                               text_hash=_text_hash(text), source_report_date=report_date)
+    if not rows:
+        return
+    stmt = pg_insert(ProjectWeeklyEntry).values(list(rows.values()))
+    stmt = stmt.on_conflict_do_update(
+        index_elements=["project_id", "week_date"],
+        set_={"text": stmt.excluded.text, "text_hash": stmt.excluded.text_hash,
+              "source_report_date": stmt.excluded.source_report_date,
+              "updated_at": datetime.utcnow()},
+        where=ProjectWeeklyEntry.source_report_date <= stmt.excluded.source_report_date,
+    )
+    try:
+        await session.execute(stmt)
+        await session.commit()
+    except Exception as exc:
+        logger.warning(f"project_sync: weekly history failed for project {project_id}: {exc}")
+        await session.rollback()
 
 
 async def _trigger_reports_after_sync() -> None:

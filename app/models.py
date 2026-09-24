@@ -327,6 +327,13 @@ class Project(Base):
     to_handle             = Column(Text, nullable=True)
     dev_plan_date         = Column(Date, nullable=True)
     estimated_finish_date = Column(Date, nullable=True)
+    # Master-file columns captured for the pattern engine (PLAN.md P0). ALTERed
+    # in at startup (app/main.py) — create_all never alters an existing table.
+    finish_date_text      = Column(Text, nullable=True)        # יעד חשמול מסתמן when it is prose, not a date
+    controller            = Column(String(255), nullable=True)  # תו"ב
+    short_supervisors     = Column(Boolean, nullable=True)      # חוסר במשגיחים
+    short_testers         = Column(Boolean, nullable=True)      # חוסר בבודקים
+    critical_tier         = Column(String(32), nullable=True)   # פרויקטים קריטים
     last_updated          = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     is_active             = Column(Boolean, default=True, nullable=False)
 
@@ -348,11 +355,39 @@ class ProjectSnapshot(Base):
     is_active             = Column(Boolean, nullable=True)
     risk_score            = Column(Integer, nullable=True)
     days_overdue          = Column(Integer, nullable=True)
+    finish_date_text      = Column(Text, nullable=True)
+    controller            = Column(String(255), nullable=True)
+    short_supervisors     = Column(Boolean, nullable=True)
+    short_testers         = Column(Boolean, nullable=True)
+    critical_tier         = Column(String(32), nullable=True)
     created_at            = Column(DateTime, default=datetime.utcnow)
 
     project               = relationship("Project", back_populates="snapshots")
 
     __table_args__ = (UniqueConstraint("project_id", "snapshot_date"),)
+
+
+class ProjectWeeklyEntry(Base):
+    """One `פירוט שבועי <date>` cell of the master file (PLAN.md P0).
+
+    Every weekly file repeats the whole history of weekly columns; the sync used
+    to keep only the last one. A later report may correct an earlier week, so
+    the row keeps the newest `source_report_date` — an older file replayed
+    during a backfill never overwrites what a newer file said.
+    """
+    __tablename__ = "project_weekly_entries"
+
+    id                 = Column(Integer, primary_key=True)
+    project_id         = Column(Integer, ForeignKey("projects.id", ondelete="CASCADE"),
+                                nullable=False, index=True)
+    week_date          = Column(Date, nullable=False, index=True)
+    text               = Column(Text, nullable=False)
+    text_hash          = Column(String(16), nullable=False)
+    source_report_date = Column(Date, nullable=False)
+    created_at         = Column(DateTime, default=datetime.utcnow)
+    updated_at         = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (UniqueConstraint("project_id", "week_date"),)
 
 
 class ProjectReport(Base):

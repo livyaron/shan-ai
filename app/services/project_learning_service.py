@@ -244,20 +244,23 @@ def predict_next_score(scores: list[int]) -> Optional[int]:
     return max(0, min(100, ceil(ewma + 2 * slope)))
 
 
-async def save_snapshot(project: Project, session: AsyncSession) -> None:
+async def save_snapshot(project: Project, session: AsyncSession,
+                        snapshot_date: Optional[date] = None) -> None:
     """
-    Upsert one ProjectSnapshot row for today.
+    Upsert one ProjectSnapshot row for `snapshot_date` (the report date of the
+    file being synced; today when not given).
     ON CONFLICT (project_id, snapshot_date) → update all fields.
     Prunes snapshots older than the 52nd most-recent per project.
     """
     from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-    today = date.today()
+    today = snapshot_date or date.today()
 
-    # Fetch last 3 finish dates for velocity calculation
+    # Fetch the 3 finish dates before this one for velocity calculation
     prior_rows = (await session.execute(
         select(ProjectSnapshot.estimated_finish_date)
-        .where(ProjectSnapshot.project_id == project.id)
+        .where(ProjectSnapshot.project_id == project.id,
+               ProjectSnapshot.snapshot_date < today)
         .order_by(desc(ProjectSnapshot.snapshot_date))
         .limit(3)
     )).scalars().all()
@@ -287,6 +290,11 @@ async def save_snapshot(project: Project, session: AsyncSession) -> None:
         is_active             = project.is_active,
         risk_score            = result["score"],
         days_overdue          = result["days_overdue"],
+        finish_date_text      = getattr(project, "finish_date_text", None),
+        controller            = getattr(project, "controller", None),
+        short_supervisors     = getattr(project, "short_supervisors", None),
+        short_testers         = getattr(project, "short_testers", None),
+        critical_tier         = getattr(project, "critical_tier", None),
     )
 
     stmt = pg_insert(ProjectSnapshot).values(**values).on_conflict_do_update(

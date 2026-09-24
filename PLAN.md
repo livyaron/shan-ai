@@ -1,6 +1,6 @@
 # PLAN — Pattern & Risk Engine (second brain, analyst layer)
 
-**Status:** Draft for review. No code yet.
+**Status:** P0 implemented (see §3 P0 notes). P1–P4 not started.
 **Goal:** Turn the weekly master file (דוח שבועי לסמנכ"ל) into specialist-grade answers — patterns, leading indicators, bottlenecks — delivered to the division manager, the PM department and the three sector managers.
 
 > Exploratory analysis was run on 8 historical weekly files (Mar–Sep 2026) outside the repo. **No project data, names or findings are committed** — the repo is public and the files carry an inside-information notice. Numbers below are shapes, not data.
@@ -47,6 +47,13 @@ P0 capture fix ─► P1 backfill ─► P2 pattern engine ─► P3 delivery (w
 4. `_parse_date`: reject years outside 2000–2045.
 5. Add the four headers to `KNOWN_COLUMNS`.
 
+**P0 as built — deviations from the draft above:**
+- An automatic "history mode" replaces the per-call backfill flag: a file whose report date is older than `_report_horizon` (newest `source_report_date` in `project_weekly_entries`, else newest legacy snapshot − 14 days) never touches live rows, returns no identifiers, and fires no briefs/reports. Projects first seen in such a file are created `is_active=False`.
+- Draft sheets (`טיוטה`) are skipped entirely — they were creating phantom projects and snapshots.
+- Duplicate `זיהוי` inside one sheet: first row wins, later ones logged and skipped.
+- String dates are parsed day-first (was month-first: "01/07/2026" read as 7 Jan).
+- Verified end-to-end on the 8 historical files against a throwaway local Postgres: re-sync is idempotent; replaying 25.03 / 01.07 / 02.09 after 16.09 leaves the live rows byte-identical and the newer weekly text intact.
+
 ### P1 — Backfill (S)
 One-off admin endpoint / script that ingests historical files in **date order** with their `report_date`. Idempotent (UNIQUE keys). Must not fire the post-sync report/notification hooks (`_trigger_reports_after_sync`) — add a `backfill=True` flag that skips them.
 
@@ -66,6 +73,8 @@ Pure SQL/pandas. **No LLM computes a number.** Every metric returns `{value, n, 
 | `risk_categories` | regex taxonomy (9 categories, Hebrew-prefix tolerant) over `risks`, `to_handle`, weekly entries |
 | `leading_indicator` | category mentioned before T → % drifted after T, vs. baseline, with Fisher p and a **multiple-comparison flag** |
 | `slip_attribution` | each drift event attributed to the **stage the project was in** when it moved (needed so ביצוע is not blamed for slips born in תכנון) |
+
+Legacy snapshots (pre-P0) are dated by upload day and may sit 1–7 days from a report-dated snapshot of the same report — collapse them to the nearest report date before computing drift, or they read as extra "weeks".
 
 Confidence rules: n < 5 → "מדגם קטן", not ranked; p reported only with the number of hypotheses tested.
 
