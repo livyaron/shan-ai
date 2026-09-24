@@ -104,3 +104,54 @@ def test_text_hash_ignores_whitespace_only_edits():
 async def test_draft_sheet_is_never_synced():
     r = await ps.sync_projects_file("/nonexistent.xlsx", sheet_name="דוח שבועי טיוטה")
     assert r["processed"] == 0 and r["errors"] == []
+
+
+# ── P1: which sheet of a master workbook is the record ────────────────────
+
+def _workbook(tmp_path, sheets: dict[str, list[list]]) -> str:
+    import openpyxl
+    wb = openpyxl.Workbook()
+    wb.remove(wb.active)
+    for name, rows in sheets.items():
+        ws = wb.create_sheet(name)
+        for r in rows:
+            ws.append(r)
+    path = tmp_path / "דוח 16.09.2026.xlsx"
+    wb.save(path)
+    return str(path)
+
+
+def test_pick_master_sheet_skips_the_leading_macro_and_draft_sheets(tmp_path):
+    path = _workbook(tmp_path, {
+        "מאקרו1": [["x"]],
+        "דוח שבועי טיוטה": [["זיהוי", "פרויקט"], ["A-1", "טיוטה"]],
+        "גיליון1": [["משגיחים", "בודקים"]],
+        "דוח שבועי עדכני": [["זיהוי", "פרויקט"], ["A-1", "אמיתי"]],
+    })
+    assert ps.pick_master_sheet(path) == "דוח שבועי עדכני"
+
+
+def test_pick_master_sheet_falls_back_to_the_sheet_with_an_identifier(tmp_path):
+    path = _workbook(tmp_path, {
+        "רשימות בחירה": [["סטטוס", "סוג"], ["תכנון", "הרחבה"]],
+        "Sheet": [["זיהוי", "פרויקט", "מנהל"], ["A-1", "x", "y"]],
+    })
+    assert ps.pick_master_sheet(path) == "Sheet"
+
+
+def test_pick_master_sheet_leaves_csv_alone(tmp_path):
+    p = tmp_path / "projects.csv"
+    p.write_text("זיהוי,פרויקט\nA-1,x\n", encoding="utf-8")
+    assert ps.pick_master_sheet(str(p)) is None
+
+
+def test_file_report_date_orders_a_backfill_even_without_a_dated_name(tmp_path):
+    import openpyxl
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "דוח שבועי עדכני"
+    ws.append(["זיהוי", "פירוט שבועי 24/06/2026", "פירוט שבועי 01/07/2026"])
+    ws.append(["A-1", "a", "b"])
+    path = tmp_path / "חוברת1.xlsx"
+    wb.save(path)
+    assert ps._file_report_date(str(path)) == date(2026, 7, 1)

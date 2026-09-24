@@ -623,6 +623,32 @@
     </div>
 </div>
 
+{% if current_user.is_admin %}
+<!-- ── Backfill Modal (PLAN.md P1) ── -->
+<div class="modal fade" id="backfillModal" tabindex="-1" aria-labelledby="backfillModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="backfillModalLabel">📚 טעינת דוחות שבועיים היסטוריים</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close">×</button>
+            </div>
+            <div class="modal-body">
+                <p class="text-muted small">
+                    בחר את כל קבצי הדוח השבועי הישנים בבת אחת (XLSX). הם נטענים כהיסטוריה בלבד:
+                    הנתונים העדכניים של הפרויקטים לא משתנים ולא נשלחות הודעות. סדר הבחירה לא משנה.
+                </p>
+                <input class="form-control" type="file" id="backfillFiles" accept=".xlsx" multiple>
+                <div id="backfillStatus" class="small mt-3"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">סגור</button>
+                <button type="button" class="btn btn-primary" id="backfillBtn">טען היסטוריה</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
 <!-- ── PROJECT DETAILS MODAL ── -->
 <div class="modal fade" id="projectModal" tabindex="-1" aria-labelledby="projectModalLabel" aria-hidden="true">
     <div class="modal-dialog modal-lg">
@@ -646,9 +672,16 @@
 
     <div class="d-flex justify-content-between align-items-center mb-3" style="flex-wrap: wrap; gap: 1rem;">
         <h4 class="section-title mb-0">📂 ניהול פרויקטים</h4>
-        <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#uploadModal">
-            ⬆ סנכרן קובץ ראשי
-        </button>
+        <div style="display:flex; gap:0.5rem;">
+            {% if current_user.is_admin %}
+            <button class="btn btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#backfillModal">
+                📚 טעינת היסטוריה
+            </button>
+            {% endif %}
+            <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#uploadModal">
+                ⬆ סנכרן קובץ ראשי
+            </button>
+        </div>
     </div>
 
     {% if master_synced_at %}
@@ -946,6 +979,44 @@ $(document).ready(function () {
         };
         return (text || '').replace(/[&<>"']/g, m => map[m]);
     }
+
+    // ── 4b. Backfill modal (admin): upload many files, poll the status ──
+    const BACKFILL_LABELS = {running: '⏳ בטעינה', done: '✅ נטען', done_with_errors: '⚠️ נטען עם שגיאות', error: '❌ נכשל'};
+    function renderBackfill(st) {
+        const rows = (st.files || []).map(f =>
+            `<div>${BACKFILL_LABELS[f.status] || escapeHtml(f.status)} — ${escapeHtml(f.name)}` +
+            (f.report_date ? ` (${escapeHtml(f.report_date)})` : '') +
+            (f.processed != null ? ` · ${f.processed} פרויקטים` : '') +
+            (f.error ? ` · ${escapeHtml(f.error)}` : '') + `</div>`).join('');
+        $('#backfillStatus').html(rows + (st.running ? '<div class="text-muted mt-1">רץ ברקע — אפשר לסגור את החלון.</div>' : ''));
+    }
+    async function pollBackfill() {
+        try {
+            const st = await (await fetch('/dashboard/projects/backfill/status')).json();
+            renderBackfill(st);
+            if (st.running) setTimeout(pollBackfill, 4000);
+        } catch (e) { setTimeout(pollBackfill, 8000); }
+    }
+    $('#backfillModal').on('shown.bs.modal', pollBackfill);
+    $('#backfillBtn').on('click', async function () {
+        const input = document.getElementById('backfillFiles');
+        if (!input.files.length) { alert('יש לבחור קבצים'); return; }
+        const btn = $(this);
+        btn.prop('disabled', true).text('מעלה...');
+        const formData = new FormData();
+        for (const f of input.files) formData.append('files', f);
+        try {
+            const resp = await fetch('/dashboard/projects/backfill', {method: 'POST', body: formData});
+            const data = await resp.json();
+            if (!resp.ok) { alert(data.detail || 'שגיאה בהעלאה'); return; }
+            input.value = '';
+            pollBackfill();
+        } catch (err) {
+            alert('שגיאת רשת — נסה שוב');
+        } finally {
+            btn.prop('disabled', false).text('טען היסטוריה');
+        }
+    });
 
     // ── 5. Upload modal: fetch POST ────────────────────────────────────
     $('#uploadBtn').on('click', async function () {

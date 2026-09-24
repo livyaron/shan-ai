@@ -146,6 +146,46 @@ async def upload_project_file(
     })
 
 
+@router.post("/backfill")
+async def backfill_history(
+    background_tasks: BackgroundTasks,
+    files: list[UploadFile] = File(...),
+    current_user: User = Depends(get_current_user),
+):
+    """Admin: load historical weekly master files as history (PLAN.md P1).
+
+    Files are replayed oldest-first and never touch live project rows, so the
+    order they are picked in does not matter.
+    """
+    if not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="טעינת היסטוריה זמינה למנהל מערכת בלבד")
+    from app.services.project_sync import BACKFILL_STATUS, backfill_files
+    if BACKFILL_STATUS["running"]:
+        raise HTTPException(status_code=409, detail="טעינת היסטוריה כבר רצה — המתן לסיומה")
+    bad = [f.filename for f in files if _ext(f.filename or "") != "xlsx"]
+    if bad:
+        raise HTTPException(status_code=400, detail=f"רק קבצי XLSX: {', '.join(bad)}")
+
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    saved: list[tuple[str, str]] = []
+    for f in files:
+        path = UPLOAD_DIR / f"{uuid.uuid4().hex}_history_{f.filename}"
+        path.write_bytes(await f.read())
+        saved.append((str(path), f.filename or path.name))
+
+    BACKFILL_STATUS.update(running=True, files=[])   # visible before the task starts
+    background_tasks.add_task(backfill_files, saved)
+    return JSONResponse({"status": "ok", "message": f"{len(saved)} קבצים נקלטו — הטעינה רצה ברקע."})
+
+
+@router.get("/backfill/status")
+async def backfill_status(current_user: User = Depends(get_current_user)):
+    if not current_user.is_admin:
+        raise HTTPException(status_code=403)
+    from app.services.project_sync import BACKFILL_STATUS
+    return JSONResponse(BACKFILL_STATUS)
+
+
 @router.post("/regenerate-briefs")
 async def regenerate_briefs(
     background_tasks: BackgroundTasks,
