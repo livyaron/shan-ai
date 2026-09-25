@@ -186,6 +186,25 @@ async def backfill_status(current_user: User = Depends(get_current_user)):
     return JSONResponse(BACKFILL_STATUS)
 
 
+@router.get("/insights", response_class=HTMLResponse)
+async def project_insights_page(
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+    current_user: User = Depends(get_current_user),
+):
+    """Admin: the pattern engine drawn as a page (the JSON is /patterns)."""
+    if not current_user.is_admin:
+        raise HTTPException(status_code=403)
+    from app.services.pattern_service import compute
+    from app.services import stage_sectors
+    return templates.TemplateResponse("project_insights.html", {
+        "request": request,
+        "current_user": current_user,
+        "p": await compute(session),
+        "sector_labels": stage_sectors.SECTORS,
+    })
+
+
 @router.get("/patterns")
 async def project_patterns(
     session: AsyncSession = Depends(get_db_session),

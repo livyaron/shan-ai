@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Shan-AI — דפוסים וסיכונים</title>
+    <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        :root {
+            --bg-deep: #070b12; --bg-card: #0f1826; --border: #1a2d47; --border-hi: #1e3a5f;
+            --cyan: #00d4ff; --purple: #8b9cf4; --green: #10b981; --amber: #f59e0b; --red: #ef4444;
+            --text-1: #e2e8f0; --text-2: #94a3b8; --text-3: #64748b;
+            --mono: 'IBM Plex Mono', monospace; --ui: 'Heebo', sans-serif;
+        }
+        body { background: var(--bg-deep); color: var(--text-1); font-family: var(--ui); }
+        .wrap { max-width: 1280px; margin: 0 auto; padding: 1.5rem 1rem 4rem; }
+        h1 { font-size: 1.5rem; font-weight: 700; color: var(--purple); }
+        h2 { font-size: 1.1rem; font-weight: 600; color: var(--cyan); margin: 0 0 .25rem; }
+        .sub { color: var(--text-2); font-size: .88rem; }
+        .card-x { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; padding: 1.1rem 1.2rem; margin-bottom: 1.25rem; }
+        .caveat { color: var(--text-3); font-size: .8rem; margin-top: .6rem; }
+        .meta { color: var(--text-3); font-size: .78rem; font-family: var(--mono); }
+        .chip { display: inline-block; border: 1px solid var(--border-hi); border-radius: 999px; padding: .1rem .6rem; margin: .15rem; font-family: var(--mono); font-size: .78rem; color: var(--text-2); }
+        .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: .9rem; margin-bottom: 1.25rem; }
+        .tile { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; padding: .9rem 1rem; }
+        .tile .num { font-size: 2rem; font-weight: 700; line-height: 1.1; font-family: var(--mono); }
+        .tile .of { color: var(--text-3); font-size: .95rem; }
+        .tile .lbl { color: var(--text-2); font-size: .86rem; margin-top: .2rem; }
+        table.t { width: 100%; border-collapse: collapse; font-size: .88rem; }
+        table.t th { color: var(--text-2); font-weight: 500; text-align: right; border-bottom: 1px solid var(--border-hi); padding: .45rem .5rem; white-space: nowrap; }
+        table.t td { border-bottom: 1px solid var(--border); padding: .45rem .5rem; vertical-align: middle; }
+        table.t td.n { font-family: var(--mono); text-align: left; white-space: nowrap; }
+        .barcell { min-width: 140px; }
+        .bar { height: 10px; background: var(--cyan); border-radius: 4px 0 0 4px; opacity: .85; }  /* RTL: anchored right, the rounded data-end is on the left */
+        .bar-track { background: rgba(255,255,255,.04); border-radius: 4px; }
+        .badge-x { display: inline-block; border-radius: 6px; padding: .05rem .45rem; font-size: .76rem; white-space: nowrap; }
+        .b-signal { background: rgba(239,68,68,.15); color: #fca5a5; }
+        .b-weak { background: rgba(245,158,11,.15); color: #fcd34d; }
+        .b-none { background: rgba(148,163,184,.12); color: var(--text-2); }
+        .b-small { background: rgba(148,163,184,.12); color: var(--text-2); }
+        .callout { border-right: 3px solid var(--purple); padding: .6rem .9rem; background: rgba(139,156,244,.06); border-radius: 6px; margin-top: .75rem; font-size: .92rem; }
+        details summary { cursor: pointer; color: var(--text-2); font-size: .88rem; margin-top: .4rem; }
+        .ids { font-family: var(--mono); font-size: .8rem; color: var(--text-2); line-height: 1.9; }
+        .scroll { overflow-x: auto; }
+        .mix { color: var(--text-3); font-size: .78rem; }
+    </style>
+</head>
+<body>
+{% include "_navbar.html" %}
+{% set m = p.metrics %}
+{% set conf_he = {'high': 'ביטחון גבוה', 'medium': 'ביטחון בינוני', 'low': 'ביטחון נמוך', 'small_sample': 'מדגם קטן'} %}
+{% macro meta(x) %}<span class="meta">n={{ x.n }} · {{ conf_he.get(x.confidence, x.confidence) }}</span>{% endmacro %}
+{% macro pct(v) %}{{ '—' if v is none else v ~ '%' }}{% endmacro %}
+
+<div class="wrap">
+    <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-3">
+        <div>
+            <h1>🧠 דפוסים וסיכונים</h1>
+            <div class="sub">מחושב מהדוחות השבועיים בלבד — ללא מודל שפה. כל מספר מגיע עם גודל המדגם שלו.</div>
+        </div>
+        <a href="/dashboard/projects" class="btn btn-outline-secondary btn-sm">→ חזרה לפרויקטים</a>
+    </div>
+
+    {% if not p.as_of %}
+    <div class="card-x">אין עדיין היסטוריה מתוארכת. טען דוחות דרך "📚 טעינת היסטוריה" בדף הפרויקטים.</div>
+    {% else %}
+
+    <div class="card-x">
+        <div class="sub mb-1">נכון לדוח <strong style="color:var(--text-1)">{{ p.as_of }}</strong> · {{ p.report_dates|length }} דוחות בהיסטוריה:</div>
+        {% for d in p.report_dates %}<span class="chip">{{ d }}</span>{% endfor %}
+    </div>
+
+    {% set fd = m.forecast_drift.value %}{% set bm = m.baseline_moves.value %}
+    <div class="tiles">
+        <div class="tile" title="{{ m.forecast_drift.caveat }}">
+            <div class="num">{{ fd.later }}<span class="of"> / {{ m.forecast_drift.n }}</span></div>
+            <div class="lbl">יעד חשמול נדחה מאז הדוח הראשון</div>
+        </div>
+        <div class="tile" title="{{ m.baseline_moves.caveat }}">
+            <div class="num">{{ bm.later }}<span class="of"> / {{ m.baseline_moves.n }}</span></div>
+            <div class="lbl">יעד תכנית פיתוח נדחה (הבסיס זז)</div>
+        </div>
+        <div class="tile" title="{{ m.stuck.caveat }}">
+            <div class="num">{{ m.stuck.value.count }}<span class="of"> / {{ m.stuck.n }}</span></div>
+            <div class="lbl">תקועים 12+ שבועות באותו שלב</div>
+        </div>
+        <div class="tile" title="{{ m.stale_reporting.caveat }}">
+            <div class="num">{{ m.stale_reporting.value.count }}</div>
+            <div class="lbl">דיווח שבועי זהה 4 שבועות</div>
+        </div>
+        <div class="tile" title="{{ m.undated.caveat }}">
+            <div class="num">{{ m.undated.value.count }}</div>
+            <div class="lbl">יעד חשמול כמלל, לא תאריך</div>
+        </div>
+        <div class="tile" title="{{ m.past_due.caveat }}">
+            <div class="num">{{ m.past_due.value.count }}</div>
+            <div class="lbl">יעד מסתמן כבר עבר</div>
+        </div>
+    </div>
+
+    {# ── Slip attribution: who owned the project when it slipped ── #}
+    {% set att = m.slip_attribution.value %}
+    {% set max_months = (att.values()|map(attribute='months')|max) or 1 %}
+    <div class="card-x">
+        <h2>איפה נוצרות הדחיות</h2>
+        <div class="sub">כל דחייה של יעד החשמול נרשמת על המגזר שהחזיק את הפרויקט (לפי שלב) ברגע שזזה. {{ meta(m.slip_attribution) }}</div>
+        <div class="scroll"><table class="t mt-2">
+            <tr><th>מגזר</th><th>אירועי דחייה</th><th>חודשי דחייה</th><th class="barcell"></th></tr>
+            {% for key, v in att.items() if v.events %}
+            <tr title="{{ sector_labels[key] }}: {{ v.events }} אירועים, {{ v.months }} חודשים">
+                <td>{{ sector_labels[key] }}</td>
+                <td class="n">{{ v.events }}</td>
+                <td class="n">{{ v.months }}</td>
+                <td class="barcell"><div class="bar-track"><div class="bar" style="width: {{ (100 * v.months / max_months)|round(0) }}%"></div></div></td>
+            </tr>
+            {% endfor %}
+        </table></div>
+        <div class="caveat">{{ m.slip_attribution.caveat }}</div>
+    </div>
+
+    {# ── Update waves ── #}
+    {% set waves = m.update_waves.value %}
+    {% set max_w = (waves|map(attribute='forecast_later')|max) or 1 %}
+    <div class="card-x">
+        <h2>גלי עדכון — תאריכים זזים בגלים, לא כל שבוע</h2>
+        <div class="sub">{{ meta(m.update_waves) }}</div>
+        <div class="scroll"><table class="t mt-2">
+            <tr><th>מקטע</th><th>שבועות</th><th>יעד מסתמן נדחה</th><th class="barcell"></th><th>תכנית פיתוח נדחתה</th><th>שניהם</th></tr>
+            {% for w in waves %}
+            <tr title="{{ w.from }} → {{ w.to }}: {{ w.forecast_later }} יעדים נדחו מתוך {{ w.n }}">
+                <td class="n">{{ w.from }} → {{ w.to }}</td>
+                <td class="n">{{ w.weeks }}</td>
+                <td class="n">{{ w.forecast_later }}</td>
+                <td class="barcell"><div class="bar-track"><div class="bar" style="width: {{ (100 * w.forecast_later / max_w)|round(0) }}%"></div></div></td>
+                <td class="n">{{ w.baseline_later }}</td>
+                <td class="n">{{ w.both }}</td>
+            </tr>
+            {% endfor %}
+        </table></div>
+        <div class="caveat">{{ m.update_waves.caveat }}</div>
+    </div>
+
+    {# ── Sectors ── #}
+    <div class="card-x">
+        <h2>לפי מגזר (לפי השלב הנוכחי)</h2>
+        <div class="scroll"><table class="t mt-2">
+            <tr><th>מגזר</th><th>פרויקטים</th><th>מאחרים מול ת.פיתוח</th><th>נדחו מאז הדוח הראשון</th><th>בסיס זז</th><th>תקועים</th></tr>
+            {% for s in p.sectors %}
+            <tr><td>{{ s.label }}</td><td class="n">{{ s.n }}</td><td class="n">{{ pct(s.late_pct) }}</td>
+                <td class="n">{{ pct(s.drift_pct) }}</td><td class="n">{{ s.baseline_moved }}</td><td class="n">{{ s.stuck }}</td></tr>
+            {% endfor %}
+        </table></div>
+        <div class="caveat">"עבודה אזרחית והרכבות" נספר גם בפיקוח וגם בביצוע — אין לסכם את השורות לסך אגף.</div>
+    </div>
+
+    {# ── League table (D3) ── #}
+    <div class="card-x">
+        <h2>טבלת מנהלי פרויקטים</h2>
+        <div class="sub">מדורג לפי % מאחרים. "בסיס זז" ליד כל מדד איחור — שיפור שנובע מדחיית תכנית הפיתוח גלוי לכולם. מתחת ל-5 פרויקטים: מוצג, לא מדורג.</div>
+        <div class="scroll"><table class="t mt-2">
+            <tr><th>#</th><th>מנה"פ</th><th>פרויקטים</th><th>מאחרים</th><th>נדחו</th><th>בסיס זז</th><th>תקועים</th><th>תמהיל שלבים</th></tr>
+            {% for r in p.league %}
+            <tr>
+                <td class="n">{% if r.rank %}{{ r.rank }}{% else %}<span class="badge-x b-small">◌ מדגם קטן</span>{% endif %}</td>
+                <td>{{ r.manager }}</td><td class="n">{{ r.n }}</td><td class="n">{{ pct(r.late_pct) }}</td>
+                <td class="n">{{ pct(r.drift_pct) }}</td><td class="n">{{ r.baseline_moved }}</td><td class="n">{{ r.stuck }}</td>
+                <td class="mix">{% for st, c in r.stage_mix.items() %}{{ st }} {{ c }}{% if not loop.last %} · {% endif %}{% endfor %}</td>
+            </tr>
+            {% endfor %}
+        </table></div>
+    </div>
+
+    {# ── Leading indicators ── #}
+    {% set li = m.leading_indicators %}
+    {% set sig_he = {'signal': '● אות מובהק', 'weak': '◐ חלש — לפני תיקון בלבד', 'none': '○ אין אות'} %}
+    <div class="card-x">
+        <h2>אותות מקדימים — נושא שהוזכר בדוח הראשון → נדחה מאז?</h2>
+        <div class="sub">{{ meta(li) }}</div>
+        <div class="scroll"><table class="t mt-2">
+            <tr><th>נושא</th><th>עם הנושא: נדחו</th><th>בלי: נדחו</th><th>p</th><th>p מתוקן</th><th>מסקנה</th></tr>
+            {% for r in li.value %}
+            <tr><td>{{ r.category }}</td>
+                <td class="n">{{ pct(r.with_pct) }} <span class="mix">(n={{ r.with_n }})</span></td>
+                <td class="n">{{ pct(r.without_pct) }} <span class="mix">(n={{ r.without_n }})</span></td>
+                <td class="n">{{ r.p }}</td><td class="n">{{ r.p_adjusted }}</td>
+                <td><span class="badge-x b-{{ r.signal }}">{{ sig_he[r.signal] }}</span></td></tr>
+            {% endfor %}
+        </table></div>
+        <div class="caveat">{{ li.caveat }}</div>
+    </div>
+
+    {# ── Risk categories ── #}
+    {% set rc = m.risk_categories %}
+    {% set max_rc = (rc.value|map(attribute='projects')|max) or 1 %}
+    <div class="card-x">
+        <h2>על מה כותבים</h2>
+        <div class="sub">{{ meta(rc) }}</div>
+        <div class="scroll"><table class="t mt-2">
+            <tr><th>נושא</th><th>פרויקטים שמזכירים</th><th class="barcell"></th><th>מתוכם בעמודת הסיכונים</th></tr>
+            {% for r in rc.value %}
+            <tr title="{{ r.category }}: {{ r.projects }} פרויקטים"><td>{{ r.category }}</td><td class="n">{{ r.projects }}</td>
+                <td class="barcell"><div class="bar-track"><div class="bar" style="width: {{ (100 * r.projects / max_rc)|round(0) }}%"></div></div></td>
+                <td class="n">{{ r.in_risk_column }}</td></tr>
+            {% endfor %}
+        </table></div>
+        <div class="caveat">{{ rc.caveat }}</div>
+    </div>
+
+    {# ── Lists ── #}
+    <div class="card-x">
+        <h2>רשימות לטיפול</h2>
+        <details><summary>⏸ תקועים ({{ m.stuck.value.count }})</summary>
+            <div class="scroll"><table class="t mt-2"><tr><th>זיהוי</th><th>שלב</th><th>שבועות</th></tr>
+            {% for r in m.stuck.value.projects %}<tr><td class="n">{{ r.identifier }}</td><td>{{ r.stage }}</td>
+                <td class="n">{{ '≥' if r.lower_bound }}{{ r.weeks }}</td></tr>{% endfor %}
+            </table></div>
+            <div class="caveat">{{ m.stuck.caveat }}</div>
+        </details>
+        <details><summary>🔁 דיווח שבועי זהה ({{ m.stale_reporting.value.count }})</summary>
+            <div class="ids">{{ m.stale_reporting.value.projects|join(' · ') }}</div></details>
+        <details><summary>📝 יעד חשמול כמלל ({{ m.undated.value.count }})</summary>
+            <div class="ids">{{ m.undated.value.projects|join(' · ') }}</div></details>
+        <details><summary>⌛ יעד מסתמן שכבר עבר ({{ m.past_due.value.count }})</summary>
+            <div class="ids">{{ m.past_due.value.projects|join(' · ') }}</div></details>
+    </div>
+
+    {% set sv = m.slip_vs_plan %}
+    <div class="callout">
+        לפי הדוח עצמו {{ sv.value.late }} מתוך {{ sv.n }} פרויקטים מאחרים מול תכנית הפיתוח (חציון {{ sv.value.median_months }} ח'),
+        אבל {{ fd.later }} נדחו מאז הדוח הראשון ו-{{ bm.later }} יעדי תכנית פיתוח זזו קדימה. {{ sv.caveat }}
+    </div>
+    {% endif %}
+</div>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
