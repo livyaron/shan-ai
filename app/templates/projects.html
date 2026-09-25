@@ -988,6 +988,7 @@ $(document).ready(function () {
             `<div>${BACKFILL_LABELS[f.status] || escapeHtml(f.status)} — ${escapeHtml(f.name)}` +
             (f.report_date ? ` (${escapeHtml(f.report_date)})` : '') +
             (f.processed != null ? ` · ${f.processed} פרויקטים` : '') +
+            (f.snapshot_errors ? ` · ${f.snapshot_errors} צילומים נכשלו` : '') +
             (f.error ? ` · ${escapeHtml(f.error)}` : '') + `</div>`).join('');
         const files = st.files || [];
         const finished = files.filter(f => f.status !== 'queued' && f.status !== 'running').length;
