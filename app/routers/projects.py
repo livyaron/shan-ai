@@ -186,6 +186,22 @@ async def backfill_status(current_user: User = Depends(get_current_user)):
     return JSONResponse(BACKFILL_STATUS)
 
 
+@router.get("/patterns")
+async def project_patterns(
+    session: AsyncSession = Depends(get_db_session),
+    current_user: User = Depends(get_current_user),
+):
+    """Admin: the pattern & risk engine's full output as JSON (PLAN.md P2).
+
+    Admin-only until the per-role views (P3) decide who sees which part — the
+    named league table and the leading indicators are not for everyone yet.
+    """
+    if not current_user.is_admin:
+        raise HTTPException(status_code=403)
+    from app.services.pattern_service import compute
+    return JSONResponse(await compute(session))
+
+
 @router.post("/regenerate-briefs")
 async def regenerate_briefs(
     background_tasks: BackgroundTasks,
