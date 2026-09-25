@@ -1,6 +1,6 @@
 # PLAN — Pattern & Risk Engine (second brain, analyst layer)
 
-**Status:** P0 + P1 implemented (see §3 notes). P2–P4 not started.
+**Status:** P0 + P1 + P2 implemented (see §3 notes). P1 backfill loaded in production (8/8 files). P3–P4 not started.
 **Goal:** Turn the weekly master file (דוח שבועי לסמנכ"ל) into specialist-grade answers — patterns, leading indicators, bottlenecks — delivered to the division manager, the PM department and the three sector managers.
 
 > Exploratory analysis was run on 8 historical weekly files (Mar–Sep 2026) outside the repo. **No project data, names or findings are committed** — the repo is public and the files carry an inside-information notice. Numbers below are shapes, not data.
@@ -79,6 +79,8 @@ Pure SQL/pandas. **No LLM computes a number.** Every metric returns `{value, n, 
 Legacy snapshots (pre-P0) are dated by upload day and may sit 1–7 days from a report-dated snapshot of the same report — collapse them to the nearest report date before computing drift, or they read as extra "weeks".
 
 Confidence rules: n < 5 → "מדגם קטן", not ranked; p reported only with the number of hypotheses tested.
+
+**P2 as built:** `app/services/pattern_service.py` (`load_frames` is the only DB access; `compute_patterns` is pure pandas, tested on synthetic frames) + `app/services/stage_sectors.py` (§5 map). Output via admin-only `GET /dashboard/projects/patterns` (JSON) until P3 decides who sees what. Thresholds are named constants at the top of the module: late = forecast > 1 month past plan; a date "moved" only beyond 15 days; stuck = 12+ weeks in the current stage (`lower_bound` when history starts in that stage); stale = identical weekly text 4 weeks running. Report dates: only full-file syncs (≥ 50% of the largest date's rows); dates within 3 days of a cluster's FIRST date collapse onto its latest — never chained (an upload day sits 6 days after the previous week's report, and chaining merged the two weeks — caught by a test). Leading indicators: Fisher exact (own implementation, checked against scipy) + Bonferroni; `weak` = significant only before correction. Slip attribution charges each forecast move to the sector(s) owning the stage at the START of the interval.
 
 ### P3 — Delivery (M)
 - **Web** `/dashboard/patterns` (reuse dashboard auth + `war_room` template conventions):
