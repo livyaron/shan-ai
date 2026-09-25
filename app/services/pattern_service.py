@@ -388,4 +388,30 @@ def _plain(x: Any) -> Any:
 
 
 async def compute(session: AsyncSession) -> dict:
-    return _plain(compute_patterns(await load_frames(session)))
+    frames = await load_frames(session)
+    result = compute_patterns(frames)
+    result["health"] = await data_health(session, frames)
+    return _plain(result)
+
+
+async def data_health(session: AsyncSession, frames: Frames) -> dict:
+    """What the history tables actually hold — shown on the page so a gap in
+    the data is visible to the reader, not only to someone with DB access."""
+    from sqlalchemy import text
+    counts = frames.snaps.groupby("snapshot_date").size().sort_index() if not frames.snaps.empty else pd.Series(dtype=int)
+    mapping = report_dates(frames.snaps)
+    weekly = (frames.weekly.groupby("week_date").size() if not frames.weekly.empty else pd.Series(dtype=int))
+    try:
+        idx = (await session.execute(text(
+            "SELECT indexdef FROM pg_indexes WHERE tablename = 'project_snapshots'"))).scalars().all()
+    except Exception as exc:   # not Postgres (tests) or no catalog access
+        idx = [f"n/a: {type(exc).__name__}"]
+    return {
+        "snapshot_dates": [{"date": d.isoformat(), "rows": int(c),
+                            "report_date": mapping[d].isoformat() if d in mapping else None}
+                           for d, c in counts.items()],
+        "snapshot_rows": int(len(frames.snaps)),
+        "weekly_rows": int(len(frames.weekly)),
+        "weekly_range": [weekly.index.min().isoformat(), weekly.index.max().isoformat()] if len(weekly) else None,
+        "snapshot_indexes": list(idx),
+    }

@@ -595,7 +595,11 @@ async def sync_projects_file(file_path: str, sheet_name: str | None = None,
                     await save_snapshot(_snap_source, session, snapshot_date=report_date)
                     await session.commit()
                 except Exception as snap_exc:
+                    # Counted and surfaced, not just logged: a sync whose every
+                    # snapshot failed used to report success.
                     logger.warning(f"project_sync: snapshot failed for {ident}: {snap_exc}")
+                    result["snapshot_errors"] = result.get("snapshot_errors", 0) + 1
+                    result.setdefault("snapshot_error", f"{type(snap_exc).__name__}: {snap_exc}"[:400])
                     try:
                         await session.rollback()
                     except Exception:
@@ -853,9 +857,12 @@ async def backfill_files(paths: list[tuple[str, str]]) -> None:
             entry["status"] = "running"
             try:
                 r = await sync_projects_file(path, force_history=True)
-                entry.update(status="done" if not r["errors"] else "done_with_errors",
+                bad = r["errors"] or r.get("snapshot_errors")
+                entry.update(status="done_with_errors" if bad else "done",
                              processed=r["processed"], created=r["created"],
-                             errors=r["errors"][:5])
+                             errors=r["errors"][:5],
+                             snapshot_errors=r.get("snapshot_errors", 0),
+                             error=r.get("snapshot_error"))
             except Exception as exc:
                 logger.error(f"backfill: {name} failed: {exc}")
                 entry.update(status="error", error=str(exc))

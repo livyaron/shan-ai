@@ -62,6 +62,21 @@
         <a href="/dashboard/projects" class="btn btn-outline-secondary btn-sm">→ חזרה לפרויקטים</a>
     </div>
 
+    {% set h = p.health %}
+    {% if h %}
+    <details class="card-x" {% if (p.report_dates|length) < 2 %}open{% endif %}>
+        <summary>🩺 בריאות הנתונים — {{ h.snapshot_rows }} צילומים ב-{{ h.snapshot_dates|length }} תאריכים · {{ h.weekly_rows }} שורות דיווח שבועי{% if h.weekly_range %} ({{ h.weekly_range[0] }} → {{ h.weekly_range[1] }}){% endif %}</summary>
+        <div class="sub mt-2">תאריך נספר כדוח רק כשיש בו לפחות מחצית מהפרויקטים של התאריך הגדול ביותר. תאריכים במרחק עד 3 ימים מתאחדים.</div>
+        <div class="scroll"><table class="t mt-2">
+            <tr><th>תאריך צילום</th><th>פרויקטים</th><th>נספר כדוח של</th></tr>
+            {% for d in h.snapshot_dates|reverse %}
+            <tr><td class="n">{{ d.date }}</td><td class="n">{{ d.rows }}</td><td class="n">{{ d.report_date or '— לא נספר' }}</td></tr>
+            {% endfor %}
+        </table></div>
+        <div class="caveat" style="direction:ltr;text-align:left">{% for i in h.snapshot_indexes %}{{ i }}<br>{% endfor %}</div>
+    </details>
+    {% endif %}
+
     {% if not p.as_of %}
     <div class="card-x">אין עדיין היסטוריה מתוארכת. טען דוחות דרך "📚 טעינת היסטוריה" בדף הפרויקטים.</div>
     {% else %}

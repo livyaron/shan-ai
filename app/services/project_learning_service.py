@@ -244,6 +244,9 @@ def predict_next_score(scores: list[int]) -> Optional[int]:
     return max(0, min(100, ceil(ewma + 2 * slope)))
 
 
+SNAPSHOT_KEEP = 520   # ~10 years of weekly reports per project
+
+
 async def save_snapshot(project: Project, session: AsyncSession,
                         snapshot_date: Optional[date] = None) -> None:
     """
@@ -303,12 +306,14 @@ async def save_snapshot(project: Project, session: AsyncSession,
     )
     await session.execute(stmt)
 
-    # Prune: keep only the 52 most-recent snapshots per project
+    # Prune: keep the SNAPSHOT_KEEP most-recent snapshots per project. Was 52:
+    # pre-P0 snapshots are one per upload DAY, and a busy stretch of uploads
+    # pushed report-dated history (the pattern engine's input) out the back.
     cutoff_date = await session.scalar(
         select(ProjectSnapshot.snapshot_date)
         .where(ProjectSnapshot.project_id == project.id)
         .order_by(desc(ProjectSnapshot.snapshot_date))
-        .offset(51)
+        .offset(SNAPSHOT_KEEP - 1)
         .limit(1)
     )
     if cutoff_date:
