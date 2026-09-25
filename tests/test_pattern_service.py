@@ -176,3 +176,31 @@ def test_empty_history_is_not_an_error():
         pd.DataFrame(columns=["project_id", "identifier", "name", "manager", "project_type", "is_active"]),
         pd.DataFrame(columns=["project_id", "week_date", "text", "text_hash"]))
     assert pt.compute_patterns(empty)["as_of"] is None
+
+
+# ── The admin page renders whatever the engine returns ────────────────────
+
+def _render(p):
+    from types import SimpleNamespace
+    from jinja2 import Environment, FileSystemLoader
+    env = Environment(loader=FileSystemLoader("app/templates"))
+    request = SimpleNamespace(url=SimpleNamespace(path="/dashboard/projects/insights"))
+    user = SimpleNamespace(is_admin=True, username="u", role=None, id=1)
+    return env.get_template("project_insights.html").render(
+        request=request, current_user=user, p=p, sector_labels=ss.SECTORS)
+
+
+def test_insights_page_renders_every_section():
+    html = _render(pt._plain(pt.compute_patterns(_frames(extra_projects=4))))
+    for heading in ("איפה נוצרות הדחיות", "גלי עדכון", "לפי מגזר", "טבלת מנהלי פרויקטים",
+                    "אותות מקדימים", "על מה כותבים", "רשימות לטיפול"):
+        assert heading in html
+    assert "מנהל א" in html and "P-2" in html
+
+
+def test_insights_page_with_no_history():
+    empty = pt.Frames(
+        pd.DataFrame(columns=["project_id", "snapshot_date", "stage", "fc", "dev", "risks", "to_handle", "finish_date_text"]),
+        pd.DataFrame(columns=["project_id", "identifier", "name", "manager", "project_type", "is_active"]),
+        pd.DataFrame(columns=["project_id", "week_date", "text", "text_hash"]))
+    assert "אין עדיין היסטוריה מתוארכת" in _render(pt._plain(pt.compute_patterns(empty)))
