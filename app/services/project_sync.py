@@ -844,9 +844,13 @@ async def backfill_files(paths: list[tuple[str, str]]) -> None:
                 continue
             dated.append((d, path, name))
         dated.sort(key=lambda t: t[0])
-        for d, path, name in dated:
-            entry = {"name": name, "report_date": d.isoformat(), "status": "running"}
-            BACKFILL_STATUS["files"].append(entry)
+        # List every file up front, so the page shows "N files, k done" rather
+        # than only the one being loaded right now.
+        queue = [{"name": name, "report_date": d.isoformat(), "status": "queued"}
+                 for d, _path, name in dated]
+        BACKFILL_STATUS["files"].extend(queue)
+        for (d, path, name), entry in zip(dated, queue):
+            entry["status"] = "running"
             try:
                 r = await sync_projects_file(path, force_history=True)
                 entry.update(status="done" if not r["errors"] else "done_with_errors",
