@@ -33,8 +33,9 @@ STALE_WEEKS = 4           # identical weekly text this many weeks running = stal
 STALE_MAX_GAP_DAYS = 10   # weekly entries further apart than this are not "running"
 SMALL_SAMPLE = 5          # below this, shown but never ranked (PLAN.md §6)
 REPORT_CLUSTER_DAYS = 3   # snapshots this close are the same weekly report
+FULL_SYNC_REFERENCE_DATES = 5   # the "full file" size = median of the biggest dates
 FULL_SYNC_SHARE = 0.5     # a date with fewer snapshots than this share of the
-                          # biggest one is a partial sync, not a report
+                          # reference size is a partial sync, not a report
 
 # v1 taxonomy — validate on a hand-labelled sample before showing it to PMs
 # (PLAN.md §8.3). Substring patterns tolerate Hebrew prefixes (ב/ה/ל/ש/ו).
@@ -119,7 +120,8 @@ def report_dates(snaps: pd.DataFrame) -> dict[date, date]:
     """Map every snapshot date to the report date it belongs to.
 
     Only full-file syncs count as reports (a date with a handful of snapshots
-    is a partial sync). Pre-P0 snapshots are stamped with the upload day —
+    is a partial sync; "full" is judged against the median of the biggest
+    dates, so one inflated date cannot disqualify the rest). Pre-P0 snapshots are stamped with the upload day —
     typically the day before the report date — so dates within
     REPORT_CLUSTER_DAYS of a cluster's FIRST date collapse onto its latest.
     Measured from the first date, never chained: an upload day sits 6 days
@@ -128,7 +130,11 @@ def report_dates(snaps: pd.DataFrame) -> dict[date, date]:
     if snaps.empty:
         return {}
     counts = snaps.groupby("snapshot_date").size()
-    full = sorted(d for d, c in counts.items() if c >= FULL_SYNC_SHARE * counts.max())
+    # Measured against the median of the biggest dates, not the single biggest:
+    # one inflated pre-P0 date (every sheet of a workbook synced as projects)
+    # would otherwise disqualify every genuine weekly report.
+    reference = float(counts.sort_values(ascending=False).head(FULL_SYNC_REFERENCE_DATES).median())
+    full = sorted(d for d, c in counts.items() if c >= FULL_SYNC_SHARE * reference)
     clusters: list[list[date]] = []
     for d in full:
         if clusters and (d - clusters[-1][0]).days <= REPORT_CLUSTER_DAYS:

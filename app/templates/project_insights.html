@@ -66,7 +66,7 @@
     {% if h %}
     <details class="card-x" {% if (p.report_dates|length) < 2 %}open{% endif %}>
         <summary>🩺 בריאות הנתונים — {{ h.snapshot_rows }} צילומים ב-{{ h.snapshot_dates|length }} תאריכים · {{ h.weekly_rows }} שורות דיווח שבועי{% if h.weekly_range %} ({{ h.weekly_range[0] }} → {{ h.weekly_range[1] }}){% endif %}</summary>
-        <div class="sub mt-2">תאריך נספר כדוח רק כשיש בו לפחות מחצית מהפרויקטים של התאריך הגדול ביותר. תאריכים במרחק עד 3 ימים מתאחדים.</div>
+        <div class="sub mt-2">תאריך נספר כדוח רק כשיש בו לפחות מחצית מהגודל של קובץ מלא (חציון 5 התאריכים הגדולים). תאריכים במרחק עד 3 ימים מתאחדים.</div>
         <div class="scroll"><table class="t mt-2">
             <tr><th>תאריך צילום</th><th>פרויקטים</th><th>נספר כדוח של</th></tr>
             {% for d in h.snapshot_dates|reverse %}

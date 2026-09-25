@@ -204,3 +204,14 @@ def test_insights_page_with_no_history():
         pd.DataFrame(columns=["project_id", "identifier", "name", "manager", "project_type", "is_active"]),
         pd.DataFrame(columns=["project_id", "week_date", "text", "text_hash"]))
     assert "אין עדיין היסטוריה מתוארכת" in _render(pt._plain(pt.compute_patterns(empty)))
+
+
+def test_one_inflated_date_does_not_disqualify_the_real_reports():
+    # Production shape: a pre-P0 upload day that synced every sheet of the
+    # workbook holds twice the projects of any real weekly report.
+    rows = [{"project_id": i, "snapshot_date": date(2026, 7, 24)} for i in range(520)]
+    for d in (date(2026, 3, 25), date(2026, 8, 19), date(2026, 9, 16)):
+        rows += [{"project_id": i, "snapshot_date": d} for i in range(250)]
+    rows += [{"project_id": i, "snapshot_date": date(2026, 9, 20)} for i in range(12)]   # partial
+    m = pt.report_dates(pd.DataFrame(rows))
+    assert sorted(set(m.values())) == [date(2026, 3, 25), date(2026, 7, 24), date(2026, 8, 19), date(2026, 9, 16)]
