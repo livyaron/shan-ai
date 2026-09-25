@@ -96,6 +96,7 @@ async def load_frames(session: AsyncSession) -> Frames:
         ProjectSnapshot.project_id, ProjectSnapshot.snapshot_date, ProjectSnapshot.stage,
         ProjectSnapshot.estimated_finish_date.label("fc"), ProjectSnapshot.dev_plan_date.label("dev"),
         ProjectSnapshot.risks, ProjectSnapshot.to_handle, ProjectSnapshot.finish_date_text,
+        ProjectSnapshot.controller,
     ))).all()
     projects = (await session.execute(select(
         Project.id.label("project_id"), Project.project_identifier.label("identifier"), Project.name,
@@ -107,7 +108,7 @@ async def load_frames(session: AsyncSession) -> Frames:
     ))).all()
     return Frames(
         snaps=pd.DataFrame(snaps, columns=["project_id", "snapshot_date", "stage", "fc", "dev",
-                                           "risks", "to_handle", "finish_date_text"]),
+                                           "risks", "to_handle", "finish_date_text", "controller"]),
         projects=pd.DataFrame(projects, columns=["project_id", "identifier", "name", "manager",
                                                  "project_type", "is_active"]),
         weekly=pd.DataFrame(weekly, columns=["project_id", "week_date", "text", "text_hash"]),
@@ -123,7 +124,8 @@ def report_dates(snaps: pd.DataFrame) -> dict[date, date]:
     is a partial sync; "full" is judged against the median of the biggest
     dates, so one inflated date cannot disqualify the rest). Pre-P0 snapshots are stamped with the upload day —
     typically the day before the report date — so dates within
-    REPORT_CLUSTER_DAYS of a cluster's FIRST date collapse onto its latest.
+    REPORT_CLUSTER_DAYS of a cluster's FIRST date collapse into one report,
+    named by its report-dated snapshot (else the latest date).
     Measured from the first date, never chained: an upload day sits 6 days
     after the previous week's report, and chaining merged the two weeks.
     """
@@ -141,15 +143,25 @@ def report_dates(snaps: pd.DataFrame) -> dict[date, date]:
             clusters[-1].append(d)
         else:
             clusters.append([d])
-    return {d: cl[-1] for cl in clusters for d in cl}
+    # Which date names the cluster: the report-dated one. Snapshots written
+    # since P0 carry תו"ב (`controller`); pre-P0 upload-day snapshots never do.
+    # Without that signal (tests, old rows only), the latest date wins.
+    if "controller" in snaps.columns:
+        p0_share = snaps.groupby("snapshot_date")["controller"].apply(lambda c: c.notna().mean())
+    else:
+        p0_share = pd.Series(0.0, index=counts.index)
+    return {d: max(cl, key=lambda x: (p0_share.get(x, 0.0) > 0.5, x)) for cl in clusters for d in cl}
 
 
 def canonical_snaps(snaps: pd.DataFrame) -> pd.DataFrame:
-    """One snapshot per project per report date (the latest within a cluster)."""
+    """One snapshot per project per report date — the report-dated one when a
+    cluster holds both it and an upload-day copy of the same file."""
     mapping = report_dates(snaps)
     s = snaps[snaps["snapshot_date"].isin(mapping)].copy()
     s["report_date"] = s["snapshot_date"].map(mapping)
-    s = s.sort_values("snapshot_date").drop_duplicates(["project_id", "report_date"], keep="last")
+    s["_named"] = s["snapshot_date"] == s["report_date"]
+    s = (s.sort_values(["_named", "snapshot_date"])
+          .drop_duplicates(["project_id", "report_date"], keep="last").drop(columns="_named"))
     for c in ("fc", "dev"):
         s[c] = pd.to_datetime(s[c])
     s["stage"] = s["stage"].map(ss.normalize_stage)

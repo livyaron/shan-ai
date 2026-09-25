@@ -215,3 +215,18 @@ def test_one_inflated_date_does_not_disqualify_the_real_reports():
     rows += [{"project_id": i, "snapshot_date": date(2026, 9, 20)} for i in range(12)]   # partial
     m = pt.report_dates(pd.DataFrame(rows))
     assert sorted(set(m.values())) == [date(2026, 3, 25), date(2026, 7, 24), date(2026, 8, 19), date(2026, 9, 16)]
+
+
+def test_a_cluster_is_named_by_its_report_dated_snapshot():
+    # P0+ snapshots carry תו"ב; pre-P0 upload-day copies of the same file don't.
+    rows = []
+    for i in range(20):
+        rows += [
+            {"project_id": i, "snapshot_date": date(2026, 9, 2), "controller": "תו\"ב"},   # report
+            {"project_id": i, "snapshot_date": date(2026, 9, 4), "controller": None},     # uploaded later
+            {"project_id": i, "snapshot_date": date(2026, 9, 15), "controller": None},    # uploaded earlier
+            {"project_id": i, "snapshot_date": date(2026, 9, 16), "controller": "תו\"ב"},  # report
+        ]
+    m = pt.report_dates(pd.DataFrame(rows))
+    assert m[date(2026, 9, 4)] == date(2026, 9, 2)
+    assert m[date(2026, 9, 15)] == date(2026, 9, 16)
