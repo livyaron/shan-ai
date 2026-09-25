@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Shan-AI — הרשאות דפוסים</title>
+    <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        :root { --bg-deep: #070b12; --bg-card: #0f1826; --border: #1a2d47; --border-hi: #1e3a5f;
+                --cyan: #00d4ff; --purple: #8b9cf4; --text-1: #e2e8f0; --text-2: #94a3b8; --text-3: #64748b;
+                --mono: 'IBM Plex Mono', monospace; --ui: 'Heebo', sans-serif; }
+        body { background: var(--bg-deep); color: var(--text-1); font-family: var(--ui); }
+        .wrap { max-width: 1100px; margin: 0 auto; padding: 1.5rem 1rem 4rem; }
+        h1 { font-size: 1.4rem; font-weight: 700; color: var(--purple); }
+        h2 { font-size: 1.05rem; font-weight: 600; color: var(--cyan); }
+        .sub { color: var(--text-2); font-size: .88rem; }
+        .card-x { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; padding: 1.1rem 1.2rem; margin-bottom: 1.25rem; }
+        table.t { width: 100%; border-collapse: collapse; font-size: .9rem; }
+        table.t th { color: var(--text-2); font-weight: 500; text-align: right; border-bottom: 1px solid var(--border-hi); padding: .45rem .5rem; }
+        table.t td { border-bottom: 1px solid var(--border); padding: .4rem .5rem; vertical-align: middle; }
+        select.form-select { background-color: #0b1320; color: var(--text-1); border-color: var(--border-hi); font-size: .88rem; max-width: 280px; }
+        .hint { color: var(--text-3); font-size: .8rem; }
+        .n { font-family: var(--mono); }
+        .saved { background: rgba(16,185,129,.12); color: #6ee7b7; border-radius: 8px; padding: .5rem .8rem; margin-bottom: 1rem; }
+    </style>
+</head>
+<body>
+{% include "_navbar.html" %}
+<div class="wrap">
+    <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-3">
+        <div>
+            <h1>👥 הרשאות ושיוך — דפוסים וסיכונים</h1>
+            <div class="sub">מי רואה מה נקבע כאן בלבד. שום שיוך לא נעשה אוטומטית.</div>
+        </div>
+        <a href="/dashboard/projects/insights" class="btn btn-outline-secondary btn-sm">→ חזרה לדפוסים</a>
+    </div>
+    {% if saved %}<div class="saved">✅ נשמר.</div>{% endif %}
+
+    <form method="post" action="/dashboard/projects/insights/access">
+    <div class="card-x">
+        <h2>שיוך מנה"פ ← משתמש</h2>
+        <div class="sub mb-2">כל שם כפי שהוא כתוב בקובץ השבועי. משתמש משויך רואה את הפרויקטים שלו ואת טבלת המנה"פים.
+            שיוך שגוי מציג למנה"פ פרויקטים של מישהו אחר — בדוק לפני שמירה. "הצעה" היא דמיון שמות בלבד.</div>
+        <div style="overflow-x:auto"><table class="t">
+            <tr><th>שם בקובץ</th><th>פרויקטים פעילים</th><th>משתמש</th><th></th></tr>
+            {% for r in rows %}
+            <tr>
+                <td>{{ r.name }}</td>
+                <td class="n">{{ r.count }}</td>
+                <td>
+                    <select class="form-select form-select-sm" name="alias::{{ r.name }}">
+                        <option value="">— לא משויך —</option>
+                        {% for u in users %}
+                        <option value="{{ u.id }}" {% if r.user_id == u.id %}selected{% endif %}>{{ u.username }}</option>
+                        {% endfor %}
+                    </select>
+                </td>
+                <td class="hint">{% if r.hint and not r.user_id %}הצעה: {{ r.hint }}{% endif %}</td>
+            </tr>
+            {% endfor %}
+        </table></div>
+    </div>
+
+    <div class="card-x">
+        <h2>מגזר לכל משתמש</h2>
+        <div class="sub mb-2">מנהל מגזר רואה את הפרויקטים שנמצאים בשלבים של המגזר שלו ואת הדחיות שנוצרו אצלו.
+            "{{ sectors['pm_dept'] }}" רואה את כל הפרויקטים ואת טבלת המנה"פים. מנהל מערכת רואה הכל בכל מקרה.</div>
+        <div style="overflow-x:auto"><table class="t">
+            <tr><th>משתמש</th><th>מגזר</th></tr>
+            {% for u in users %}
+            <tr>
+                <td>{{ u.username }}{% if u.is_admin %} <span class="hint">(מנהל מערכת)</span>{% endif %}</td>
+                <td>
+                    <select class="form-select form-select-sm" name="sector::{{ u.id }}">
+                        <option value="">— ללא —</option>
+                        {% for key, label in sectors.items() %}
+                        <option value="{{ key }}" {% if u.sector == key %}selected{% endif %}>{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                </td>
+            </tr>
+            {% endfor %}
+        </table></div>
+    </div>
+
+    <button type="submit" class="btn btn-primary">שמור</button>
+    </form>
+</div>
+</body>
+</html>

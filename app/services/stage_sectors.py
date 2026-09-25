@@ -23,6 +23,9 @@ SECTORS: dict[str, str] = {
     UNKNOWN: "ללא סטטוס",
 }
 
+# What a user can be given (users.sector) — every sector except the bucket.
+ASSIGNABLE_SECTORS = {k: v for k, v in SECTORS.items() if k != UNKNOWN}
+
 CLOSED_STAGES = frozenset({"הסתיים"})
 
 STAGE_SECTORS: dict[str, tuple[str, ...]] = {

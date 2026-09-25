@@ -54,4 +54,5 @@ jobs:
             tests/test_llm_health_report.py \
             tests/test_telegram_webhook_watchdog.py \
             tests/test_project_sync_capture.py \
-            tests/test_pattern_service.py
+            tests/test_pattern_service.py \
+            tests/test_insight_access.py

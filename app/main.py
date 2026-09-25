@@ -286,6 +286,12 @@ async def startup():
                     "ALTER TABLE users ADD COLUMN IF NOT EXISTS password_is_default BOOLEAN"
                 ))
 
+                # Patterns view (PLAN.md P3): which sector a user manages. NULL =
+                # no sector view; the key set lives in stage_sectors.SECTORS.
+                await conn.execute(_text(
+                    "ALTER TABLE users ADD COLUMN IF NOT EXISTS sector VARCHAR(16)"
+                ))
+
                 # Pattern engine (PLAN.md P0): master-file columns the sync used
                 # to drop. Same five on the live row and on every snapshot, so a
                 # snapshot is a full picture of the file on its report date.

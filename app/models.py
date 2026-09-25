@@ -69,6 +69,7 @@ class User(Base):
     # חדר מבצעים: which board layout this user sees. NULL = the default
     # (war_room_styles.DEFAULT_STYLE), so nobody gets a new screen unasked.
     war_room_style = Column(String(16), nullable=True)
+    sector = Column(String(16), nullable=True)   # stage_sectors key; decides the patterns view (PLAN.md P3)
     manager_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -877,6 +878,21 @@ class ProjectDossier(Base):
     updated_at   = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     project = relationship("Project")
+
+
+class ManagerAlias(Base):
+    """A name as the weekly master file spells it (מנה"פ column) → the system
+    user it is (PLAN.md §4). Confirmed by an admin, never auto-linked: a wrong
+    link shows a PM someone else's projects. SET NULL keeps the name known
+    when the user is deleted."""
+    __tablename__ = "manager_aliases"
+
+    id         = Column(Integer, primary_key=True)
+    alias      = Column(String(255), unique=True, nullable=False)
+    user_id    = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    user = relationship("User")
 
 
 class PendingDecision(Base):
