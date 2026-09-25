@@ -349,6 +349,7 @@ def compute_patterns(frames: Frames) -> dict:
         "metrics": m,
         "league": _league(cur),
         "sectors": _sectors(cur),
+        "projects": _project_rows(cur, set(stale)),
         "data_quality": {
             "unknown_stages": sorted({s for s in cur["stage"] if s and ss.sectors_for(s) == (ss.UNKNOWN,)}),
             "no_status": int((cur["stage"] == "").sum()),
@@ -356,6 +357,32 @@ def compute_patterns(frames: Frames) -> dict:
             "stale_reporting": len(stale),
         },
     }
+
+
+def _project_rows(cur: pd.DataFrame, stale: set) -> list[dict]:
+    """One row per live project — what the per-role views filter (P3)."""
+    def months(days: Any) -> float | None:
+        return None if pd.isna(days) else _months(days)
+
+    rows = []
+    for r in cur.itertuples():
+        rows.append({
+            "identifier": r.identifier, "name": r.name, "manager": r.manager,
+            "stage": r.stage or "ללא סטטוס", "sectors": list(r.sectors),
+            "slip_months": months(r.slip_days),
+            "forecast_moved_months": months(r.fc_drift),
+            "baseline_moved_months": months(r.dev_drift),
+            "forecast_moved": None if pd.isna(r.fc_drift) else bool(r.fc_drift > MOVE_DAYS),
+            "baseline_moved": None if pd.isna(r.dev_drift) else bool(r.dev_drift > MOVE_DAYS),
+            "stuck": not pd.isna(r.weeks_in_stage) and r.weeks_in_stage >= STUCK_WEEKS,
+            "weeks_in_stage": None if pd.isna(r.weeks_in_stage) else int(r.weeks_in_stage),
+            "stale": r.identifier in stale,
+            "undated": isinstance(r.finish_date_text, str),
+            "fc": None if pd.isna(r.fc) else r.fc.date().isoformat(),
+            "dev": None if pd.isna(r.dev) else r.dev.date().isoformat(),
+        })
+    # Worst first: most forecast slippage, then longest in stage.
+    return sorted(rows, key=lambda x: (-(x["forecast_moved_months"] or 0), -(x["weeks_in_stage"] or 0)))
 
 
 def _row_stats(g: pd.DataFrame) -> dict:

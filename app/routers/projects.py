@@ -77,12 +77,19 @@ async def projects_page(
     )
     master_file_name = master_file.original_name if master_file else None
 
+    from app.services import insight_access
+    try:
+        insights_allowed = (await insight_access.scope_for(session, current_user)).allowed
+    except Exception:   # the button is a convenience; never let it break the page
+        insights_allowed = bool(current_user.is_admin)
+
     return templates.TemplateResponse("projects.html", {
         "request": request,
         "current_user": current_user,
         "projects": projects,
         "master_synced_at": master_synced_at,
         "master_file_name": master_file_name,
+        "insights_allowed": insights_allowed,
     })
 
 
@@ -192,17 +199,83 @@ async def project_insights_page(
     session: AsyncSession = Depends(get_db_session),
     current_user: User = Depends(get_current_user),
 ):
-    """Admin: the pattern engine drawn as a page (the JSON is /patterns)."""
-    if not current_user.is_admin:
-        raise HTTPException(status_code=403)
+    """The pattern engine drawn as a page, filtered to what this viewer may
+    see (insight_access). The raw JSON (/patterns) stays admin-only."""
+    from app.services import insight_access, stage_sectors
     from app.services.pattern_service import compute
-    from app.services import stage_sectors
+    scope = await insight_access.scope_for(session, current_user)
+    if not scope.allowed:
+        raise HTTPException(status_code=403, detail="אין לך עדיין שיוך לתצוגת הדפוסים — פנה למנהל המערכת")
+    p = await compute(session)
     return templates.TemplateResponse("project_insights.html", {
         "request": request,
         "current_user": current_user,
-        "p": await compute(session),
+        "p": p,
+        "view": insight_access.view_for(scope, p),
         "sector_labels": stage_sectors.SECTORS,
     })
+
+
+@router.get("/insights/access", response_class=HTMLResponse)
+async def insights_access_page(
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+    current_user: User = Depends(get_current_user),
+):
+    """Admin: link file names (מנה"פ) to users and give users a sector."""
+    if not current_user.is_admin:
+        raise HTTPException(status_code=403)
+    from rapidfuzz import process as rf_process
+    from sqlalchemy import func
+    from app.models import ManagerAlias
+    from app.services import stage_sectors
+    names = (await session.execute(
+        select(Project.manager, func.count()).where(Project.is_active, Project.manager.isnot(None))
+        .group_by(Project.manager).order_by(func.count().desc()))).all()
+    users = (await session.execute(select(User).order_by(User.username))).scalars().all()
+    links = dict((await session.execute(select(ManagerAlias.alias, ManagerAlias.user_id))).all())
+    usernames = {u.id: u.username or "" for u in users}
+    rows = []
+    for name, count in names:
+        hint = rf_process.extractOne(name, usernames, score_cutoff=60) if usernames else None
+        rows.append({"name": name, "count": count, "user_id": links.get(name),
+                     "hint": usernames.get(hint[2]) if hint else None})
+    return templates.TemplateResponse("project_insights_access.html", {
+        "request": request, "current_user": current_user, "rows": rows, "users": users,
+        "sectors": stage_sectors.ASSIGNABLE_SECTORS, "saved": request.query_params.get("saved"),
+    })
+
+
+@router.post("/insights/access")
+async def insights_access_save(
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+    current_user: User = Depends(get_current_user),
+):
+    """Admin: save the name links (alias::<name> = user id) and sectors
+    (sector::<user id> = key). An empty choice removes a link / sector."""
+    if not current_user.is_admin:
+        raise HTTPException(status_code=403)
+    from fastapi.responses import RedirectResponse
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+    from app.models import ManagerAlias
+    from app.services import stage_sectors
+    form = await request.form()
+    user_ids = set((await session.execute(select(User.id))).scalars().all())
+    for key, value in form.multi_items():
+        if key.startswith("alias::"):
+            alias = key[len("alias::"):].strip()
+            uid = int(value) if str(value).isdigit() and int(value) in user_ids else None
+            stmt = pg_insert(ManagerAlias).values(alias=alias, user_id=uid)
+            await session.execute(stmt.on_conflict_do_update(
+                index_elements=["alias"], set_={"user_id": uid}))
+        elif key.startswith("sector::"):
+            uid_s = key[len("sector::"):]
+            if uid_s.isdigit() and int(uid_s) in user_ids:
+                user = await session.get(User, int(uid_s))
+                user.sector = value if value in stage_sectors.ASSIGNABLE_SECTORS else None
+    await session.commit()
+    return RedirectResponse("/dashboard/projects/insights/access?saved=1", status_code=303)
 
 
 @router.get("/patterns")

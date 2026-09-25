@@ -56,14 +56,17 @@
 <div class="wrap">
     <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-3">
         <div>
-            <h1>🧠 דפוסים וסיכונים</h1>
+            <h1>🧠 דפוסים וסיכונים <span class="sub" style="font-size:1rem">· {{ view.title }}</span></h1>
             <div class="sub">מחושב מהדוחות השבועיים בלבד — ללא מודל שפה. כל מספר מגיע עם גודל המדגם שלו.</div>
         </div>
-        <a href="/dashboard/projects" class="btn btn-outline-secondary btn-sm">→ חזרה לפרויקטים</a>
+        <div class="d-flex gap-2">
+            {% if current_user.is_admin %}<a href="/dashboard/projects/insights/access" class="btn btn-outline-info btn-sm">👥 הרשאות ושיוך</a>{% endif %}
+            <a href="/dashboard/projects" class="btn btn-outline-secondary btn-sm">→ חזרה לפרויקטים</a>
+        </div>
     </div>
 
     {% set h = p.health %}
-    {% if h %}
+    {% if h and 'health' in view.sections %}
     <details class="card-x" {% if (p.report_dates|length) < 2 %}open{% endif %}>
         <summary>🩺 בריאות הנתונים — {{ h.snapshot_rows }} צילומים ב-{{ h.snapshot_dates|length }} תאריכים · {{ h.weekly_rows }} שורות דיווח שבועי{% if h.weekly_range %} ({{ h.weekly_range[0] }} → {{ h.weekly_range[1] }}){% endif %}</summary>
         <div class="sub mt-2">תאריך נספר כדוח רק כשיש בו לפחות מחצית מהגודל של קובץ מלא (חציון 5 התאריכים הגדולים). תאריכים במרחק עד 3 ימים מתאחדים.</div>
@@ -86,36 +89,58 @@
         {% for d in p.report_dates %}<span class="chip">{{ d }}</span>{% endfor %}
     </div>
 
-    {% set fd = m.forecast_drift.value %}{% set bm = m.baseline_moves.value %}
+    {% set sm = view.summary %}
     <div class="tiles">
         <div class="tile" title="{{ m.forecast_drift.caveat }}">
-            <div class="num">{{ fd.later }}<span class="of"> / {{ m.forecast_drift.n }}</span></div>
+            <div class="num">{{ sm.forecast_later }}<span class="of"> / {{ sm.forecast_n }}</span></div>
             <div class="lbl">יעד חשמול נדחה מאז הדוח הראשון</div>
         </div>
         <div class="tile" title="{{ m.baseline_moves.caveat }}">
-            <div class="num">{{ bm.later }}<span class="of"> / {{ m.baseline_moves.n }}</span></div>
+            <div class="num">{{ sm.baseline_later }}<span class="of"> / {{ sm.baseline_n }}</span></div>
             <div class="lbl">יעד תכנית פיתוח נדחה (הבסיס זז)</div>
         </div>
         <div class="tile" title="{{ m.stuck.caveat }}">
-            <div class="num">{{ m.stuck.value.count }}<span class="of"> / {{ m.stuck.n }}</span></div>
+            <div class="num">{{ sm.stuck }}<span class="of"> / {{ sm.n }}</span></div>
             <div class="lbl">תקועים 12+ שבועות באותו שלב</div>
         </div>
         <div class="tile" title="{{ m.stale_reporting.caveat }}">
-            <div class="num">{{ m.stale_reporting.value.count }}</div>
+            <div class="num">{{ sm.stale }}</div>
             <div class="lbl">דיווח שבועי זהה 4 שבועות</div>
         </div>
         <div class="tile" title="{{ m.undated.caveat }}">
-            <div class="num">{{ m.undated.value.count }}</div>
+            <div class="num">{{ sm.undated }}</div>
             <div class="lbl">יעד חשמול כמלל, לא תאריך</div>
         </div>
         <div class="tile" title="{{ m.past_due.caveat }}">
-            <div class="num">{{ m.past_due.value.count }}</div>
+            <div class="num">{{ sm.past_due }}</div>
             <div class="lbl">יעד מסתמן כבר עבר</div>
         </div>
     </div>
 
+    {# ── The viewer's projects, worst first ── #}
+    <div class="card-x">
+        <h2>{{ 'הפרויקטים שלי' if view.title == 'הפרויקטים שלי' else 'פרויקטים' }} ({{ view.projects|length }})</h2>
+        <div class="sub">ממוין: הכי הרבה דחייה מאז הדוח הראשון, ואז הכי הרבה זמן באותו שלב.</div>
+        <div class="scroll" style="max-height: 520px; overflow-y: auto;"><table class="t mt-2">
+            <tr><th>זיהוי</th><th>פרויקט</th><th>מנה"פ</th><th>שלב</th><th>יעד מסתמן</th><th>ת.פיתוח</th><th>יעד זז (ח')</th><th>בסיס זז (ח')</th><th>שבועות בשלב</th><th></th></tr>
+            {% for x in view.projects %}
+            <tr>
+                <td class="n">{{ x.identifier }}</td><td>{{ (x.name or '')[:60] }}</td><td>{{ x.manager or '' }}</td><td>{{ x.stage }}</td>
+                <td class="n">{{ x.fc or ('מלל' if x.undated else '—') }}</td><td class="n">{{ x.dev or '—' }}</td>
+                <td class="n">{{ '—' if x.forecast_moved_months is none else x.forecast_moved_months }}</td>
+                <td class="n">{{ '—' if x.baseline_moved_months is none else x.baseline_moved_months }}</td>
+                <td class="n">{{ '—' if x.weeks_in_stage is none else x.weeks_in_stage }}</td>
+                <td>{% if x.stuck %}<span class="badge-x b-weak" title="12+ שבועות באותו שלב">⏸ תקוע</span> {% endif %}{% if x.stale %}<span class="badge-x b-none" title="מלל שבועי זהה 4 שבועות">🔁 דיווח זהה</span> {% endif %}{% if x.undated %}<span class="badge-x b-none" title="יעד חשמול כתוב כמלל">📝 ללא תאריך</span>{% endif %}</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="10" class="sub">אין פרויקטים פעילים בתצוגה הזו.</td></tr>
+            {% endfor %}
+        </table></div>
+    </div>
+
+    {% if 'attribution' in view.sections %}
     {# ── Slip attribution: who owned the project when it slipped ── #}
-    {% set att = m.slip_attribution.value %}
+    {% set att = view.attribution %}
     {% set max_months = (att.values()|map(attribute='months')|max) or 1 %}
     <div class="card-x">
         <h2>איפה נוצרות הדחיות</h2>
@@ -134,6 +159,8 @@
         <div class="caveat">{{ m.slip_attribution.caveat }}</div>
     </div>
 
+    {% endif %}
+    {% if 'waves' in view.sections %}
     {# ── Update waves ── #}
     {% set waves = m.update_waves.value %}
     {% set max_w = (waves|map(attribute='forecast_later')|max) or 1 %}
@@ -156,12 +183,14 @@
         <div class="caveat">{{ m.update_waves.caveat }}</div>
     </div>
 
+    {% endif %}
+    {% if 'sectors' in view.sections %}
     {# ── Sectors ── #}
     <div class="card-x">
         <h2>לפי מגזר (לפי השלב הנוכחי)</h2>
         <div class="scroll"><table class="t mt-2">
             <tr><th>מגזר</th><th>פרויקטים</th><th>מאחרים מול ת.פיתוח</th><th>נדחו מאז הדוח הראשון</th><th>בסיס זז</th><th>תקועים</th></tr>
-            {% for s in p.sectors %}
+            {% for s in view.sectors %}
             <tr><td>{{ s.label }}</td><td class="n">{{ s.n }}</td><td class="n">{{ pct(s.late_pct) }}</td>
                 <td class="n">{{ pct(s.drift_pct) }}</td><td class="n">{{ s.baseline_moved }}</td><td class="n">{{ s.stuck }}</td></tr>
             {% endfor %}
@@ -169,13 +198,15 @@
         <div class="caveat">"עבודה אזרחית והרכבות" נספר גם בפיקוח וגם בביצוע — אין לסכם את השורות לסך אגף.</div>
     </div>
 
+    {% endif %}
+    {% if 'league' in view.sections %}
     {# ── League table (D3) ── #}
     <div class="card-x">
         <h2>טבלת מנהלי פרויקטים</h2>
         <div class="sub">מדורג לפי % מאחרים. "בסיס זז" ליד כל מדד איחור — שיפור שנובע מדחיית תכנית הפיתוח גלוי לכולם. מתחת ל-5 פרויקטים: מוצג, לא מדורג.</div>
         <div class="scroll"><table class="t mt-2">
             <tr><th>#</th><th>מנה"פ</th><th>פרויקטים</th><th>מאחרים</th><th>נדחו</th><th>בסיס זז</th><th>תקועים</th><th>תמהיל שלבים</th></tr>
-            {% for r in p.league %}
+            {% for r in view.league %}
             <tr>
                 <td class="n">{% if r.rank %}{{ r.rank }}{% else %}<span class="badge-x b-small">◌ מדגם קטן</span>{% endif %}</td>
                 <td>{{ r.manager }}</td><td class="n">{{ r.n }}</td><td class="n">{{ pct(r.late_pct) }}</td>
@@ -186,6 +217,8 @@
         </table></div>
     </div>
 
+    {% endif %}
+    {% if 'leading' in view.sections %}
     {# ── Leading indicators ── #}
     {% set li = m.leading_indicators %}
     {% set sig_he = {'signal': '● אות מובהק', 'weak': '◐ חלש — לפני תיקון בלבד', 'none': '○ אין אות'} %}
@@ -205,6 +238,8 @@
         <div class="caveat">{{ li.caveat }}</div>
     </div>
 
+    {% endif %}
+    {% if 'risk' in view.sections %}
     {# ── Risk categories ── #}
     {% set rc = m.risk_categories %}
     {% set max_rc = (rc.value|map(attribute='projects')|max) or 1 %}
@@ -222,6 +257,8 @@
         <div class="caveat">{{ rc.caveat }}</div>
     </div>
 
+    {% endif %}
+    {% if 'lists' in view.sections %}
     {# ── Lists ── #}
     <div class="card-x">
         <h2>רשימות לטיפול</h2>
@@ -240,11 +277,12 @@
             <div class="ids">{{ m.past_due.value.projects|join(' · ') }}</div></details>
     </div>
 
-    {% set sv = m.slip_vs_plan %}
+    {% set sv = m.slip_vs_plan %}{% set fd = m.forecast_drift.value %}{% set bm = m.baseline_moves.value %}
     <div class="callout">
         לפי הדוח עצמו {{ sv.value.late }} מתוך {{ sv.n }} פרויקטים מאחרים מול תכנית הפיתוח (חציון {{ sv.value.median_months }} ח'),
         אבל {{ fd.later }} נדחו מאז הדוח הראשון ו-{{ bm.later }} יעדי תכנית פיתוח זזו קדימה. {{ sv.caveat }}
     </div>
+    {% endif %}
     {% endif %}
 </div>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>

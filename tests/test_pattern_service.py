@@ -186,8 +186,10 @@ def _render(p):
     env = Environment(loader=FileSystemLoader("app/templates"))
     request = SimpleNamespace(url=SimpleNamespace(path="/dashboard/projects/insights"))
     user = SimpleNamespace(is_admin=True, username="u", role=None, id=1)
+    from app.services import insight_access
+    view = insight_access.view_for(insight_access.Scope(admin=True), p)
     return env.get_template("project_insights.html").render(
-        request=request, current_user=user, p=p, sector_labels=ss.SECTORS)
+        request=request, current_user=user, p=p, view=view, sector_labels=ss.SECTORS)
 
 
 def test_insights_page_renders_every_section():
