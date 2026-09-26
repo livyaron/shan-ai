@@ -266,7 +266,10 @@ async def project_page(
         select(Project).where(Project.project_identifier == identifier))).scalars().first()
     return templates.TemplateResponse("project_page.html", {
         "request": request, "current_user": current_user, "h": pattern_service._plain(h),
-        "project": project, "chart": project_chart.timeline_chart(h["timeline"]),
+        "project": project,
+        "delay": project_chart.delay_story(pattern_service._plain(h)),
+        "matrix": project_chart.risk_matrix(pattern_service._plain(h)),
+        "risk_changes": project_chart.risk_column_changes(pattern_service._plain(h)),
         "sector_labels": stage_sectors.SECTORS,
     })
 

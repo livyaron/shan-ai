@@ -515,6 +515,8 @@ def project_history(frames: Frames, p: dict, identifier: str) -> dict | None:
             "fc": None if pd.isna(r.fc) else r.fc.date().isoformat(),
             "dev": None if pd.isna(r.dev) else r.dev.date().isoformat(),
             "fc_text": r.finish_date_text if isinstance(r.finish_date_text, str) else None,
+            "risks": r.risks if isinstance(r.risks, str) else None,
+            "to_handle": r.to_handle if isinstance(r.to_handle, str) else None,
         })
         prev_stage = r.stage
 
