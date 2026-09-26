@@ -129,7 +129,7 @@ Tests enforce: every stage value seen in the file maps somewhere; a new unseen s
 ## 8. Open items / risks
 1. **Information security:** files are marked as possible inside information. Confirm Railway hosting of this data is approved before P1 backfill; P4 (external MCP) needs explicit approval.
 2. The sync runs only when someone uploads the file — the engine is only as fresh as the uploads. Consider a Gmail/Drive watcher later (out of scope).
-3. Regex taxonomy is a v1; validate on a hand-labelled sample of ~50 entries before showing category stats to PMs.
+3. Regex taxonomy is v2 (word-edge anchored) after v1 was caught producing ~230 false "outside party" hits from "הרכבת" (assembly) — which was also the entire "weak" leading-indicator signal (p 0.008 → 0.125 once fixed). Still validate on a hand-labelled sample of ~50 entries before showing category stats to PMs.
 4. Leading-indicator stats on ~130 projects are weak; ship them to the division manager only until they replicate on new data.
 
 ## 9. Review ask (per CLAUDE.md §3)

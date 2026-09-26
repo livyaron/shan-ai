@@ -168,7 +168,7 @@
                 <td class="n">{{ x.fc or ('מלל' if x.undated else '—') }}</td><td class="n">{{ x.dev or '—' }}</td>
                 <td class="n">{{ '—' if x.forecast_moved_months is none else x.forecast_moved_months }}</td>
                 <td class="n">{{ '—' if x.baseline_moved_months is none else x.baseline_moved_months }}</td>
-                <td class="n">{{ '—' if x.weeks_in_stage is none else x.weeks_in_stage }}</td></tr>
+                <td class="n">{{ '—' if x.weeks_in_stage is none else ('≥' if x.weeks_lower_bound else '') ~ x.weeks_in_stage }}</td></tr>
             {% else %}<tr><td colspan="9" class="sub">אין פרויקטים שגלויים לך בפירוט הזה.</td></tr>{% endfor %}
         {% endif %}
         </table></div>
@@ -189,7 +189,7 @@
                 <td class="n">{{ x.fc or ('מלל' if x.undated else '—') }}</td><td class="n">{{ x.dev or '—' }}</td>
                 <td class="n">{{ '—' if x.forecast_moved_months is none else x.forecast_moved_months }}</td>
                 <td class="n">{{ '—' if x.baseline_moved_months is none else x.baseline_moved_months }}</td>
-                <td class="n">{{ '—' if x.weeks_in_stage is none else x.weeks_in_stage }}</td>
+                <td class="n">{{ '—' if x.weeks_in_stage is none else ('≥' if x.weeks_lower_bound else '') ~ x.weeks_in_stage }}</td>
                 <td>{% if x.stuck %}<span class="badge-x b-weak" title="12+ שבועות באותו שלב">⏸ תקוע</span> {% endif %}{% if x.stale %}<span class="badge-x b-none" title="מלל שבועי זהה 4 שבועות">🔁 דיווח זהה</span> {% endif %}{% if x.undated %}<span class="badge-x b-none" title="יעד חשמול כתוב כמלל">📝 ללא תאריך</span>{% endif %}</td>
             </tr>
             {% else %}

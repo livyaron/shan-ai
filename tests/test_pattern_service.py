@@ -302,3 +302,38 @@ def test_risk_matrix_and_risk_column_changes():
     assert repeat["weeks"] == 4
     changes = pc.risk_column_changes(h)
     assert changes and changes[-1]["first"]
+
+
+# ── Taxonomy v2 and near-duplicate reports (caught on real data) ──────────
+
+@pytest.mark.parametrize("text,cat,hit", [
+    ("ממתינים להפסקת פ\"צ לצורך הרכבת מנתק פ\"צ", "גורם חיצוני/רשויות", False),   # assembly, not a train
+    ("עבודות ליד פסי רכבת ישראל", "גורם חיצוני/רשויות", True),
+    ("אישור נת\"י התקבל", "גורם חיצוני/רשויות", True),
+    ("תכנית עבודה שנתית", "גורם חיצוני/רשויות", False),                        # שנתית ⊃ נתי
+    ("סיום מוקדם מהצפוי", "הפסקות/תפעול רשת", False),                         # early, not a control centre
+    ("תיאום מול המוקד", "הפסקות/תפעול רשת", True),
+    ("בהמתנה לכל הגורמים", "קרקע/גישה/הסכמים", False),                        # הגורמים ⊃ רמי
+    ("עבודות בכרמיאל", "קרקע/גישה/הסכמים", False),
+    ("ממתינים לאישור רמ\"י", "קרקע/גישה/הסכמים", True),
+    ("המחירים צפויים לעלות", "תקציב/עלות", False),                           # to rise
+    ("הקרקע בבעלות פרטית", "תקציב/עלות", False),                             # ownership
+    ("עלות החוזה חרגה", "תקציב/עלות", True),
+    ("חוסר בסוללות", "כוח אדם/פיקוח/בדיקות", False),
+    ("חוסר בפועלים באתר", "כוח אדם/פיקוח/בדיקות", True),
+    ("הציוד מספק את הדרישה", "ציוד/אספקה", True),                             # ציוד still counts
+    ("הכמות מספקת", "ציוד/אספקה", False),                                    # sufficient, not a supplier
+    ("התקבל היתר בנייה", "רישוי/היתרים/סטטוטוריקה", True),
+    ("היתרון של הפתרון", "רישוי/היתרים/סטטוטוריקה", False),
+])
+def test_taxonomy_v2_word_edges(text, cat, hit):
+    import re
+    assert bool(re.search(pt.RISK_CATEGORIES[cat], text)) is hit
+
+
+def test_near_same_treats_a_typo_fix_as_a_repeat():
+    a = 'נאמר שבפסקת פ"צ לצורך החזרת מנתק פ"צ תהיה ב 11.2026,'
+    b = 'נאמר שהפסקת פ"צ לצורך החזרת מנתק פ"צ תהיה ב 11.2026.'
+    assert pt.near_same(a, b)
+    assert not pt.near_same(a, "הקבלן התחיל עבודות אזרחיות באתר השבוע")
+    assert not pt.near_same(None, a)
