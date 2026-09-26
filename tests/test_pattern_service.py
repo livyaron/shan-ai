@@ -259,35 +259,46 @@ def test_project_history_marks_repeated_weekly_text_and_unknown_is_none():
     assert pt.project_history(frames, p, "NOPE") is None
 
 
-def test_chart_geometry():
-    from app.services.project_chart import timeline_chart
-    frames = _frames()
-    h = pt.project_history(frames, pt._plain(pt.compute_patterns(frames)), "P-1")
-    c = timeline_chart(h["timeline"])
-    assert [s["key"] for s in c["series"]] == ["fc", "dev"] and all(len(s["points"]) == 3 for s in c["series"])
-    ys = [pt_["y"] for s in c["series"] for pt_ in s["points"]]
-    assert all(0 <= y <= c["h"] for y in ys) and c["y_ticks"]
-    assert timeline_chart(h["timeline"][:1]) is None
-
-
 def test_project_page_renders():
     from types import SimpleNamespace
     from jinja2 import Environment, FileSystemLoader
-    from app.services.project_chart import timeline_chart
+    from app.services import project_chart as pc
     frames = _frames()
     h = pt._plain(pt.project_history(frames, pt._plain(pt.compute_patterns(frames)), "P-1"))
     html = Environment(loader=FileSystemLoader("app/templates")).get_template("project_page.html").render(
         request=SimpleNamespace(url=SimpleNamespace(path="/dashboard/projects/p/P-1")),
         current_user=SimpleNamespace(is_admin=True, username="u", role=None, id=1),
-        h=h, project=None, chart=timeline_chart(h["timeline"]), sector_labels=ss.SECTORS)
-    for s in ("ניתוח סיכונים", "היסטוריית יעדים ושלבים", "אירועי דחייה", "דיווחים שבועיים", "<polyline"):
+        h=h, project=None, delay=pc.delay_story(h), matrix=pc.risk_matrix(h),
+        risk_changes=pc.risk_column_changes(h), sector_labels=ss.SECTORS)
+    for s in ("ניתוח סיכונים", "איך האיחור מתפתח", "סיכונים לאורך זמן", "אירועי דחייה",
+              "דיווחים שבועיים", 'id="delay-data"', "drawDelay"):
         assert s in html
+    assert "innerHTML" not in html          # data is inserted with textContent only
 
 
-def test_chart_x_labels_never_collide():
-    from app.services.project_chart import MIN_LABEL_GAP, timeline_chart
-    weekly = [{"date": f"2026-09-{d:02d}", "fc": "2027-01-01", "dev": "2027-01-01"} for d in (2, 9, 16)]
-    tl = [{"date": "2026-03-25", "fc": "2026-12-31", "dev": "2026-12-31"}] + weekly
-    xs = [lab["x"] for lab in timeline_chart(tl)["x_labels"]]
-    assert all(b - a >= MIN_LABEL_GAP for a, b in zip(xs, xs[1:]))
-    assert timeline_chart(tl)["x_labels"][-1]["label"] == "16/09"     # the newest is always labelled
+def test_delay_story_measures_each_report():
+    from app.services import project_chart as pc
+    frames = _frames()
+    h = pt._plain(pt.project_history(frames, pt._plain(pt.compute_patterns(frames)), "P-1"))
+    d = pc.delay_story(h)
+    by = {x["date"]: x for x in d["points"]}
+    # P-1: fc 31.12.26 → 30.6.27 → 31.12.27; dev 31.12.26 → 30.6.27 → 30.6.27
+    assert by[D1.isoformat()]["fc_slip"] == 0.0 and by[D1.isoformat()]["gap"] == 0.0
+    # 31.12→30.6 is 181 days = 5.9 months; the plan followed the forecast exactly.
+    assert by[D2.isoformat()]["fc_slip"] == by[D2.isoformat()]["dev_slip"] == pytest.approx(5.9)
+    assert by[D3.isoformat()]["fc_slip"] == pytest.approx(12.0) and by[D3.isoformat()]["gap"] == pytest.approx(6.0)
+    assert {m["kind"] for m in by[D2.isoformat()]["moves"]} == {"forecast", "baseline"}
+    assert by[D3.isoformat()]["stage_changed"] and d["stage_changes"] == [D3.isoformat()]
+    assert d["y_min"] <= 0 <= 12 <= d["y_max"] and 0 in d["ticks"]
+
+
+def test_risk_matrix_and_risk_column_changes():
+    from app.services import project_chart as pc
+    frames = _frames()
+    h = pt._plain(pt.project_history(frames, pt._plain(pt.compute_patterns(frames)), "P-2"))
+    m = pc.risk_matrix(h)
+    assert len(m["weeks"]) == 5 and all(len(r["cells"]) == 5 for r in m["rows"])
+    repeat = next(r for r in m["rows"] if r["kind"] == "repeat")
+    assert repeat["weeks"] == 4
+    changes = pc.risk_column_changes(h)
+    assert changes and changes[-1]["first"]
