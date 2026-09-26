@@ -38,19 +38,46 @@ FULL_SYNC_REFERENCE_DATES = 5   # the "full file" size = median of the biggest d
 FULL_SYNC_SHARE = 0.5     # a date with fewer snapshots than this share of the
                           # reference size is a partial sync, not a report
 
-# v1 taxonomy — validate on a hand-labelled sample before showing it to PMs
-# (PLAN.md §8.3). Substring patterns tolerate Hebrew prefixes (ב/ה/ל/ש/ו).
+# Taxonomy v2. v1 matched raw substrings and the real reports showed the cost:
+# "הרכבת" (assembly) read as a train → ~230 false "outside party" hits;
+# "מוקדם" (early) as an operations centre; "הגורמים"/"כרמיאל" as רמ"י;
+# "לעלות" (to rise) and "בעלות" (ownership) as cost. v2 anchors the ambiguous
+# stems on Hebrew word edges: _B = no Hebrew letter before (optionally after
+# one prefix letter), _E = no Hebrew letter after. Still unvalidated by hand —
+# PLAN.md §8.3 — and every hit is shown with its quote so a reader can judge.
+_B = r"(?<![א-ת])"
+_E = r"(?![א-ת])"
 RISK_CATEGORIES: dict[str, str] = {
-    "רישוי/היתרים/סטטוטוריקה": r'היתר|תב"?ע|ועד[הת] (?:מקומית|מחוזית)|רישוי|טופס 4|תמ"?א|ות"?ל',
-    "קרקע/גישה/הסכמים": r'קרקע|רמ"?י|מקרקעין|הפקע|חכיר|דרך גישה|כביש גישה|זיקת|הסכם',
-    "ציוד/אספקה": r'שנאי|אספק|ספק|מפסק|GIS|ציוד|ייצור|יבוא|משלוח',
+    "רישוי/היתרים/סטטוטוריקה": r'היתר(?!ו)|תב"?ע|ועד[הת] (?:מקומית|מחוזית)|רישוי|טופס 4|תמ"?א|ות"?ל',
+    "קרקע/גישה/הסכמים": (r'קרקע|רמ"י|' + _B + r'[וב]?רמי' + _E +
+                         r'|מקרקעין|הפקע|חכיר|דרך גישה|כביש גישה|זיקת|הסכם'),
+    "ציוד/אספקה": (r'שנאי|אספק|' + _B + r'(?:[והבל]|מה)?ספק(?:ים|י|ית)?' + _E +
+                   r'|מפסק|GIS|ציוד|ייצור|יבוא|משלוח'),
     "קבלן/מכרז": r'קבלן|מכרז|ועדת מכרזים|הזמנת עבודה|התקשרות',
-    "הפסקות/תפעול רשת": r'הפסק[הות]|חלון|ניתוק|העברת עומס|מוקד',
-    "כוח אדם/פיקוח/בדיקות": r'משגיח|בודק|כ[ו]?ח אדם|חוסר ב',
-    "גורם חיצוני/רשויות": r'עיריי|רשות|מועצ|נת"?י|נתיבי|רכבת|רט"?ג|תושב|התנגד|יישוב|קיבוץ|משרד ה',
-    "תקציב/עלות": r'תקציב|אומדן|עלות|מימון|חריגה',
+    "הפסקות/תפעול רשת": r'הפסק[הות]|חלון|ניתוק|העברת עומס|מוקד(?![םמ])',
+    "כוח אדם/פיקוח/בדיקות": r'משגיח|בודק|כ[ו]?ח אדם|חוסר ב(?:כ[ו]?ח|פועלים|עובדים|משגיח|בודק|צוות|אנשי)',
+    "גורם חיצוני/רשויות": (r'עיריי|רשות|מועצ|נת"י|' + _B + r'[לבו]?נתי' + _E + r'|נתיבי ישראל|'
+                           + _B + r'[לבו]?רכבת' + _E + r'|רכבת ישראל|רכבת קלה|רט"?ג|תושב|התנגד|יישוב|קיבוץ|משרד ה'),
+    "תקציב/עלות": r'תקציב|אומדן|' + _B + r'[והלמ]?עלויות|עלות ה|מימון|חריגה',
     "ביטחוני/מלחמה": r'מלחמ|ביטחונ|צבא|צה"?ל|מיגון',
 }
+
+
+NEAR_SAME_RATIO = 95      # weekly texts this similar (0–100, punctuation ignored) count as a repeat
+
+
+def _norm_text(t: str) -> str:
+    return " ".join(re.sub(r"[^\w\s]", " ", t or "").split())
+
+
+def near_same(a: str | None, b: str | None) -> bool:
+    """Two weekly texts that differ only by a typo fix, punctuation or spacing
+    are the same report — an exact hash called a one-letter edit "new"."""
+    from rapidfuzz import fuzz
+    if not a or not b:
+        return False
+    x, y = _norm_text(a), _norm_text(b)
+    return x == y or fuzz.ratio(x, y) >= NEAR_SAME_RATIO
 
 
 def metric(value: Any, n: int, confidence: str, caveat: str = "") -> dict:
@@ -250,7 +277,7 @@ def compute_patterns(frames: Frames) -> dict:
 
     # 5. Stuck: weeks in the current stage (a lower bound when the run starts
     #    at the project's first snapshot — the history may simply begin there).
-    stuck_rows, weeks_in_stage = [], {}
+    stuck_rows, weeks_in_stage, stage_since_start = [], {}, {}
     for pid, g in snaps[snaps["project_id"].isin(live_ids)].sort_values("report_date").groupby("project_id"):
         stages = list(g["stage"])
         dates = list(g["report_date"])
@@ -259,12 +286,14 @@ def compute_patterns(frames: Frames) -> dict:
             i -= 1
         weeks = (r_last - dates[i]).days // 7
         weeks_in_stage[pid] = weeks
+        stage_since_start[pid] = i == 0
         if weeks >= STUCK_WEEKS:
             stuck_rows.append({"identifier": projects.at[pid, "identifier"], "stage": stages[-1] or "ללא סטטוס",
                                "weeks": int(weeks), "lower_bound": i == 0})
     stuck_rows.sort(key=lambda r: -r["weeks"])
     by_stage = pd.Series([r["stage"] for r in stuck_rows]).value_counts().to_dict() if stuck_rows else {}
     cur["weeks_in_stage"] = cur["project_id"].map(weeks_in_stage)
+    cur["weeks_lower_bound"] = cur["project_id"].map(stage_since_start).fillna(False)
     m["stuck"] = metric({"count": len(stuck_rows), "by_stage": by_stage, "projects": stuck_rows[:50]},
                         len(live_ids), _confidence(len(live_ids)),
                         f"באותו שלב {STUCK_WEEKS} שבועות ומעלה. 'lower_bound' = ההיסטוריה מתחילה כבר בשלב הזה.")
@@ -277,11 +306,12 @@ def compute_patterns(frames: Frames) -> dict:
         if len(tail) < STALE_WEEKS:
             continue
         gaps = pd.Series(tail["week_date"]).diff().dropna().map(lambda x: x.days)
-        if tail["text_hash"].nunique() == 1 and (gaps <= STALE_MAX_GAP_DAYS).all():
+        texts_ = tail["text"].tolist()
+        if all(near_same(a, b) for a, b in zip(texts_, texts_[1:])) and (gaps <= STALE_MAX_GAP_DAYS).all():
             stale.append(projects.at[pid, "identifier"])
     m["stale_reporting"] = metric({"count": len(stale), "projects": sorted(stale)},
                                   len(live_ids), _confidence(len(live_ids)),
-                                  f"מלל שבועי זהה {STALE_WEEKS} שבועות רצופים.")
+                                  f"מלל שבועי זהה (או כמעט זהה — תיקון אות או פיסוק) {STALE_WEEKS} שבועות רצופים.")
 
     # 7–8. Undated targets and targets already behind us.
     undated = cur[cur["finish_date_text"].notna()]
@@ -305,7 +335,7 @@ def compute_patterns(frames: Frames) -> dict:
         in_col = (cur["risks"].fillna("") + " " + cur["to_handle"].fillna("")).str.contains(pat, regex=True)
         cats.append({"category": cat, "projects": int(hit.sum()), "in_risk_column": int(in_col.sum())})
     m["risk_categories"] = metric(sorted(cats, key=lambda r: -r["projects"]), len(cur), _confidence(len(cur)),
-                                  "מה כתוב — לא מה גורם לדחייה. טקסונומיה v1 (ביטויים רגולריים), טרם אומתה ידנית.")
+                                  "מה כתוב — לא מה גורם לדחייה. טקסונומיה v2 (ביטויים רגולריים עם גבולות מילה), טרם אומתה ידנית.")
 
     # 10. Leading indicators: a category written about by the first report →
     #     did the forecast move later by the last one? Fisher, Bonferroni.
@@ -398,6 +428,7 @@ def _project_rows(cur: pd.DataFrame, stale: set) -> list[dict]:
             "late": not pd.isna(r.slip_days) and r.slip_days > LATE_MONTHS * MONTH_DAYS,
             "risk_cats": list(r.risk_cats), "early_cats": list(r.early_cats),
             "weeks_in_stage": None if pd.isna(r.weeks_in_stage) else int(r.weeks_in_stage),
+            "weeks_lower_bound": bool(r.weeks_lower_bound),
             "stale": r.identifier in stale,
             "undated": isinstance(r.finish_date_text, str),
             "fc": None if pd.isna(r.fc) else r.fc.date().isoformat(),
@@ -521,10 +552,10 @@ def project_history(frames: Frames, p: dict, identifier: str) -> dict | None:
         prev_stage = r.stage
 
     wk = frames.weekly[frames.weekly["project_id"] == pid].sort_values("week_date")
-    weekly, prev_hash = [], None
+    weekly, prev_text = [], None
     for r in wk.itertuples():
-        weekly.append({"week": r.week_date.isoformat(), "text": r.text, "same_as_before": r.text_hash == prev_hash})
-        prev_hash = r.text_hash
+        weekly.append({"week": r.week_date.isoformat(), "text": r.text, "same_as_before": near_same(r.text, prev_text)})
+        prev_text = r.text
     weekly.reverse()   # newest first
 
     row = next((x for x in p.get("projects", []) if x["identifier"] == identifier), None)
@@ -579,7 +610,8 @@ def project_history(frames: Frames, p: dict, identifier: str) -> dict | None:
         if row["undated"]:
             flag("medium", "יעד החשמול כתוב כמלל ולא כתאריך — אי אפשר למדוד אותו.")
         if row["stuck"]:
-            flag("medium", f"{row['weeks_in_stage']} שבועות בשלב \"{row['stage']}\".")
+            flag("medium", (f"לפחות {row['weeks_in_stage']} שבועות בשלב \"{row['stage']}\" — ההיסטוריה מתחילה כשהפרויקט כבר בשלב הזה."
+                            if row["weeks_lower_bound"] else f"{row['weeks_in_stage']} שבועות בשלב \"{row['stage']}\"."))
         if (peers and peers["n"] >= SMALL_SAMPLE and peers["median_weeks"] and row["weeks_in_stage"] is not None
                 and row["weeks_in_stage"] > PEER_SLOWER_FACTOR * peers["median_weeks"]):
             flag("info", f"איטי מהרגיל לשלב: {row['weeks_in_stage']} שבועות מול חציון {peers['median_weeks']} "
