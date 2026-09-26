@@ -207,12 +207,23 @@ async def project_insights_page(
     if not scope.allowed:
         raise HTTPException(status_code=403, detail="אין לך עדיין שיוך לתצוגת הדפוסים — פנה למנהל המערכת")
     p = await compute(session)
+    preview, preview_label, options = None, None, None
+    if scope.admin:
+        # "View as": an admin sees exactly what any other viewer sees.
+        qp = request.query_params
+        preview = await insight_access.preview_scope(
+            session, qp.get("as_user"), qp.get("as_sector"), qp.get("as_manager"))
+        options = await insight_access.preview_options(session, p)
+        if preview:
+            scope, preview_label = preview
     return templates.TemplateResponse("project_insights.html", {
         "request": request,
         "current_user": current_user,
         "p": p,
         "view": insight_access.view_for(scope, p),
         "sector_labels": stage_sectors.SECTORS,
+        "preview_label": preview_label,
+        "preview_options": options,
     })
 
 

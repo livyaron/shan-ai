@@ -94,3 +94,16 @@ def test_access_page_renders():
         users=users, sectors=ss.ASSIGNABLE_SECTORS, saved="1")
     assert 'name="alias::גולן, לירון"' in html and 'name="sector::2"' in html
     assert "ללא סטטוס" not in html                    # the bucket is never assignable
+
+
+def test_preview_banner_and_selector_render_for_the_admin():
+    env = Environment(loader=FileSystemLoader("app/templates"))
+    html = env.get_template("project_insights.html").render(
+        request=SimpleNamespace(url=SimpleNamespace(path="/dashboard/projects/insights"),
+                                query_params={"as_sector": ss.EXECUTION}),
+        current_user=SimpleNamespace(is_admin=True, username="u", role=None, id=1),
+        p=P, view=ia.view_for(ia.Scope(sector=ss.EXECUTION), P), sector_labels=ss.SECTORS,
+        preview_label=ss.SECTORS[ss.EXECUTION],
+        preview_options={"users": [], "sectors": ss.ASSIGNABLE_SECTORS, "managers": ["מנהל א"]})
+    assert "צפה כ" in html and "תצוגה מקדימה — מגזר ביצוע" in html
+    assert "אותות מקדימים" not in html            # previewing drops admin power

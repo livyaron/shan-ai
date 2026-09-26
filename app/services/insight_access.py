@@ -48,6 +48,40 @@ async def scope_for(session: AsyncSession, user: User) -> Scope:
                  managers=frozenset(names))
 
 
+async def preview_scope(session: AsyncSession, as_user: str | None, as_sector: str | None,
+                        as_manager: str | None) -> tuple[Scope, str] | None:
+    """An admin's "view as": the scope another viewer would get, and a label.
+
+    as_user → exactly that user's scope (their sector + confirmed names).
+    as_sector → a sector manager with no names. as_manager → a PM by the name
+    in the file, linked or not — so a link can be checked before it is saved.
+    Admin power is never carried into a preview. None = no preview asked.
+    """
+    if as_user and as_user.isdigit():
+        user = await session.get(User, int(as_user))
+        if user is not None:
+            sc = await scope_for(session, user)
+            return Scope(admin=False, sector=sc.sector, managers=sc.managers), f"משתמש: {user.username}"
+    if as_sector in ss.ASSIGNABLE_SECTORS:
+        return Scope(sector=as_sector), ss.SECTORS[as_sector]
+    if as_manager:
+        return Scope(managers=frozenset({as_manager})), f'מנה"פ: {as_manager}'
+    return None
+
+
+async def preview_options(session: AsyncSession, p: dict) -> dict:
+    """What the admin's "view as" selector offers: users that have a role,
+    every sector, and every PM name the latest report carries."""
+    linked = set((await session.execute(select(ManagerAlias.user_id).where(ManagerAlias.user_id.isnot(None)))).scalars())
+    users = (await session.execute(select(User).order_by(User.username))).scalars().all()
+    return {
+        "users": [{"id": u.id, "name": u.username, "sector": ss.SECTORS.get(getattr(u, "sector", None) or "", "")}
+                  for u in users if (getattr(u, "sector", None) in ss.ASSIGNABLE_SECTORS or u.id in linked)],
+        "sectors": ss.ASSIGNABLE_SECTORS,
+        "managers": sorted({r["manager"] for r in p.get("league", []) if r.get("manager")}),
+    }
+
+
 def summarize(projects: list[dict], as_of: str | None) -> dict:
     """The page's tiles, computed from whichever projects the viewer sees."""
     measured = [p for p in projects if p["forecast_moved"] is not None]
