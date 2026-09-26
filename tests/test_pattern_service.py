@@ -65,7 +65,7 @@ D1, D2, D3 = date(2026, 3, 25), date(2026, 7, 8), date(2026, 9, 16)
 
 def _snap(pid, d, stage, fc, dev, **kw):
     return {"project_id": pid, "snapshot_date": d, "stage": stage, "fc": fc, "dev": dev,
-            "risks": kw.get("risks"), "to_handle": None, "finish_date_text": kw.get("text")}
+            "risks": kw.get("risks"), "to_handle": kw.get("to_handle"), "finish_date_text": kw.get("text")}
 
 
 def _frames(extra_projects: int = 0) -> pt.Frames:
@@ -245,7 +245,7 @@ def test_project_history_tells_p1s_story():
     kinds = sorted(e["kind"] for e in h["events"])
     assert kinds == ["baseline", "forecast", "forecast"]
     texts = " ".join(f["text"] for f in h["flags"])
-    assert "נדחה 2 פעמים" in texts and "תכנית הפיתוח זזה" in texts
+    assert "נדחה פעמיים" in texts and "תכנית הפיתוח זזה" in texts
     assert h["flags"][0]["level"] == "high"
     assert h["weekly"][0]["week"] > h["weekly"][-1]["week"]                     # newest first
 
@@ -325,6 +325,17 @@ def test_risk_matrix_and_risk_column_changes():
     ("הכמות מספקת", "ציוד/אספקה", False),                                    # sufficient, not a supplier
     ("התקבל היתר בנייה", "רישוי/היתרים/סטטוטוריקה", True),
     ("היתרון של הפתרון", "רישוי/היתרים/סטטוטוריקה", False),
+    # WBC-057 page: "קרקע" alone is mostly site work, cables and soil, not land.
+    ("צפי עלייה לקרקע בנובמבר", "קרקע/גישה/הסכמים", False),                  # contractor on site
+    ("חיבור מ\"ע תת קרקעי", "קרקע/גישה/הסכמים", False),                      # underground cable
+    ("התקבל דוח זיהום קרקע", "קרקע/גישה/הסכמים", False),                     # soil
+    ("הוסדר נושא רכישת הקרקע", "קרקע/גישה/הסכמים", True),
+    ("התקבל מסמך זכויות בקרקע", "קרקע/גישה/הסכמים", True),
+    ("לרישום העירייה כבעלת הקרקע", "קרקע/גישה/הסכמים", True),
+    ("נדרשות חפירות נוספות", "גורם חיצוני/רשויות", False),                    # נדרשות ⊃ רשות
+    ("ממתינים לאישור רשות העתיקות", "גורם חיצוני/רשויות", True),
+    ("הועבר מסמך למהנדס העיר אשדוד", "גורם חיצוני/רשויות", True),
+    ("פגישה עם אדריכלית העיר", "גורם חיצוני/רשויות", True),
 ])
 def test_taxonomy_v2_word_edges(text, cat, hit):
     import re
@@ -337,3 +348,55 @@ def test_near_same_treats_a_typo_fix_as_a_repeat():
     assert pt.near_same(a, b)
     assert not pt.near_same(a, "הקבלן התחיל עבודות אזרחיות באתר השבוע")
     assert not pt.near_same(None, a)
+
+
+# ── Caught on the WBC-057 page ────────────────────────────────────────────
+
+def _gap_frames() -> pt.Frames:
+    """P-9: dated, then the target is written as text for one report, then
+    dated again 22 months later. The move must survive the undated report."""
+    f = _frames()
+    snaps = [
+        _snap(9, D1, "קבלת היתר", date(2028, 2, 28), date(2027, 6, 30)),
+        _snap(9, D2, "קבלת היתר", None, date(2027, 6, 30), text="-", to_handle="חסם לטיפול סמנכ\"ל"),
+        _snap(9, D3, "קבלת היתר", date(2029, 12, 31), date(2027, 6, 30), to_handle="חסם לטיפול סמנכ\"ל"),
+    ]
+    projects = [{"project_id": 9, "identifier": "P-9", "name": "g", "manager": "מנהל ב",
+                 "project_type": "הקמה", "is_active": True}]
+    return pt.Frames(pd.concat([f.snaps, pd.DataFrame(snaps)], ignore_index=True),
+                     pd.concat([f.projects, pd.DataFrame(projects)], ignore_index=True), f.weekly)
+
+
+def test_a_move_across_an_undated_report_is_still_a_move():
+    frames = _gap_frames()
+    p = pt._plain(pt.compute_patterns(frames))
+    ev = [e for e in p["events"] if e["identifier"] == "P-9"]
+    assert len(ev) == 1 and ev[0]["kind"] == "forecast"
+    assert (ev[0]["from"], ev[0]["to"], ev[0]["undated_between"]) == (D1.isoformat(), D3.isoformat(), 1)
+    row = next(r for r in p["projects"] if r["identifier"] == "P-9")
+    assert ev[0]["months"] == row["forecast_moved_months"]         # events add up to the total move
+    # A wave is one consecutive pair; the gap-crossing move is in no wave's drill.
+    from app.services import insight_access as ia
+    w = next(x for x in p["metrics"]["update_waves"]["value"] if x["from"] == D1.isoformat())
+    d = ia.drill_for(ia.view_for(ia.Scope(admin=True), p), p, "wave", D1.isoformat(), "forecast")
+    assert len(d["rows"]) == w["forecast_later"]
+    assert all(r["identifier"] != "P-9" for r in d["rows"])
+
+
+def test_escalation_flag_and_times_wording():
+    frames = _gap_frames()
+    p = pt._plain(pt.compute_patterns(frames))
+    h = pt.project_history(frames, p, "P-9")
+    top = h["flags"][0]
+    assert top["level"] == "high" and "סמנכ" in top["text"] and f"מאז {D2.isoformat()}" in top["text"]
+    assert "לפחות" not in top["text"]                                # D1 had no escalation
+    assert any("נדחה פעם אחת" in f["text"] and "כמלל" in f["text"] for f in h["flags"])
+    assert pt._times(2) == "פעמיים" and pt._times(3) == "3 פעמים"
+
+
+def test_risk_matrix_marks_missing_weeks():
+    from app.services import project_chart as pc
+    weekly = [{"week": w, "text": "x", "same_as_before": False}
+              for w in ("2026-04-01", "2026-04-08", "2026-05-13", "2026-05-20")]
+    m = pc.risk_matrix({"weekly": weekly[::-1]})
+    assert m["missing_before"] == [0, 0, 4, 0]

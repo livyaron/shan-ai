@@ -196,7 +196,11 @@ def drill_for(view: dict, p: dict, kind: str, value: str = "", metric: str = "al
         rows = [e for e in p.get("events", []) if e["kind"] == "forecast" and value in e["sectors"]]
         return {"label": f"דחיות שנרשמו על {ss.SECTORS.get(value, value)}", "kind": "events", "rows": rows}
     if kind == "wave" and "waves" in sections:
-        live = [e for e in p.get("events", []) if e["from"] == value and e["live"]]
+        # A wave counts consecutive report pairs only; a move measured across
+        # an undated gap (from → a later "to") belongs to no wave.
+        to = next((w["to"] for w in p.get("metrics", {}).get("update_waves", {}).get("value", [])
+                   if w["from"] == value), None)
+        live = [e for e in p.get("events", []) if e["from"] == value and e["to"] == to and e["live"]]
         if metric == "both":
             both = ({e["identifier"] for e in live if e["kind"] == "forecast"}
                     & {e["identifier"] for e in live if e["kind"] == "baseline"})

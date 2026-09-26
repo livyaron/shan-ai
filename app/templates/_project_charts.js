@@ -198,6 +198,7 @@
     const H = top + data.rows.length * (cellH + gap) + xLab;
     const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "נושאי סיכון לפי שבוע" }, box);
     const HIT = "#3987e5", REPEAT = "#64748b", MISS = "#172338";
+    const gapWeeks = data.missing_before || data.weeks.map(() => 0);
 
     data.rows.forEach((row, r) => {
       const y = top + r * (cellH + gap);
@@ -210,6 +211,7 @@
           cell.setAttribute("stroke", INK); cell.setAttribute("stroke-width", 1.5);
           tip.textContent = "";
           h("div", "hd", `שבוע ${fmtDate(data.weeks[i])}`, tip);
+          if (gapWeeks[i]) h("div", "", `לפני שבוע זה חסרים בקובץ ${gapWeeks[i]} שבועות`, tip);
           h("div", "", row.label, tip);
           const body = h("div", "sec", null, tip);
           if (row.kind === "repeat") h("div", "", c.hit ? "🔁 המלל זהה לשבוע הקודם" : "מלל חדש השבוע", body);
@@ -221,6 +223,13 @@
         cell.addEventListener("pointerdown", over);
         cell.addEventListener("pointerleave", () => { cell.removeAttribute("stroke"); hideTip(); });
       });
+    });
+    // holes in the weekly history: a dashed divider where weeks are missing
+    gapWeeks.forEach((k, i) => {
+      if (!k) return;
+      const x = i * cw;
+      el("line", { x1: x, x2: x, y1: top - 2, y2: H - xLab + 2, stroke: "#e0b341", "stroke-width": 2,
+        "stroke-dasharray": "3 3" }, svg);
     });
     // week labels, newest always shown
     let lastX = Infinity;
