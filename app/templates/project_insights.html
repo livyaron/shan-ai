@@ -65,6 +65,28 @@
         </div>
     </div>
 
+    {% if preview_options %}
+    <form method="get" action="/dashboard/projects/insights" class="card-x d-flex flex-wrap align-items-center gap-2" style="padding:.7rem 1rem">
+        <span class="sub">👁 צפה כ:</span>
+        <select name="as_user" class="form-select form-select-sm" style="max-width:220px;background:#0b1320;color:var(--text-1);border-color:var(--border-hi)" onchange="this.form.as_sector.value='';this.form.as_manager.value='';this.form.submit()">
+            <option value="">— משתמש —</option>
+            {% for u in preview_options.users %}<option value="{{ u.id }}" {% if request.query_params.get('as_user') == u.id|string %}selected{% endif %}>{{ u.name }}{% if u.sector %} · {{ u.sector }}{% endif %}</option>{% endfor %}
+        </select>
+        <select name="as_sector" class="form-select form-select-sm" style="max-width:200px;background:#0b1320;color:var(--text-1);border-color:var(--border-hi)" onchange="this.form.as_user.value='';this.form.as_manager.value='';this.form.submit()">
+            <option value="">— מגזר —</option>
+            {% for k, label in preview_options.sectors.items() %}<option value="{{ k }}" {% if request.query_params.get('as_sector') == k %}selected{% endif %}>{{ label }}</option>{% endfor %}
+        </select>
+        <select name="as_manager" class="form-select form-select-sm" style="max-width:220px;background:#0b1320;color:var(--text-1);border-color:var(--border-hi)" onchange="this.form.as_user.value='';this.form.as_sector.value='';this.form.submit()">
+            <option value="">— מנה"פ מהקובץ —</option>
+            {% for m in preview_options.managers %}<option value="{{ m }}" {% if request.query_params.get('as_manager') == m %}selected{% endif %}>{{ m }}</option>{% endfor %}
+        </select>
+        {% if preview_label %}<a href="/dashboard/projects/insights" class="btn btn-outline-secondary btn-sm">✕ חזרה לתצוגה שלי</a>{% endif %}
+    </form>
+    {% if preview_label %}
+    <div class="callout" style="margin:0 0 1.25rem;border-right-color:var(--amber)">👁 <strong>תצוגה מקדימה — {{ preview_label }}.</strong> זה בדיוק מה שהצופה הזה רואה. אזורי מנהל מוסתרים.</div>
+    {% endif %}
+    {% endif %}
+
     {% set h = p.health %}
     {% if h and 'health' in view.sections %}
     <details class="card-x" {% if (p.report_dates|length) < 2 %}open{% endif %}>
