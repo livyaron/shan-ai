@@ -158,7 +158,7 @@
             <tr><th>זיהוי</th><th>פרויקט</th><th>מנה"פ</th><th>מקטע</th><th>מה זז</th><th>חודשים</th><th>שלב בזמן הדחייה</th></tr>
             {% for e in drill.rows %}
             <tr><td class="n">{{ plink(e.identifier) }}</td><td>{{ (e.name or '')[:60] }}</td><td>{{ e.manager or '' }}</td>
-                <td class="n">{{ e.from }} → {{ e.to }}</td><td>{{ 'יעד חשמול' if e.kind == 'forecast' else 'תכנית פיתוח' }}</td>
+                <td class="n">{{ e.from }} → {{ e.to }}{% if e.undated_between %}<div class="mix">מעל {{ e.undated_between }} דוחות בלי תאריך</div>{% endif %}</td><td>{{ 'יעד חשמול' if e.kind == 'forecast' else 'תכנית פיתוח' }}</td>
                 <td class="n">{{ e.months }}</td><td>{{ e.stage }}{% if not e.live %} <span class="mix">(לא פעיל היום)</span>{% endif %}</td></tr>
             {% else %}<tr><td colspan="7" class="sub">אין שורות.</td></tr>{% endfor %}
         {% else %}

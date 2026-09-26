@@ -106,7 +106,11 @@ def risk_matrix(h: dict) -> dict | None:
     rows.append({"label": "דיווח זהה לשבוע הקודם", "kind": "repeat",
                  "cells": [{"hit": w["same_as_before"], "quote": None} for w in weekly],
                  "weeks": sum(w["same_as_before"] for w in weekly)})
-    return {"weeks": [w["week"] for w in weekly], "rows": rows}
+    # Weeks the file never had a column for. The grid is one cell per report,
+    # so without this a five-week hole reads as one week.
+    dates = [_d(w["week"]) for w in weekly]
+    missing = [0] + [max(0, round((b - a).days / 7) - 1) for a, b in zip(dates, dates[1:])]
+    return {"weeks": [w["week"] for w in weekly], "rows": rows, "missing_before": missing}
 
 
 def risk_column_changes(h: dict) -> list[dict]:

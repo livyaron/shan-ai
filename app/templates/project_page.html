@@ -165,6 +165,8 @@
         <h2>סיכונים לאורך זמן</h2>
         <div class="sub">כל משבצת = שבוע. צבועה כשהנושא הוזכר בדיווח השבועי. רחף למשבצת לציטוט המדויק.</div>
         {% if matrix %}
+        {% set holes = matrix.missing_before|sum %}
+        {% if holes %}<div class="sub">קו מקווקו צהוב = שבועות שאין להם עמודת דיווח בקובץ ({{ holes }} שבועות בסך הכל) — המשבצות הן דוחות, לא שבועות רציפים.</div>{% endif %}
         <div class="chart-box mt-2" id="risk-matrix"></div>
         <details class="mt-2"><summary>טבלה</summary>
             <div class="scroll"><table class="t mt-2">
@@ -197,7 +199,7 @@
         <div class="scroll"><table class="t mt-2">
             <tr><th>מקטע</th><th>מה זז</th><th>חודשים</th><th>שלב בזמן הדחייה</th></tr>
             {% for e in h.events|reverse %}
-            <tr><td class="n">{{ e.from }} → {{ e.to }}</td><td>{{ 'יעד חשמול' if e.kind == 'forecast' else 'תכנית פיתוח' }}</td>
+            <tr><td class="n">{{ e.from }} → {{ e.to }}{% if e.undated_between %}<div class="sub">מעל {{ e.undated_between }} דוחות בלי תאריך</div>{% endif %}</td><td>{{ 'יעד חשמול' if e.kind == 'forecast' else 'תכנית פיתוח' }}</td>
                 <td class="n">{{ e.months }}</td><td>{{ e.stage }}</td></tr>
             {% endfor %}
         </table></div>

@@ -49,19 +49,25 @@ _B = r"(?<![א-ת])"
 _E = r"(?![א-ת])"
 RISK_CATEGORIES: dict[str, str] = {
     "רישוי/היתרים/סטטוטוריקה": r'היתר(?!ו)|תב"?ע|ועד[הת] (?:מקומית|מחוזית)|רישוי|טופס 4|תמ"?א|ות"?ל',
-    "קרקע/גישה/הסכמים": (r'קרקע|רמ"י|' + _B + r'[וב]?רמי' + _E +
+    # "קרקע" alone was mostly NOT land: "עלייה לקרקע" (contractor on site, ~200
+    # hits), "תת קרקעי" (cable), "זיהום/דיגום/ביסוס/יועץ קרקע" (soil). Only
+    # land-rights phrases count.
+    "קרקע/גישה/הסכמים": (r'(?:רכישת|זכויות|בעלות|בעלת|רישום|הקצאת) (?:על )?[בה]?קרקע|רמ"י|' + _B + r'[וב]?רמי' + _E +
                          r'|מקרקעין|הפקע|חכיר|דרך גישה|כביש גישה|זיקת|הסכם'),
     "ציוד/אספקה": (r'שנאי|אספק|' + _B + r'(?:[והבל]|מה)?ספק(?:ים|י|ית)?' + _E +
                    r'|מפסק|GIS|ציוד|ייצור|יבוא|משלוח'),
     "קבלן/מכרז": r'קבלן|מכרז|ועדת מכרזים|הזמנת עבודה|התקשרות',
     "הפסקות/תפעול רשת": r'הפסק[הות]|חלון|ניתוק|העברת עומס|מוקד(?![םמ])',
     "כוח אדם/פיקוח/בדיקות": r'משגיח|בודק|כ[ו]?ח אדם|חוסר ב(?:כ[ו]?ח|פועלים|עובדים|משגיח|בודק|צוות|אנשי)',
-    "גורם חיצוני/רשויות": (r'עיריי|רשות|מועצ|נת"י|' + _B + r'[לבו]?נתי' + _E + r'|נתיבי ישראל|'
+    "גורם חיצוני/רשויות": (r'עיריי|' + _B + r'(?:[והלב]|מ)?רשות' + _E + r'|(?:מהנדס|אדריכל(?:ית)?|ראש) (?:ה)?עיר' + _E + r'|מועצ|נת"י|' + _B + r'[לבו]?נתי' + _E + r'|נתיבי ישראל|'
                            + _B + r'[לבו]?רכבת' + _E + r'|רכבת ישראל|רכבת קלה|רט"?ג|תושב|התנגד|יישוב|קיבוץ|משרד ה'),
     "תקציב/עלות": r'תקציב|אומדן|' + _B + r'[והלמ]?עלויות|עלות ה|מימון|חריגה',
     "ביטחוני/מלחמה": r'מלחמ|ביטחונ|צבא|צה"?ל|מיגון',
 }
 
+
+ESCALATED = re.compile(r'חסם לטיפול')          # the file's "לטיפול" column: who must act
+ESCALATED_TOP = re.compile(r'סמנכ"?ל')           # the top of that ladder
 
 NEAR_SAME_RATIO = 95      # weekly texts this similar (0–100, punctuation ignored) count as a repeat
 
@@ -367,20 +373,30 @@ def compute_patterns(frames: Frames) -> dict:
     # 11. Slip attribution: every forecast move charged to the sector that
     #     owned the project (by stage) when it moved.
     #     Every move is also kept as an event, so each number drills down.
+    #     A move is measured against the last DATED report, not the previous
+    #     report: a target written as text for a few weeks ("-", "יתקבל יעד
+    #     חדש") and then dated again must not swallow the move across the gap.
     move_events: list[dict] = []
-    for a, b in zip(rdates, rdates[1:]):
-        A, B = by_date[a], by_date[b]
-        stage_at = A.set_index("project_id")["stage"]
+    for pid, g in snaps.sort_values("report_date").groupby("project_id"):
         for col, kind in (("fc", "forecast"), ("dev", "baseline")):
-            d = _drift(A, B, col)
-            for pid, days in d[d > MOVE_DAYS].items():
-                stage = stage_at.get(pid) or ""
-                move_events.append({
-                    "identifier": projects.at[pid, "identifier"], "name": projects.at[pid, "name"],
-                    "manager": projects.at[pid, "manager"], "kind": kind,
-                    "from": a.isoformat(), "to": b.isoformat(), "days": int(days), "months": _months(days),
-                    "stage": stage or "ללא סטטוס", "sectors": list(ss.sectors_for(stage)),
-                    "live": pid in live_ids})
+            prev = None   # (value, report_date, stage) of the last dated report
+            undated_between = 0
+            for r in g.itertuples():
+                v = getattr(r, col)
+                if pd.isna(v):
+                    undated_between += prev is not None
+                    continue
+                if prev is not None and (days := (v - prev[0]).days) > MOVE_DAYS:
+                    stage = prev[2] or ""
+                    move_events.append({
+                        "identifier": projects.at[pid, "identifier"], "name": projects.at[pid, "name"],
+                        "manager": projects.at[pid, "manager"], "kind": kind,
+                        "from": prev[1].isoformat(), "to": r.report_date.isoformat(),
+                        "days": int(days), "months": _months(days), "undated_between": undated_between,
+                        "stage": stage or "ללא סטטוס", "sectors": list(ss.sectors_for(stage)),
+                        "live": pid in live_ids})
+                prev, undated_between = (v, r.report_date, r.stage), 0
+    move_events.sort(key=lambda e: (e["to"], e["from"], e["kind"], e["identifier"]))
     attribution = {k: {"events": 0, "months": 0.0} for k in ss.SECTORS}
     for e in move_events:
         if e["kind"] == "forecast":
@@ -522,6 +538,10 @@ EVIDENCE_PER_TOPIC = 3    # newest quotes shown per topic
 PEER_SLOWER_FACTOR = 1.5  # "slower than peers" = this × the stage's median
 
 
+def _times(n: int) -> str:
+    return "פעם אחת" if n == 1 else "פעמיים" if n == 2 else f"{n} פעמים"
+
+
 def _snippet(text: str, match: re.Match) -> str:
     a, b = max(0, match.start() - SNIPPET_CHARS), min(len(text), match.end() + SNIPPET_CHARS)
     return ("…" if a else "") + text[a:b].strip() + ("…" if b < len(text) else "")
@@ -599,9 +619,11 @@ def project_history(frames: Frames, p: dict, identifier: str) -> dict | None:
     if fc_events:
         total = round(sum(e["days"] for e in fc_events) / MONTH_DAYS, 1)
         flag("high" if len(fc_events) >= 2 else "medium",
-             f"יעד החשמול נדחה {len(fc_events)} פעמים, {total} חודשים בסך הכל.")
+             f"יעד החשמול נדחה {_times(len(fc_events))}, {total} חודשים בסך הכל."
+             + (" חלק מהדחייה נמדד על פני דוחות שבהם היעד נכתב כמלל — ייתכן שהיו בהם כמה דחיות."
+                if any(e.get("undated_between") for e in fc_events) else ""))
     if fc_events and dev_events:
-        flag("medium", f"תכנית הפיתוח זזה {len(dev_events)} פעמים יחד עם היעד — האיחור מול התכנית נראה קטן מהאמיתי.")
+        flag("medium", f"תכנית הפיתוח זזה {_times(len(dev_events))} יחד עם היעד — האיחור מול התכנית נראה קטן מהאמיתי.")
     if row:
         if row["late"]:
             flag("medium", f"מאחר {row['slip_months']} חודשים מול תכנית הפיתוח העדכנית.")
@@ -618,6 +640,16 @@ def project_history(frames: Frames, p: dict, identifier: str) -> dict | None:
                          f"ב-{peers['n']} פרויקטים באותו שלב.")
         if row["stale"]:
             flag("medium", f"הדיווח השבועי זהה {STALE_WEEKS} שבועות ברצף — ייתכן שאינו מתעדכן.")
+    # The file's own escalation column ("חסם לטיפול <who>"): the PM already
+    # said who must act. The VP level is the top of the ladder.
+    esc = timeline[-1]["to_handle"] if timeline else None
+    if esc and ESCALATED.search(esc):
+        run = 0
+        while run < len(timeline) and timeline[-1 - run]["to_handle"] == esc:
+            run += 1
+        since = timeline[-run]["date"]
+        since = f"לפחות מאז {since} (הדוח הראשון בהיסטוריה)" if run == len(timeline) else f"מאז {since}"
+        flag("high" if ESCALATED_TOP.search(esc) else "medium", f"בקובץ: \"{esc}\" — {since}.")
     for t in topics:
         li = t["leading"]
         if li and li["signal"] in ("signal", "weak"):
