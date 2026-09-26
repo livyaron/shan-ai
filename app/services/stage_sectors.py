@@ -45,6 +45,23 @@ STAGE_SECTORS: dict[str, tuple[str, ...]] = {
 }
 
 
+# The order a project moves through (same rank = parallel names for one step).
+# Used only to notice a stage the weekly report has already left behind;
+# stages off the ladder (הסכם- אגירת אנרגיה, הסתיים, empty) are never checked.
+STAGE_RANK: dict[str, int] = {
+    "תכנון": 0, "הקפאת תכולה": 0, "הקפאת תצורה": 0,
+    "קבלת היתר": 1,
+    "בחירת קבלן": 2,
+    "לקראת ביצוע": 3,
+    "עבודה אזרחית": 4, "עבודה אזרחית והרכבות": 4,
+    "הרכבה חשמלית": 5, "הרכבה חשמלית ובדיקות": 5,
+    "בדיקות": 6,
+    "טופס 4": 7,
+}
+STAGE_BY_RANK = {1: "קבלת היתר", 2: "בחירת קבלן", 3: "לקראת ביצוע", 4: "עבודה אזרחית",
+                 5: "הרכבה חשמלית", 6: "בדיקות", 7: "טופס 4"}
+
+
 def normalize_stage(stage: object) -> str:
     """Collapse whitespace; anything that is not text (None, a pandas NaN) is ""."""
     return " ".join(stage.split()) if isinstance(stage, str) else ""
