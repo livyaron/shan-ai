@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Shan-AI — {{ h.identifier }}</title>
+    <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        :root {
+            --bg-deep: #070b12; --bg-card: #0f1826; --border: #1a2d47; --border-hi: #1e3a5f;
+            --cyan: #00d4ff; --purple: #8b9cf4; --text-1: #e2e8f0; --text-2: #94a3b8; --text-3: #64748b;
+            --mono: 'IBM Plex Mono', monospace; --ui: 'Heebo', sans-serif;
+            --s-high: #e66767; --s-med: #c98500; --s-info: #3987e5;
+        }
+        body { background: var(--bg-deep); color: var(--text-1); font-family: var(--ui); }
+        .wrap { max-width: 1180px; margin: 0 auto; padding: 1.5rem 1rem 4rem; }
+        h1 { font-size: 1.4rem; font-weight: 700; color: var(--purple); margin: 0; }
+        h2 { font-size: 1.08rem; font-weight: 600; color: var(--cyan); margin: 0 0 .4rem; }
+        .sub { color: var(--text-2); font-size: .88rem; }
+        .mono { font-family: var(--mono); }
+        .card-x { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; padding: 1.1rem 1.2rem; margin-bottom: 1.25rem; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: .8rem; }
+        .kv { background: rgba(255,255,255,.02); border: 1px solid var(--border); border-radius: 10px; padding: .7rem .85rem; }
+        .kv .k { color: var(--text-2); font-size: .8rem; }
+        .kv .v { font-size: 1.05rem; font-weight: 600; margin-top: .15rem; }
+        .chip { display: inline-block; border: 1px solid var(--border-hi); border-radius: 999px; padding: .05rem .55rem; font-size: .78rem; color: var(--text-2); margin-inline-end: .3rem; }
+        .flag { display: flex; gap: .6rem; align-items: flex-start; padding: .5rem 0; border-bottom: 1px solid var(--border); }
+        .flag:last-child { border-bottom: 0; }
+        .lvl { white-space: nowrap; font-size: .78rem; border-radius: 6px; padding: .05rem .45rem; border: 1px solid; }
+        .lvl-high { color: var(--s-high); border-color: var(--s-high); }
+        .lvl-medium { color: var(--s-med); border-color: var(--s-med); }
+        .lvl-info { color: var(--s-info); border-color: var(--s-info); }
+        table.t { width: 100%; border-collapse: collapse; font-size: .88rem; }
+        table.t th { color: var(--text-2); font-weight: 500; text-align: right; border-bottom: 1px solid var(--border-hi); padding: .45rem .5rem; white-space: nowrap; }
+        table.t td { border-bottom: 1px solid var(--border); padding: .45rem .5rem; vertical-align: top; }
+        .n { font-family: var(--mono); white-space: nowrap; }
+        .scroll { overflow-x: auto; }
+        .quote { color: var(--text-2); font-size: .85rem; border-right: 2px solid var(--border-hi); padding-right: .6rem; margin: .3rem 0; }
+        .week { padding: .6rem 0; border-bottom: 1px solid var(--border); }
+        .week .w { font-family: var(--mono); color: var(--text-2); font-size: .82rem; }
+        .same { color: var(--text-3); font-size: .78rem; }
+        .legend span { display: inline-flex; align-items: center; gap: .35rem; margin-inline-end: 1rem; font-size: .85rem; color: var(--text-2); }
+        .legend i { width: 14px; height: 3px; border-radius: 2px; display: inline-block; }
+        svg text { font-family: var(--ui); }
+        .caveat { color: var(--text-3); font-size: .8rem; margin-top: .5rem; }
+        details summary { cursor: pointer; color: var(--text-2); font-size: .88rem; }
+    </style>
+</head>
+<body>
+{% include "_navbar.html" %}
+{% set r = h.row %}
+<div class="wrap">
+    <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-3">
+        <div>
+            <div class="sub mono">{{ h.identifier }}</div>
+            <h1>{{ h.name or h.identifier }}</h1>
+            <div class="mt-1">
+                <span class="chip">מנה"פ: {{ h.manager or 'טרם הוקצה' }}</span>
+                {% if h.project_type %}<span class="chip">{{ h.project_type }}</span>{% endif %}
+                {% if r %}{% for s in r.sectors %}<span class="chip">{{ sector_labels.get(s, s) }}</span>{% endfor %}{% endif %}
+                {% if not h.is_active %}<span class="chip">לא פעיל בקובץ העדכני</span>{% endif %}
+            </div>
+        </div>
+        <a href="/dashboard/projects/insights" class="btn btn-outline-secondary btn-sm">→ חזרה לדפוסים</a>
+    </div>
+
+    {# ── Status ── #}
+    <div class="card-x">
+        <h2>סטטוס — נכון לדוח {{ h.as_of }}</h2>
+        <div class="grid mt-2">
+            <div class="kv"><div class="k">שלב</div><div class="v">{{ r.stage if r else '—' }}</div>
+                {% if r and r.weeks_in_stage is not none %}<div class="sub">{{ r.weeks_in_stage }} שבועות בשלב</div>{% endif %}</div>
+            <div class="kv"><div class="k">יעד חשמול מסתמן</div><div class="v mono">{{ (r.fc if r else none) or ('מלל' if r and r.undated else '—') }}</div></div>
+            <div class="kv"><div class="k">יעד תכנית פיתוח</div><div class="v mono">{{ (r.dev if r else none) or '—' }}</div></div>
+            <div class="kv"><div class="k">פער מול התכנית</div><div class="v mono">{{ '—' if not r or r.slip_months is none else r.slip_months ~ ' ח׳' }}</div></div>
+            <div class="kv"><div class="k">היעד זז מאז הדוח הראשון</div><div class="v mono">{{ '—' if not r or r.forecast_moved_months is none else r.forecast_moved_months ~ ' ח׳' }}</div></div>
+            <div class="kv"><div class="k">התכנית זזה מאז הדוח הראשון</div><div class="v mono">{{ '—' if not r or r.baseline_moved_months is none else r.baseline_moved_months ~ ' ח׳' }}</div></div>
+            {% if project %}
+            <div class="kv"><div class="k">תו"ב</div><div class="v">{{ project.controller or '—' }}</div></div>
+            <div class="kv"><div class="k">פרויקט קריטי</div><div class="v">{{ project.critical_tier or '—' }}</div></div>
+            <div class="kv"><div class="k">חוסר במשגיחים / בבודקים</div><div class="v">{{ '✔ כן' if project.short_supervisors else 'לא' }} / {{ '✔ כן' if project.short_testers else 'לא' }}</div></div>
+            {% endif %}
+        </div>
+        {% if r and r.undated and h.timeline and h.timeline[-1].fc_text %}
+        <div class="caveat">יעד חשמול כפי שנכתב: "{{ h.timeline[-1].fc_text }}"</div>
+        {% endif %}
+    </div>
+
+    {# ── Risk read-out ── #}
+    {% set lvl_he = {'high': '● גבוה', 'medium': '◐ בינוני', 'info': '○ מידע'} %}
+    <div class="card-x">
+        <h2>ניתוח סיכונים</h2>
+        <div class="sub">כל שורה היא כלל מחושב על הנתונים שבדף — לא ניסוח של מודל שפה.</div>
+        <div class="mt-2">
+            {% for f in h.flags %}
+            <div class="flag"><span class="lvl lvl-{{ f.level }}">{{ lvl_he[f.level] }}</span><span>{{ f.text }}</span></div>
+            {% else %}
+            <div class="sub">לא זוהו סימני סיכון מחושבים.</div>
+            {% endfor %}
+        </div>
+        {% if h.peers %}
+        <div class="caveat">השוואה: {{ h.peers.n }} פרויקטים פעילים נוספים באותו שלב · חציון זמן בשלב {{ h.peers.median_weeks if h.peers.median_weeks is not none else '—' }} שבועות · חציון תזוזת יעד {{ h.peers.median_moved_months if h.peers.median_moved_months is not none else '—' }} ח׳.</div>
+        {% endif %}
+        {% if project and (project.risks or project.to_handle) %}
+        <div class="mt-3">
+            {% if project.risks %}<div class="sub">פירוט סיכונים וחסמים (מהקובץ)</div><div class="quote">{{ project.risks }}</div>{% endif %}
+            {% if project.to_handle %}<div class="sub mt-2">לטיפול (מהקובץ)</div><div class="quote">{{ project.to_handle }}</div>{% endif %}
+        </div>
+        {% endif %}
+    </div>
+
+    {% if h.topics %}
+    <div class="card-x">
+        <h2>נושאים שעולים בדיווחים</h2>
+        <div class="sub">זיהוי לפי מילות מפתח (טקסונומיה v1, טרם אומתה ידנית). מוצגים הציטוטים האחרונים.</div>
+        {% for t in h.topics %}
+        <div class="mt-3">
+            <strong>{{ t.category }}</strong> <span class="sub">· הוזכר ב-{{ t.weeks }} שבועות</span>
+            {% for e in t.evidence %}<div class="quote"><span class="mono">{{ e.source }}</span> — {{ e.quote }}</div>{% endfor %}
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    {# ── Target history ── #}
+    <div class="card-x">
+        <h2>היסטוריית יעדים ושלבים</h2>
+        {% if chart %}
+        <div class="legend mt-1">{% for s in chart.series %}<span><i style="background: {{ s.color }}"></i>{{ s.label }}</span>{% endfor %}</div>
+        <div class="scroll"><svg viewBox="0 0 {{ chart.w }} {{ chart.h }}" width="100%" style="max-width: {{ chart.w }}px; direction: ltr" role="img" aria-label="יעד חשמול ויעד תכנית פיתוח לאורך הדוחות">
+            {% for t in chart.y_ticks %}
+            <line x1="{{ chart.plot_left }}" x2="{{ chart.plot_right }}" y1="{{ t.y }}" y2="{{ t.y }}" stroke="#1a2d47" stroke-width="1"/>
+            <text x="{{ chart.plot_left - 8 }}" y="{{ t.y + 4 }}" text-anchor="end" font-size="11" fill="#94a3b8">{{ t.label }}</text>
+            {% endfor %}
+            {% for xl in chart.x_labels %}
+            <text x="{{ xl.x }}" y="{{ chart.plot_bottom + 18 }}" text-anchor="middle" font-size="10" fill="#64748b">{{ xl.label }}</text>
+            {% endfor %}
+            {% for s in chart.series %}
+            <polyline points="{{ s.path }}" fill="none" stroke="{{ s.color }}" stroke-width="2" stroke-linejoin="round"/>
+            {% for pt in s.points %}
+            <g><circle cx="{{ pt.x }}" cy="{{ pt.y }}" r="10" fill="transparent"/>
+               <circle cx="{{ pt.x }}" cy="{{ pt.y }}" r="4" fill="{{ s.color }}" stroke="#0f1826" stroke-width="2"/>
+               <title>דוח {{ pt.report }} · {{ s.label }}: {{ pt.value }}</title></g>
+            {% endfor %}
+            <text x="{{ chart.plot_right + 8 }}" y="{{ s.label_y + 4 }}" font-size="11" fill="#e2e8f0">{{ s.label }}</text>
+            {% endfor %}
+        </svg></div>
+        {% else %}
+        <div class="sub">אין מספיק דוחות מתוארכים לגרף.</div>
+        {% endif %}
+        <details class="mt-2" {% if not chart %}open{% endif %}><summary>טבלה</summary>
+            <div class="scroll"><table class="t mt-2">
+                <tr><th>דוח</th><th>שלב</th><th>יעד חשמול מסתמן</th><th>יעד תכנית פיתוח</th></tr>
+                {% for t in h.timeline|reverse %}
+                <tr><td class="n">{{ t.date }}</td><td>{{ t.stage }}{% if t.stage_changed %} <span class="chip">שלב חדש</span>{% endif %}</td>
+                    <td class="n">{{ t.fc or (t.fc_text[:40] if t.fc_text else '—') }}</td><td class="n">{{ t.dev or '—' }}</td></tr>
+                {% endfor %}
+            </table></div>
+        </details>
+    </div>
+
+    {% if h.events %}
+    <div class="card-x">
+        <h2>אירועי דחייה</h2>
+        <div class="scroll"><table class="t mt-2">
+            <tr><th>מקטע</th><th>מה זז</th><th>חודשים</th><th>שלב בזמן הדחייה</th></tr>
+            {% for e in h.events|reverse %}
+            <tr><td class="n">{{ e.from }} → {{ e.to }}</td><td>{{ 'יעד חשמול' if e.kind == 'forecast' else 'תכנית פיתוח' }}</td>
+                <td class="n">{{ e.months }}</td><td>{{ e.stage }}</td></tr>
+            {% endfor %}
+        </table></div>
+    </div>
+    {% endif %}
+
+    {# ── Weekly reports ── #}
+    <div class="card-x">
+        <h2>דיווחים שבועיים ({{ h.weekly|length }})</h2>
+        {% for w in h.weekly[:8] %}
+        <div class="week"><div class="w">{{ w.week }}{% if w.same_as_before %} <span class="same">🔁 זהה לשבוע הקודם</span>{% endif %}</div><div>{{ w.text }}</div></div>
+        {% else %}
+        <div class="sub">אין דיווחים שבועיים שמורים.</div>
+        {% endfor %}
+        {% if h.weekly|length > 8 %}
+        <details class="mt-2"><summary>עוד {{ h.weekly|length - 8 }} דיווחים</summary>
+            {% for w in h.weekly[8:] %}
+            <div class="week"><div class="w">{{ w.week }}{% if w.same_as_before %} <span class="same">🔁 זהה לשבוע הקודם</span>{% endif %}</div><div>{{ w.text }}</div></div>
+            {% endfor %}
+        </details>
+        {% endif %}
+    </div>
+</div>
+</body>
+</html>

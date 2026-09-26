@@ -14,6 +14,7 @@ run without a database.
 from __future__ import annotations
 
 import math
+import re
 from dataclasses import dataclass
 from datetime import date
 from typing import Any
@@ -295,8 +296,12 @@ def compute_patterns(frames: Frames) -> dict:
     cur["all_text"] = (cur["risks"].fillna("") + " " + cur["to_handle"].fillna("") + " "
                        + cur["project_id"].map(texts).fillna(""))
     cats = []
+    cur["risk_cats"] = [[] for _ in range(len(cur))]
     for cat, pat in RISK_CATEGORIES.items():
         hit = cur["all_text"].str.contains(pat, regex=True)
+        for lst, h in zip(cur["risk_cats"], hit):
+            if h:
+                lst.append(cat)
         in_col = (cur["risks"].fillna("") + " " + cur["to_handle"].fillna("")).str.contains(pat, regex=True)
         cats.append({"category": cat, "projects": int(hit.sum()), "in_risk_column": int(in_col.sum())})
     m["risk_categories"] = metric(sorted(cats, key=lambda r: -r["projects"]), len(cur), _confidence(len(cur)),
@@ -307,6 +312,9 @@ def compute_patterns(frames: Frames) -> dict:
     early_text = frames.weekly[frames.weekly["week_date"] <= r_first].groupby("project_id")["text"].apply(" ".join)
     measured = live_fc
     early = measured.index.to_series().map(early_text).fillna("")
+    cur["early_cats"] = [
+        [c for c, pat in RISK_CATEGORIES.items() if re.search(pat, early_text.get(pid, "") or "")]
+        for pid in cur["project_id"]]
     drifted = measured > MOVE_DAYS
     rows = []
     for cat, pat in RISK_CATEGORIES.items():
@@ -328,16 +336,27 @@ def compute_patterns(frames: Frames) -> dict:
 
     # 11. Slip attribution: every forecast move charged to the sector that
     #     owned the project (by stage) when it moved.
-    attribution = {k: {"events": 0, "months": 0.0} for k in ss.SECTORS}
+    #     Every move is also kept as an event, so each number drills down.
+    move_events: list[dict] = []
     for a, b in zip(rdates, rdates[1:]):
         A, B = by_date[a], by_date[b]
-        f = _drift(A, B, "fc")
-        moved = f[f > MOVE_DAYS]
         stage_at = A.set_index("project_id")["stage"]
-        for pid, days in moved.items():
-            for sec in ss.sectors_for(stage_at.get(pid)):
+        for col, kind in (("fc", "forecast"), ("dev", "baseline")):
+            d = _drift(A, B, col)
+            for pid, days in d[d > MOVE_DAYS].items():
+                stage = stage_at.get(pid) or ""
+                move_events.append({
+                    "identifier": projects.at[pid, "identifier"], "name": projects.at[pid, "name"],
+                    "manager": projects.at[pid, "manager"], "kind": kind,
+                    "from": a.isoformat(), "to": b.isoformat(), "days": int(days), "months": _months(days),
+                    "stage": stage or "ללא סטטוס", "sectors": list(ss.sectors_for(stage)),
+                    "live": pid in live_ids})
+    attribution = {k: {"events": 0, "months": 0.0} for k in ss.SECTORS}
+    for e in move_events:
+        if e["kind"] == "forecast":
+            for sec in e["sectors"]:
                 attribution[sec]["events"] += 1
-                attribution[sec]["months"] = round(attribution[sec]["months"] + days / MONTH_DAYS, 1)
+                attribution[sec]["months"] = round(attribution[sec]["months"] + e["days"] / MONTH_DAYS, 1)
     events = sum(v["events"] for v in attribution.values())
     m["slip_attribution"] = metric(attribution, events, _confidence(events),
                                    "כל דחייה נרשמת על המגזר שהחזיק את הפרויקט (לפי שלב) ברגע שזז. "
@@ -350,6 +369,7 @@ def compute_patterns(frames: Frames) -> dict:
         "league": _league(cur),
         "sectors": _sectors(cur),
         "projects": _project_rows(cur, set(stale)),
+        "events": move_events,
         "data_quality": {
             "unknown_stages": sorted({s for s in cur["stage"] if s and ss.sectors_for(s) == (ss.UNKNOWN,)}),
             "no_status": int((cur["stage"] == "").sum()),
@@ -375,6 +395,8 @@ def _project_rows(cur: pd.DataFrame, stale: set) -> list[dict]:
             "forecast_moved": None if pd.isna(r.fc_drift) else bool(r.fc_drift > MOVE_DAYS),
             "baseline_moved": None if pd.isna(r.dev_drift) else bool(r.dev_drift > MOVE_DAYS),
             "stuck": not pd.isna(r.weeks_in_stage) and r.weeks_in_stage >= STUCK_WEEKS,
+            "late": not pd.isna(r.slip_days) and r.slip_days > LATE_MONTHS * MONTH_DAYS,
+            "risk_cats": list(r.risk_cats), "early_cats": list(r.early_cats),
             "weeks_in_stage": None if pd.isna(r.weeks_in_stage) else int(r.weeks_in_stage),
             "stale": r.identifier in stale,
             "undated": isinstance(r.finish_date_text, str),
@@ -459,4 +481,121 @@ async def data_health(session: AsyncSession, frames: Frames) -> dict:
         "weekly_rows": int(len(frames.weekly)),
         "weekly_range": [weekly.index.min().isoformat(), weekly.index.max().isoformat()] if len(weekly) else None,
         "snapshot_indexes": list(idx),
+    }
+
+
+# ── One project's full story (the project page) ──────────────────────────
+
+SNIPPET_CHARS = 70        # context either side of a matched topic word
+EVIDENCE_PER_TOPIC = 3    # newest quotes shown per topic
+PEER_SLOWER_FACTOR = 1.5  # "slower than peers" = this × the stage's median
+
+
+def _snippet(text: str, match: re.Match) -> str:
+    a, b = max(0, match.start() - SNIPPET_CHARS), min(len(text), match.end() + SNIPPET_CHARS)
+    return ("…" if a else "") + text[a:b].strip() + ("…" if b < len(text) else "")
+
+
+def project_history(frames: Frames, p: dict, identifier: str) -> dict | None:
+    """Everything the history holds about one project, plus a computed risk
+    read-out. Pure: `p` is compute_patterns' output. None = unknown project.
+    Every flag is a rule over the data below it — no LLM wrote any of it."""
+    match = frames.projects[frames.projects["identifier"] == identifier]
+    if match.empty:
+        return None
+    pid = match.iloc[0]["project_id"]
+
+    snaps = canonical_snaps(frames.snaps)
+    mine = snaps[snaps["project_id"] == pid].sort_values("report_date")
+    timeline, prev_stage = [], None
+    for r in mine.itertuples():
+        timeline.append({
+            "date": r.report_date.isoformat(), "stage": r.stage or "ללא סטטוס",
+            "stage_changed": prev_stage is not None and r.stage != prev_stage,
+            "fc": None if pd.isna(r.fc) else r.fc.date().isoformat(),
+            "dev": None if pd.isna(r.dev) else r.dev.date().isoformat(),
+            "fc_text": r.finish_date_text if isinstance(r.finish_date_text, str) else None,
+        })
+        prev_stage = r.stage
+
+    wk = frames.weekly[frames.weekly["project_id"] == pid].sort_values("week_date")
+    weekly, prev_hash = [], None
+    for r in wk.itertuples():
+        weekly.append({"week": r.week_date.isoformat(), "text": r.text, "same_as_before": r.text_hash == prev_hash})
+        prev_hash = r.text_hash
+    weekly.reverse()   # newest first
+
+    row = next((x for x in p.get("projects", []) if x["identifier"] == identifier), None)
+    events = [e for e in p.get("events", []) if e["identifier"] == identifier]
+    fc_events = [e for e in events if e["kind"] == "forecast"]
+    dev_events = [e for e in events if e["kind"] == "baseline"]
+
+    # Topics with the words that triggered them, newest first.
+    latest = mine.iloc[-1] if len(mine) else None
+    current_text = " ".join(str(x) for x in ((latest.risks, latest.to_handle) if latest is not None else ())
+                            if isinstance(x, str))
+    sources = [("עמודת סיכונים/לטיפול", current_text)] + [(w["week"], w["text"]) for w in weekly]
+    leading = {r["category"]: r for r in p.get("metrics", {}).get("leading_indicators", {}).get("value", [])}
+    topics = []
+    for cat, pat in RISK_CATEGORIES.items():
+        evidence, weeks = [], 0
+        for label, text in sources:
+            m = re.search(pat, text or "")
+            if m:
+                weeks += label != "עמודת סיכונים/לטיפול"
+                if len(evidence) < EVIDENCE_PER_TOPIC:
+                    evidence.append({"source": label, "quote": _snippet(text, m)})
+        if evidence:
+            topics.append({"category": cat, "weeks": weeks, "evidence": evidence,
+                           "leading": leading.get(cat) if row and cat in row.get("early_cats", []) else None})
+    topics.sort(key=lambda t: -t["weeks"])
+
+    # Peers: live projects in the same current stage.
+    peers = None
+    if row:
+        same = [x for x in p.get("projects", []) if x["stage"] == row["stage"] and x["identifier"] != identifier]
+        wks = sorted(x["weeks_in_stage"] for x in same if x["weeks_in_stage"] is not None)
+        mv = sorted(x["forecast_moved_months"] for x in same if x["forecast_moved_months"] is not None)
+        med = lambda v: v[len(v) // 2] if v else None   # noqa: E731
+        peers = {"n": len(same), "median_weeks": med(wks), "median_moved_months": med(mv)}
+
+    flags = []
+    def flag(level: str, text: str) -> None:
+        flags.append({"level": level, "text": text})
+
+    if fc_events:
+        total = round(sum(e["days"] for e in fc_events) / MONTH_DAYS, 1)
+        flag("high" if len(fc_events) >= 2 else "medium",
+             f"יעד החשמול נדחה {len(fc_events)} פעמים, {total} חודשים בסך הכל.")
+    if fc_events and dev_events:
+        flag("medium", f"תכנית הפיתוח זזה {len(dev_events)} פעמים יחד עם היעד — האיחור מול התכנית נראה קטן מהאמיתי.")
+    if row:
+        if row["late"]:
+            flag("medium", f"מאחר {row['slip_months']} חודשים מול תכנית הפיתוח העדכנית.")
+        if row["fc"] and p.get("as_of") and row["fc"] < p["as_of"]:
+            flag("high", f"יעד החשמול המסתמן ({row['fc']}) כבר עבר והפרויקט לא הסתיים.")
+        if row["undated"]:
+            flag("medium", "יעד החשמול כתוב כמלל ולא כתאריך — אי אפשר למדוד אותו.")
+        if row["stuck"]:
+            flag("medium", f"{row['weeks_in_stage']} שבועות בשלב \"{row['stage']}\".")
+        if (peers and peers["n"] >= SMALL_SAMPLE and peers["median_weeks"] and row["weeks_in_stage"] is not None
+                and row["weeks_in_stage"] > PEER_SLOWER_FACTOR * peers["median_weeks"]):
+            flag("info", f"איטי מהרגיל לשלב: {row['weeks_in_stage']} שבועות מול חציון {peers['median_weeks']} "
+                         f"ב-{peers['n']} פרויקטים באותו שלב.")
+        if row["stale"]:
+            flag("medium", f"הדיווח השבועי זהה {STALE_WEEKS} שבועות ברצף — ייתכן שאינו מתעדכן.")
+    for t in topics:
+        li = t["leading"]
+        if li and li["signal"] in ("signal", "weak"):
+            flag("info", f"הוזכר \"{t['category']}\" כבר בדוח הראשון. בכלל האגף, {li['with_pct']}% מהפרויקטים שהזכירו אותו "
+                         f"נדחו מול {li['without_pct']}% — אות {'מובהק' if li['signal'] == 'signal' else 'חלש (לפני תיקון בלבד)'}.")
+    order = {"high": 0, "medium": 1, "info": 2}
+    flags.sort(key=lambda f: order[f["level"]])
+
+    info = match.iloc[0]
+    return {
+        "identifier": identifier, "name": info["name"], "manager": info["manager"],
+        "project_type": info["project_type"], "is_active": bool(info["is_active"]),
+        "row": row, "timeline": timeline, "weekly": weekly, "events": events,
+        "topics": topics, "peers": peers, "flags": flags, "as_of": p.get("as_of"),
     }

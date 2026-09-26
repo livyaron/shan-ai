@@ -216,14 +216,58 @@ async def project_insights_page(
         options = await insight_access.preview_options(session, p)
         if preview:
             scope, preview_label = preview
+    view = insight_access.view_for(scope, p)
+    qp = request.query_params
+    drill = None
+    if qp.get("drill"):
+        drill = insight_access.drill_for(view, p, qp.get("drill", ""), qp.get("dv", ""), qp.get("dm", "all"))
+    # Drill links keep the "view as" params, so a preview can be drilled too.
+    from urllib.parse import urlencode
+    keep = urlencode({k: qp[k] for k in ("as_user", "as_sector", "as_manager") if qp.get(k)})
     return templates.TemplateResponse("project_insights.html", {
         "request": request,
         "current_user": current_user,
         "p": p,
-        "view": insight_access.view_for(scope, p),
+        "view": view,
+        "drill": drill,
+        "drill_requested": bool(qp.get("drill")),
+        "drill_keep": keep,
         "sector_labels": stage_sectors.SECTORS,
         "preview_label": preview_label,
         "preview_options": options,
+    })
+
+
+@router.get("/p/{identifier:path}", response_class=HTMLResponse)
+async def project_page(
+    identifier: str,
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+    current_user: User = Depends(get_current_user),
+):
+    """One project: status, target history, every weekly report, its slip
+    events and a computed risk read-out. Visible to whoever sees the project
+    on the patterns page (insight_access) — admins and the PM department see
+    every project, including ones that have left the file."""
+    from app.services import insight_access, pattern_service, project_chart, stage_sectors
+    scope = await insight_access.scope_for(session, current_user)
+    if not scope.allowed:
+        raise HTTPException(status_code=403, detail="אין לך עדיין שיוך לתצוגת הדפוסים — פנה למנהל המערכת")
+    frames = await pattern_service.load_frames(session)
+    p = pattern_service._plain(pattern_service.compute_patterns(frames))
+    view = insight_access.view_for(scope, p)
+    full = scope.admin or scope.sector == stage_sectors.PM_DEPT
+    if not full and identifier not in {x["identifier"] for x in view["projects"]}:
+        raise HTTPException(status_code=404, detail="הפרויקט לא נמצא בתצוגה שלך")
+    h = pattern_service.project_history(frames, p, identifier)
+    if h is None:
+        raise HTTPException(status_code=404, detail="פרויקט לא ידוע")
+    project = (await session.execute(
+        select(Project).where(Project.project_identifier == identifier))).scalars().first()
+    return templates.TemplateResponse("project_page.html", {
+        "request": request, "current_user": current_user, "h": pattern_service._plain(h),
+        "project": project, "chart": project_chart.timeline_chart(h["timeline"]),
+        "sector_labels": stage_sectors.SECTORS,
     })
 
 

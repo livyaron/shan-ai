@@ -107,3 +107,46 @@ def test_preview_banner_and_selector_render_for_the_admin():
         preview_options={"users": [], "sectors": ss.ASSIGNABLE_SECTORS, "managers": ["מנהל א"]})
     assert "צפה כ" in html and "תצוגה מקדימה — מגזר ביצוע" in html
     assert "אותות מקדימים" not in html            # previewing drops admin power
+
+
+# ── Drill-down ────────────────────────────────────────────────────────────
+
+ADMIN_VIEW = ia.view_for(ia.Scope(admin=True), P)
+
+
+@pytest.mark.parametrize("value,summary_key", [
+    ("forecast", "forecast_later"), ("baseline", "baseline_later"), ("stuck", "stuck"),
+    ("stale", "stale"), ("undated", "undated"), ("past_due", "past_due")])
+def test_every_tile_drills_to_exactly_its_count(value, summary_key):
+    d = ia.drill_for(ADMIN_VIEW, P, "tile", value)
+    assert len(d["rows"]) == ADMIN_VIEW["summary"][summary_key]
+
+
+def test_sector_and_league_rows_drill_to_their_numbers():
+    for s in P["sectors"]:
+        assert len(ia.drill_for(ADMIN_VIEW, P, "sector", s["sector"], "all")["rows"]) == s["n"]
+        assert len(ia.drill_for(ADMIN_VIEW, P, "sector", s["sector"], "stuck")["rows"]) == s["stuck"]
+        assert len(ia.drill_for(ADMIN_VIEW, P, "sector", s["sector"], "baseline")["rows"]) == s["baseline_moved"]
+    for r in P["league"]:
+        assert len(ia.drill_for(ADMIN_VIEW, P, "manager", r["manager"], "all")["rows"]) == r["n"]
+
+
+def test_attribution_and_waves_drill_to_events():
+    att = P["metrics"]["slip_attribution"]["value"]
+    for key, v in att.items():
+        assert len(ia.drill_for(ADMIN_VIEW, P, "attribution", key)["rows"]) == v["events"]
+    for w in P["metrics"]["update_waves"]["value"]:
+        assert len(ia.drill_for(ADMIN_VIEW, P, "wave", w["from"], "forecast")["rows"]) == w["forecast_later"]
+        assert len(ia.drill_for(ADMIN_VIEW, P, "wave", w["from"], "baseline")["rows"]) == w["baseline_later"]
+
+
+def test_a_drill_never_widens_access():
+    exec_view = ia.view_for(ia.Scope(sector=ss.EXECUTION), P)
+    assert ia.drill_for(exec_view, P, "sector", ss.PLANNING, "all") is None       # another sector
+    assert ia.drill_for(exec_view, P, "attribution", ss.PLANNING) is None
+    assert ia.drill_for(exec_view, P, "risk", "ציוד/אספקה") is None                # admin-only topic
+    assert ia.drill_for(exec_view, P, "wave", "2026-03-25", "forecast") is None
+    pm_view = ia.view_for(ia.Scope(managers=frozenset({"מנהל ב"})), P)
+    assert ia.drill_for(pm_view, P, "manager", "מנהל א", "all")["rows"] == []     # a colleague's row
+    assert ia.drill_for(ADMIN_VIEW, P, "tile", "nonsense") is None
+    assert ia.drill_for(ADMIN_VIEW, P, "sector", ss.PLANNING, "nonsense") is None
