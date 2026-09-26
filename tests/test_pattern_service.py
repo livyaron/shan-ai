@@ -474,3 +474,38 @@ def test_risk_column_keeps_risks_and_who_apart():
 def test_frozen_project_rule(text, frozen):
     assert bool(pt.FROZEN.search(text)) is frozen
 
+
+
+# ── Stage in the file vs. what the weekly report says already happened ────
+
+@pytest.mark.parametrize("stage,text,gap", [
+    ("תכנון", "התקבל היתר בניה. מכתב זכייה לקבלן הופץ", 3),
+    ("קבלת היתר", "התקבלה חבילת מסירה לביצוע קבלן  עלה לשטח 6/9", 3),        # double space
+    ("תכנון", "בתאריך 22/7 הוכנסה ניידת ראשונה לתחנה", 5),
+    ("בחירת קבלן", "המשך עבודות הקבלן באתר, יסוד שנאי הושלמה יציקה", 2),
+    ("תכנון", "התחילו עבודות חפירת צד מזרחי", 4),
+    ("בחירת קבלן", "פורסם קבלן זוכה - לו\"ז לביצוע", 1),
+    ("קבלת היתר", "התקבל אישור סטטוטורי ובוחנים תכנון אזרחי", 1),
+    ("תכנון", "נבחר קבלן ע\"י היזם ממתינים להצעה", None),                     # the developer's, not ours
+    ("קבלת היתר", "טרם התקבל היתר, צפי לקבלת היתר 10/26", None),               # future
+    ("בחירת קבלן", "צפי קבלן זוכה 15/10", None),
+    ("בחירת קבלן", "נבחר קבלן", 1),
+    ("לקראת ביצוע", "נבחר קבלן", None),                                     # consistent
+    ("הסתיים", "הקבלן עלה לשטח", None),                                     # off the ladder
+    (None, "הקבלן עלה לשטח", None),
+])
+def test_stage_contradiction(stage, text, gap):
+    sc = pt.stage_contradiction(stage, text)
+    assert (sc["gap"] if sc else None) == gap
+
+
+def test_stage_contradiction_flag_levels():
+    f = _frames()
+    weekly = pd.concat([f.weekly, pd.DataFrame([
+        {"project_id": 2, "week_date": D3 + timedelta(days=1), "text": "הוכנסה ניידת לתחנה", "text_hash": "n"}])],
+        ignore_index=True)
+    frames = pt.Frames(f.snaps, f.projects, weekly)
+    p = pt._plain(pt.compute_patterns(frames))
+    h = pt.project_history(frames, p, "P-2")                 # P-2 sits in קבלת היתר
+    fl = next(x for x in h["flags"] if "לא תואם לדיווח" in x["text"])
+    assert fl["level"] == "medium" and "קבלת היתר" in fl["text"]

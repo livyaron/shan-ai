@@ -72,6 +72,49 @@ RISK_CATEGORIES: dict[str, str] = {
 
 ENERGIZED = re.compile(r'\s*חושמל')          # target cell says it is already energized
 BIG_SLIP_MONTHS = 6       # a pushback this large (in total) is high on its own
+# A milestone the latest weekly report says has ALREADY happened, and the
+# lowest stage rank (stage_sectors.STAGE_RANK) a project that passed it is in.
+# Measured on the whole division before shipping: 11 hits, 9 real; the two
+# misses ("נבחר קבלן ע"י היזם", a developer's contractor) are excluded below.
+# A future/waiting phrase just before the match ("צפי", "טרם"…) cancels it.
+STAGE_MILESTONES: tuple[tuple[str, int, re.Pattern], ...] = (
+    ("התקבל היתר / אישור סטטוטורי", 2, re.compile(
+        r'(?:התקבל(?:ה)?|הונפק|ניתן) (?:ה)?(?:היתר(?: ה?בני(?:י)?ה)?|אישור סטטוטורי)'
+        r'|היתר(?: ה?בני(?:י)?ה)? (?:התקבל|הונפק)|התקבל אישור \S+ \S+ (?:להציב|לבצע) \S+ \S+ בפטור מהיתר')),
+    ("נבחר קבלן", 3, re.compile(
+        r'מכתב זכייה|נבחר(?:ה)? (?:ה)?קבלן|(?:פורסם|נבחר) (?:ה)?קבלן (?:ה)?זוכה|נחתם (?:ה)?חוזה (?:עם|מול) (?:ה)?קבלן')),
+    ("עבודות בשטח", 4, re.compile(
+        r'קבלן (?:\S+ )?עלה ל(?:קרקע|שטח|אתר)|(?:ה)?קבלן החל (?:את )?(?:ה)?עבודות|(?:החלו|התחילו) (?:ה)?עבודות'
+        r'|(?:המשך )?עבודות (?:ה)?קבלן באתר|(?:הושלמה|בוצעה) (?:ה)?יציקה')),
+    ("הרכבה / הצבת ניידת", 5, re.compile(
+        r'(?:החלו|התחילו) (?:ה)?עבודות (?:ה)?הרכבה|הרכבה חשמלית (?:החלה|התחילה)|(?:הוכנסה|הוצבה) (?:ה)?ניידת')),
+    ("חושמל", 7, re.compile(r'(?:האתר|התחנה|הפרויקט) חושמל|חושמל(?:ה)? בתאריך|הושלם (?:ה)?חשמול')),
+)
+MILESTONE_NOT_YET = re.compile(r'טרם|לא |צפי|ממתינ|לקראת|יתקבל|עד ל|מתוכנן|אמור')
+MILESTONE_NOT_OURS = re.compile(r'^\S* ?ע"?י (?:ה)?יזם')     # the developer's contractor, not ours
+STAGE_LAG_MEDIUM = 2      # the report is this many stages ahead of the file → medium
+
+
+def stage_contradiction(stage: str | None, text: str | None) -> dict | None:
+    """The furthest milestone the text says already happened beyond the
+    file's stage, or None. Pure; the caller decides what to show."""
+    rank = ss.STAGE_RANK.get(ss.normalize_stage(stage))
+    if rank is None or not text:
+        return None
+    t = " ".join(text.split())
+    best = None
+    for label, need, pat in STAGE_MILESTONES:
+        if need <= rank:
+            continue
+        for m in pat.finditer(t):
+            if MILESTONE_NOT_YET.search(t[max(0, m.start() - 22):m.start()]) or MILESTONE_NOT_OURS.search(t[m.end():]):
+                continue
+            if best is None or need > best["rank"]:
+                best = {"milestone": label, "rank": need, "gap": need - rank, "quote": _snippet(t, m)}
+            break
+    return best
+
+
 FROZEN = re.compile(r'הפרויקט (?:הוקפא|בהקפאה)|הוקפא[הו]? (?:ה)?(?:תכנון|פרויקט|עבודות)|להקפיא את (?:ה)?פרויקט'
                     r'|לבטל את (?:ה)?(?:פרויקט|שדרוג)|בחינת נחיצות')
 ESCALATED = re.compile(r'חסם לטיפול')          # the file's "לטיפול" column: who must act
@@ -674,6 +717,17 @@ def project_history(frames: Frames, p: dict, identifier: str) -> dict | None:
         if m:
             flag("high", f"לפי הדיווח ({label}) הפרויקט מוקפא או נבחן לביטול: \"{_snippet(text, m)}\"")
             break
+    # The stage in the file vs. what the latest weekly report says already
+    # happened. Warning only — the stage is never changed from free text.
+    if row and last_week:
+        sc = stage_contradiction(row["stage"], last_week["text"])
+        if sc and sc["gap"] >= STAGE_LAG_MEDIUM:
+            flag("medium", f"השלב בקובץ (\"{row['stage']}\") לא תואם לדיווח מ-{last_week['week']}, "
+                           f"שמעיד על \"{sc['milestone']}\": \"{sc['quote']}\" — המגזר והזמן בשלב "
+                           "מחושבים על שלב שכנראה לא מעודכן.")
+        elif sc:
+            flag("info", f"לפי הדיווח מ-{last_week['week']} השלב \"{row['stage']}\" כנראה הסתיים "
+                         f"(\"{sc['quote']}\") — כדאי לעדכן בקובץ.")
     # The file's own escalation column ("חסם לטיפול <who>"): the PM already
     # said who must act. The VP level is the top of the ladder.
     esc = timeline[-1]["to_handle"] if timeline else None
