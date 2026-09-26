@@ -335,6 +335,14 @@ def test_risk_matrix_and_risk_column_changes():
     ("תיאום מול נגה בנושא", "גורם חיצוני/רשויות", True),
     ("הועברה לנגה לאישור", "גורם חיצוני/רשויות", True),
     ("עבודות ההנגה במקום", "גורם חיצוני/רשויות", False),                       # word edge
+    # Round 2 (10 more random pages).
+    ("נבחר ספק יחיד לצורך כריתת העצים", "ציוד/אספקה", False),                  # tender type
+    ("תכנון אזרחי של אגף הייצור", "ציוד/אספקה", False),                        # generation division
+    ("ארונות ממירים בשלבי ייצור", "ציוד/אספקה", True),
+    ("נושא יסודות טרומיים נשלל ובודקים חלופות", "כוח אדם/פיקוח/בדיקות", False),
+    ("העיריה שבודק את התכנית", "כוח אדם/פיקוח/בדיקות", False),
+    ("מחסור בבודקים", "כוח אדם/פיקוח/בדיקות", True),
+    ("נת\"ע מסרבים לאשר", "גורם חיצוני/רשויות", True),
     ("הכמות מספקת", "ציוד/אספקה", False),                                    # sufficient, not a supplier
     ("התקבל היתר בנייה", "רישוי/היתרים/סטטוטוריקה", True),
     ("היתרון של הפתרון", "רישוי/היתרים/סטטוטוריקה", False),
@@ -451,3 +459,18 @@ def test_risk_column_keeps_risks_and_who_apart():
     from app.services import project_chart as pc
     h = {"timeline": [{"date": "2026-01-01", "risks": "המתנה למשרד", "to_handle": "אחר"}]}
     assert pc.risk_column_changes(h)[0]["text"] == "המתנה למשרד · לטיפול: אחר"
+    h = {"timeline": [{"date": "2026-01-01", "risks": "x", "to_handle": "חסם לטיפול מנהל אגף"}]}
+    assert pc.risk_column_changes(h)[0]["text"] == "x · חסם לטיפול מנהל אגף"      # no "לטיפול: חסם לטיפול"
+
+
+@pytest.mark.parametrize("text,frozen", [
+    ("הפרויקט הוקפא. נדע בהמשך", True),
+    ("הפרויקט בהקפאה - כרגע ישנו חוסר ודאות", True),
+    ("עפי מזכר מנגה לבטל את שדרוג סוללות", True),
+    ("בחינת נחיצות ברמת מנהל אגף", True),
+    ("השמן- בוטל עקב מזג האוויר", False),              # a cancelled outage, not the project
+    ("הצלחנו לבטל את ההפסקה", False),
+])
+def test_frozen_project_rule(text, frozen):
+    assert bool(pt.FROZEN.search(text)) is frozen
+
