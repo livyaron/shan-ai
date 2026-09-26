@@ -23,6 +23,7 @@
 
 ## 4. Critical Operational Guardrails
 - **Deployment is Railway-ONLY.** The local Docker stack is retired. All DB commands run against the Railway DB: `psql "$RAILWAY_DATABASE_URL" -c "..."` (URL in local `.env`, never commit it — repo is public). Never start a local Docker instance while Railway is live — it steals Telegram polling AND double-sends the 07:00 missions digest and overdue alerts.
+- **No local database, anywhere (user instruction 2026-09-26).** Not Docker, and not a throwaway Postgres inside a remote session either. Verify logic with the synthetic-frame tests; real-data checks happen in production only.
 - **The "BIGINT" Fix:** After a fresh DB, MUST run:
   `psql "$RAILWAY_DATABASE_URL" -c "ALTER TABLE users ALTER COLUMN telegram_id TYPE BIGINT;"`
 - **is_relevant columns:** After a Railway deploy with new schema / fresh DB:
