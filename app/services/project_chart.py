@@ -46,7 +46,9 @@ def _risk_text(t: dict) -> str:
     """The file's two columns, kept apart: "<risks> · לטיפול: <who>". Run
     together, "…סיום הפרויקט" + "אחר" read as one sentence."""
     risks, who = _norm(t.get("risks")), _norm(t.get("to_handle"))
-    return " · ".join(x for x in (risks, f"לטיפול: {who}" if who else "") if x)
+    if who and "לטיפול" not in who:
+        who = f"לטיפול: {who}"
+    return " · ".join(x for x in (risks, who) if x)
 
 
 def delay_story(h: dict) -> dict | None:

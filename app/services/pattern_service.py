@@ -57,13 +57,13 @@ RISK_CATEGORIES: dict[str, str] = {
     # The equipment itself ("שנאי", "ציוד", "מפסק") is what every project is
     # about — 1,599 of 1,898 hits were "חשמול שנאי", "הוספת שנאי"… Only
     # supply is a topic. "הספק" (power rating) is not a supplier.
-    "ציוד/אספקה": (r'אספק(?!ת מים)|' + _B + r'(?:[ובל]|מה)?ספק(?:ים|י|ית)?' + _E +
-                   r"|(?<!פרו' )(?<!פרויקטי )(?<!פרוייקטי )ייצור|יבוא|משלוח|הגעת ה?(?:שנאי|ציוד|מפסק|מסדר)"
+    "ציוד/אספקה": (r'אספק(?!ת מים)|' + _B + r'(?:[ובל]|מה)?ספק(?:ים|י|ית)?' + _E + r'(?! יחיד)' +
+                   r"|(?<!פרו' )(?<!פרויקטי )(?<!פרוייקטי )(?<!אגף ה)(?<!פ\.)ייצור|יבוא|משלוח|הגעת ה?(?:שנאי|ציוד|מפסק|מסדר)"
                    r'|(?:חסר|חוסר ב|השלמת|הזמנת|בהזמנת) ה?ציוד|מחלקת ציוד|ציוד (?:חסר|תקול)|GIS'),
     "קבלן/מכרז": r'קבלן|מכרז|ועדת מכרזים|הזמנת עבודה|התקשרות',
     "הפסקות/תפעול רשת": r'הפסק[הות]|חלון|ניתוק|העברת עומס|מוקד(?![םמ])',
-    "כוח אדם/פיקוח/בדיקות": r'משגיח|בודק|כ[ו]?ח אדם|חוסר ב(?:כ[ו]?ח|פועלים|עובדים|משגיח|בודק|צוות|אנשי)',
-    "גורם חיצוני/רשויות": (r'עיריי|' + _B + r'(?:[והלב]|מ)?רשות' + _E + r'|(?:מהנדס|אדריכל(?:ית)?|ראש) (?:ה)?עיר' + _E + r'|מועצ|נת"י|נתיבי ישראל|' + _B + r'(?:[והלבמ]|מה)?נג"?ה' + _E + r'|'
+    "כוח אדם/פיקוח/בדיקות": r'משגיח|(?<!ש)בודק(?:ים|י|ת)?(?![א-ת])(?! (?:חלופ|אפשרו|האם|את |מול ))|כ[ו]?ח אדם|חוסר ב(?:כ[ו]?ח|פועלים|עובדים|משגיח|בודק|צוות|אנשי)',
+    "גורם חיצוני/רשויות": (r'עיריי|' + _B + r'(?:[והלב]|מ)?רשות' + _E + r'|(?:מהנדס|אדריכל(?:ית)?|ראש) (?:ה)?עיר' + _E + r'|מועצ|נת"י|נת"ע|נתיבי ישראל|' + _B + r'(?:[והלבמ]|מה)?נג"?ה' + _E + r'|'
                            + _B + r'[לבו]?רכבת' + _E + r'|רכבת ישראל|רכבת קלה|רט"?ג|תושב|התנגד|יישוב|קיבוץ|משרד ה'),
     "תקציב/עלות": r'תקציב|אומדן|' + _B + r'[והלמ]?עלויות|עלות ה|מימון|חריגה',
     "ביטחוני/מלחמה": r'מלחמ|ביטחונ|צבא|צה"?ל|מיגון',
@@ -72,6 +72,8 @@ RISK_CATEGORIES: dict[str, str] = {
 
 ENERGIZED = re.compile(r'\s*חושמל')          # target cell says it is already energized
 BIG_SLIP_MONTHS = 6       # a pushback this large (in total) is high on its own
+FROZEN = re.compile(r'הפרויקט (?:הוקפא|בהקפאה)|הוקפא[הו]? (?:ה)?(?:תכנון|פרויקט|עבודות)|להקפיא את (?:ה)?פרויקט'
+                    r'|לבטל את (?:ה)?(?:פרויקט|שדרוג)|בחינת נחיצות')
 ESCALATED = re.compile(r'חסם לטיפול')          # the file's "לטיפול" column: who must act
 ESCALATED_TOP = re.compile(r'סמנכ"?ל')           # the top of that ladder
 
@@ -662,6 +664,16 @@ def project_history(frames: Frames, p: dict, identifier: str) -> dict | None:
                          f"ב-{peers['n']} פרויקטים באותו שלב.")
         if row["stale"]:
             flag("medium", f"הדיווח השבועי זהה {STALE_WEEKS} שבועות ברצף — ייתכן שאינו מתעדכן.")
+    # The latest weekly report (or the risk column) says the project is
+    # frozen, cancelled or under a necessity review: every lateness number
+    # above describes a project that may not be going ahead.
+    last_week = weekly[0] if weekly else None
+    for label, text in ((last_week["week"] if last_week else "", last_week["text"] if last_week else ""),
+                        ("עמודת הסיכונים", current_text)):
+        m = FROZEN.search(text or "")
+        if m:
+            flag("high", f"לפי הדיווח ({label}) הפרויקט מוקפא או נבחן לביטול: \"{_snippet(text, m)}\"")
+            break
     # The file's own escalation column ("חסם לטיפול <who>"): the PM already
     # said who must act. The VP level is the top of the ladder.
     esc = timeline[-1]["to_handle"] if timeline else None
