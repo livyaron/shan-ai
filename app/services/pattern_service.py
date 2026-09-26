@@ -54,18 +54,24 @@ RISK_CATEGORIES: dict[str, str] = {
     # land-rights phrases count.
     "קרקע/גישה/הסכמים": (r'(?:רכישת|זכויות|בעלות|בעלת|רישום|הקצאת) (?:על )?[בה]?קרקע|רמ"י|' + _B + r'[וב]?רמי' + _E +
                          r'|מקרקעין|הפקע|חכיר|דרך גישה|כביש גישה|זיקת|הסכם'),
-    "ציוד/אספקה": (r'שנאי|אספק|' + _B + r'(?:[והבל]|מה)?ספק(?:ים|י|ית)?' + _E +
-                   r'|מפסק|GIS|ציוד|ייצור|יבוא|משלוח'),
+    # The equipment itself ("שנאי", "ציוד", "מפסק") is what every project is
+    # about — 1,599 of 1,898 hits were "חשמול שנאי", "הוספת שנאי"… Only
+    # supply is a topic. "הספק" (power rating) is not a supplier.
+    "ציוד/אספקה": (r'אספק(?!ת מים)|' + _B + r'(?:[ובל]|מה)?ספק(?:ים|י|ית)?' + _E +
+                   r"|(?<!פרו' )(?<!פרויקטי )(?<!פרוייקטי )ייצור|יבוא|משלוח|הגעת ה?(?:שנאי|ציוד|מפסק|מסדר)"
+                   r'|(?:חסר|חוסר ב|השלמת|הזמנת|בהזמנת) ה?ציוד|מחלקת ציוד|ציוד (?:חסר|תקול)|GIS'),
     "קבלן/מכרז": r'קבלן|מכרז|ועדת מכרזים|הזמנת עבודה|התקשרות',
     "הפסקות/תפעול רשת": r'הפסק[הות]|חלון|ניתוק|העברת עומס|מוקד(?![םמ])',
     "כוח אדם/פיקוח/בדיקות": r'משגיח|בודק|כ[ו]?ח אדם|חוסר ב(?:כ[ו]?ח|פועלים|עובדים|משגיח|בודק|צוות|אנשי)',
-    "גורם חיצוני/רשויות": (r'עיריי|' + _B + r'(?:[והלב]|מ)?רשות' + _E + r'|(?:מהנדס|אדריכל(?:ית)?|ראש) (?:ה)?עיר' + _E + r'|מועצ|נת"י|' + _B + r'[לבו]?נתי' + _E + r'|נתיבי ישראל|'
+    "גורם חיצוני/רשויות": (r'עיריי|' + _B + r'(?:[והלב]|מ)?רשות' + _E + r'|(?:מהנדס|אדריכל(?:ית)?|ראש) (?:ה)?עיר' + _E + r'|מועצ|נת"י|נתיבי ישראל|'
                            + _B + r'[לבו]?רכבת' + _E + r'|רכבת ישראל|רכבת קלה|רט"?ג|תושב|התנגד|יישוב|קיבוץ|משרד ה'),
     "תקציב/עלות": r'תקציב|אומדן|' + _B + r'[והלמ]?עלויות|עלות ה|מימון|חריגה',
     "ביטחוני/מלחמה": r'מלחמ|ביטחונ|צבא|צה"?ל|מיגון',
 }
 
 
+ENERGIZED = re.compile(r'\s*חושמל')          # target cell says it is already energized
+BIG_SLIP_MONTHS = 6       # a pushback this large (in total) is high on its own
 ESCALATED = re.compile(r'חסם לטיפול')          # the file's "לטיפול" column: who must act
 ESCALATED_TOP = re.compile(r'סמנכ"?ל')           # the top of that ladder
 
@@ -210,6 +216,15 @@ def _drift(first: pd.DataFrame, last: pd.DataFrame, col: str) -> pd.Series:
     return (j[col] - j[f"{col}_0"]).dt.days.set_axis(j["project_id"]).dropna()
 
 
+def _own_drift(snaps: pd.DataFrame, col: str) -> pd.Series:
+    """Days a date moved from the project's FIRST dated report to its LAST —
+    not from the division's first report: a project whose first report had
+    no date (or that joined later) would otherwise read as "never moved"."""
+    d = snaps.dropna(subset=[col]).sort_values("report_date").groupby("project_id")[col]
+    moved = (d.last() - d.first()).dt.days
+    return moved[d.count() >= 2]      # one dated report says nothing about movement
+
+
 def _move_summary(days: pd.Series) -> dict:
     later = days[days > MOVE_DAYS]
     return {
@@ -233,7 +248,7 @@ def compute_patterns(frames: Frames) -> dict:
     rdates = sorted(snaps["report_date"].unique())
     r_first, r_last = rdates[0], rdates[-1]
     by_date = {d: g for d, g in snaps.groupby("report_date")}
-    first, last = by_date[r_first], by_date[r_last]
+    last = by_date[r_last]
 
     projects = frames.projects.set_index("project_id")
     cur = last.merge(frames.projects, on="project_id")
@@ -242,8 +257,8 @@ def compute_patterns(frames: Frames) -> dict:
     cur["slip_days"] = (cur["fc"] - cur["dev"]).dt.days
     live_ids = set(cur["project_id"])
 
-    fc_drift = _drift(first, last, "fc")
-    dev_drift = _drift(first, last, "dev")
+    fc_drift = _own_drift(snaps, "fc")
+    dev_drift = _own_drift(snaps, "dev")
     cur["fc_drift"] = cur["project_id"].map(fc_drift)
     cur["dev_drift"] = cur["project_id"].map(dev_drift)
 
@@ -263,9 +278,9 @@ def compute_patterns(frames: Frames) -> dict:
     # 2–3. How the forecast and the baseline moved over the whole history.
     live_fc, live_dev = fc_drift[fc_drift.index.isin(live_ids)], dev_drift[dev_drift.index.isin(live_ids)]
     m["forecast_drift"] = metric(_move_summary(live_fc), len(live_fc), _confidence(len(live_fc)),
-                                 f"יעד חשמול מסתמן, {span}.")
+                                 f"יעד חשמול מסתמן, מהתאריך הראשון שנמסר לכל פרויקט ועד האחרון ({span}).")
     m["baseline_moves"] = metric(_move_summary(live_dev), len(live_dev), _confidence(len(live_dev)),
-                                 f"יעד תכנית פיתוח, {span}. בסיס שנדחה יחד עם התחזית מסתיר איחור.")
+                                 f"יעד תכנית פיתוח, מהתאריך הראשון שנמסר לכל פרויקט ועד האחרון ({span}). בסיס שנדחה יחד עם התחזית מסתיר איחור.")
 
     # 4. Update waves — dates move in bursts, not weekly.
     waves = []
@@ -320,7 +335,8 @@ def compute_patterns(frames: Frames) -> dict:
                                   f"מלל שבועי זהה (או כמעט זהה — תיקון אות או פיסוק) {STALE_WEEKS} שבועות רצופים.")
 
     # 7–8. Undated targets and targets already behind us.
-    undated = cur[cur["finish_date_text"].notna()]
+    cur["energized"] = cur["finish_date_text"].map(lambda t: isinstance(t, str) and bool(ENERGIZED.match(t)))
+    undated = cur[cur["finish_date_text"].notna() & ~cur["energized"]]
     past = cur[cur["fc"] < pd.Timestamp(r_last)]
     m["undated"] = metric({"count": len(undated), "projects": sorted(undated["identifier"])},
                           len(cur), _confidence(len(cur)), "יעד חשמול מסתמן כתוב כמלל ולא כתאריך — לא נמדד.")
@@ -446,7 +462,9 @@ def _project_rows(cur: pd.DataFrame, stale: set) -> list[dict]:
             "weeks_in_stage": None if pd.isna(r.weeks_in_stage) else int(r.weeks_in_stage),
             "weeks_lower_bound": bool(r.weeks_lower_bound),
             "stale": r.identifier in stale,
-            "undated": isinstance(r.finish_date_text, str),
+            "undated": isinstance(r.finish_date_text, str) and not r.energized,
+            "energized": bool(r.energized),
+            "fc_text": r.finish_date_text if isinstance(r.finish_date_text, str) else None,
             "fc": None if pd.isna(r.fc) else r.fc.date().isoformat(),
             "dev": None if pd.isna(r.dev) else r.dev.date().isoformat(),
         })
@@ -618,12 +636,14 @@ def project_history(frames: Frames, p: dict, identifier: str) -> dict | None:
 
     if fc_events:
         total = round(sum(e["days"] for e in fc_events) / MONTH_DAYS, 1)
-        flag("high" if len(fc_events) >= 2 else "medium",
+        flag("high" if total >= BIG_SLIP_MONTHS or len(fc_events) >= 3 else "medium",
              f"יעד החשמול נדחה {_times(len(fc_events))}, {total} חודשים בסך הכל."
              + (" חלק מהדחייה נמדד על פני דוחות שבהם היעד נכתב כמלל — ייתכן שהיו בהם כמה דחיות."
                 if any(e.get("undated_between") for e in fc_events) else ""))
-    if fc_events and dev_events:
-        flag("medium", f"תכנית הפיתוח זזה {_times(len(dev_events))} יחד עם היעד — האיחור מול התכנית נראה קטן מהאמיתי.")
+    if dev_events:
+        dev_total = round(sum(e["days"] for e in dev_events) / MONTH_DAYS, 1)
+        flag("medium", f"תכנית הפיתוח (הבסיס) נדחתה {_times(len(dev_events))}, {dev_total} חודשים — "
+                       "כל איחור שנמדד מולה קטן באותו שיעור.")
     if row:
         if row["late"]:
             flag("medium", f"מאחר {row['slip_months']} חודשים מול תכנית הפיתוח העדכנית.")
@@ -631,6 +651,8 @@ def project_history(frames: Frames, p: dict, identifier: str) -> dict | None:
             flag("high", f"יעד החשמול המסתמן ({row['fc']}) כבר עבר והפרויקט לא הסתיים.")
         if row["undated"]:
             flag("medium", "יעד החשמול כתוב כמלל ולא כתאריך — אי אפשר למדוד אותו.")
+        if row["energized"]:
+            flag("info", f"לפי הקובץ הפרויקט כבר חושמל (\"{row['fc_text'].strip()[:40]}\") — איחור ודחיות לא נמדדים.")
         if row["stuck"]:
             flag("medium", (f"לפחות {row['weeks_in_stage']} שבועות בשלב \"{row['stage']}\" — ההיסטוריה מתחילה כשהפרויקט כבר בשלב הזה."
                             if row["weeks_lower_bound"] else f"{row['weeks_in_stage']} שבועות בשלב \"{row['stage']}\"."))

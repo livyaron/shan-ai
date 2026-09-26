@@ -86,8 +86,8 @@
             <div class="kv"><div class="k">יעד חשמול מסתמן</div><div class="v mono">{{ (r.fc if r else none) or ('מלל' if r and r.undated else '—') }}</div></div>
             <div class="kv"><div class="k">יעד תכנית פיתוח</div><div class="v mono">{{ (r.dev if r else none) or '—' }}</div></div>
             <div class="kv"><div class="k">פער מול התכנית</div><div class="v mono">{{ '—' if not r or r.slip_months is none else r.slip_months ~ ' ח׳' }}</div></div>
-            <div class="kv"><div class="k">היעד זז מאז הדוח הראשון</div><div class="v mono">{{ '—' if not r or r.forecast_moved_months is none else r.forecast_moved_months ~ ' ח׳' }}</div></div>
-            <div class="kv"><div class="k">התכנית זזה מאז הדוח הראשון</div><div class="v mono">{{ '—' if not r or r.baseline_moved_months is none else r.baseline_moved_months ~ ' ח׳' }}</div></div>
+            <div class="kv"><div class="k">היעד זז מאז התאריך הראשון שנמסר</div><div class="v mono">{{ '—' if not r or r.forecast_moved_months is none else r.forecast_moved_months ~ ' ח׳' }}</div></div>
+            <div class="kv"><div class="k">התכנית זזה מאז התאריך הראשון שנמסר</div><div class="v mono">{{ '—' if not r or r.baseline_moved_months is none else r.baseline_moved_months ~ ' ח׳' }}</div></div>
             {% if project %}
             <div class="kv"><div class="k">תו"ב</div><div class="v">{{ project.controller or '—' }}</div></div>
             <div class="kv"><div class="k">פרויקט קריטי</div><div class="v">{{ project.critical_tier or '—' }}</div></div>
@@ -128,7 +128,7 @@
         <div class="sub">זיהוי לפי מילות מפתח (טקסונומיה v2 עם גבולות מילה, טרם אומתה ידנית). מוצגים הציטוטים האחרונים.</div>
         {% for t in h.topics %}
         <div class="mt-3">
-            <strong>{{ t.category }}</strong> <span class="sub">· הוזכר ב-{{ t.weeks }} שבועות</span>
+            <strong>{{ t.category }}</strong> <span class="sub">· {{ 'רק בעמודת הסיכונים/לטיפול' if t.weeks == 0 else 'הוזכר בשבוע אחד' if t.weeks == 1 else 'הוזכר ב-' ~ t.weeks ~ ' שבועות' }}</span>
             {% for e in t.evidence %}<div class="quote"><span class="mono">{{ e.source }}</span> — {{ e.quote }}</div>{% endfor %}
         </div>
         {% endfor %}

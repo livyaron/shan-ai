@@ -245,7 +245,7 @@ def test_project_history_tells_p1s_story():
     kinds = sorted(e["kind"] for e in h["events"])
     assert kinds == ["baseline", "forecast", "forecast"]
     texts = " ".join(f["text"] for f in h["flags"])
-    assert "נדחה פעמיים" in texts and "תכנית הפיתוח זזה" in texts
+    assert "נדחה פעמיים" in texts and "תכנית הפיתוח (הבסיס) נדחתה פעם אחת" in texts
     assert h["flags"][0]["level"] == "high"
     assert h["weekly"][0]["week"] > h["weekly"][-1]["week"]                     # newest first
 
@@ -321,7 +321,15 @@ def test_risk_matrix_and_risk_column_changes():
     ("עלות החוזה חרגה", "תקציב/עלות", True),
     ("חוסר בסוללות", "כוח אדם/פיקוח/בדיקות", False),
     ("חוסר בפועלים באתר", "כוח אדם/פיקוח/בדיקות", True),
-    ("הציוד מספק את הדרישה", "ציוד/אספקה", True),                             # ציוד still counts
+    # 10 random pages: the equipment itself is not a supply topic; "נתי" is a person.
+    ("הציוד מספק את הדרישה", "ציוד/אספקה", False),
+    ("יסודות שנאים הושלמו", "ציוד/אספקה", False),
+    ("השלמת הרכבת כל הציודים", "ציוד/אספקה", False),
+    ("הגדלת הספק השנאי", "ציוד/אספקה", False),                              # power rating
+    ("עיכוב באספקת השנאי", "ציוד/אספקה", True),
+    ("איחור בהגעת השנאי", "ציוד/אספקה", True),
+    ("ממתינים למחלקת ציוד", "ציוד/אספקה", True),
+    ("ישיבה עם יועצת משפטית ונתי דביר", "גורם חיצוני/רשויות", False),
     ("הכמות מספקת", "ציוד/אספקה", False),                                    # sufficient, not a supplier
     ("התקבל היתר בנייה", "רישוי/היתרים/סטטוטוריקה", True),
     ("היתרון של הפתרון", "רישוי/היתרים/סטטוטוריקה", False),
@@ -387,7 +395,7 @@ def test_escalation_flag_and_times_wording():
     frames = _gap_frames()
     p = pt._plain(pt.compute_patterns(frames))
     h = pt.project_history(frames, p, "P-9")
-    top = h["flags"][0]
+    top = next(f for f in h["flags"] if "חסם לטיפול" in f["text"])
     assert top["level"] == "high" and "סמנכ" in top["text"] and f"מאז {D2.isoformat()}" in top["text"]
     assert "לפחות" not in top["text"]                                # D1 had no escalation
     assert any("נדחה פעם אחת" in f["text"] and "כמלל" in f["text"] for f in h["flags"])
@@ -400,3 +408,41 @@ def test_risk_matrix_marks_missing_weeks():
               for w in ("2026-04-01", "2026-04-08", "2026-05-13", "2026-05-20")]
     m = pc.risk_matrix({"weekly": weekly[::-1]})
     assert m["missing_before"] == [0, 0, 4, 0]
+
+
+# ── Caught on 10 random project pages ─────────────────────────────────────
+
+def test_drift_runs_from_the_projects_own_first_dated_report():
+    """P-9 in _gap_frames has no forecast at D2 only; P-10 has none at D1."""
+    f = _gap_frames()
+    snaps = [_snap(10, D1, "תכנון", None, date(2030, 1, 1)),
+             _snap(10, D2, "תכנון", date(2029, 1, 1), date(2030, 1, 1)),
+             _snap(10, D3, "תכנון", date(2029, 6, 1), date(2030, 1, 1))]
+    frames = pt.Frames(pd.concat([f.snaps, pd.DataFrame(snaps)], ignore_index=True),
+                       pd.concat([f.projects, pd.DataFrame([{"project_id": 10, "identifier": "P-10", "name": "h",
+                                  "manager": "מנהל ב", "project_type": "הקמה", "is_active": True}])], ignore_index=True),
+                       f.weekly)
+    rows = {r["identifier"]: r for r in pt._plain(pt.compute_patterns(frames))["projects"]}
+    assert rows["P-10"]["forecast_moved_months"] == pytest.approx(4.96, abs=0.1)
+    assert rows["P-10"]["forecast_moved"] is True
+
+
+def test_energized_text_is_not_an_undated_target():
+    f = _frames()
+    snaps = [_snap(11, d, "טופס 4", None, date(2025, 6, 30), text="חושמל ב30/06/2025") for d in (D1, D2, D3)]
+    frames = pt.Frames(pd.concat([f.snaps, pd.DataFrame(snaps)], ignore_index=True),
+                       pd.concat([f.projects, pd.DataFrame([{"project_id": 11, "identifier": "P-11", "name": "e",
+                                  "manager": "מנהל ב", "project_type": "הקמה", "is_active": True}])], ignore_index=True),
+                       f.weekly)
+    p = pt._plain(pt.compute_patterns(frames))
+    assert "P-11" not in p["metrics"]["undated"]["value"]["projects"]
+    assert "P-4" in p["metrics"]["undated"]["value"]["projects"]           # "טרם נקבע" still is
+    h = pt.project_history(frames, p, "P-11")
+    texts = " ".join(x["text"] for x in h["flags"])
+    assert "חושמל" in texts and "כמלל" not in texts
+
+
+def test_risk_column_keeps_risks_and_who_apart():
+    from app.services import project_chart as pc
+    h = {"timeline": [{"date": "2026-01-01", "risks": "המתנה למשרד", "to_handle": "אחר"}]}
+    assert pc.risk_column_changes(h)[0]["text"] == "המתנה למשרד · לטיפול: אחר"

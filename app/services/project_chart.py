@@ -42,6 +42,13 @@ def _norm(t: str | None) -> str:
     return " ".join((t or "").split())
 
 
+def _risk_text(t: dict) -> str:
+    """The file's two columns, kept apart: "<risks> · לטיפול: <who>". Run
+    together, "…סיום הפרויקט" + "אחר" read as one sentence."""
+    risks, who = _norm(t.get("risks")), _norm(t.get("to_handle"))
+    return " · ".join(x for x in (risks, f"לטיפול: {who}" if who else "") if x)
+
+
 def delay_story(h: dict) -> dict | None:
     """Per report: the three delay measures plus everything a hover should
     explain — stage, what moved in this interval, the targets, the week's
@@ -60,7 +67,7 @@ def delay_story(h: dict) -> dict | None:
     for t in tl:
         week = next((w for w in reversed(weekly) if w["week"] <= t["date"]), None)
         text = week["text"] if week else ""
-        risk = _norm(" ".join(x for x in (t.get("risks"), t.get("to_handle")) if x))
+        risk = _risk_text(t)
         points.append({
             "date": t["date"], "stage": t["stage"], "stage_changed": t["stage_changed"],
             "fc": t["fc"], "dev": t["dev"], "fc_text": t.get("fc_text"),
@@ -117,7 +124,7 @@ def risk_column_changes(h: dict) -> list[dict]:
     """Every report where the file's risk / to-handle text changed, newest first."""
     out, prev = [], None
     for t in h.get("timeline") or []:
-        cur = _norm(" ".join(x for x in (t.get("risks"), t.get("to_handle")) if x))
+        cur = _risk_text(t)
         if prev is None or cur != prev:
             out.append({"date": t["date"], "text": cur or "— (ריק)", "first": prev is None})
         prev = cur
