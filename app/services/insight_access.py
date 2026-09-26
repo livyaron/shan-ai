@@ -140,3 +140,76 @@ def view_for(scope: Scope, p: dict) -> dict:
         "league": p.get("league", []) if "league" in sections else [],
     }
 
+
+
+# ── Drill-down: the projects / events behind any number on the page ───────
+
+_PROJECT_TESTS = {
+    "forecast": ("יעד חשמול נדחה", lambda x: x["forecast_moved"] is True),
+    "baseline": ("יעד תכנית פיתוח נדחה", lambda x: x["baseline_moved"] is True),
+    "stuck": ("תקועים 12+ שבועות", lambda x: x["stuck"]),
+    "stale": ("דיווח שבועי זהה", lambda x: x["stale"]),
+    "undated": ("יעד חשמול כמלל", lambda x: x["undated"]),
+    "late": ("מאחרים מול תכנית פיתוח", lambda x: x["late"]),
+    "all": ("כל הפרויקטים", lambda x: True),
+}
+UNASSIGNED = "טרם הוקצה"   # the league's label for a project with no מנה"פ
+
+
+def drill_for(view: dict, p: dict, kind: str, value: str = "", metric: str = "all") -> dict | None:
+    """The rows behind one number. Always drawn from what `view` already lets
+    this viewer see — a drill can never widen access. None = not allowed or
+    not a known drill.
+
+    kind: tile (value = a _PROJECT_TESTS key) | sector | manager (value = key /
+    name, metric = a _PROJECT_TESTS key) | attribution (value = sector) |
+    wave (value = interval start, metric = forecast|baseline|both) |
+    risk (value = topic) | leading (value = topic, metric = with|without).
+    """
+    sections, projects = view["sections"], view["projects"]
+    as_of = p.get("as_of")
+
+    def project_rows(label: str, test) -> dict:
+        rows = [x for x in projects if test(x)]
+        return {"label": label, "kind": "projects", "rows": rows}
+
+    if kind == "tile":
+        if value == "past_due":
+            return project_rows("יעד מסתמן כבר עבר", lambda x: bool(x["fc"] and as_of and x["fc"] < as_of))
+        if value in _PROJECT_TESTS:
+            return project_rows(_PROJECT_TESTS[value][0], _PROJECT_TESTS[value][1])
+        return None
+
+    if metric not in _PROJECT_TESTS and kind in ("sector", "manager"):
+        return None
+    m_label, m_test = _PROJECT_TESTS.get(metric, _PROJECT_TESTS["all"])
+
+    if kind == "sector" and "sectors" in sections and any(s["sector"] == value for s in view["sectors"]):
+        return project_rows(f"{ss.SECTORS.get(value, value)} · {m_label}",
+                            lambda x: value in x["sectors"] and m_test(x))
+    if kind == "manager" and "league" in sections:
+        # The league names every PM, but a drill only lists projects this
+        # viewer already sees — a PM drilling a colleague's row gets nothing.
+        return project_rows(f"{value} · {m_label}",
+                            lambda x: (x["manager"] or UNASSIGNED) == value and m_test(x))
+    if kind == "attribution" and "attribution" in sections and value in view["attribution"]:
+        rows = [e for e in p.get("events", []) if e["kind"] == "forecast" and value in e["sectors"]]
+        return {"label": f"דחיות שנרשמו על {ss.SECTORS.get(value, value)}", "kind": "events", "rows": rows}
+    if kind == "wave" and "waves" in sections:
+        live = [e for e in p.get("events", []) if e["from"] == value and e["live"]]
+        if metric == "both":
+            both = ({e["identifier"] for e in live if e["kind"] == "forecast"}
+                    & {e["identifier"] for e in live if e["kind"] == "baseline"})
+            rows = [e for e in live if e["identifier"] in both]
+        elif metric in ("forecast", "baseline"):
+            rows = [e for e in live if e["kind"] == metric]
+        else:
+            return None
+        return {"label": f"גל {value} · {metric}", "kind": "events", "rows": rows}
+    if kind == "risk" and "risk" in sections:
+        return project_rows(f"מזכירים: {value}", lambda x: value in x["risk_cats"])
+    if kind == "leading" and "leading" in sections and metric in ("with", "without"):
+        want = metric == "with"
+        return project_rows(f"{value} — {'הוזכר' if want else 'לא הוזכר'} בדוח הראשון",
+                            lambda x: x["forecast_moved"] is not None and (value in x["early_cats"]) is want)
+    return None

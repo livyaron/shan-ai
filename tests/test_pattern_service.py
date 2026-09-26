@@ -232,3 +232,62 @@ def test_a_cluster_is_named_by_its_report_dated_snapshot():
     m = pt.report_dates(pd.DataFrame(rows))
     assert m[date(2026, 9, 4)] == date(2026, 9, 2)
     assert m[date(2026, 9, 15)] == date(2026, 9, 16)
+
+
+# ── The project page ──────────────────────────────────────────────────────
+
+def test_project_history_tells_p1s_story():
+    frames = _frames()
+    p = pt._plain(pt.compute_patterns(frames))
+    h = pt.project_history(frames, p, "P-1")
+    assert [t["date"] for t in h["timeline"]] == [D1.isoformat(), D2.isoformat(), D3.isoformat()]
+    assert [t["stage_changed"] for t in h["timeline"]] == [False, False, True]    # תכנון → בדיקות
+    kinds = sorted(e["kind"] for e in h["events"])
+    assert kinds == ["baseline", "forecast", "forecast"]
+    texts = " ".join(f["text"] for f in h["flags"])
+    assert "נדחה 2 פעמים" in texts and "תכנית הפיתוח זזה" in texts
+    assert h["flags"][0]["level"] == "high"
+    assert h["weekly"][0]["week"] > h["weekly"][-1]["week"]                     # newest first
+
+
+def test_project_history_marks_repeated_weekly_text_and_unknown_is_none():
+    frames = _frames()
+    p = pt._plain(pt.compute_patterns(frames))
+    h = pt.project_history(frames, p, "P-2")
+    assert sum(w["same_as_before"] for w in h["weekly"]) == 4
+    assert any("זהה" in f["text"] for f in h["flags"])
+    assert pt.project_history(frames, p, "NOPE") is None
+
+
+def test_chart_geometry():
+    from app.services.project_chart import timeline_chart
+    frames = _frames()
+    h = pt.project_history(frames, pt._plain(pt.compute_patterns(frames)), "P-1")
+    c = timeline_chart(h["timeline"])
+    assert [s["key"] for s in c["series"]] == ["fc", "dev"] and all(len(s["points"]) == 3 for s in c["series"])
+    ys = [pt_["y"] for s in c["series"] for pt_ in s["points"]]
+    assert all(0 <= y <= c["h"] for y in ys) and c["y_ticks"]
+    assert timeline_chart(h["timeline"][:1]) is None
+
+
+def test_project_page_renders():
+    from types import SimpleNamespace
+    from jinja2 import Environment, FileSystemLoader
+    from app.services.project_chart import timeline_chart
+    frames = _frames()
+    h = pt._plain(pt.project_history(frames, pt._plain(pt.compute_patterns(frames)), "P-1"))
+    html = Environment(loader=FileSystemLoader("app/templates")).get_template("project_page.html").render(
+        request=SimpleNamespace(url=SimpleNamespace(path="/dashboard/projects/p/P-1")),
+        current_user=SimpleNamespace(is_admin=True, username="u", role=None, id=1),
+        h=h, project=None, chart=timeline_chart(h["timeline"]), sector_labels=ss.SECTORS)
+    for s in ("ניתוח סיכונים", "היסטוריית יעדים ושלבים", "אירועי דחייה", "דיווחים שבועיים", "<polyline"):
+        assert s in html
+
+
+def test_chart_x_labels_never_collide():
+    from app.services.project_chart import MIN_LABEL_GAP, timeline_chart
+    weekly = [{"date": f"2026-09-{d:02d}", "fc": "2027-01-01", "dev": "2027-01-01"} for d in (2, 9, 16)]
+    tl = [{"date": "2026-03-25", "fc": "2026-12-31", "dev": "2026-12-31"}] + weekly
+    xs = [lab["x"] for lab in timeline_chart(tl)["x_labels"]]
+    assert all(b - a >= MIN_LABEL_GAP for a, b in zip(xs, xs[1:]))
+    assert timeline_chart(tl)["x_labels"][-1]["label"] == "16/09"     # the newest is always labelled
