@@ -185,3 +185,32 @@ def test_rtl_signed_numbers_and_spans_stay_isolated():
     assert '<bdi class="ltr">≥' in html                             # not "25≤"
     body = html[html.index("<body>"):]
     assert "→" not in body.replace("→ חזרה לפרויקטים", "")          # an LTR arrow points backwards in RTL
+
+
+def test_league_stage_mix_drills_to_each_count():
+    for r in P["league"]:
+        for st, c in r["stage_mix"].items():
+            d = ia.drill_for(ADMIN_VIEW, P, "manager", r["manager"], "all", stage=st)
+            assert len(d["rows"]) == c and all(x["stage"] == st for x in d["rows"])
+
+
+def test_stage_and_whole_wave_drills():
+    stages = {x["stage"] for x in P["projects"]}
+    for st in stages:
+        assert len(ia.drill_for(ADMIN_VIEW, P, "stage", st)["rows"]) == sum(x["stage"] == st for x in P["projects"])
+    for w in P["metrics"]["update_waves"]["value"]:
+        rows = ia.drill_for(ADMIN_VIEW, P, "wave", w["from"], "any")["rows"]
+        assert sum(e["kind"] == "forecast" for e in rows) == w["forecast_later"]
+        assert sum(e["kind"] == "baseline" for e in rows) == w["baseline_later"]
+    pm_view = ia.view_for(ia.Scope(managers=frozenset({"מנהל ב"})), P)
+    assert {x["identifier"] for x in ia.drill_for(pm_view, P, "stage", "תכנון")["rows"]} <= IDS(pm_view)
+
+
+def test_every_league_and_sector_label_links_to_its_drill():
+    from urllib.parse import urlencode
+    html = _admin_html().replace("&amp;", "&")
+    for r in P["league"]:
+        for st in r["stage_mix"]:
+            link = urlencode({"drill": "manager", "dv": r["manager"], "dm": "all"}) + "&" + urlencode({"ds": st})
+            assert link in html, (r["manager"], st)
+    assert "drill=stage" in html and "dm=any" in html

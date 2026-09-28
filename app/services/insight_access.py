@@ -156,7 +156,8 @@ _PROJECT_TESTS = {
 UNASSIGNED = "טרם הוקצה"   # the league's label for a project with no מנה"פ
 
 
-def drill_for(view: dict, p: dict, kind: str, value: str = "", metric: str = "all") -> dict | None:
+def drill_for(view: dict, p: dict, kind: str, value: str = "", metric: str = "all",
+              stage: str = "") -> dict | None:
     """The rows behind one number. Always drawn from what `view` already lets
     this viewer see — a drill can never widen access. None = not allowed or
     not a known drill.
@@ -164,14 +165,17 @@ def drill_for(view: dict, p: dict, kind: str, value: str = "", metric: str = "al
     kind: tile (value = a _PROJECT_TESTS key) | sector | manager (value = key /
     name, metric = a _PROJECT_TESTS key) | attribution (value = sector) |
     wave (value = interval start, metric = forecast|baseline|both) |
-    risk (value = topic, metric = column → the risk column only) | leading (value = topic, metric = with|without).
+    risk (value = topic, metric = column → the risk column only) | leading (value = topic, metric = with|without) |
+    stage (value = current stage, metric = a _PROJECT_TESTS key).
+    `stage` narrows any project drill to one current stage (the league's stage mix).
+    wave metric = any → every move in the interval.
     """
     sections, projects = view["sections"], view["projects"]
     as_of = p.get("as_of")
 
     def project_rows(label: str, test) -> dict:
-        rows = [x for x in projects if test(x)]
-        return {"label": label, "kind": "projects", "rows": rows}
+        rows = [x for x in projects if test(x) and (not stage or x["stage"] == stage)]
+        return {"label": f"{label} · שלב {stage}" if stage else label, "kind": "projects", "rows": rows}
 
     if kind == "tile":
         if value == "past_due":
@@ -180,7 +184,7 @@ def drill_for(view: dict, p: dict, kind: str, value: str = "", metric: str = "al
             return project_rows(_PROJECT_TESTS[value][0], _PROJECT_TESTS[value][1])
         return None
 
-    if metric not in _PROJECT_TESTS and kind in ("sector", "manager"):
+    if metric not in _PROJECT_TESTS and kind in ("sector", "manager", "stage"):
         return None
     m_label, m_test = _PROJECT_TESTS.get(metric, _PROJECT_TESTS["all"])
 
@@ -192,6 +196,8 @@ def drill_for(view: dict, p: dict, kind: str, value: str = "", metric: str = "al
         # viewer already sees — a PM drilling a colleague's row gets nothing.
         return project_rows(f"{value} · {m_label}",
                             lambda x: (x["manager"] or UNASSIGNED) == value and m_test(x))
+    if kind == "stage":
+        return project_rows(f"שלב {value} · {m_label}", lambda x: x["stage"] == value and m_test(x))
     if kind == "attribution" and "attribution" in sections and value in view["attribution"]:
         rows = [e for e in p.get("events", []) if e["kind"] == "forecast" and value in e["sectors"]]
         return {"label": f"דחיות שנרשמו על {ss.SECTORS.get(value, value)}", "kind": "events", "rows": rows}
@@ -207,9 +213,12 @@ def drill_for(view: dict, p: dict, kind: str, value: str = "", metric: str = "al
             rows = [e for e in live if e["identifier"] in both]
         elif metric in ("forecast", "baseline"):
             rows = [e for e in live if e["kind"] == metric]
+        elif metric == "any":
+            rows = live
         else:
             return None
-        what = {"forecast": "יעד מסתמן נדחה", "baseline": "תכנית פיתוח נדחתה", "both": "שניהם"}[metric]
+        what = {"forecast": "יעד מסתמן נדחה", "baseline": "תכנית פיתוח נדחתה", "both": "שניהם",
+                "any": "כל התזוזות"}[metric]
         return {"label": f"גל {value} עד {to} · {what}", "kind": "events", "rows": rows}
     if kind == "risk" and "risk" in sections:
         if metric == "column":
