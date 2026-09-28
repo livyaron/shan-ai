@@ -67,8 +67,11 @@
 {% macro weeks(x) %}{% if x.weeks_in_stage is none %}—{% else %}<bdi class="ltr">{{ '≥' if x.weeks_lower_bound }}{{ x.weeks_in_stage }}</bdi>{% endif %}{% endmacro %}
 {% macro pct(v) %}{{ '—' if v is none else v ~ '%' }}{% endmacro %}
 {# A number that drills down to the rows behind it (insight_access.drill_for). #}
-{% macro dl(kind, v, m='all') %}/dashboard/projects/insights?{{ {'drill': kind, 'dv': v, 'dm': m}|urlencode }}{% if drill_keep %}&{{ drill_keep }}{% endif %}#drill{% endmacro %}
+{% macro dl(kind, v, m='all', st='') %}/dashboard/projects/insights?{{ {'drill': kind, 'dv': v, 'dm': m}|urlencode }}{% if st %}&{{ {'ds': st}|urlencode }}{% endif %}{% if drill_keep %}&{{ drill_keep }}{% endif %}#drill{% endmacro %}
 {% macro plink(ident) %}<a class="plink" href="/dashboard/projects/p/{{ ident|urlencode }}"><bdi>{{ ident }}</bdi></a>{% endmacro %}
+{# A project row's manager / stage cells drill to their peers (manager only where the league is visible). #}
+{% macro mgr(x) %}{% if 'league' in view.sections %}<a class="dn" href="{{ dl('manager', x.manager or 'טרם הוקצה') }}">{{ x.manager or 'טרם הוקצה' }}</a>{% else %}{{ x.manager or '' }}{% endif %}{% endmacro %}
+{% macro stg(x) %}<a class="dn" href="{{ dl('stage', x.stage) }}">{{ x.stage }}</a>{% endmacro %}
 {% macro pname(x) %}<a class="pname" href="/dashboard/projects/p/{{ x.identifier|urlencode }}" title="{{ x.name or '' }}">{{ (x.name or '')[:60] or '—' }}</a>{% endmacro %}
 
 <div class="wrap">
@@ -167,14 +170,14 @@
         {% if drill.kind == 'events' %}
             <tr><th>זיהוי</th><th>פרויקט</th><th>מנה"פ</th><th>מקטע</th><th>מה זז</th><th>חודשים</th><th>שלב בזמן הדחייה</th></tr>
             {% for e in drill.rows %}
-            <tr><td class="n">{{ plink(e.identifier) }}</td><td>{{ pname(e) }}</td><td>{{ e.manager or '' }}</td>
+            <tr><td class="n">{{ plink(e.identifier) }}</td><td>{{ pname(e) }}</td><td>{{ mgr(e) }}</td>
                 <td class="n">{{ span(e['from'], e.to) }}{% if e.undated_between %}<div class="mix" style="font-family:var(--ui)">מעל {{ e.undated_between }} דוחות בלי תאריך</div>{% endif %}</td><td>{{ 'יעד חשמול' if e.kind == 'forecast' else 'תכנית פיתוח' }}</td>
                 <td class="n">{{ num(e.months) }}</td><td>{{ e.stage }}{% if not e.live %} <span class="mix">(לא פעיל היום)</span>{% endif %}</td></tr>
             {% else %}<tr><td colspan="7" class="sub">אין שורות.</td></tr>{% endfor %}
         {% else %}
             <tr><th>זיהוי</th><th>פרויקט</th><th>מנה"פ</th><th>שלב</th><th>יעד מסתמן</th><th>ת.פיתוח</th><th>יעד זז (ח')</th><th>בסיס זז (ח')</th><th>שבועות בשלב</th></tr>
             {% for x in drill.rows %}
-            <tr><td class="n">{{ plink(x.identifier) }}</td><td>{{ pname(x) }}</td><td>{{ x.manager or '' }}</td><td>{{ x.stage }}</td>
+            <tr><td class="n">{{ plink(x.identifier) }}</td><td>{{ pname(x) }}</td><td>{{ mgr(x) }}</td><td>{{ stg(x) }}</td>
                 <td class="n">{{ x.fc or ('מלל' if x.undated else '—') }}</td><td class="n">{{ x.dev or '—' }}</td>
                 <td class="n">{{ num(x.forecast_moved_months) }}</td>
                 <td class="n">{{ num(x.baseline_moved_months) }}</td>
@@ -195,12 +198,12 @@
             <tr><th>זיהוי</th><th>פרויקט</th><th>מנה"פ</th><th>שלב</th><th>יעד מסתמן</th><th>ת.פיתוח</th><th>יעד זז (ח')</th><th>בסיס זז (ח')</th><th>שבועות בשלב</th><th></th></tr>
             {% for x in view.projects %}
             <tr>
-                <td class="n">{{ plink(x.identifier) }}</td><td>{{ pname(x) }}</td><td>{{ x.manager or '' }}</td><td>{{ x.stage }}</td>
+                <td class="n">{{ plink(x.identifier) }}</td><td>{{ pname(x) }}</td><td>{{ mgr(x) }}</td><td>{{ stg(x) }}</td>
                 <td class="n">{{ x.fc or ('מלל' if x.undated else '—') }}</td><td class="n">{{ x.dev or '—' }}</td>
                 <td class="n">{{ num(x.forecast_moved_months) }}</td>
                 <td class="n">{{ num(x.baseline_moved_months) }}</td>
                 <td class="n">{{ weeks(x) }}</td>
-                <td>{% if x.stuck %}<span class="badge-x b-weak" title="12 שבועות ומעלה באותו שלב">⏸ תקוע</span> {% endif %}{% if x.stale %}<span class="badge-x b-none" title="מלל שבועי זהה 4 שבועות">🔁 דיווח זהה</span> {% endif %}{% if x.undated %}<span class="badge-x b-none" title="יעד חשמול כתוב כמלל">📝 ללא תאריך</span>{% endif %}</td>
+                <td>{% if x.stuck %}<a href="{{ dl('tile', 'stuck') }}" class="badge-x b-weak" style="text-decoration:none" title="12 שבועות ומעלה באותו שלב">⏸ תקוע</a> {% endif %}{% if x.stale %}<a href="{{ dl('tile', 'stale') }}" class="badge-x b-none" style="text-decoration:none" title="מלל שבועי זהה 4 שבועות">🔁 דיווח זהה</a> {% endif %}{% if x.undated %}<a href="{{ dl('tile', 'undated') }}" class="badge-x b-none" style="text-decoration:none" title="יעד חשמול כתוב כמלל">📝 ללא תאריך</a>{% endif %}</td>
             </tr>
             {% else %}
             <tr><td colspan="10" class="sub">אין פרויקטים פעילים בתצוגה הזו.</td></tr>
@@ -219,9 +222,9 @@
             <tr><th>מגזר</th><th>אירועי דחייה</th><th>חודשי דחייה</th><th class="barcell"></th></tr>
             {% for key, v in att.items() if v.events %}
             <tr title="{{ sector_labels[key] }}: {{ v.events }} אירועים, {{ v.months }} חודשים">
-                <td>{{ sector_labels[key] }}</td>
+                <td><a class="dn" href="{{ dl('attribution', key) }}">{{ sector_labels[key] }}</a></td>
                 <td class="n"><a class="dn" href="{{ dl('attribution', key) }}">{{ v.events }}</a></td>
-                <td class="n">{{ v.months }}</td>
+                <td class="n"><a class="dn" href="{{ dl('attribution', key) }}">{{ v.months }}</a></td>
                 <td class="barcell"><div class="bar-track"><div class="bar" style="width: {{ (100 * v.months / max_months)|round(0) }}%"></div></div></td>
             </tr>
             {% endfor %}
@@ -241,8 +244,8 @@
             <tr><th>מקטע</th><th>שבועות</th><th>יעד מסתמן נדחה</th><th class="barcell"></th><th>תכנית פיתוח נדחתה</th><th>שניהם</th></tr>
             {% for w in waves %}
             <tr title="{{ w['from'] }} עד {{ w.to }}: {{ w.forecast_later }} יעדים נדחו מתוך {{ w.n }}">
-                <td class="n">{{ span(w['from'], w.to) }}</td>
-                <td class="n">{{ w.weeks }}</td>
+                <td class="n"><a class="dn" href="{{ dl('wave', w['from'], 'any') }}">{{ span(w['from'], w.to) }}</a></td>
+                <td class="n"><a class="dn" href="{{ dl('wave', w['from'], 'any') }}">{{ w.weeks }}</a></td>
                 <td class="n"><a class="dn" href="{{ dl('wave', w['from'], 'forecast') }}">{{ w.forecast_later }}</a></td>
                 <td class="barcell"><div class="bar-track"><div class="bar" style="width: {{ (100 * w.forecast_later / max_w)|round(0) }}%"></div></div></td>
                 <td class="n"><a class="dn" href="{{ dl('wave', w['from'], 'baseline') }}">{{ w.baseline_later }}</a></td>
@@ -261,7 +264,7 @@
         <div class="scroll"><table class="t mt-2">
             <tr><th>מגזר</th><th>פרויקטים</th><th>מאחרים מול ת.פיתוח</th><th>נדחו מאז התאריך הראשון</th><th>בסיס זז</th><th>תקועים</th></tr>
             {% for s in view.sectors %}
-            <tr><td>{{ s.label }}</td><td class="n"><a class="dn" href="{{ dl('sector', s.sector, 'all') }}">{{ s.n }}</a></td>
+            <tr><td><a class="dn" href="{{ dl('sector', s.sector, 'all') }}">{{ s.label }}</a></td><td class="n"><a class="dn" href="{{ dl('sector', s.sector, 'all') }}">{{ s.n }}</a></td>
                 <td class="n"><a class="dn" href="{{ dl('sector', s.sector, 'late') }}">{{ pct(s.late_pct) }}</a></td>
                 <td class="n"><a class="dn" href="{{ dl('sector', s.sector, 'forecast') }}">{{ pct(s.drift_pct) }}</a></td>
                 <td class="n"><a class="dn" href="{{ dl('sector', s.sector, 'baseline') }}">{{ s.baseline_moved }}</a></td>
@@ -282,12 +285,12 @@
             {% for r in view.league %}
             <tr>
                 <td class="n">{% if r.rank %}{{ r.rank }}{% else %}<span class="badge-x b-small">◌ מדגם קטן</span>{% endif %}</td>
-                <td>{{ r.manager }}</td><td class="n"><a class="dn" href="{{ dl('manager', r.manager, 'all') }}">{{ r.n }}</a></td>
+                <td><a class="dn" href="{{ dl('manager', r.manager, 'all') }}">{{ r.manager }}</a></td><td class="n"><a class="dn" href="{{ dl('manager', r.manager, 'all') }}">{{ r.n }}</a></td>
                 <td class="n"><a class="dn" href="{{ dl('manager', r.manager, 'late') }}">{{ pct(r.late_pct) }}</a></td>
                 <td class="n"><a class="dn" href="{{ dl('manager', r.manager, 'forecast') }}">{{ pct(r.drift_pct) }}</a></td>
                 <td class="n"><a class="dn" href="{{ dl('manager', r.manager, 'baseline') }}">{{ r.baseline_moved }}</a></td>
                 <td class="n"><a class="dn" href="{{ dl('manager', r.manager, 'stuck') }}">{{ r.stuck }}</a></td>
-                <td class="mix">{% for st, c in r.stage_mix.items() %}{{ st }} {{ c }}{% if not loop.last %} · {% endif %}{% endfor %}</td>
+                <td class="mix">{% for st, c in r.stage_mix.items() %}<a class="dn" href="{{ dl('manager', r.manager, 'all', st) }}">{{ st }} {{ c }}</a>{% if not loop.last %} · {% endif %}{% endfor %}</td>
             </tr>
             {% endfor %}
         </table></div>
@@ -304,7 +307,7 @@
         <div class="scroll"><table class="t mt-2">
             <tr><th>נושא</th><th>עם הנושא: נדחו</th><th>בלי: נדחו</th><th>p</th><th>p מתוקן</th><th>מסקנה</th></tr>
             {% for r in li.value %}
-            <tr><td>{{ r.category }}</td>
+            <tr><td><a class="dn" href="{{ dl('risk', r.category) }}">{{ r.category }}</a></td>
                 <td class="n"><a class="dn" href="{{ dl('leading', r.category, 'with') }}">{{ pct(r.with_pct) }}</a> <span class="mix">(<bdi class="ltr">n={{ r.with_n }}</bdi>)</span></td>
                 <td class="n"><a class="dn" href="{{ dl('leading', r.category, 'without') }}">{{ pct(r.without_pct) }}</a> <span class="mix">(<bdi class="ltr">n={{ r.without_n }}</bdi>)</span></td>
                 <td class="n">{{ r.p }}</td><td class="n">{{ r.p_adjusted }}</td>
@@ -325,7 +328,7 @@
         <div class="scroll"><table class="t mt-2">
             <tr><th>נושא</th><th>פרויקטים שמזכירים</th><th class="barcell"></th><th>מתוכם בעמודת הסיכונים</th></tr>
             {% for r in rc.value %}
-            <tr title="{{ r.category }}: {{ r.projects }} פרויקטים"><td>{{ r.category }}</td><td class="n"><a class="dn" href="{{ dl('risk', r.category) }}">{{ r.projects }}</a></td>
+            <tr title="{{ r.category }}: {{ r.projects }} פרויקטים"><td><a class="dn" href="{{ dl('risk', r.category) }}">{{ r.category }}</a></td><td class="n"><a class="dn" href="{{ dl('risk', r.category) }}">{{ r.projects }}</a></td>
                 <td class="barcell"><div class="bar-track"><div class="bar" style="width: {{ (100 * r.projects / max_rc)|round(0) }}%"></div></div></td>
                 <td class="n"><a class="dn" href="{{ dl('risk', r.category, 'column') }}">{{ r.in_risk_column }}</a></td></tr>
             {% endfor %}
@@ -353,7 +356,7 @@
             <div class="scroll"><table class="t mt-2">
                 <tr><th>זיהוי</th><th>פרויקט</th><th>מנה"פ</th><th>שלב</th><th>יעד מסתמן</th><th>שבועות בשלב</th></tr>
                 {% for x in rows %}
-                <tr><td class="n">{{ plink(x.identifier) }}</td><td>{{ pname(x) }}</td><td>{{ x.manager or '' }}</td><td>{{ x.stage }}</td>
+                <tr><td class="n">{{ plink(x.identifier) }}</td><td>{{ pname(x) }}</td><td>{{ mgr(x) }}</td><td>{{ stg(x) }}</td>
                     <td class="n">{{ x.fc or ('מלל' if x.undated else '—') }}</td><td class="n">{{ weeks(x) }}</td></tr>
                 {% else %}<tr><td colspan="6" class="sub">אין.</td></tr>{% endfor %}
             </table></div>

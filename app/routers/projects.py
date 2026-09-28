@@ -220,7 +220,8 @@ async def project_insights_page(
     qp = request.query_params
     drill = None
     if qp.get("drill"):
-        drill = insight_access.drill_for(view, p, qp.get("drill", ""), qp.get("dv", ""), qp.get("dm", "all"))
+        drill = insight_access.drill_for(view, p, qp.get("drill", ""), qp.get("dv", ""), qp.get("dm", "all"),
+                                         qp.get("ds", ""))
     # Drill links keep the "view as" params, so a preview can be drilled too.
     from urllib.parse import urlencode
     keep = urlencode({k: qp[k] for k in ("as_user", "as_sector", "as_manager") if qp.get(k)})
