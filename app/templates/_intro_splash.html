@@ -1,0 +1,306 @@
+{# סרטון פתיחה (10 שניות) לפני מסך הכניסה — פעם ביום לכל דפדפן; דלג / Esc / לחיצה סוגרים.
+   הסמל נחתך מתוך /static/logo.png (הטקסט שבתמונה לא בשימוש); השם והסלוגן נכתבים כאן. #}
+{% raw %}
+<style>
+  #intro {
+    --i-bg: #0b100d; --i-ink: #d5dfd8; --i-ink2: #96a39b; --i-ink3: #5a6560; --i-acc: #00a86b; --i-acc-hi: #3ee39a;
+    position: fixed; inset: 0; z-index: 9999; background: #060907;
+    display: flex; align-items: center; justify-content: center;
+    transition: opacity .6s ease; direction: rtl; font-family: 'Heebo', 'Segoe UI', Arial, sans-serif;
+  }
+  #intro[hidden] { display: none; }
+  #intro.out { opacity: 0; pointer-events: none; }
+  #intro .stage {
+    position: relative; width: min(100vw, 177.78vh); aspect-ratio: 16 / 9;
+    background: var(--i-bg); overflow: hidden; container-type: inline-size; isolation: isolate;
+  }
+  #intro canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  #intro .flash {
+    position: absolute; inset: 0; pointer-events: none; opacity: 0;
+    background: radial-gradient(circle at var(--fx, 50%) var(--fy, 33%), color-mix(in oklab, var(--i-acc-hi) 70%, #fff) 0, color-mix(in oklab, var(--i-acc) 35%, transparent) 12cqw, transparent 40cqw);
+  }
+  #intro .content { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; padding-top: 4.2cqw; pointer-events: none; color: var(--i-ink); }
+  #intro .mark { position: relative; width: 23cqw; height: 23cqw; opacity: 0; }
+  #intro .halo { position: absolute; inset: -30%; border-radius: 50%; background: radial-gradient(circle, color-mix(in oklab, var(--i-acc) 45%, transparent) 0, transparent 62%); }
+  #intro .emblem {
+    --D: 23cqw; position: absolute; inset: 0; border-radius: 50%;
+    background-image: url("/static/logo.png"); background-repeat: no-repeat;
+    background-size: calc(var(--D) * 2.7608) auto;
+    background-position: calc(var(--D) * -0.88627) calc(var(--D) * -0.03333);
+    -webkit-mask-image: radial-gradient(circle, #000 52%, transparent 68%);
+            mask-image: radial-gradient(circle, #000 52%, transparent 68%);
+  }
+  #intro .ring, #intro .ring2 { position: absolute; border-radius: 50%; }
+  #intro .ring  { inset: -7%;  border: .18cqw dashed color-mix(in oklab, var(--i-acc) 70%, transparent); animation: introSpin 14s linear infinite; }
+  #intro .ring2 { inset: -13%; border: .12cqw solid transparent; border-top-color: var(--i-acc-hi); border-left-color: color-mix(in oklab, var(--i-acc) 40%, transparent); animation: introSpin 5s linear infinite reverse; }
+  @keyframes introSpin { to { transform: rotate(360deg); } }
+  #intro .word { margin-top: 3.4cqw; direction: ltr; font-weight: 800; font-size: 6.6cqw; line-height: 1; letter-spacing: -.01em; display: flex; }
+  #intro .word span { display: inline-block; opacity: 0; }
+  #intro .word .ai { color: var(--i-acc-hi); }
+  #intro .sub { margin-top: 1.2cqw; direction: ltr; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 1.15cqw; letter-spacing: .32em; color: var(--i-ink2); min-height: 1.6cqw; white-space: nowrap; }
+  #intro .sub .cur { display: inline-block; width: .7cqw; height: 1.1cqw; background: var(--i-acc); vertical-align: -.1cqw; margin-left: .2cqw; }
+  #intro .tag { margin-top: 2.6cqw; font-size: 3cqw; font-weight: 300; display: flex; gap: .9cqw; }
+  #intro .tag b { font-weight: 600; color: var(--i-acc-hi); }
+  #intro .chips { position: relative; margin-top: 2.4cqw; display: flex; gap: 1.6cqw; align-items: center; }
+  #intro .chip { font-size: 1.6cqw; padding: .5cqw 1.4cqw; border-radius: 99px; border: .1cqw solid var(--i-ink3); opacity: 0; }
+  #intro .chips .sep { width: .5cqw; height: .5cqw; border-radius: 50%; background: var(--i-ink3); opacity: 0; }
+  #intro .sweep { position: absolute; bottom: -1.2cqw; right: 0; height: .15cqw; width: 0; background: linear-gradient(to left, transparent, var(--i-acc-hi), transparent); }
+  #intro .hud { position: absolute; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 1cqw; letter-spacing: .14em; color: var(--i-ink3); direction: ltr; }
+  #intro .hud.tl { top: 2cqw; left: 2.2cqw; }
+  #intro .hud.tr { top: 2cqw; right: 2.2cqw; font-variant-numeric: tabular-nums; }
+  #intro .hud.bl { bottom: 2cqw; left: 2.2cqw; }
+  #intro .hud.br { bottom: 2cqw; right: 2.2cqw; }
+  #intro .dot { display: inline-block; width: .7cqw; height: .7cqw; border-radius: 50%; background: #c0442f; margin-right: .6cqw; }
+  #intro .hud.bl.live, #intro .hud.bl.live .dot { color: var(--i-acc-hi); }
+  #intro .hud.bl.live .dot { background: var(--i-acc-hi); box-shadow: 0 0 1cqw var(--i-acc-hi); }
+  #intro .skip {
+    position: fixed; bottom: calc(18px + env(safe-area-inset-bottom, 0px)); left: 50%; transform: translateX(-50%); z-index: 1;
+    font-family: 'Heebo', 'Segoe UI', Arial, sans-serif; font-size: 14px; font-weight: 600;
+    color: var(--i-acc); background: color-mix(in oklab, var(--i-acc) 10%, #060907);
+    border: 1px solid color-mix(in oklab, var(--i-acc) 55%, transparent); border-radius: 2px; padding: 8px 14px; cursor: pointer;
+  }
+  #intro .skip:hover, #intro .skip:focus-visible { color: #060907; background: var(--i-acc); outline: none; }
+</style>
+
+<div id="intro" hidden aria-label="Shan-AI — סרטון פתיחה">
+  <div class="stage" id="introStage">
+    <canvas id="introFlow" dir="ltr"></canvas>
+    <div class="flash" id="introFlash"></div>
+    <div class="content">
+      <div class="mark" id="introMark">
+        <div class="halo" id="introHalo"></div>
+        <div class="ring2"></div>
+        <div class="ring"></div>
+        <div class="emblem" role="img" aria-label="Shan-AI"></div>
+      </div>
+      <div class="word" id="introWord"></div>
+      <div class="sub" id="introSub"></div>
+      <div class="tag" id="introTag"></div>
+      <div class="chips">
+        <span class="chip">החלטות</span><span class="sep"></span>
+        <span class="chip">פרויקטים</span><span class="sep"></span>
+        <span class="chip">חדר מבצעים</span>
+        <div class="sweep" id="introSweep"></div>
+      </div>
+    </div>
+    <div class="hud tl">SHAN-AI · SUB-04</div>
+    <div class="hud tr" id="introClock">T+00.00s</div>
+    <div class="hud bl" id="introState"><span class="dot"></span><span id="introStateTxt">161 kV · DE-ENERGIZED</span></div>
+    <div class="hud br">DECISION INTELLIGENCE</div>
+  </div>
+  <button type="button" class="skip" id="introSkip" dir="rtl">דלג ⏭</button>
+</div>
+
+<script>
+(() => {
+  const KEY = 'shanai_intro_day', DUR = 10, HOLD = 1.2;
+  const $ = id => document.getElementById(id);
+  const root = $('intro'), stage = $('introStage'), cv = $('introFlow'), ctx = cv.getContext('2d');
+  const mark = $('introMark'), halo = $('introHalo'), flash = $('introFlash');
+  const word = $('introWord'), sub = $('introSub'), tag = $('introTag'), sweep = $('introSweep');
+  const chips = [...root.querySelectorAll('.chip')], seps = [...root.querySelectorAll('.chips .sep')];
+  const clock = $('introClock'), stateEl = $('introState'), stateTxt = $('introStateTxt');
+
+  const today = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Jerusalem' });
+  const seenToday = () => { try { return localStorage.getItem(KEY) === today(); } catch (e) { return false; } };
+  const markSeen = () => { try { localStorage.setItem(KEY, today()); } catch (e) {} };
+
+  const clamp = (v, a = 0, b = 1) => Math.min(b, Math.max(a, v));
+  const seg = (t, a, b) => clamp((t - a) / (b - a));
+  const easeOut = x => 1 - Math.pow(1 - x, 3);
+  const easeIn = x => x * x * x;
+  const easeInOut = x => x < .5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;
+
+  'Shan-AI'.split('').forEach((c, i) => {
+    const s = document.createElement('span'); s.textContent = c;
+    if (i >= 5) s.className = 'ai';
+    word.appendChild(s);
+  });
+  const letters = [...word.children];
+  const SUB = 'SUBSTATION PROJECTS · DECISION LEARNING SYSTEM';
+  const subText = document.createElement('span'), cur = document.createElement('span');
+  cur.className = 'cur'; sub.append(subText, cur);
+  ['המוח', 'החשמלי', 'של', 'אגף', 'השנאה.'].forEach((w, i) => {
+    const s = document.createElement(i >= 3 ? 'b' : 'span'); s.textContent = w;
+    s.style.display = 'inline-block'; s.style.opacity = 0; tag.appendChild(s);
+  });
+  const words = [...tag.children];
+
+  // Feeders (normalised 0..1) converging on the emblem centre (cx, cy)
+  const PATHS = [
+    { s: .10, pts: (cx, cy) => [[0, .10], [.30, .10], [.30, cy], [cx, cy]], label: '161 kV' },
+    { s: .25, pts: (cx, cy) => [[1, .10], [.70, .10], [.70, cy], [cx, cy]], label: '161 kV' },
+    { s: .55, pts: (cx, cy) => [[0, .80], [.12, .80], [.12, .47], [.38, .47], [.38, cy], [cx, cy]], label: '33 kV' },
+    { s: .70, pts: (cx, cy) => [[1, .80], [.88, .80], [.88, .47], [.62, .47], [.62, cy], [cx, cy]], label: '33 kV' },
+    { s: .90, pts: (cx, cy) => [[0, .34], [.07, .34], [.07, .22], [.40, .22], [.40, cy], [cx, cy]], label: '22 kV' },
+    { s: 1.0, pts: (cx, cy) => [[1, .34], [.93, .34], [.93, .22], [.60, .22], [.60, cy], [cx, cy]], label: '22 kV' },
+    { s: .40, pts: (cx, cy) => [[cx, 0], [cx, cy]], label: 'T1 · 50 MVA' },
+    { s: 1.2, pts: (cx, cy) => [[.44, 1], [.44, .66], [.50, .66], [cx, cy]], label: 'BUS A' },
+    { s: 1.3, pts: (cx, cy) => [[.56, 1], [.56, .66], [.50, .66], [cx, cy]], label: 'BUS B' },
+  ];
+  const ARRIVE = 2.95;
+  let W = 0, H = 0, dpr = 1, routes = [], center = [0, 0];
+
+  function layout() {
+    const r = stage.getBoundingClientRect();
+    dpr = Math.min(2, window.devicePixelRatio || 1);
+    W = r.width; H = r.height;
+    cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
+    const m = mark.getBoundingClientRect();
+    const cx = (m.left + m.width / 2 - r.left) / W, cy = (m.top + m.height / 2 - r.top) / H;
+    center = [cx * W, cy * H];
+    flash.style.setProperty('--fx', (cx * 100) + '%');
+    flash.style.setProperty('--fy', (cy * 100) + '%');
+    routes = PATHS.map(p => {
+      const pts = p.pts(cx, cy).map(([x, y]) => [x * W, y * H]);
+      const lens = []; let total = 0;
+      for (let i = 1; i < pts.length; i++) { const l = Math.hypot(pts[i][0] - pts[i-1][0], pts[i][1] - pts[i-1][1]); lens.push(l); total += l; }
+      return { ...p, pts, lens, total };
+    });
+  }
+  function pointAt(r, d) {
+    d = clamp(d, 0, r.total);
+    for (let i = 0; i < r.lens.length; i++) {
+      if (d <= r.lens[i] || i === r.lens.length - 1) {
+        const f = r.lens[i] ? d / r.lens[i] : 0, a = r.pts[i], b = r.pts[i + 1];
+        return [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f];
+      }
+      d -= r.lens[i];
+    }
+    return r.pts[r.pts.length - 1];
+  }
+  function strokeTo(r, d) {
+    ctx.beginPath(); ctx.moveTo(r.pts[0][0], r.pts[0][1]);
+    let left = d;
+    for (let i = 0; i < r.lens.length && left > 0; i++) {
+      if (left >= r.lens[i]) { ctx.lineTo(r.pts[i+1][0], r.pts[i+1][1]); left -= r.lens[i]; }
+      else { const p = pointAt(r, d); ctx.lineTo(p[0], p[1]); left = 0; }
+    }
+    ctx.stroke();
+  }
+  function glowDot(x, y, rad, alpha) {
+    const g = ctx.createRadialGradient(x, y, 0, x, y, rad * 5);
+    g.addColorStop(0, `rgba(160,255,210,${alpha})`);
+    g.addColorStop(.25, `rgba(62,227,154,${alpha * .6})`);
+    g.addColorStop(1, 'rgba(0,168,107,0)');
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, rad * 5, 0, Math.PI * 2); ctx.fill();
+  }
+  function drawFlow(t) {
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, W, H);
+    const u = W / 1000;
+    ctx.strokeStyle = 'rgba(90,101,96,0.10)'; ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (let x = 0; x <= W; x += 40 * u) { ctx.moveTo(x, 0); ctx.lineTo(x, H); }
+    for (let y = 0; y <= H; y += 40 * u) { ctx.moveTo(0, y); ctx.lineTo(W, y); }
+    ctx.stroke();
+    const dim = 1 - .72 * easeOut(seg(t, 3.0, 4.2));
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    ctx.direction = 'ltr'; ctx.font = `${10 * u}px 'JetBrains Mono', monospace`;
+    routes.forEach((r, i) => {
+      const k = easeIn(seg(t, r.s, ARRIVE)), d = k * r.total;
+      ctx.strokeStyle = `rgba(150,163,155,${.55 * dim})`; ctx.lineWidth = 2 * u;
+      strokeTo(r, d);
+      if (t < 3.3) {
+        ctx.strokeStyle = `rgba(62,227,154,${.9 * (1 - seg(t, 3.0, 3.3))})`; ctx.lineWidth = 2.4 * u;
+        ctx.save(); ctx.setLineDash([Math.min(d, 90 * u), 1e5]); ctx.lineDashOffset = -(d - Math.min(d, 90 * u));
+        strokeTo(r, d); ctx.restore();
+      }
+      if (k > 0 && t < ARRIVE + .05) { const p = pointAt(r, d); glowDot(p[0], p[1], 2.2 * u, 1); }
+      const la = seg(t, r.s + .2, r.s + .7) * dim;
+      if (la > 0) {
+        const p = pointAt(r, 26 * u), right = p[0] > W * .5;
+        ctx.fillStyle = `rgba(150,163,155,${.8 * la})`;
+        ctx.textAlign = right ? 'right' : 'left';
+        ctx.fillText(r.label, p[0] + (right ? -8 : 8) * u, p[1] - 8 * u);
+      }
+      if (t > 3.4) {
+        const a = seg(t, 3.4, 4.2) * .75;
+        for (let n = 0; n < 2; n++) {
+          const ph = ((t - 3.4) / 2.4 + i * .137 + n * .5) % 1;
+          const p = pointAt(r, easeIn(ph) * r.total);
+          glowDot(p[0], p[1], 1.5 * u, a * Math.sin(ph * Math.PI));
+        }
+      }
+    });
+    const b = seg(t, 2.95, 3.9);
+    if (b > 0 && b < 1) {
+      ctx.strokeStyle = `rgba(62,227,154,${.8 * (1 - b)})`; ctx.lineWidth = 3 * u * (1 - b) + .5;
+      ctx.beginPath(); ctx.arc(center[0], center[1], (20 + 380 * easeOut(b)) * u, 0, Math.PI * 2); ctx.stroke();
+    }
+  }
+  function render(t) {
+    drawFlow(t);
+    flash.style.opacity = (seg(t, 2.85, 3.02) * (1 - seg(t, 3.05, 3.7))).toFixed(3);
+    const e = easeOut(seg(t, 3.0, 3.9));
+    mark.style.opacity = e.toFixed(3);
+    mark.style.transform = `scale(${(.72 + .28 * e).toFixed(4)})`;
+    mark.style.filter = `blur(${((1 - e) * 1.2).toFixed(2)}cqw) brightness(${(1 + (1 - e) * 1.4).toFixed(2)})`;
+    halo.style.opacity = (e * (.55 + .25 * Math.sin(t * 2.4))).toFixed(3);
+    letters.forEach((s, i) => {
+      const k = easeOut(seg(t, 3.9 + i * .08, 4.5 + i * .08));
+      s.style.opacity = k.toFixed(3);
+      s.style.transform = `translateY(${((1 - k) * 1.4).toFixed(2)}cqw)`;
+      s.style.filter = `blur(${((1 - k) * .5).toFixed(2)}cqw)`;
+    });
+    subText.textContent = SUB.slice(0, Math.round(seg(t, 4.6, 5.7) * SUB.length));
+    cur.style.opacity = (t >= 4.5 && (t < 5.8 || Math.floor(t * 2.5) % 2 === 0)) ? 1 : 0;
+    words.forEach((s, i) => {
+      const k = easeOut(seg(t, 6.0 + i * .3, 6.55 + i * .3));
+      s.style.opacity = k.toFixed(3);
+      s.style.transform = `translateY(${((1 - k) * 1.2).toFixed(2)}cqw)`;
+      s.style.filter = `blur(${((1 - k) * .4).toFixed(2)}cqw)`;
+    });
+    chips.forEach((c, i) => {
+      const s0 = 8.5 + i * .3, k = easeOut(seg(t, s0, s0 + .3)), hot = 1 - seg(t, s0 + .15, s0 + .8);
+      c.style.opacity = k.toFixed(3);
+      c.style.transform = `scale(${(.9 + .1 * k).toFixed(3)})`;
+      c.style.borderColor = k > 0 ? `color-mix(in oklab, var(--i-acc-hi) ${Math.round(40 + 60 * hot)}%, var(--i-ink3))` : '';
+      c.style.boxShadow = `0 0 ${(2 * hot * k).toFixed(2)}cqw color-mix(in oklab, var(--i-acc-hi) 60%, transparent)`;
+      c.style.color = hot > .3 && k > 0 ? 'var(--i-acc-hi)' : 'var(--i-ink)';
+    });
+    seps.forEach((s, i) => { s.style.opacity = seg(t, 8.7 + i * .3, 8.9 + i * .3).toFixed(3); });
+    sweep.style.width = (easeInOut(seg(t, 9.4, 9.95)) * 100).toFixed(1) + '%';
+    clock.textContent = 'T+' + Math.min(t, DUR).toFixed(2).padStart(5, '0') + 's';
+    const live = t >= 3.0;
+    stateEl.classList.toggle('live', live);
+    stateTxt.textContent = live ? '161 kV · ENERGIZED' : '161 kV · DE-ENERGIZED';
+  }
+
+  let t = 0, last = 0, raf = 0, running = false;
+  function close() {
+    if (!running) return;
+    running = false; markSeen();
+    cancelAnimationFrame(raf); raf = 0;
+    document.removeEventListener('keydown', onKey);
+    root.classList.add('out');
+    setTimeout(() => { root.hidden = true; root.classList.remove('out'); }, 650);
+  }
+  function tick(now) {
+    if (!running) return;
+    if (last) t += (now - last) / 1000;
+    last = now;
+    render(Math.min(t, DUR));
+    if (t >= DUR + HOLD) { close(); return; }
+    raf = requestAnimationFrame(tick);
+  }
+  function onKey(e) { if (e.key === 'Escape' || e.key === 'Enter' || e.key === ' ') { e.preventDefault(); close(); } }
+  function play() {
+    if (running) return;
+    root.hidden = false; root.classList.remove('out');
+    t = 0; last = 0; running = true;
+    layout(); render(0);
+    document.addEventListener('keydown', onKey);
+    $('introSkip').focus({ preventScroll: true });
+    raf = requestAnimationFrame(tick);
+  }
+  $('introSkip').addEventListener('click', close);
+  root.addEventListener('click', e => { if (e.target !== $('introSkip')) close(); });
+  new ResizeObserver(() => { if (running) { layout(); render(Math.min(t, DUR)); } }).observe(stage);
+  window.shanIntroPlay = play;
+
+  const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (!reduce && !seenToday()) play();
+})();
+</script>
+{% endraw %}
