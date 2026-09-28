@@ -23,6 +23,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import ManagerAlias, User
+from app.services import insight_triage as it
 from app.services import stage_sectors as ss
 
 ADMIN_SECTIONS = frozenset({"leading", "risk", "waves", "health", "lists"})
@@ -130,16 +131,32 @@ def view_for(scope: Scope, p: dict) -> dict:
     else:
         title = "הפרויקטים שלי"
 
+    tri = it.triage_all(p)
     return {
         "title": title,
         "sections": sections,
         "projects": projects,
+        "triage": it.board(projects, tri),        # rule-based, so every role gets it
+        "triage_of": {x["identifier"]: tri[x["identifier"]] for x in projects if x["identifier"] in tri},
+        "names": {x["identifier"]: x["name"] for x in projects},
+        "ai_kinds": ai_kinds_for(scope),
         "summary": summarize(projects, p.get("as_of")),
         "sectors": sectors,
         "attribution": attribution,
         "league": p.get("league", []) if "league" in sections else [],
     }
 
+
+
+def ai_kinds_for(scope: Scope) -> list[str]:
+    """Which stored AI analyses this viewer may read (PLAN.md P5). Levels 1–2
+    only; level 3 follows the project page's own visibility rule."""
+    from app.services import insight_ai as ai
+    if scope.admin or scope.sector == ss.PM_DEPT:
+        return [ai.DIVISION] + [ai.sector_kind(k) for k in ai.AREA_SECTORS]
+    if scope.sector in ai.AREA_SECTORS:
+        return [ai.sector_kind(scope.sector)]
+    return []
 
 
 # ── Drill-down: the projects / events behind any number on the page ───────
@@ -166,7 +183,8 @@ def drill_for(view: dict, p: dict, kind: str, value: str = "", metric: str = "al
     name, metric = a _PROJECT_TESTS key) | attribution (value = sector) |
     wave (value = interval start, metric = forecast|baseline|both) |
     risk (value = topic, metric = column → the risk column only) | leading (value = topic, metric = with|without) |
-    stage (value = current stage, metric = a _PROJECT_TESTS key).
+    stage (value = current stage, metric = a _PROJECT_TESTS key) |
+    triage (value = an insight_triage level, metric = a _PROJECT_TESTS key).
     `stage` narrows any project drill to one current stage (the league's stage mix).
     wave metric = any → every move in the interval.
     """
@@ -184,7 +202,7 @@ def drill_for(view: dict, p: dict, kind: str, value: str = "", metric: str = "al
             return project_rows(_PROJECT_TESTS[value][0], _PROJECT_TESTS[value][1])
         return None
 
-    if metric not in _PROJECT_TESTS and kind in ("sector", "manager", "stage"):
+    if metric not in _PROJECT_TESTS and kind in ("sector", "manager", "stage", "triage"):
         return None
     m_label, m_test = _PROJECT_TESTS.get(metric, _PROJECT_TESTS["all"])
 
@@ -196,6 +214,11 @@ def drill_for(view: dict, p: dict, kind: str, value: str = "", metric: str = "al
         # viewer already sees — a PM drilling a colleague's row gets nothing.
         return project_rows(f"{value} · {m_label}",
                             lambda x: (x["manager"] or UNASSIGNED) == value and m_test(x))
+    if kind == "triage" and value in it.LEVELS:
+        lv = it.LEVELS[value]
+        keep = {x["identifier"] for x in view["triage"][value]}
+        return project_rows(f"{lv['icon']} {lv['label']} · {m_label}",
+                            lambda x: x["identifier"] in keep and m_test(x))
     if kind == "stage":
         return project_rows(f"שלב {value} · {m_label}", lambda x: x["stage"] == value and m_test(x))
     if kind == "attribution" and "attribution" in sections and value in view["attribution"]:

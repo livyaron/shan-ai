@@ -7,7 +7,7 @@ from jinja2 import Environment, FileSystemLoader
 from app.services import insight_access as ia
 from app.services import pattern_service as pt
 from app.services import stage_sectors as ss
-from tests.test_pattern_service import _frames
+from tests.test_pattern_service import _frames, page_ctx
 
 P = pt._plain(pt.compute_patterns(_frames(extra_projects=4)))
 P_WITH_HEALTH = {**P, "health": {"snapshot_dates": [], "snapshot_rows": 0, "weekly_rows": 0,
@@ -77,7 +77,7 @@ def test_page_renders_for_every_role_and_hides_admin_sections(scope):
     html = env.get_template("project_insights.html").render(
         request=SimpleNamespace(url=SimpleNamespace(path="/dashboard/projects/insights")),
         current_user=SimpleNamespace(is_admin=scope.admin, username="u", role=None, id=1),
-        p=P_WITH_HEALTH, view=ia.view_for(scope, P_WITH_HEALTH), sector_labels=ss.SECTORS)
+        p=P_WITH_HEALTH, view=ia.view_for(scope, P_WITH_HEALTH), sector_labels=ss.SECTORS, **page_ctx())
     assert ("אותות מקדימים" in html) is scope.admin
     assert ("בריאות הנתונים" in html) is scope.admin
     assert ("טבלת מנהלי פרויקטים" in html) is ("league" in ia.view_for(scope, P)["sections"])
@@ -102,7 +102,7 @@ def test_preview_banner_and_selector_render_for_the_admin():
         request=SimpleNamespace(url=SimpleNamespace(path="/dashboard/projects/insights"),
                                 query_params={"as_sector": ss.EXECUTION}),
         current_user=SimpleNamespace(is_admin=True, username="u", role=None, id=1),
-        p=P, view=ia.view_for(ia.Scope(sector=ss.EXECUTION), P), sector_labels=ss.SECTORS,
+        p=P, view=ia.view_for(ia.Scope(sector=ss.EXECUTION), P), sector_labels=ss.SECTORS, **page_ctx(),
         preview_label=ss.SECTORS[ss.EXECUTION],
         preview_options={"users": [], "sectors": ss.ASSIGNABLE_SECTORS, "managers": ["מנהל א"]})
     assert "צפה כ" in html and "תצוגה מקדימה — מגזר ביצוע" in html
@@ -163,7 +163,7 @@ def _admin_html(p=P_WITH_HEALTH):
     return env.get_template("project_insights.html").render(
         request=SimpleNamespace(url=SimpleNamespace(path="/dashboard/projects/insights")),
         current_user=SimpleNamespace(is_admin=True, username="u", role=None, id=1),
-        p=p, view=ia.view_for(ia.Scope(admin=True), p), sector_labels=ss.SECTORS)
+        p=p, view=ia.view_for(ia.Scope(admin=True), p), sector_labels=ss.SECTORS, **page_ctx())
 
 
 def test_lists_name_every_project_and_drill_to_their_tile():

@@ -72,6 +72,8 @@ USAGE_LABELS: dict[str, str] = {
     "missions_insights":       "תובנות AI לדוח חדר מבצעים",
     "missions_summary":        "סיכום משימות בסיכון (חדר מבצעים)",
     "wall_motto":              "משפט השעה על מסך לוח המצב",
+    # Patterns page (PLAN.md P5)
+    "pattern_analysis":        "ניתוח AI מעמיק בדפוסים וסיכונים",
 }
 
 

@@ -548,6 +548,25 @@ class MissionReportCache(Base):
     __table_args__ = (UniqueConstraint("day", "kind", name="uq_mission_report_cache_day_kind"),)
 
 
+class PatternAIAnalysis(Base):
+    """One AI reading of the patterns page (PLAN.md P5), per report date.
+
+    kind: "division" | "sector:<key>" | "project:<identifier>". The numbers in
+    it come from the engine; the handling level from insight_triage — the model
+    wrote only the prose. A newer report date simply gets new rows.
+    """
+    __tablename__ = "pattern_ai_analyses"
+
+    id         = Column(Integer, primary_key=True)
+    kind       = Column(String(160), nullable=False)
+    as_of      = Column(Date, nullable=False)
+    payload    = Column(JSON, nullable=False)
+    provider   = Column(String(40), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (UniqueConstraint("kind", "as_of", name="uq_pattern_ai_kind_as_of"),)
+
+
 # =============================================================================
 # Eval & Self-Repair Loop tables
 # =============================================================================

@@ -638,6 +638,10 @@ async def sync_projects_file(file_path: str, sheet_name: str | None = None,
     # Trigger project reports for all enabled-schedule users after sync
     asyncio.create_task(_trigger_reports_after_sync())
 
+    # Deep AI reading of the patterns page for the new report (PLAN.md P5).
+    from app.services.insight_ai import generate_areas
+    asyncio.create_task(generate_areas())
+
     return result
 
 

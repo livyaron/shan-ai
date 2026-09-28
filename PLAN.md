@@ -96,6 +96,22 @@ Confidence rules: n < 5 → "מדגם קטן", not ranked; p reported only with 
 ### P4 — MCP server, read-only, manager only (M)
 Tools return aggregates only: `get_slip_patterns`, `get_update_waves`, `get_stuck_projects`, `get_leading_indicators`, `get_reporting_quality`, `get_project_history(identifier)`. Bearer token per user, admin-only issuance, audit log row per call. Mounted under the FastAPI app. **Blocked on information-security approval** (see §8).
 
+### P5 — Deep AI analysis on the patterns page (M) — decisions 2026-09-28
+User decisions: **3 zoom levels, deep** (1 division · 2 sector · 3 project) · **4 handling levels by owner** · generated **after every live sync + refresh button** · **each role sees only its scope**.
+
+| Handling level | Owner | Rule (a project takes the highest level it meets) |
+|---|---|---|
+| 🔴 escalate | סמנכ"ל | frozen / cancel review · `חסם לטיפול סמנכ"ל` · past due AND forecast moved ≥ 6 mo · ≥ 3 forecast moves |
+| 🟠 this week | מנהל אגף | past due · forecast moved ≥ 6 mo · baseline moved together with the forecast · another `חסם לטיפול` · stuck ≥ 24 weeks |
+| 🟡 follow-up | מנהל מגזר / מנה"פ | stuck 12+ · late vs plan · target as text · identical report 4 weeks · stage ≠ report · one forecast move |
+| 🟢 FYI | — | everything else |
+
+- **The level is a rule, never the model** (`insight_triage.py`, thresholds as constants). The AI writes only the reading: story, likely root cause with quotes, action, questions, what to watch.
+- **No LLM computes a number**: the context is the engine's output; every number in the reply that is not in the context is replaced by `[?]` and counted on screen. Quotes not found verbatim in the weekly texts are dropped. Project ids outside the context are dropped.
+- Access: level 1 = admin + pm_dept; level 2 = full scopes see all three sectors, a sector manager only theirs; level 3 = whoever may open the project page. Built only from what the viewer's scope allows.
+- Storage: `pattern_ai_analyses` (kind, as_of, payload JSON), one row per kind per report date; auto-created. Levels 1–2 regenerate after a live sync (never on history replay); level 3 on demand, cached per report date.
+- Token budget: Groq's daily limit is shared with the per-project briefs that run on the same sync — contexts are capped (top projects per level, newest weekly texts truncated).
+
 ## 4. Name → user linkage (G5)
 New table `manager_aliases(alias TEXT UNIQUE, user_id FK SET NULL)`. On sync, unmatched `מנה"פ` strings are queued; admin confirms matches in a small web page (rapidfuzz suggestion, human confirm — a wrong link shows a PM someone else's projects). `טרם הוקצאה` is a reserved alias → "unassigned" bucket.
 

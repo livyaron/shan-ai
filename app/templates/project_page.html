@@ -31,6 +31,9 @@
         .lvl-high { color: var(--s-high); border-color: var(--s-high); }
         .lvl-medium { color: var(--s-med); border-color: var(--s-med); }
         .lvl-info { color: var(--s-info); border-color: var(--s-info); }
+        .lv { display: inline-block; border-radius: 6px; padding: .05rem .45rem; font-size: .8rem; font-weight: 500; }
+        .lv-escalate { background: rgba(239,68,68,.15); color: #fca5a5; } .lv-week { background: rgba(249,115,22,.15); color: #fdba74; }
+        .lv-follow { background: rgba(245,158,11,.15); color: #fcd34d; } .lv-fyi { background: rgba(16,185,129,.15); color: #6ee7b7; }
         table.t { width: 100%; border-collapse: collapse; font-size: .88rem; }
         table.t th { color: var(--text-2); font-weight: 500; text-align: right; border-bottom: 1px solid var(--border-hi); padding: .45rem .5rem; white-space: nowrap; }
         table.t td { border-bottom: 1px solid var(--border); padding: .45rem .5rem; vertical-align: top; }
@@ -96,6 +99,36 @@
         </div>
         {% if r and r.undated and h.timeline and h.timeline[-1].fc_text %}
         <div class="caveat">יעד חשמול כפי שנכתב: "{{ h.timeline[-1].fc_text }}"</div>
+        {% endif %}
+    </div>
+
+    {# ── Level 3: deep AI reading (PLAN.md P5). Level = rules; prose = AI, validated. ── #}
+    {% set levels = levels or {} %}
+    <div class="card-x" id="ai">
+        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+            <h2>🧠 צלילת AI לפרויקט{% if triage %} · <span class="lv lv-{{ triage.level }}">{{ levels[triage.level].icon }} {{ levels[triage.level].label }} — {{ levels[triage.level].owner }}, {{ levels[triage.level].when }}</span>{% endif %}</h2>
+            <form method="post" action="/dashboard/projects/p/{{ h.identifier|urlencode }}/ai"
+                  onsubmit="var b=this.querySelector('button');b.disabled=true;b.textContent='⏳ מנתח… (עד דקה)';">
+                <button class="btn btn-outline-info btn-sm">{{ '↻ נתח מחדש' if ai else '🧠 נתח לעומק' }}</button></form>
+        </div>
+        {% if triage and triage.reasons %}
+        <div class="sub mt-1">דרגת הטיפול נקבעה בכללים: {% for x in triage.reasons %}{{ levels[x.level].icon }} {{ x.text }}{% if not loop.last %} · {% endif %}{% endfor %}</div>
+        {% endif %}
+        {% if ai_error %}<div class="caveat" style="color:var(--s-high)">הניתוח נכשל (ייתכן שמכסת המודל נוצלה) — נסה שוב בעוד כמה דקות.</div>{% endif %}
+        {% if ai %}{% set x = ai.payload %}
+        {% if x.headline %}<div class="mt-2" style="font-weight:600;font-size:1.05rem">{{ x.headline }}</div>{% endif %}
+        {% if x.story %}<div class="sub mt-2" style="color:var(--text-2)">מה קרה</div><div style="line-height:1.65">{{ x.story }}</div>{% endif %}
+        {% if x.root_cause %}<div class="sub mt-2">סיבת שורש סבירה</div><div style="line-height:1.65">{{ x.root_cause }}</div>{% endif %}
+        {% for e in x.evidence or [] %}<div class="quote"><span class="mono">{{ e.week }}</span> — {{ e.quote }}</div>{% endfor %}
+        {% if x.action %}<div class="mt-2" style="color:var(--cyan)">👉 {{ x.action }}{% if x.owner %} <span class="sub">· בעלים: {{ x.owner }}</span>{% endif %}</div>{% endif %}
+        {% if x.questions %}<div class="sub mt-2">❓ לשאול את מנה"פ</div><ul style="margin:.2rem 0;padding-right:1.2rem">{% for q in x.questions %}<li>{{ q }}</li>{% endfor %}</ul>{% endif %}
+        {% if x.watch %}<div class="sub mt-2">👁 לבדוק בדוח הבא</div><div>{{ x.watch }}</div>{% endif %}
+        {% set c = x._checks or {} %}
+        <div class="caveat">🤖 נוסח ע״י AI{% if ai.provider %} ({{ ai.provider }}){% endif %}{% if ai.created_at %} · {{ ai.created_at.strftime('%d/%m %H:%M') }} UTC{% endif %} מתוך נתוני הדף בלבד; ציטוט שלא נמצא מילה במילה בדיווחים הוסר.
+            {% if c.numbers_replaced %} ⚠ {{ c.numbers_replaced }} מספרים שלא הופיעו בנתונים הוחלפו ב-[?].{% endif %}
+            {% if c.quotes_dropped %} ⚠ {{ c.quotes_dropped }} ציטוטים לא אומתו והוסרו.{% endif %}</div>
+        {% elif not ai_error %}
+        <div class="sub mt-2">עוד אין ניתוח לדוח {{ h.as_of }}. הניתוח קורא את כל הדיווחים והתזוזות ומנסח סיבת שורש, פעולה ושאלות.</div>
         {% endif %}
     </div>
 

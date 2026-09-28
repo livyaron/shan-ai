@@ -180,6 +180,15 @@ def test_empty_history_is_not_an_error():
 
 # ── The admin page renders whatever the engine returns ────────────────────
 
+def page_ctx(ai=None, running=False):
+    """What the router adds for the AI section (PLAN.md P5)."""
+    from app.services import insight_ai, insight_triage
+    return {"levels": insight_triage.LEVELS, "level_order": insight_triage.ORDER, "ai": ai or {},
+            "ai_status": {"running": running, "done": []},
+            "ai_started": False,
+            "ai_sector_labels": {insight_ai.sector_kind(k): ss.SECTORS[k] for k in insight_ai.AREA_SECTORS}}
+
+
 def _render(p):
     from types import SimpleNamespace
     from jinja2 import Environment, FileSystemLoader
@@ -189,7 +198,7 @@ def _render(p):
     from app.services import insight_access
     view = insight_access.view_for(insight_access.Scope(admin=True), p)
     return env.get_template("project_insights.html").render(
-        request=request, current_user=user, p=p, view=view, sector_labels=ss.SECTORS)
+        request=request, current_user=user, p=p, view=view, sector_labels=ss.SECTORS, **page_ctx())
 
 
 def test_insights_page_renders_every_section():

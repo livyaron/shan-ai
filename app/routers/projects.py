@@ -225,6 +225,15 @@ async def project_insights_page(
     # Drill links keep the "view as" params, so a preview can be drilled too.
     from urllib.parse import urlencode
     keep = urlencode({k: qp[k] for k in ("as_user", "as_sector", "as_manager") if qp.get(k)})
+    # Deep AI reading (PLAN.md P5): only the levels this viewer's scope allows.
+    # A missing analysis for this report date is generated in the background
+    # (single-flight, skips what exists) — the page never waits for a model.
+    from app.services import insight_ai, insight_triage
+    ai_rows = await insight_ai.load(session, view["ai_kinds"], p.get("as_of"))
+    ai_started = bool(set(view["ai_kinds"]) - set(ai_rows)) and insight_ai.claim_autostart(p.get("as_of"))
+    if ai_started:
+        import asyncio
+        asyncio.create_task(insight_ai.generate_areas())
     return templates.TemplateResponse("project_insights.html", {
         "request": request,
         "current_user": current_user,
@@ -236,7 +245,62 @@ async def project_insights_page(
         "sector_labels": stage_sectors.SECTORS,
         "preview_label": preview_label,
         "preview_options": options,
+        "ai": {k: insight_ai.for_display(v) for k, v in ai_rows.items()},
+        "ai_status": insight_ai.STATUS,
+        "ai_started": ai_started,
+        "ai_sector_labels": {insight_ai.sector_kind(k): stage_sectors.SECTORS[k] for k in insight_ai.AREA_SECTORS},
+        "levels": insight_triage.LEVELS,
+        "level_order": insight_triage.ORDER,
     })
+
+
+@router.post("/insights/ai/refresh")
+async def insights_ai_refresh(current_user: User = Depends(get_current_user)):
+    """Admin: rebuild the division + sector analyses for the newest report."""
+    if not current_user.is_admin:
+        raise HTTPException(status_code=403)
+    import asyncio
+    from fastapi.responses import RedirectResponse
+    from app.services import insight_ai
+    asyncio.create_task(insight_ai.generate_areas(force=True))
+    return RedirectResponse("/dashboard/projects/insights#ai", status_code=303)
+
+
+@router.get("/insights/ai/status")
+async def insights_ai_status(current_user: User = Depends(get_current_user)):
+    from app.services import insight_ai
+    return JSONResponse({"running": insight_ai.STATUS["running"], "done": insight_ai.STATUS["done"]})
+
+
+async def _visible_project(session: AsyncSession, current_user: User, identifier: str):
+    """(frames, p) when this viewer may open the project page, else HTTP error."""
+    from app.services import insight_access, pattern_service, stage_sectors
+    scope = await insight_access.scope_for(session, current_user)
+    if not scope.allowed:
+        raise HTTPException(status_code=403, detail="אין לך עדיין שיוך לתצוגת הדפוסים — פנה למנהל המערכת")
+    frames = await pattern_service.load_frames(session)
+    p = pattern_service._plain(pattern_service.compute_patterns(frames))
+    view = insight_access.view_for(scope, p)
+    full = scope.admin or scope.sector == stage_sectors.PM_DEPT
+    if not full and identifier not in {x["identifier"] for x in view["projects"]}:
+        raise HTTPException(status_code=404, detail="הפרויקט לא נמצא בתצוגה שלך")
+    return frames, p
+
+
+@router.post("/p/{identifier:path}/ai")
+async def project_ai(
+    identifier: str,
+    session: AsyncSession = Depends(get_db_session),
+    current_user: User = Depends(get_current_user),
+):
+    """Level 3: a deep AI reading of one project, stored for this report date."""
+    from urllib.parse import quote
+    from fastapi.responses import RedirectResponse
+    from app.services import insight_ai
+    frames, p = await _visible_project(session, current_user, identifier)
+    done = await insight_ai.generate_project(session, frames, p, identifier)
+    suffix = "" if done else "?ai_error=1"
+    return RedirectResponse(f"/dashboard/projects/p/{quote(identifier)}{suffix}#ai", status_code=303)
 
 
 @router.get("/p/{identifier:path}", response_class=HTMLResponse)
@@ -250,16 +314,8 @@ async def project_page(
     events and a computed risk read-out. Visible to whoever sees the project
     on the patterns page (insight_access) — admins and the PM department see
     every project, including ones that have left the file."""
-    from app.services import insight_access, pattern_service, project_chart, stage_sectors
-    scope = await insight_access.scope_for(session, current_user)
-    if not scope.allowed:
-        raise HTTPException(status_code=403, detail="אין לך עדיין שיוך לתצוגת הדפוסים — פנה למנהל המערכת")
-    frames = await pattern_service.load_frames(session)
-    p = pattern_service._plain(pattern_service.compute_patterns(frames))
-    view = insight_access.view_for(scope, p)
-    full = scope.admin or scope.sector == stage_sectors.PM_DEPT
-    if not full and identifier not in {x["identifier"] for x in view["projects"]}:
-        raise HTTPException(status_code=404, detail="הפרויקט לא נמצא בתצוגה שלך")
+    from app.services import insight_ai, insight_triage, pattern_service, project_chart, stage_sectors
+    frames, p = await _visible_project(session, current_user, identifier)
     h = pattern_service.project_history(frames, p, identifier)
     if h is None:
         raise HTTPException(status_code=404, detail="פרויקט לא ידוע")
@@ -272,6 +328,11 @@ async def project_page(
         "matrix": project_chart.risk_matrix(pattern_service._plain(h)),
         "risk_changes": project_chart.risk_column_changes(pattern_service._plain(h)),
         "sector_labels": stage_sectors.SECTORS,
+        "triage": insight_triage.triage_all(p).get(identifier),
+        "levels": insight_triage.LEVELS,
+        "ai": insight_ai.for_display((await insight_ai.load(
+            session, [insight_ai.project_kind(identifier)], p.get("as_of"))).get(insight_ai.project_kind(identifier))),
+        "ai_error": request.query_params.get("ai_error") == "1",
     })
 
 

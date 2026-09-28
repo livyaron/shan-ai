@@ -54,6 +54,24 @@
         a.pname:hover { color: var(--cyan); text-decoration: underline; }
         .listhead { display: flex; justify-content: space-between; align-items: center; gap: .5rem; flex-wrap: wrap; }
         .drill { border-color: var(--cyan); }
+        .tri { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: .75rem; }
+        .tri-col { border: 1px solid var(--border); border-right-width: 4px; border-radius: 10px; padding: .6rem .75rem; background: rgba(255,255,255,.015); }
+        .tri-n { font-family: var(--mono); font-size: 1.6rem; font-weight: 700; }
+        .tri-row { border-top: 1px solid var(--border); padding: .35rem 0; font-size: .85rem; }
+        .lvb-escalate { border-right-color: var(--red); } .lvb-week { border-right-color: #f97316; }
+        .lvb-follow { border-right-color: var(--amber); } .lvb-fyi { border-right-color: var(--green); } .lvb-none { border-right-color: var(--border-hi); }
+        .lv { display: inline-block; border-radius: 6px; padding: .05rem .45rem; font-size: .76rem; white-space: nowrap; }
+        .lv-escalate { background: rgba(239,68,68,.15); color: #fca5a5; } .lv-week { background: rgba(249,115,22,.15); color: #fdba74; }
+        .lv-follow { background: rgba(245,158,11,.15); color: #fcd34d; } .lv-fyi { background: rgba(16,185,129,.15); color: #6ee7b7; }
+        .ai-box { border-top: 1px solid var(--border-hi); margin-top: 1rem; padding-top: .8rem; }
+        .ai-level { color: var(--purple); font-weight: 600; font-size: .9rem; }
+        .ai-head { font-size: 1.05rem; font-weight: 600; margin: .4rem 0; }
+        .ai-p { color: var(--text-1); font-size: .9rem; line-height: 1.65; margin: .3rem 0; }
+        .ai-find { border-right: 4px solid var(--border-hi); background: rgba(255,255,255,.02); border-radius: 6px; padding: .55rem .8rem; margin: .55rem 0; }
+        .ai-projects { font-size: .82rem; margin: .25rem 0; }
+        .ai-act { font-size: .88rem; color: var(--cyan); margin-top: .3rem; }
+        .ai-sub { color: var(--text-2); font-weight: 600; font-size: .85rem; margin-top: .7rem; }
+        .ai-ul { margin: .2rem 0; padding-right: 1.2rem; font-size: .88rem; line-height: 1.6; }
     </style>
 </head>
 <body>
@@ -158,6 +176,80 @@
             <div class="num"><a class="dn" href="{{ dl('tile', 'past_due') }}">{{ sm.past_due }}</a></div>
             <div class="lbl">יעד מסתמן כבר עבר</div>
         </div>
+    </div>
+
+    {# ── Deep AI reading (PLAN.md P5). Levels = rules (insight_triage); prose = AI. ── #}
+    {% macro lvbadge(lv) %}{% if lv %}<span class="lv lv-{{ lv }}">{{ levels[lv].icon }} {{ levels[lv].label }}</span>{% endif %}{% endmacro %}
+    {% macro area(a) %}{% set x = a.payload %}
+        {% if x.headline %}<div class="ai-head">{{ x.headline }}</div>{% endif %}
+        {% if x.situation %}<p class="ai-p">{{ x.situation }}</p>{% endif %}
+        {% for f in x.findings or [] %}
+        <div class="ai-find lvb-{{ f.level or 'none' }}">
+            <div class="d-flex flex-wrap align-items-center gap-2">{{ lvbadge(f.level) }}<strong>{{ f.title }}</strong></div>
+            <div class="ai-p">{{ f.analysis }}</div>
+            {% if f.projects %}<div class="ai-projects">{% for i in f.projects %}{{ plink(i) }} <a class="pname" href="/dashboard/projects/p/{{ i|urlencode }}">{{ (view.names.get(i) or '')[:40] }}</a>{% if view.triage_of.get(i) %} {{ levels[view.triage_of[i].level].icon }}{% endif %}{% if not loop.last %} · {% endif %}{% endfor %}</div>{% endif %}
+            {% if f.action %}<div class="ai-act">👉 {{ f.action }}{% if f.owner %} <span class="mix">· בעלים: {{ f.owner }}</span>{% endif %}</div>{% endif %}
+        </div>
+        {% endfor %}
+        {% if x.patterns %}<div class="ai-sub">🔁 דפוסים רוחביים</div><ul class="ai-ul">{% for t in x.patterns %}<li>{{ t }}</li>{% endfor %}</ul>{% endif %}
+        {% if x.questions %}<div class="ai-sub">❓ שאלות לישיבת הסטטוס</div><ul class="ai-ul">{% for t in x.questions %}<li>{{ t }}</li>{% endfor %}</ul>{% endif %}
+        {% if x.watch %}<div class="ai-sub">👁 לבדוק בדוח הבא</div><div class="ai-p">{{ x.watch }}</div>{% endif %}
+        {% set c = x._checks or {} %}
+        <div class="caveat">🤖 נוסח ע״י AI{% if a.provider %} ({{ a.provider }}){% endif %}{% if a.created_at %} · {{ a.created_at.strftime('%d/%m %H:%M') }} UTC{% endif %} מתוך המנוע בלבד. דרגות הטיפול נקבעו בכללים, לא ע״י המודל.
+            {% if c.numbers_replaced %} ⚠ {{ c.numbers_replaced }} מספרים שלא הופיעו בנתונים הוחלפו ב-[?].{% endif %}
+            {% if c.projects_dropped %} ⚠ {{ c.projects_dropped }} הפניות לפרויקטים לא מוכרים הוסרו.{% endif %}</div>
+    {% endmacro %}
+    <div class="card-x" id="ai">
+        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+            <h2>🧠 ניתוח AI מעמיק — דרגות טיפול</h2>
+            {% if current_user.is_admin and not preview_label %}
+            <form method="post" action="/dashboard/projects/insights/ai/refresh" onsubmit="this.querySelector('button').disabled=true">
+                <button class="btn btn-outline-info btn-sm">↻ רענן ניתוח AI</button></form>{% endif %}
+        </div>
+        <div class="sub">הדרגה של כל פרויקט נקבעת בכללים קבועים (בלי מודל). לחיצה על מספר פותחת את הפרויקטים. צלילת AI לפרויקט בודד — בדף הפרויקט.</div>
+        <div class="tri mt-2">
+            {% for lv in level_order %}{% set rows = view.triage[lv] %}
+            <div class="tri-col lvb-{{ lv }}">
+                <div class="d-flex justify-content-between align-items-baseline">
+                    <div><strong>{{ levels[lv].icon }} {{ levels[lv].label }}</strong><div class="mix">{{ levels[lv].owner }} · {{ levels[lv].when }}</div></div>
+                    <a class="dn tri-n" href="{{ dl('triage', lv) }}">{{ rows|length }}</a>
+                </div>
+                {% if lv != 'fyi' %}
+                {% for x in rows[:6] %}
+                <div class="tri-row">{{ plink(x.identifier) }} {{ pname(x) }}<div class="mix">{{ x.triage.reasons[0].text if x.triage.reasons else '' }}{% if x.triage.reasons|length > 1 %} · ועוד {{ x.triage.reasons|length - 1 }}{% endif %}</div></div>
+                {% endfor %}
+                {% if rows|length > 6 %}<a class="mix" href="{{ dl('triage', lv) }}">ועוד {{ rows|length - 6 }} ←</a>{% endif %}
+                {% endif %}
+            </div>
+            {% endfor %}
+        </div>
+
+        {% if view.ai_kinds %}
+        {% set pending = ai_status.running or ai_started %}
+        {% if 'division' in view.ai_kinds %}
+        <div class="ai-box">
+            <div class="ai-level">רמה 1 · תמונת אגף</div>
+            {% if ai.get('division') %}{{ area(ai['division']) }}{% else %}<div class="sub">{{ '⏳ הניתוח בהכנה — הדף יתעדכן לבד.' if pending else 'אין עדיין ניתוח לדוח הזה.' }}</div>{% endif %}
+        </div>
+        {% endif %}
+        {% for k in view.ai_kinds if k != 'division' %}
+        <details class="ai-box" {% if view.ai_kinds|length == 1 %}open{% endif %}>
+            <summary><span class="ai-level">רמה 2 · {{ ai_sector_labels.get(k, k) }}</span>{% if ai.get(k) and ai[k].payload.headline %} — {{ ai[k].payload.headline }}{% endif %}</summary>
+            {% if ai.get(k) %}{{ area(ai[k]) }}{% else %}<div class="sub">{{ '⏳ הניתוח בהכנה — הדף יתעדכן לבד.' if pending else 'אין עדיין ניתוח לדוח הזה.' }}</div>{% endif %}
+        </details>
+        {% endfor %}
+        {% if pending %}
+        <script>
+        (function poll() {
+            setTimeout(function () {
+                fetch('/dashboard/projects/insights/ai/status').then(function (r) { return r.json(); })
+                    .then(function (s) { if (s.running) { poll(); } else { location.reload(); } })
+                    .catch(function () {});
+            }, 10000);
+        })();
+        </script>
+        {% endif %}
+        {% endif %}
     </div>
 
     {% if drill %}

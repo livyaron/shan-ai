@@ -473,6 +473,11 @@ def compute_patterns(frames: Frames) -> dict:
                                    "כל דחייה נרשמת על המגזר שהחזיק את הפרויקט (לפי שלב) ברגע שזז. "
                                    "שלב משותף נרשם לשני המגזרים — אין לסכם לסך אגף.")
 
+    # 12. The rule flags project_history prints, once per live project, so the
+    #     triage (insight_triage) never has to open 185 histories per page.
+    last_text = wk.groupby("project_id")["text"].last() if not wk.empty else pd.Series(dtype=object)
+    cur["last_week_text"] = cur["project_id"].map(last_text)
+
     return {
         "report_dates": [d.isoformat() for d in rdates],
         "as_of": r_last.isoformat(),
@@ -487,6 +492,22 @@ def compute_patterns(frames: Frames) -> dict:
             "undated": len(undated),
             "stale_reporting": len(stale),
         },
+    }
+
+
+def _rule_flags(r: Any) -> dict:
+    """Frozen / escalated / stage-behind-the-report for one live row — the
+    same rules as project_history's read-out, over the latest report."""
+    week = getattr(r, "last_week_text", None)
+    week = week if isinstance(week, str) else ""
+    col = " ".join(x for x in (r.risks, r.to_handle) if isinstance(x, str))
+    esc = r.to_handle if isinstance(r.to_handle, str) and ESCALATED.search(r.to_handle) else None
+    sc = stage_contradiction(r.stage, week) if week else None
+    return {
+        "frozen": bool(FROZEN.search(week) or FROZEN.search(col)),
+        "escalation": esc.strip() if esc else None,
+        "escalation_top": bool(esc and ESCALATED_TOP.search(esc)),
+        "stage_gap": sc["gap"] if sc else 0,
     }
 
 
@@ -516,6 +537,7 @@ def _project_rows(cur: pd.DataFrame, stale: set) -> list[dict]:
             "fc_text": r.finish_date_text if isinstance(r.finish_date_text, str) else None,
             "fc": None if pd.isna(r.fc) else r.fc.date().isoformat(),
             "dev": None if pd.isna(r.dev) else r.dev.date().isoformat(),
+            **_rule_flags(r),
         })
     # Worst first: most forecast slippage, then longest in stage.
     return sorted(rows, key=lambda x: (-(x["forecast_moved_months"] or 0), -(x["weeks_in_stage"] or 0)))
