@@ -308,7 +308,7 @@ def compute_patterns(frames: Frames) -> dict:
     cur["dev_drift"] = cur["project_id"].map(dev_drift)
 
     m: dict[str, dict] = {}
-    span = f"{r_first.isoformat()} → {r_last.isoformat()}"
+    span = f"{r_first.isoformat()} עד {r_last.isoformat()}"   # no arrow: it points backwards in RTL
 
     # 1. Lateness against the development plan — as the report shows it today.
     slip = cur["slip_days"].dropna()
@@ -318,7 +318,7 @@ def compute_patterns(frames: Frames) -> dict:
          "median_months": _months(slip.median()) if len(slip) else None,
          "p90_months": _months(slip.quantile(0.9)) if len(slip) else None},
         len(slip), _confidence(len(slip)),
-        "נמדד מול תכנית הפיתוח העדכנית. כשהבסיס זז יחד עם התחזית (baseline_moves) המדד הזה מראה פחות איחור מהמציאות.")
+        "נמדד מול תכנית הפיתוח העדכנית. כשהבסיס זז יחד עם התחזית המדד הזה מראה פחות איחור מהמציאות.")
 
     # 2–3. How the forecast and the baseline moved over the whole history.
     live_fc, live_dev = fc_drift[fc_drift.index.isin(live_ids)], dev_drift[dev_drift.index.isin(live_ids)]
@@ -362,7 +362,7 @@ def compute_patterns(frames: Frames) -> dict:
     cur["weeks_lower_bound"] = cur["project_id"].map(stage_since_start).fillna(False)
     m["stuck"] = metric({"count": len(stuck_rows), "by_stage": by_stage, "projects": stuck_rows[:50]},
                         len(live_ids), _confidence(len(live_ids)),
-                        f"באותו שלב {STUCK_WEEKS} שבועות ומעלה. 'lower_bound' = ההיסטוריה מתחילה כבר בשלב הזה.")
+                        f"באותו שלב {STUCK_WEEKS} שבועות ומעלה. '≥' לפני המספר = ההיסטוריה מתחילה כבר בשלב הזה.")
 
     # 6. Stale reporting: the same weekly text, week after week.
     stale = []
@@ -394,12 +394,16 @@ def compute_patterns(frames: Frames) -> dict:
                        + cur["project_id"].map(texts).fillna(""))
     cats = []
     cur["risk_cats"] = [[] for _ in range(len(cur))]
+    cur["risk_col_cats"] = [[] for _ in range(len(cur))]
     for cat, pat in RISK_CATEGORIES.items():
         hit = cur["all_text"].str.contains(pat, regex=True)
         for lst, h in zip(cur["risk_cats"], hit):
             if h:
                 lst.append(cat)
         in_col = (cur["risks"].fillna("") + " " + cur["to_handle"].fillna("")).str.contains(pat, regex=True)
+        for lst, h in zip(cur["risk_col_cats"], in_col):
+            if h:
+                lst.append(cat)
         cats.append({"category": cat, "projects": int(hit.sum()), "in_risk_column": int(in_col.sum())})
     m["risk_categories"] = metric(sorted(cats, key=lambda r: -r["projects"]), len(cur), _confidence(len(cur)),
                                   "מה כתוב — לא מה גורם לדחייה. טקסונומיה v2 (ביטויים רגולריים עם גבולות מילה), טרם אומתה ידנית.")
@@ -428,8 +432,8 @@ def compute_patterns(frames: Frames) -> dict:
     rows.sort(key=lambda r: r["p"])
     m["leading_indicators"] = metric(
         rows, len(measured), "low" if len(measured) < 200 else "medium",
-        f"{len(rows)} השערות נבדקו; p_adjusted מתוקן Bonferroni. 'weak' = מובהק רק לפני התיקון — "
-        "לא להציג למנה\"פים עד שישתחזר על נתונים חדשים (PLAN.md §8.4).")
+        f"{len(rows)} השערות נבדקו; p מתוקן לפי בונפרוני. 'חלש' = מובהק רק לפני התיקון — "
+        "לא להציג למנה\"פים עד שישתחזר על נתונים חדשים.")
 
     # 11. Slip attribution: every forecast move charged to the sector that
     #     owned the project (by stage) when it moved.
@@ -503,7 +507,7 @@ def _project_rows(cur: pd.DataFrame, stale: set) -> list[dict]:
             "baseline_moved": None if pd.isna(r.dev_drift) else bool(r.dev_drift > MOVE_DAYS),
             "stuck": not pd.isna(r.weeks_in_stage) and r.weeks_in_stage >= STUCK_WEEKS,
             "late": not pd.isna(r.slip_days) and r.slip_days > LATE_MONTHS * MONTH_DAYS,
-            "risk_cats": list(r.risk_cats), "early_cats": list(r.early_cats),
+            "risk_cats": list(r.risk_cats), "risk_col_cats": list(r.risk_col_cats), "early_cats": list(r.early_cats),
             "weeks_in_stage": None if pd.isna(r.weeks_in_stage) else int(r.weeks_in_stage),
             "weeks_lower_bound": bool(r.weeks_lower_bound),
             "stale": r.identifier in stale,

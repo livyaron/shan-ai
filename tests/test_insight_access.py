@@ -150,3 +150,38 @@ def test_a_drill_never_widens_access():
     assert ia.drill_for(pm_view, P, "manager", "מנהל א", "all")["rows"] == []     # a colleague's row
     assert ia.drill_for(ADMIN_VIEW, P, "tile", "nonsense") is None
     assert ia.drill_for(ADMIN_VIEW, P, "sector", ss.PLANNING, "nonsense") is None
+
+
+def test_risk_topics_drill_both_counts():
+    for r in P["metrics"]["risk_categories"]["value"]:
+        assert len(ia.drill_for(ADMIN_VIEW, P, "risk", r["category"])["rows"]) == r["projects"]
+        assert len(ia.drill_for(ADMIN_VIEW, P, "risk", r["category"], "column")["rows"]) == r["in_risk_column"]
+
+
+def _admin_html(p=P_WITH_HEALTH):
+    env = Environment(loader=FileSystemLoader("app/templates"))
+    return env.get_template("project_insights.html").render(
+        request=SimpleNamespace(url=SimpleNamespace(path="/dashboard/projects/insights")),
+        current_user=SimpleNamespace(is_admin=True, username="u", role=None, id=1),
+        p=p, view=ia.view_for(ia.Scope(admin=True), p), sector_labels=ss.SECTORS)
+
+
+def test_lists_name_every_project_and_drill_to_their_tile():
+    html = _admin_html()
+    lists = html[html.index("רשימות לטיפול"):]
+    for x in P["projects"]:
+        if x["stuck"] or x["stale"] or x["undated"]:
+            assert f'>{x["name"]}</a>' in lists, x["identifier"]      # the name, not only the id
+    for key in ("stuck", "stale", "undated", "past_due"):
+        assert f"drill=tile&amp;dv={key}" in lists or f"drill=tile&dv={key}" in lists
+
+
+def test_rtl_signed_numbers_and_spans_stay_isolated():
+    import copy
+    p = copy.deepcopy(P_WITH_HEALTH)
+    p["projects"][0]["forecast_moved_months"] = -2.5
+    html = _admin_html(p)
+    assert '<bdi class="ltr">-2.5</bdi>' in html                    # not "2.5-"
+    assert '<bdi class="ltr">≥' in html                             # not "25≤"
+    body = html[html.index("<body>"):]
+    assert "→" not in body.replace("→ חזרה לפרויקטים", "")          # an LTR arrow points backwards in RTL
