@@ -164,7 +164,7 @@ def drill_for(view: dict, p: dict, kind: str, value: str = "", metric: str = "al
     kind: tile (value = a _PROJECT_TESTS key) | sector | manager (value = key /
     name, metric = a _PROJECT_TESTS key) | attribution (value = sector) |
     wave (value = interval start, metric = forecast|baseline|both) |
-    risk (value = topic) | leading (value = topic, metric = with|without).
+    risk (value = topic, metric = column → the risk column only) | leading (value = topic, metric = with|without).
     """
     sections, projects = view["sections"], view["projects"]
     as_of = p.get("as_of")
@@ -209,8 +209,11 @@ def drill_for(view: dict, p: dict, kind: str, value: str = "", metric: str = "al
             rows = [e for e in live if e["kind"] == metric]
         else:
             return None
-        return {"label": f"גל {value} · {metric}", "kind": "events", "rows": rows}
+        what = {"forecast": "יעד מסתמן נדחה", "baseline": "תכנית פיתוח נדחתה", "both": "שניהם"}[metric]
+        return {"label": f"גל {value} עד {to} · {what}", "kind": "events", "rows": rows}
     if kind == "risk" and "risk" in sections:
+        if metric == "column":
+            return project_rows(f"בעמודת הסיכונים: {value}", lambda x: value in x.get("risk_col_cats", []))
         return project_rows(f"מזכירים: {value}", lambda x: value in x["risk_cats"])
     if kind == "leading" and "leading" in sections and metric in ("with", "without"):
         want = metric == "with"

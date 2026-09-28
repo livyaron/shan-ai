@@ -20,7 +20,7 @@
         .sub { color: var(--text-2); font-size: .88rem; }
         .card-x { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; padding: 1.1rem 1.2rem; margin-bottom: 1.25rem; }
         .caveat { color: var(--text-3); font-size: .8rem; margin-top: .6rem; }
-        .meta { color: var(--text-3); font-size: .78rem; font-family: var(--mono); }
+        .meta { color: var(--text-3); font-size: .78rem; }
         .chip { display: inline-block; border: 1px solid var(--border-hi); border-radius: 999px; padding: .1rem .6rem; margin: .15rem; font-family: var(--mono); font-size: .78rem; color: var(--text-2); }
         .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: .9rem; margin-bottom: 1.25rem; }
         .tile { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; padding: .9rem 1rem; }
@@ -30,7 +30,9 @@
         table.t { width: 100%; border-collapse: collapse; font-size: .88rem; }
         table.t th { color: var(--text-2); font-weight: 500; text-align: right; border-bottom: 1px solid var(--border-hi); padding: .45rem .5rem; white-space: nowrap; }
         table.t td { border-bottom: 1px solid var(--border); padding: .45rem .5rem; vertical-align: middle; }
-        table.t td.n { font-family: var(--mono); text-align: left; white-space: nowrap; }
+        table.t td.n { font-family: var(--mono); text-align: right; white-space: nowrap; }  /* RTL: under its header */
+        bdi.ltr { direction: ltr; unicode-bidi: isolate; }   /* -2.5 / ≥25 / dates keep their order inside RTL */
+        .form-select { background-position: left .75rem center; padding-right: .75rem; padding-left: 2.25rem; }  /* LTR bootstrap: arrow off the Hebrew text */
         .barcell { min-width: 140px; }
         .bar { height: 10px; background: var(--cyan); border-radius: 4px 0 0 4px; opacity: .85; }  /* RTL: anchored right, the rounded data-end is on the left */
         .bar-track { background: rgba(255,255,255,.04); border-radius: 4px; }
@@ -48,6 +50,9 @@
         a.dn:hover { color: var(--cyan); border-bottom-color: var(--cyan); }
         a.plink { color: var(--cyan); text-decoration: none; }
         a.plink:hover { text-decoration: underline; }
+        a.pname { color: var(--text-1); text-decoration: none; }
+        a.pname:hover { color: var(--cyan); text-decoration: underline; }
+        .listhead { display: flex; justify-content: space-between; align-items: center; gap: .5rem; flex-wrap: wrap; }
         .drill { border-color: var(--cyan); }
     </style>
 </head>
@@ -55,11 +60,16 @@
 {% include "_navbar.html" %}
 {% set m = p.metrics %}
 {% set conf_he = {'high': 'ביטחון גבוה', 'medium': 'ביטחון בינוני', 'low': 'ביטחון נמוך', 'small_sample': 'מדגם קטן'} %}
-{% macro meta(x) %}<span class="meta">n={{ x.n }} · {{ conf_he.get(x.confidence, x.confidence) }}</span>{% endmacro %}
+{% macro meta(x) %}<span class="meta"><bdi class="ltr">n={{ x.n }}</bdi> · {{ conf_he.get(x.confidence, x.confidence) }}</span>{% endmacro %}
+{# Numbers that carry a sign or a prefix (−2.5, ≥25) and date spans: isolated LTR, or RTL prints "2.5-" / "25≤". #}
+{% macro num(v) %}{% if v is none %}—{% else %}<bdi class="ltr">{{ v }}</bdi>{% endif %}{% endmacro %}
+{% macro span(a, b) %}<bdi class="ltr">{{ a }}</bdi> ← <bdi class="ltr">{{ b }}</bdi>{% endmacro %}
+{% macro weeks(x) %}{% if x.weeks_in_stage is none %}—{% else %}<bdi class="ltr">{{ '≥' if x.weeks_lower_bound }}{{ x.weeks_in_stage }}</bdi>{% endif %}{% endmacro %}
 {% macro pct(v) %}{{ '—' if v is none else v ~ '%' }}{% endmacro %}
 {# A number that drills down to the rows behind it (insight_access.drill_for). #}
 {% macro dl(kind, v, m='all') %}/dashboard/projects/insights?{{ {'drill': kind, 'dv': v, 'dm': m}|urlencode }}{% if drill_keep %}&{{ drill_keep }}{% endif %}#drill{% endmacro %}
-{% macro plink(ident) %}<a class="plink" href="/dashboard/projects/p/{{ ident|urlencode }}">{{ ident }}</a>{% endmacro %}
+{% macro plink(ident) %}<a class="plink" href="/dashboard/projects/p/{{ ident|urlencode }}"><bdi>{{ ident }}</bdi></a>{% endmacro %}
+{% macro pname(x) %}<a class="pname" href="/dashboard/projects/p/{{ x.identifier|urlencode }}" title="{{ x.name or '' }}">{{ (x.name or '')[:60] or '—' }}</a>{% endmacro %}
 
 <div class="wrap">
     <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-3">
@@ -98,7 +108,7 @@
     {% set h = p.health %}
     {% if h and 'health' in view.sections %}
     <details class="card-x" {% if (p.report_dates|length) < 2 %}open{% endif %}>
-        <summary>🩺 בריאות הנתונים — {{ h.snapshot_rows }} צילומים ב-{{ h.snapshot_dates|length }} תאריכים · {{ h.weekly_rows }} שורות דיווח שבועי{% if h.weekly_range %} ({{ h.weekly_range[0] }} → {{ h.weekly_range[1] }}){% endif %}</summary>
+        <summary>🩺 בריאות הנתונים — {{ h.snapshot_rows }} צילומים ב-{{ h.snapshot_dates|length }} תאריכים · {{ h.weekly_rows }} שורות דיווח שבועי{% if h.weekly_range %} ({{ span(h.weekly_range[0], h.weekly_range[1]) }}){% endif %}</summary>
         <div class="sub mt-2">תאריך נספר כדוח רק כשיש בו לפחות מחצית מהגודל של קובץ מלא (חציון 5 התאריכים הגדולים). תאריכים במרחק עד 3 ימים מתאחדים.</div>
         <div class="scroll"><table class="t mt-2">
             <tr><th>תאריך צילום</th><th>פרויקטים</th><th>נספר כדוח של</th></tr>
@@ -131,7 +141,7 @@
         </div>
         <div class="tile" title="{{ m.stuck.caveat }}">
             <div class="num"><a class="dn" href="{{ dl('tile', 'stuck') }}">{{ sm.stuck }}</a><span class="of"> / {{ sm.n }}</span></div>
-            <div class="lbl">תקועים 12+ שבועות באותו שלב</div>
+            <div class="lbl">תקועים 12 שבועות ומעלה באותו שלב</div>
         </div>
         <div class="tile" title="{{ m.stale_reporting.caveat }}">
             <div class="num"><a class="dn" href="{{ dl('tile', 'stale') }}">{{ sm.stale }}</a></div>
@@ -157,18 +167,18 @@
         {% if drill.kind == 'events' %}
             <tr><th>זיהוי</th><th>פרויקט</th><th>מנה"פ</th><th>מקטע</th><th>מה זז</th><th>חודשים</th><th>שלב בזמן הדחייה</th></tr>
             {% for e in drill.rows %}
-            <tr><td class="n">{{ plink(e.identifier) }}</td><td>{{ (e.name or '')[:60] }}</td><td>{{ e.manager or '' }}</td>
-                <td class="n">{{ e.from }} → {{ e.to }}{% if e.undated_between %}<div class="mix">מעל {{ e.undated_between }} דוחות בלי תאריך</div>{% endif %}</td><td>{{ 'יעד חשמול' if e.kind == 'forecast' else 'תכנית פיתוח' }}</td>
-                <td class="n">{{ e.months }}</td><td>{{ e.stage }}{% if not e.live %} <span class="mix">(לא פעיל היום)</span>{% endif %}</td></tr>
+            <tr><td class="n">{{ plink(e.identifier) }}</td><td>{{ pname(e) }}</td><td>{{ e.manager or '' }}</td>
+                <td class="n">{{ span(e['from'], e.to) }}{% if e.undated_between %}<div class="mix" style="font-family:var(--ui)">מעל {{ e.undated_between }} דוחות בלי תאריך</div>{% endif %}</td><td>{{ 'יעד חשמול' if e.kind == 'forecast' else 'תכנית פיתוח' }}</td>
+                <td class="n">{{ num(e.months) }}</td><td>{{ e.stage }}{% if not e.live %} <span class="mix">(לא פעיל היום)</span>{% endif %}</td></tr>
             {% else %}<tr><td colspan="7" class="sub">אין שורות.</td></tr>{% endfor %}
         {% else %}
             <tr><th>זיהוי</th><th>פרויקט</th><th>מנה"פ</th><th>שלב</th><th>יעד מסתמן</th><th>ת.פיתוח</th><th>יעד זז (ח')</th><th>בסיס זז (ח')</th><th>שבועות בשלב</th></tr>
             {% for x in drill.rows %}
-            <tr><td class="n">{{ plink(x.identifier) }}</td><td>{{ (x.name or '')[:60] }}</td><td>{{ x.manager or '' }}</td><td>{{ x.stage }}</td>
+            <tr><td class="n">{{ plink(x.identifier) }}</td><td>{{ pname(x) }}</td><td>{{ x.manager or '' }}</td><td>{{ x.stage }}</td>
                 <td class="n">{{ x.fc or ('מלל' if x.undated else '—') }}</td><td class="n">{{ x.dev or '—' }}</td>
-                <td class="n">{{ '—' if x.forecast_moved_months is none else x.forecast_moved_months }}</td>
-                <td class="n">{{ '—' if x.baseline_moved_months is none else x.baseline_moved_months }}</td>
-                <td class="n">{{ '—' if x.weeks_in_stage is none else ('≥' if x.weeks_lower_bound else '') ~ x.weeks_in_stage }}</td></tr>
+                <td class="n">{{ num(x.forecast_moved_months) }}</td>
+                <td class="n">{{ num(x.baseline_moved_months) }}</td>
+                <td class="n">{{ weeks(x) }}</td></tr>
             {% else %}<tr><td colspan="9" class="sub">אין פרויקטים שגלויים לך בפירוט הזה.</td></tr>{% endfor %}
         {% endif %}
         </table></div>
@@ -185,12 +195,12 @@
             <tr><th>זיהוי</th><th>פרויקט</th><th>מנה"פ</th><th>שלב</th><th>יעד מסתמן</th><th>ת.פיתוח</th><th>יעד זז (ח')</th><th>בסיס זז (ח')</th><th>שבועות בשלב</th><th></th></tr>
             {% for x in view.projects %}
             <tr>
-                <td class="n">{{ plink(x.identifier) }}</td><td>{{ (x.name or '')[:60] }}</td><td>{{ x.manager or '' }}</td><td>{{ x.stage }}</td>
+                <td class="n">{{ plink(x.identifier) }}</td><td>{{ pname(x) }}</td><td>{{ x.manager or '' }}</td><td>{{ x.stage }}</td>
                 <td class="n">{{ x.fc or ('מלל' if x.undated else '—') }}</td><td class="n">{{ x.dev or '—' }}</td>
-                <td class="n">{{ '—' if x.forecast_moved_months is none else x.forecast_moved_months }}</td>
-                <td class="n">{{ '—' if x.baseline_moved_months is none else x.baseline_moved_months }}</td>
-                <td class="n">{{ '—' if x.weeks_in_stage is none else ('≥' if x.weeks_lower_bound else '') ~ x.weeks_in_stage }}</td>
-                <td>{% if x.stuck %}<span class="badge-x b-weak" title="12+ שבועות באותו שלב">⏸ תקוע</span> {% endif %}{% if x.stale %}<span class="badge-x b-none" title="מלל שבועי זהה 4 שבועות">🔁 דיווח זהה</span> {% endif %}{% if x.undated %}<span class="badge-x b-none" title="יעד חשמול כתוב כמלל">📝 ללא תאריך</span>{% endif %}</td>
+                <td class="n">{{ num(x.forecast_moved_months) }}</td>
+                <td class="n">{{ num(x.baseline_moved_months) }}</td>
+                <td class="n">{{ weeks(x) }}</td>
+                <td>{% if x.stuck %}<span class="badge-x b-weak" title="12 שבועות ומעלה באותו שלב">⏸ תקוע</span> {% endif %}{% if x.stale %}<span class="badge-x b-none" title="מלל שבועי זהה 4 שבועות">🔁 דיווח זהה</span> {% endif %}{% if x.undated %}<span class="badge-x b-none" title="יעד חשמול כתוב כמלל">📝 ללא תאריך</span>{% endif %}</td>
             </tr>
             {% else %}
             <tr><td colspan="10" class="sub">אין פרויקטים פעילים בתצוגה הזו.</td></tr>
@@ -230,8 +240,8 @@
         <div class="scroll"><table class="t mt-2">
             <tr><th>מקטע</th><th>שבועות</th><th>יעד מסתמן נדחה</th><th class="barcell"></th><th>תכנית פיתוח נדחתה</th><th>שניהם</th></tr>
             {% for w in waves %}
-            <tr title="{{ w.from }} → {{ w.to }}: {{ w.forecast_later }} יעדים נדחו מתוך {{ w.n }}">
-                <td class="n">{{ w.from }} → {{ w.to }}</td>
+            <tr title="{{ w['from'] }} עד {{ w.to }}: {{ w.forecast_later }} יעדים נדחו מתוך {{ w.n }}">
+                <td class="n">{{ span(w['from'], w.to) }}</td>
                 <td class="n">{{ w.weeks }}</td>
                 <td class="n"><a class="dn" href="{{ dl('wave', w['from'], 'forecast') }}">{{ w.forecast_later }}</a></td>
                 <td class="barcell"><div class="bar-track"><div class="bar" style="width: {{ (100 * w.forecast_later / max_w)|round(0) }}%"></div></div></td>
@@ -289,14 +299,14 @@
     {% set li = m.leading_indicators %}
     {% set sig_he = {'signal': '● אות מובהק', 'weak': '◐ חלש — לפני תיקון בלבד', 'none': '○ אין אות'} %}
     <div class="card-x">
-        <h2>אותות מקדימים — נושא שהוזכר בדוח הראשון → נדחה מאז?</h2>
+        <h2>אותות מקדימים — נושא שהוזכר בדוח הראשון ← נדחה מאז?</h2>
         <div class="sub">{{ meta(li) }}</div>
         <div class="scroll"><table class="t mt-2">
             <tr><th>נושא</th><th>עם הנושא: נדחו</th><th>בלי: נדחו</th><th>p</th><th>p מתוקן</th><th>מסקנה</th></tr>
             {% for r in li.value %}
             <tr><td>{{ r.category }}</td>
-                <td class="n"><a class="dn" href="{{ dl('leading', r.category, 'with') }}">{{ pct(r.with_pct) }}</a> <span class="mix">(n={{ r.with_n }})</span></td>
-                <td class="n"><a class="dn" href="{{ dl('leading', r.category, 'without') }}">{{ pct(r.without_pct) }}</a> <span class="mix">(n={{ r.without_n }})</span></td>
+                <td class="n"><a class="dn" href="{{ dl('leading', r.category, 'with') }}">{{ pct(r.with_pct) }}</a> <span class="mix">(<bdi class="ltr">n={{ r.with_n }}</bdi>)</span></td>
+                <td class="n"><a class="dn" href="{{ dl('leading', r.category, 'without') }}">{{ pct(r.without_pct) }}</a> <span class="mix">(<bdi class="ltr">n={{ r.without_n }}</bdi>)</span></td>
                 <td class="n">{{ r.p }}</td><td class="n">{{ r.p_adjusted }}</td>
                 <td><span class="badge-x b-{{ r.signal }}">{{ sig_he[r.signal] }}</span></td></tr>
             {% endfor %}
@@ -317,7 +327,7 @@
             {% for r in rc.value %}
             <tr title="{{ r.category }}: {{ r.projects }} פרויקטים"><td>{{ r.category }}</td><td class="n"><a class="dn" href="{{ dl('risk', r.category) }}">{{ r.projects }}</a></td>
                 <td class="barcell"><div class="bar-track"><div class="bar" style="width: {{ (100 * r.projects / max_rc)|round(0) }}%"></div></div></td>
-                <td class="n">{{ r.in_risk_column }}</td></tr>
+                <td class="n"><a class="dn" href="{{ dl('risk', r.category, 'column') }}">{{ r.in_risk_column }}</a></td></tr>
             {% endfor %}
         </table></div>
         <div class="caveat">{{ rc.caveat }}</div>
@@ -328,19 +338,27 @@
     {# ── Lists ── #}
     <div class="card-x">
         <h2>רשימות לטיפול</h2>
-        <details><summary>⏸ תקועים ({{ m.stuck.value.count }})</summary>
-            <div class="scroll"><table class="t mt-2"><tr><th>זיהוי</th><th>שלב</th><th>שבועות</th></tr>
-            {% for r in m.stuck.value.projects %}<tr><td class="n">{{ plink(r.identifier) }}</td><td>{{ r.stage }}</td>
-                <td class="n">{{ '≥' if r.lower_bound }}{{ r.weeks }}</td></tr>{% endfor %}
+        {# Every list is the same rows its tile drills to: id + name, each opens the project page. #}
+        {% set as_of = p.as_of %}
+        {% set lists = [
+            ('stuck', '⏸ תקועים', view.projects|selectattr('stuck')|list, m.stuck.caveat),
+            ('stale', '🔁 דיווח שבועי זהה', view.projects|selectattr('stale')|list, m.stale_reporting.caveat),
+            ('undated', '📝 יעד חשמול כמלל', view.projects|selectattr('undated')|list, m.undated.caveat),
+            ('past_due', '⌛ יעד מסתמן שכבר עבר', view.projects|selectattr('fc')|selectattr('fc', 'lt', as_of)|list, m.past_due.caveat),
+        ] %}
+        {% for key, label, rows, cav in lists %}
+        <details><summary>{{ label }} ({{ rows|length }})</summary>
+            <div class="listhead mt-2"><span class="caveat" style="margin:0">{{ cav }}</span>
+                <a class="btn btn-outline-info btn-sm" href="{{ dl('tile', key) }}">🔎 פירוט מלא</a></div>
+            <div class="scroll"><table class="t mt-2">
+                <tr><th>זיהוי</th><th>פרויקט</th><th>מנה"פ</th><th>שלב</th><th>יעד מסתמן</th><th>שבועות בשלב</th></tr>
+                {% for x in rows %}
+                <tr><td class="n">{{ plink(x.identifier) }}</td><td>{{ pname(x) }}</td><td>{{ x.manager or '' }}</td><td>{{ x.stage }}</td>
+                    <td class="n">{{ x.fc or ('מלל' if x.undated else '—') }}</td><td class="n">{{ weeks(x) }}</td></tr>
+                {% else %}<tr><td colspan="6" class="sub">אין.</td></tr>{% endfor %}
             </table></div>
-            <div class="caveat">{{ m.stuck.caveat }}</div>
         </details>
-        <details><summary>🔁 דיווח שבועי זהה ({{ m.stale_reporting.value.count }})</summary>
-            <div class="ids">{% for i in m.stale_reporting.value.projects %}{{ plink(i) }}{% if not loop.last %} · {% endif %}{% endfor %}</div></details>
-        <details><summary>📝 יעד חשמול כמלל ({{ m.undated.value.count }})</summary>
-            <div class="ids">{% for i in m.undated.value.projects %}{{ plink(i) }}{% if not loop.last %} · {% endif %}{% endfor %}</div></details>
-        <details><summary>⌛ יעד מסתמן שכבר עבר ({{ m.past_due.value.count }})</summary>
-            <div class="ids">{% for i in m.past_due.value.projects %}{{ plink(i) }}{% if not loop.last %} · {% endif %}{% endfor %}</div></details>
+        {% endfor %}
     </div>
 
     {% set sv = m.slip_vs_plan %}{% set fd = m.forecast_drift.value %}{% set bm = m.baseline_moves.value %}
