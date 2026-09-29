@@ -4,9 +4,11 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Shan-AI — מרכז בקרת החלטות</title>
-    <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&family=Karantina:wght@400;700&display=swap" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    {# Motion (motion.dev) — springs, staggers and number tweens. Optional: every
+       element is fully rendered without it, it only adds the movement. #}
+    <script src="https://cdn.jsdelivr.net/npm/motion@13.4.6/dist/motion.js"></script>
     <style>
         /* ── Shared DSS design tokens (mirrored from decisions.html) ── */
         :root {
@@ -140,87 +142,154 @@
         .badge-rejected  { background: #3d1018; color: #ff6b7a; border: 1px solid rgba(220,53,69,.4); }
         .badge-executed  { background: #0e3d47; color: #17d8f5; border: 1px solid rgba(23,162,184,.35); }
 
-        /* ── Stats Row (decisions style) ── */
-        .stats-row {
-            display: grid;
-            grid-template-columns: repeat(5, 1fr);
-            gap: 12px;
-            margin-bottom: 20px;
+        /* ══ Live substation layout ═══════════════════════════════════════
+           The page is a single-line diagram: one busbar, every KPI is a
+           feeder bay hanging off it; a living HV yard runs behind it all
+           (static/js/substation_bg.js). Semantic colours: ok / warn / crit. */
+        .sb {
+            --energy: #00d4ff; --energy-dim: rgba(0,212,255,.10); --volt: #8b9cf4;
+            --ok: #36e273; --warn: #ffc107; --crit: #ff5f6d; --info: #17d8f5;
+            --panel: rgba(12,20,33,.80); --line: #1a2d47; --line-hi: #24507d;
+            --t1: #e6edf7; --t2: #8fa0b8; --t3: #4f6280;
+            --display: 'Karantina', 'Heebo', sans-serif;
+            position: relative; z-index: 1;
         }
-        .stat-card {
-            background: #0e1020;
-            border: 1px solid #1a1e38;
-            border-radius: 14px;
-            padding: 14px 16px;
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            transition: transform .2s, box-shadow .2s;
-            animation: fadeUp .5s ease both;
-            cursor: default;
-        }
-        .stat-card:hover { transform: translateY(-3px); }
-        .stat-icon { font-size: 1.5rem; }
-        .stat-label { font-size: .68rem; color: #a8b0d0; text-transform: uppercase; letter-spacing: .6px; line-height: 1.2; }
-        .stat-value { font-size: 1.6rem; font-weight: 800; line-height: 1; }
-        .stat-total   .stat-value { color: #8b9cf4; }
-        .stat-pending .stat-value { color: #ffc107; }
-        .stat-critical .stat-value { color: #ff6b7a; }
-        .stat-approved .stat-value { color: #36e273; }
-        .stat-executed .stat-value { color: #17d8f5; }
-        .stat-purple .stat-value  { color: #8b9cf4; }
-        .stat-cyan   .stat-value  { color: #17d8f5; }
-        .stat-red    .stat-value  { color: #ff6b7a; }
-        .stat-amber  .stat-value  { color: #ffc107; }
-        .stat-green  .stat-value  { color: #36e273; }
-        .stat-total:hover   { box-shadow: 0 6px 24px rgba(139,156,244,.15); border-color: rgba(139,156,244,.25); }
-        .stat-pending:hover { box-shadow: 0 6px 24px rgba(255,193,7,.12); border-color: rgba(255,193,7,.2); }
-        .stat-critical:hover{ box-shadow: 0 6px 24px rgba(220,53,69,.12); border-color: rgba(220,53,69,.2); }
-        .stat-approved:hover{ box-shadow: 0 6px 24px rgba(40,167,69,.12); border-color: rgba(40,167,69,.2); }
-        .stat-executed:hover{ box-shadow: 0 6px 24px rgba(23,162,184,.12); border-color: rgba(23,162,184,.2); }
-        .stat-purple:hover  { box-shadow: 0 6px 24px rgba(139,156,244,.15); border-color: rgba(139,156,244,.25); }
-        .stat-cyan:hover    { box-shadow: 0 6px 24px rgba(23,162,184,.12); border-color: rgba(23,162,184,.2); }
-        .stat-red:hover     { box-shadow: 0 6px 24px rgba(220,53,69,.12); border-color: rgba(220,53,69,.2); }
-        .stat-amber:hover   { box-shadow: 0 6px 24px rgba(255,193,7,.12); border-color: rgba(255,193,7,.2); }
-        .stat-green:hover   { box-shadow: 0 6px 24px rgba(40,167,69,.12); border-color: rgba(40,167,69,.2); }
+        #substation-bg { position: fixed; inset: 0; width: 100%; height: 100%; z-index: 0; pointer-events: none; display: block; }
+        body.bg-off #substation-bg { opacity: .35; }
 
-        /* ── Approval Banner (green pulse) ── */
-        .approval-banner {
-            background: linear-gradient(135deg, #0a180a, #0d1f0d);
-            border: 1px solid rgba(54,226,115,.35);
-            border-radius: 12px;
-            padding: 14px 20px;
-            margin-bottom: 16px;
-            font-size: .88rem;
-            color: #a0ffb0;
-            animation: fadeUp .5s ease .1s both, approvalPulse 3s ease-in-out 1s infinite;
-        }
-        @keyframes approvalPulse {
-            0%, 100% { box-shadow: 0 0 10px rgba(40,167,69,.1); }
-            50%       { box-shadow: 0 0 24px rgba(40,167,69,.3); }
-        }
-        .approval-banner.danger {
-            background: linear-gradient(135deg, #1f0a0d, #2a0d12);
-            border-color: rgba(220,53,69,.35);
-            color: #ffb0b8;
-        }
-        .approval-banner.danger { animation: fadeUp .5s ease .1s both, dangerPulse 3s ease-in-out 1s infinite; }
-        @keyframes dangerPulse {
-            0%, 100% { box-shadow: 0 0 10px rgba(220,53,69,.1); }
-            50%       { box-shadow: 0 0 24px rgba(220,53,69,.3); }
-        }
+        .sb-head { display: flex; flex-wrap: wrap; gap: 14px; justify-content: space-between; align-items: flex-end; margin-bottom: 14px; }
+        .sb-title { font-family: var(--display); font-weight: 700; font-size: clamp(2.6rem, 5.6vw, 4.4rem); line-height: .9; margin: 0; color: var(--t1); text-wrap: balance; }
+        .sb-title .kv { color: var(--energy); text-shadow: 0 0 22px rgba(0,212,255,.55); }
+        .sb-sub { color: var(--t2); font-size: .95rem; margin-top: 6px; }
+        .sb-side { display: grid; gap: 8px; justify-items: end; }
+        .sb-live { display: flex; align-items: center; gap: 10px; font-family: var(--mono); font-size: .85rem; color: var(--t2); }
+        .sb-led { position: relative; width: 10px; height: 10px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 10px var(--ok); }
+        .sb-led::after { content: ""; position: absolute; inset: -5px; border-radius: 50%; border: 2px solid var(--ok); opacity: 0; animation: sbRing 2s ease-out infinite; }
+        .sb-led.stale { background: var(--warn); box-shadow: 0 0 10px var(--warn); }
+        .sb-led.stale::after { border-color: var(--warn); }
+        @keyframes sbRing { 0% { transform: scale(.5); opacity: .9; } 100% { transform: scale(1.8); opacity: 0; } }
+        .sb-clock { color: var(--energy); font-size: 1.05rem; font-variant-numeric: tabular-nums; text-shadow: 0 0 10px rgba(0,212,255,.45); }
+        .sb-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+        .sb-btn { position: relative; overflow: hidden; font: 600 .95rem var(--ui); color: var(--t1); background: var(--panel); border: 1px solid var(--line-hi); border-radius: 10px; padding: 9px 16px; cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; gap: 6px; }
+        .sb-btn:hover { color: #fff; border-color: var(--energy); box-shadow: 0 0 18px rgba(0,212,255,.25); }
+        .sb-btn.primary { background: linear-gradient(135deg, #0b3550, #0b2440); border-color: var(--energy); }
+        .sb-btn:focus-visible, .sb-bay:focus-visible, .sb-row:focus-visible { outline: 2px solid var(--energy); outline-offset: 2px; }
+        .sb-btn .ripple { position: absolute; width: 10px; height: 10px; border-radius: 50%; background: rgba(0,212,255,.4); pointer-events: none; transform: translate(-50%,-50%); }
 
-        /* ── Panel (chart card / table card) ── */
-        .panel {
-            background: #0e1020;
-            border: 1px solid #1a1e38;
-            border-radius: 16px;
-            padding: 18px;
-            transition: border-color .2s, box-shadow .2s;
-            animation: fadeUp .5s ease both;
+        /* ticker tape of recent decisions */
+        .sb-ticker { overflow: hidden; white-space: nowrap; border-block: 1px solid var(--line); background: rgba(6,10,17,.7); font-family: var(--mono); font-size: .82rem; color: var(--energy); margin-bottom: 22px; mask-image: linear-gradient(90deg, transparent, #000 6%, #000 94%, transparent); }
+        .sb-ticker .track { display: inline-flex; gap: 46px; padding: 7px 0; animation: sbTick 60s linear infinite; }
+        .sb-ticker:hover .track { animation-play-state: paused; }
+        .sb-ticker b { color: var(--t1); font-weight: 400; font-family: var(--ui); }
+        @keyframes sbTick { to { transform: translateX(50%); } }
+
+        /* busbar + bays */
+        .sb-bus-label { display: flex; justify-content: space-between; font-family: var(--mono); font-size: .75rem; color: var(--t2); margin-bottom: 6px; }
+        .sb-bus-label b { color: var(--energy); font-weight: 600; }
+        .sb-busbar { height: 6px; border-radius: 3px; background: linear-gradient(90deg, var(--line-hi), var(--energy), #bff4ff, var(--energy), var(--line-hi)); background-size: 200% 100%; animation: sbFlow var(--flow, 3s) linear infinite; box-shadow: 0 0 16px rgba(0,212,255,.45); transform-origin: right; }
+        @keyframes sbFlow { to { background-position: -200% 0; } }
+        .sb-bays { display: grid; grid-template-columns: repeat(5, 1fr); gap: 14px; margin-bottom: 8px; }
+        .sb-bay { position: relative; padding-top: 38px; perspective: 800px; display: flex; flex-direction: column; text-decoration: none; color: inherit; }
+        .sb-bay::before { content: ""; position: absolute; top: 0; right: 50%; width: 2px; height: 38px; background: var(--line-hi); }
+        .sb-bay::after { content: ""; position: absolute; top: 0; right: calc(50% - 1px); width: 4px; height: 12px; border-radius: 2px; background: var(--energy); box-shadow: 0 0 10px var(--energy); animation: sbDrop 2.2s ease-in infinite; animation-delay: var(--d, 0s); }
+        @keyframes sbDrop { 0% { transform: translateY(0); opacity: 0; } 15% { opacity: 1; } 100% { transform: translateY(26px); opacity: 0; } }
+        .sb-breaker { position: absolute; top: 13px; right: calc(50% - 8px); width: 18px; height: 11px; border: 2px solid var(--energy); background: #070b12; border-radius: 2px; z-index: 1; }
+        .sb-card { flex: 1; position: relative; background: linear-gradient(180deg, rgba(16,28,45,.92), var(--panel)); border: 1px solid var(--line); border-radius: 14px; padding: 16px; transform-style: preserve-3d; will-change: transform; overflow: hidden; }
+        .sb-card::before { content: ""; position: absolute; inset: 0; background: radial-gradient(260px circle at var(--mx, 50%) var(--my, 0%), rgba(0,212,255,.14), transparent 60%); opacity: 0; transition: opacity .25s; pointer-events: none; }
+        .sb-bay:hover .sb-card { border-color: var(--line-hi); }
+        .sb-bay:hover .sb-card::before { opacity: 1; }
+        .sb-k-label { font-size: .8rem; color: var(--t2); letter-spacing: .04em; display: flex; justify-content: space-between; gap: 6px; }
+        .sb-k-val { font-family: var(--display); font-size: 3.3rem; line-height: 1; margin-top: 6px; font-variant-numeric: tabular-nums; }
+        .sb-k-val small { font-size: 1.3rem; opacity: .55; }
+        .sb-k-foot { font-family: var(--mono); font-size: .74rem; color: var(--t3); margin-top: 4px; }
+        .sb-meter { height: 4px; background: #0a1320; border-radius: 2px; margin-top: 10px; overflow: hidden; }
+        .sb-meter i { display: block; height: 100%; border-radius: 2px; background: currentColor; transform-origin: right; box-shadow: 0 0 8px currentColor; }
+        .c-v { color: var(--volt); } .c-ok { color: var(--ok); } .c-e { color: var(--energy); } .c-w { color: var(--warn); } .c-crit { color: var(--crit); }
+        .c-v .sb-k-val, .c-ok .sb-k-val, .c-e .sb-k-val, .c-w .sb-k-val, .c-crit .sb-k-val { color: inherit; text-shadow: 0 0 18px currentColor; }
+        .sb-card .sb-k-label, .sb-card .sb-k-foot { color: var(--t2); }
+        .sb-bay.alarm .sb-breaker { border-color: var(--crit); animation: sbTrip 1.1s steps(2) infinite; }
+        .sb-bay.alarm::after { background: var(--crit); box-shadow: 0 0 10px var(--crit); }
+        .sb-bay.alarm .sb-card { border-color: rgba(255,95,109,.5); box-shadow: 0 0 0 1px rgba(255,95,109,.15), 0 0 32px rgba(255,95,109,.18); }
+        .sb-bay.alarm .sb-card::after { content: ""; position: absolute; inset: 0; border-radius: inherit; background: linear-gradient(115deg, transparent 40%, rgba(255,95,109,.14) 50%, transparent 60%); background-size: 250% 100%; animation: sbSweep 2.4s linear infinite; pointer-events: none; }
+        @keyframes sbTrip { 50% { background: var(--crit); } }
+        @keyframes sbSweep { from { background-position: 150% 0; } to { background-position: -100% 0; } }
+        .sb-bay.bump .sb-card { animation: sbBump .9s ease-out; }
+        @keyframes sbBump { 0% { box-shadow: 0 0 0 0 rgba(0,212,255,.8); } 100% { box-shadow: 0 0 0 18px rgba(0,212,255,0); } }
+
+        .sb-h { display: flex; align-items: baseline; flex-wrap: wrap; gap: 10px; margin: 30px 0 12px; }
+        .sb-h h2 { font-family: var(--display); font-size: 2.1rem; font-weight: 700; margin: 0; color: var(--t1); }
+        .sb-h span { font-family: var(--mono); font-size: .75rem; color: var(--t3); }
+
+        /* RACI relays */
+        .sb-relays { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; }
+        .sb-relay { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; display: flex; align-items: center; gap: 12px; }
+        .sb-relay .code { font-family: var(--mono); font-weight: 600; width: 36px; height: 36px; display: grid; place-items: center; border-radius: 8px; border: 1px solid currentColor; flex: none; box-shadow: inset 0 0 10px currentColor; }
+        .sb-relay b { font-family: var(--display); font-size: 2.1rem; font-weight: 700; line-height: 1; }
+        .sb-relay small { display: block; color: var(--t2); font-size: .8rem; }
+
+        /* charts */
+        .sb-charts { display: grid; grid-template-columns: 1fr 1fr 1.3fr; gap: 14px; }
+        .sb-panel { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 16px; min-width: 0; }
+        .sb-panel h3 { margin: 0 0 12px; font-size: 1rem; font-weight: 600; color: var(--t2); }
+        .sb-donut-wrap { display: flex; gap: 16px; align-items: center; }
+        .sb-donut { width: 132px; height: 132px; flex: none; overflow: visible; }
+        .sb-donut .seg { fill: none; stroke-width: 14; cursor: pointer; transition: stroke-width .2s, filter .2s; }
+        .sb-donut .seg:hover, .sb-donut .seg.on { stroke-width: 19; filter: drop-shadow(0 0 6px currentColor); }
+        .sb-donut .num { font-family: var(--display); font-size: 2.3rem; fill: var(--t1); }
+        .sb-legend { display: grid; gap: 6px; font-size: .88rem; flex: 1; min-width: 0; }
+        .sb-legend button { all: unset; display: flex; align-items: center; gap: 8px; cursor: pointer; color: var(--t1); padding: 2px 4px; border-radius: 6px; }
+        .sb-legend button:hover, .sb-legend button.on { background: var(--energy-dim); }
+        .sb-legend button:focus-visible { outline: 2px solid var(--energy); }
+        .sb-legend i { width: 10px; height: 10px; border-radius: 2px; flex: none; }
+        .sb-legend b { font-family: var(--mono); margin-inline-start: auto; font-variant-numeric: tabular-nums; }
+        .sb-spark { width: 100%; height: 160px; display: block; }
+        .sb-spark text { font-family: var(--mono); font-size: 10px; fill: var(--t2); direction: ltr; unicode-bidi: plaintext; }
+        .sb-empty { color: var(--t2); font-size: .9rem; text-align: center; padding: 30px 0; }
+
+        /* roles */
+        .sb-role { margin-bottom: 14px; }
+        .sb-role-hd { display: flex; justify-content: space-between; margin-bottom: 6px; font-size: .95rem; color: var(--t1); }
+        .sb-role-hd b { font-family: var(--mono); color: var(--volt); }
+        .sb-role-bar { height: 6px; background: #0a1320; border-radius: 3px; overflow: hidden; }
+        .sb-role-bar i { display: block; height: 100%; background: linear-gradient(90deg, var(--volt), var(--energy)); border-radius: 3px; transform-origin: right; }
+
+        /* recent decisions */
+        .sb-grid2 { display: grid; grid-template-columns: 1fr 2fr; gap: 14px; }
+        .sb-scroll { overflow-x: auto; }
+        .sb-table { width: 100%; border-collapse: collapse; font-size: .9rem; color: var(--t1); }
+        .sb-table th { font-weight: 600; color: var(--t2); text-align: right; padding: 8px 10px; border-bottom: 1px solid var(--line); font-size: .8rem; white-space: nowrap; }
+        .sb-table td { padding: 10px; border-bottom: 1px solid #111d2e; text-align: right; vertical-align: middle; }
+        .sb-row { cursor: pointer; }
+        .sb-row:hover td { background: var(--energy-dim); }
+        .sb-row.new td { animation: sbNew 2.5s ease-out; }
+        @keyframes sbNew { from { background: rgba(0,212,255,.25); } to { background: transparent; } }
+        .sb-row td:first-child { border-inline-start: 3px solid transparent; }
+        .sb-row[data-type="critical"] td:first-child { border-inline-start-color: var(--crit); }
+        .sb-row[data-type="normal"] td:first-child { border-inline-start-color: var(--ok); }
+        .sb-row[data-type="info"] td:first-child { border-inline-start-color: var(--info); }
+        .sb-row[data-type="uncertain"] td:first-child { border-inline-start-color: var(--warn); }
+        .sb-sum { max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .sb-pill { font-size: .75rem; font-weight: 600; padding: 3px 9px; border-radius: 999px; border: 1px solid currentColor; white-space: nowrap; }
+        .p-critical, .p-rejected { color: var(--crit); } .p-normal, .p-approved { color: var(--ok); } .p-info, .p-executed { color: var(--info); } .p-uncertain { color: var(--warn); } .p-pending { color: var(--t2); }
+        .sb-mono { font-family: var(--mono); font-size: .78rem; color: var(--t2); white-space: nowrap; }
+        .sb-detail td { padding: 0; border: 0; }
+        .sb-detail .inner { overflow: hidden; height: 0; }
+        .sb-detail .box { margin: 4px 10px 12px; padding: 12px 14px; border-inline-start: 3px solid var(--energy); background: rgba(6,12,20,.9); border-radius: 8px; color: var(--t2); font-size: .9rem; line-height: 1.7; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; }
+        .sb-detail .box p { margin: 0; color: var(--t1); flex: 1 1 260px; min-width: 0; }
+
+        /* toast when a new decision lands */
+        .sb-toast { position: fixed; bottom: calc(18px + env(safe-area-inset-bottom, 0px)); left: 18px; z-index: 1100; max-width: min(420px, calc(100vw - 36px)); background: rgba(8,18,30,.96); border: 1px solid var(--energy); border-radius: 12px; padding: 12px 16px; color: var(--t1); box-shadow: 0 0 30px rgba(0,212,255,.3); display: flex; gap: 12px; align-items: center; }
+        .sb-toast[hidden] { display: none; }
+        .sb-toast .bolt { font-size: 1.5rem; color: var(--energy); text-shadow: 0 0 12px var(--energy); }
+
+        @media (max-width: 1100px) { .sb-bays, .sb-relays { grid-template-columns: repeat(3, 1fr); } .sb-charts, .sb-grid2 { grid-template-columns: 1fr; } }
+        @media (max-width: 640px) {
+            .sb-bays, .sb-relays { grid-template-columns: repeat(2, 1fr); }
+            .sb-busbar, .sb-bus-label { display: none; }
+            .sb-bay { padding-top: 0; } .sb-bay::before, .sb-bay::after, .sb-breaker { display: none; }
+            .sb-side { justify-items: start; }
         }
-        .panel:hover { border-color: rgba(139,156,244,.25); box-shadow: 0 8px 28px rgba(0,0,0,.3); }
-        .panel canvas { max-height: 220px; }
+        @media (prefers-reduced-motion: reduce) { .sb *, .sb *::before, .sb *::after { animation: none !important; } }
 
         /* ── CTA buttons (decisions Bootstrap-primary look) ── */
         .btn-primary {
@@ -243,85 +312,6 @@
         .btn-secondary:hover { background: #3a3e5a; border-color: #3a3e5a; }
         .btn-outline-info { color: #17d8f5; border-color: rgba(23,216,245,.45); }
         .btn-outline-info:hover { background: rgba(23,216,245,.15); color: #fff; border-color: #17d8f5; }
-
-        /* ── Page Header ── */
-        .page-header {
-            display: flex; justify-content: space-between; align-items: center;
-            margin-bottom: 1.4rem;
-            animation: fadeUp .4s ease both;
-        }
-        .page-header h4 { color: #d8e0fa; margin-bottom: 0; font-weight: 700; font-size: 1.6rem; }
-        .page-header .subtitle { color: #8b9cf4; font-size: .9rem; margin-top: 4px; }
-        .page-header .actions { display: flex; gap: 10px; }
-
-        /* ── Section labels (compact) ── */
-        .group-label {
-            color: #8b9cf4;
-            font-size: .9rem;
-            font-weight: 600;
-            border-right: 3px solid #8b9cf4;
-            padding-right: 10px;
-            margin-bottom: 12px;
-            margin-top: 6px;
-        }
-
-        /* ── Recent decisions table ── */
-        .dtable { color: #e0e0e0; margin-bottom: 0; }
-        .dtable thead th {
-            font-family: var(--ui);
-            font-size: .85rem; font-weight: 600;
-            color: #8b9cf4;
-            background: #12151f !important;
-            border-bottom: 1px solid #1a1e38 !important;
-            border-top: none !important;
-            padding: .7rem 1rem;
-            position: sticky; top: 0; z-index: 5;
-            text-align: right;
-        }
-        .dtable tbody td {
-            font-size: .9rem;
-            padding: .65rem 1rem;
-            border-bottom: 1px solid #14172a !important;
-            border-top: none !important;
-            text-align: right;
-            vertical-align: middle;
-        }
-        .dtable tbody tr { transition: background .15s; }
-        .dtable tbody tr:hover td { background: rgba(139,156,244,.05); }
-
-        /* type accent strip on right edge of first cell (RTL) */
-        .drow-info     td:first-child { border-right: 3px solid #17d8f5 !important; }
-        .drow-normal   td:first-child { border-right: 3px solid #36e273 !important; }
-        .drow-critical td:first-child { border-right: 3px solid #ff6b7a !important; }
-        .drow-uncertain td:first-child { border-right: 3px solid #ffd700 !important; }
-
-        .table-shell {
-            background: #0a0c18;
-            border-radius: 10px;
-            overflow: hidden;
-            border: 1px solid #14172a;
-        }
-
-        /* role progress rows */
-        .role-row { margin-bottom: 14px; }
-        .role-hd { display: flex; justify-content: space-between; margin-bottom: 6px; align-items: baseline; }
-        .role-name { font-size: .95rem; color: #d0d8f0; }
-        .role-count {
-            font-family: var(--mono);
-            font-size: 1rem;
-            font-weight: 700;
-            color: #8b9cf4;
-        }
-        .progress {
-            background: #12151f;
-            border-radius: 6px;
-            height: 6px;
-        }
-        .progress-bar {
-            border-radius: 6px;
-            background: linear-gradient(90deg, #8b9cf4, #5865f2) !important;
-            transition: width .8s cubic-bezier(.4,0,.2,1);
-        }
 
         /* ── AI sections (modal) ── */
         .ai-preview {
@@ -396,14 +386,6 @@
         ::-webkit-scrollbar-thumb { background: #2d3047; border-radius: 3px; }
         ::-webkit-scrollbar-thumb:hover { background: #8b9cf4; }
 
-        /* ── Responsive ── */
-        @media (max-width: 1100px) {
-            .stats-row { grid-template-columns: repeat(3, 1fr); }
-        }
-        @media (max-width: 700px) {
-            .stats-row { grid-template-columns: repeat(2, 1fr); }
-            .page-header { flex-direction: column; align-items: flex-start; gap: 12px; }
-        }
     </style>
 </head>
 <body>
@@ -412,174 +394,163 @@
 {% include "_navbar.html" %}
 
 
-<div class="container-fluid py-4 px-4">
+<canvas id="substation-bg" aria-hidden="true"></canvas>
+
+{% set approved = status_counts.get('approved', 0) %}
+{% set critical = type_counts.get('critical', 0) %}
+{% macro pct(n) %}{{ ((n / total_decisions * 100) | round | int) if total_decisions else 0 }}{% endmacro %}
+<div class="container-fluid py-4 px-4 sb" id="sb">
 
     <!-- Header -->
-    <div class="page-header">
+    <div class="sb-head">
         <div>
-            <h4>📊 מרכז בקרת החלטות</h4>
-            <div class="subtitle">סקירה כללית של פעילות המערכת</div>
+            <h1 class="sb-title">מרכז בקרת החלטות <span class="kv">⚡</span></h1>
+            <div class="sb-sub">כל מדד הוא שדה שמוזן מפס הצבירה · הנתונים מתעדכנים לבד</div>
         </div>
-        <div class="actions">
-            <button class="btn btn-primary px-4" onclick="openDashboardAI()">
-                ◈ ניתוח AI
-            </button>
-            <a href="/dashboard/decisions?new=1" class="btn btn-primary px-4" style="text-decoration:none;">
-                ➕ החלטה חדשה
-            </a>
+        <div class="sb-side">
+            <div class="sb-live">
+                <span class="sb-led" id="sb-led"></span>
+                <span id="sb-updated">חי</span>
+                <span class="sb-clock" id="sb-clock">--:--:--</span>
+            </div>
+            <div class="sb-actions">
+                <button type="button" class="sb-btn" id="sb-bg-toggle" aria-pressed="true" title="הפעלה/כיבוי של רקע התחנה החי">⚡ רקע חי</button>
+                <button type="button" class="sb-btn" onclick="openDashboardAI()">◈ ניתוח AI</button>
+                <a href="/dashboard/decisions?new=1" class="sb-btn primary">➕ החלטה חדשה</a>
+            </div>
         </div>
     </div>
 
-    <!-- Pending approvals alert (red glow when pending) -->
-    {% if pending_approvals %}
-    <div class="approval-banner danger">
-        ⏳ <strong>{{ pending_approvals }} החלטה{% if pending_approvals > 1 %}ות{% endif %} ממתינה{% if pending_approvals > 1 %}ות{% endif %} לאישורך</strong> —
-        <a href="/dashboard/decisions?filter_status=pending" class="fw-semibold text-decoration-none" style="color:#ff8a96;">לחץ לטיפול ←</a>
+    {% if recent_decisions %}
+    <div class="sb-ticker" aria-label="החלטות אחרונות">
+        <div class="track">
+            {% for _ in range(2) %}{% for d in recent_decisions %}<span>▸ #{{ d.id }} <b>{{ d.summary or '—' }}</b> · {{ type_labels_he.get(d.type, d.type) }} · {{ status_labels_he.get(d.status, d.status) }}</span>{% endfor %}{% endfor %}
+        </div>
     </div>
     {% endif %}
 
-    <!-- ── KPI strip ── -->
-    <div class="group-label">מדדים ראשיים</div>
-    <div class="stats-row">
-        <div class="stat-card stat-total" style="animation-delay:.05s;">
-            <div class="stat-icon">📊</div>
-            <div><div class="stat-label">סה"כ החלטות</div><div class="stat-value">{{ total_decisions }}</div></div>
-        </div>
-        <div class="stat-card stat-cyan" style="animation-delay:.1s;">
-            <div class="stat-icon">👥</div>
-            <div><div class="stat-label">משתמשים רשומים</div><div class="stat-value">{{ total_users }}</div></div>
-        </div>
-        <div class="stat-card stat-amber" style="animation-delay:.15s;">
-            <div class="stat-icon">⭐</div>
-            <div><div class="stat-label">ממוצע פידבק</div><div class="stat-value">{{ avg_feedback if avg_feedback else "—" }}{% if avg_feedback %}<span style="font-size:.95rem;opacity:.55;">/5</span>{% endif %}</div></div>
-        </div>
-        <div class="stat-card stat-critical" style="animation-delay:.2s;">
-            <div class="stat-icon">🚨</div>
-            <div><div class="stat-label">החלטות קריטיות</div><div class="stat-value">{{ type_counts.get('critical', 0) }}</div></div>
-        </div>
-        <div class="stat-card stat-approved" style="animation-delay:.25s;">
-            <div class="stat-icon">✅</div>
-            <div><div class="stat-label">מאושרות</div><div class="stat-value">{{ status_counts.get('approved', 0) }}</div></div>
-        </div>
-    </div>
-
-    <!-- ── Personal RACI strip ── -->
-    <div class="group-label">הסטטיסטיקות שלי</div>
-    <div class="stats-row">
-        <div class="stat-card stat-purple" style="animation-delay:.05s;">
-            <div class="stat-icon">✍️</div>
-            <div><div class="stat-label">החלטות שכתבתי</div><div class="stat-value">{{ written_count }}</div></div>
-        </div>
-        <div class="stat-card stat-purple" style="animation-delay:.1s;">
-            <div class="stat-icon">⚙️</div>
-            <div><div class="stat-label">R · ביצוע</div><div class="stat-value">{{ raci_counts.get('R', 0) }}</div></div>
-        </div>
-        <div class="stat-card stat-red" style="animation-delay:.15s;">
-            <div class="stat-icon">🛡️</div>
-            <div><div class="stat-label">A · סמכות</div><div class="stat-value">{{ raci_counts.get('A', 0) }}</div></div>
-        </div>
-        <div class="stat-card stat-amber" style="animation-delay:.2s;">
-            <div class="stat-icon">💬</div>
-            <div><div class="stat-label">C · יועץ</div><div class="stat-value">{{ raci_counts.get('C', 0) }}</div></div>
-        </div>
-        <div class="stat-card stat-cyan" style="animation-delay:.25s;">
-            <div class="stat-icon">📨</div>
-            <div><div class="stat-label">I · לידיעה</div><div class="stat-value">{{ raci_counts.get('I', 0) }}</div></div>
-        </div>
-    </div>
-
-    <!-- ── Charts row ── -->
-    <div class="group-label">ניתוח נתונים</div>
-    <div class="row g-3 mb-4">
-        <div class="col-md-4">
-            <div class="panel h-100" style="animation-delay:.05s;">
-                <div class="section-title">החלטות לפי סוג</div>
-                <canvas id="typeChart"></canvas>
+    <!-- ── Busbar + feeder bays ── -->
+    <div class="sb-bus-label"><span>פס צבירה ראשי · ההחלטות שלי</span><span>עומס שבועי: <b id="sb-week">{{ week_total }}</b> החלטות ב-7 ימים</span></div>
+    <div class="sb-busbar" id="sb-busbar"></div>
+    <div class="sb-bays" id="sb-bays">
+        <a class="sb-bay c-v" style="--d:0s" href="/dashboard/decisions">
+            <div class="sb-breaker"></div>
+            <div class="sb-card">
+                <div class="sb-k-label"><span>סה״כ החלטות</span><span>📊</span></div>
+                <div class="sb-k-val" data-live="total_decisions">{{ total_decisions }}</div>
+                <div class="sb-k-foot"><span data-live="week_total">{{ week_total }}</span> ב-7 הימים האחרונים</div>
             </div>
-        </div>
-        <div class="col-md-4">
-            <div class="panel h-100" style="animation-delay:.1s;">
-                <div class="section-title">התפלגות סטטוס</div>
-                <canvas id="statusChart"></canvas>
+        </a>
+        <a class="sb-bay {{ 'alarm' if pending_approvals else 'c-ok' }}" id="sb-pending-bay" style="--d:.4s" href="/dashboard/decisions?filter_status=pending">
+            <div class="sb-breaker"></div>
+            <div class="sb-card">
+                <div class="sb-k-label"><span>ממתינות לאישורך</span><span>⏳</span></div>
+                <div class="sb-k-val" data-live="pending_approvals">{{ pending_approvals }}</div>
+                <div class="sb-k-foot" id="sb-pending-foot">{{ 'לחץ לטיפול ←' if pending_approvals else 'אין מה לאשר' }}</div>
             </div>
-        </div>
-        <div class="col-md-4">
-            <div class="panel h-100" style="animation-delay:.15s;">
-                <div class="section-title">7 ימים אחרונים</div>
-                <canvas id="dailyChart"></canvas>
+        </a>
+        <a class="sb-bay c-crit" style="--d:.8s" href="/dashboard/decisions?filter_type=critical">
+            <div class="sb-breaker"></div>
+            <div class="sb-card">
+                <div class="sb-k-label"><span>החלטות קריטיות</span><span>🚨</span></div>
+                <div class="sb-k-val" data-live="critical">{{ critical }}</div>
+                <div class="sb-meter"><i data-meter="critical" style="width:{{ pct(critical) }}%"></i></div>
+                <div class="sb-k-foot"><span data-live="critical_pct">{{ pct(critical) }}</span>% מההחלטות</div>
+            </div>
+        </a>
+        <a class="sb-bay c-ok" style="--d:1.2s" href="/dashboard/decisions?filter_status=approved">
+            <div class="sb-breaker"></div>
+            <div class="sb-card">
+                <div class="sb-k-label"><span>מאושרות</span><span>✅</span></div>
+                <div class="sb-k-val" data-live="approved">{{ approved }}</div>
+                <div class="sb-meter"><i data-meter="approved" style="width:{{ pct(approved) }}%"></i></div>
+                <div class="sb-k-foot"><span data-live="approved_pct">{{ pct(approved) }}</span>% מההחלטות</div>
+            </div>
+        </a>
+        <div class="sb-bay c-e" style="--d:1.6s">
+            <div class="sb-breaker"></div>
+            <div class="sb-card">
+                <div class="sb-k-label"><span>ממוצע פידבק</span><span>⭐</span></div>
+                <div class="sb-k-val"><span data-live="avg_feedback" data-dec="1">{{ avg_feedback if avg_feedback else "—" }}</span><small>/5</small></div>
+                <div class="sb-k-foot"><span data-live="total_users">{{ total_users }}</span> משתמשים רשומים</div>
             </div>
         </div>
     </div>
 
-    <!-- ── Roles + Recent table ── -->
-    <div class="row g-3 mb-4">
-        <div class="col-md-4">
-            <div class="panel h-100" style="animation-delay:.05s;">
-                <div class="section-title">החלטות לפי תפקיד</div>
-                {% set role_labels = {
-                    'project_manager': 'מנהל פרויקט',
-                    'department_manager': 'מנהל מחלקה',
-                    'deputy_division_manager': 'סגן מנהל אגף',
-                    'division_manager': 'מנהל אגף'
-                } %}
-                {% for role, cnt in role_counts.items() %}
-                <div class="role-row">
-                    <div class="role-hd">
-                        <span class="role-name">{{ role_labels.get(role, role) }}</span>
-                        <span class="role-count">{{ cnt }}</span>
-                    </div>
-                    <div class="progress">
-                        {% set max_cnt = role_counts.values() | max if role_counts else 1 %}
-                        <div class="progress-bar" style="width: {{ (cnt / max_cnt * 100) | int }}%"></div>
-                    </div>
-                </div>
-                {% endfor %}
-                {% if not role_counts %}
-                <p class="text-muted small text-center mt-3">אין נתונים עדיין</p>
-                {% endif %}
-            </div>
-        </div>
+    <!-- ── Personal RACI relays ── -->
+    <div class="sb-h"><h2>הממסרים שלי</h2><span>RACI · התפקידים שלי בהחלטות</span></div>
+    <div class="sb-relays">
+        <div class="sb-relay c-v"><div class="code">✍</div><div><b data-live="written_count">{{ written_count }}</b><small>החלטות שכתבתי</small></div></div>
+        <div class="sb-relay c-v"><div class="code">R</div><div><b data-live="raci_R">{{ raci_counts.get('R', 0) }}</b><small>ביצוע</small></div></div>
+        <div class="sb-relay c-crit"><div class="code">A</div><div><b data-live="raci_A">{{ raci_counts.get('A', 0) }}</b><small>סמכות</small></div></div>
+        <div class="sb-relay c-w"><div class="code">C</div><div><b data-live="raci_C">{{ raci_counts.get('C', 0) }}</b><small>יועץ</small></div></div>
+        <div class="sb-relay c-e"><div class="code">I</div><div><b data-live="raci_I">{{ raci_counts.get('I', 0) }}</b><small>לידיעה</small></div></div>
+    </div>
 
-        <div class="col-md-8">
-            <div class="panel h-100" style="animation-delay:.1s;">
-                <div class="section-title">החלטות אחרונות</div>
-                <div class="table-shell">
-                    <table class="table dtable table-hover">
-                        <thead>
-                            <tr>
-                                <th>#</th>
-                                <th>סוג</th>
-                                <th>סטטוס</th>
-                                <th>סיכום</th>
-                                <th>מגיש</th>
-                                <th>פידבק</th>
-                                <th>תאריך</th>
-                                <th></th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {% for d in recent_decisions %}
-                            <tr class="drow-{{ d.type }}">
-                                <td class="text-muted" style="font-family:var(--mono);font-size:.82rem;">#{{ d.id }}</td>
-                                <td><span class="badge badge-{{ d.type }}">{{ type_labels_he.get(d.type, d.type) }}</span></td>
-                                <td><span class="badge badge-{{ d.status }}">{{ status_labels_he.get(d.status, d.status) }}</span></td>
-                                <td style="max-width:240px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{{ d.summary or '—' }}</td>
-                                <td class="text-muted" style="font-size:.85rem;">{{ d.username }}</td>
-                                <td>{% if d.feedback_score %}<span style="color:#ffd700;font-weight:700;font-size:.85rem;">⭐ {{ d.feedback_score }}/5</span>{% else %}<span class="text-muted">—</span>{% endif %}</td>
-                                <td class="text-muted" style="font-family:var(--mono);font-size:.78rem;">{{ d.created_at }}</td>
-                                <td><button class="btn btn-outline-info btn-sm" onclick="openDecisionAI({{ d.id }})" style="border-radius:6px;font-size:.75rem;padding:3px 9px;">🤖 AI</button></td>
-                            </tr>
-                            {% endfor %}
-                            {% if not recent_decisions %}
-                            <tr><td colspan="8" class="text-center py-4 text-muted">אין החלטות עדיין</td></tr>
-                            {% endif %}
-                        </tbody>
-                    </table>
-                </div>
+    <!-- ── Flows (charts) ── -->
+    <div class="sb-h"><h2>זרמים</h2><span>לחץ על מקטע או על שורה במקרא כדי לסנן את ההחלטות האחרונות</span></div>
+    <div class="sb-charts">
+        <div class="sb-panel"><h3>לפי סוג</h3><div class="sb-donut-wrap"><svg class="sb-donut" id="sb-d-type" viewBox="0 0 132 132" role="img" aria-label="החלטות לפי סוג"></svg><div class="sb-legend" id="sb-l-type"></div></div></div>
+        <div class="sb-panel"><h3>לפי סטטוס</h3><div class="sb-donut-wrap"><svg class="sb-donut" id="sb-d-status" viewBox="0 0 132 132" role="img" aria-label="החלטות לפי סטטוס"></svg><div class="sb-legend" id="sb-l-status"></div></div></div>
+        <div class="sb-panel"><h3>7 ימים אחרונים</h3><svg class="sb-spark" id="sb-spark" viewBox="0 0 400 160" role="img" aria-label="החלטות ביום, 7 ימים אחרונים"></svg></div>
+    </div>
+
+    <!-- ── Roles + recent decisions ── -->
+    <div class="sb-h"><h2>החלטות אחרונות</h2><span id="sb-filter-note">כל ההחלטות · לחץ על שורה לפרטים</span></div>
+    <div class="sb-grid2">
+        <div class="sb-panel">
+            <h3>החלטות לפי תפקיד</h3>
+            {% set role_labels = {
+                'project_manager': 'מנהל פרויקט',
+                'department_manager': 'מנהל מחלקה',
+                'deputy_division_manager': 'סגן מנהל אגף',
+                'division_manager': 'מנהל אגף'
+            } %}
+            {% set max_cnt = role_counts.values() | max if role_counts else 1 %}
+            {% for role, cnt in role_counts.items() %}
+            <div class="sb-role">
+                <div class="sb-role-hd"><span>{{ role_labels.get(role, role) }}</span><b>{{ cnt }}</b></div>
+                <div class="sb-role-bar"><i style="width: {{ (cnt / max_cnt * 100) | int }}%"></i></div>
             </div>
+            {% endfor %}
+            {% if not role_counts %}<div class="sb-empty">אין נתונים עדיין</div>{% endif %}
+        </div>
+        <div class="sb-panel sb-scroll">
+            <table class="sb-table">
+                <thead><tr><th>#</th><th>סוג</th><th>סטטוס</th><th>סיכום</th><th>מגיש</th><th>פידבק</th><th>תאריך</th></tr></thead>
+                <tbody id="sb-rows">
+                    {% for d in recent_decisions %}
+                    <tr class="sb-row" tabindex="0" data-id="{{ d.id }}" data-type="{{ d.type }}" data-status="{{ d.status }}">
+                        <td class="sb-mono">#{{ d.id }}</td>
+                        <td><span class="sb-pill p-{{ d.type }}">{{ type_labels_he.get(d.type, d.type) }}</span></td>
+                        <td><span class="sb-pill p-{{ d.status }}">{{ status_labels_he.get(d.status, d.status) }}</span></td>
+                        <td class="sb-sum">{{ d.summary or '—' }}</td>
+                        <td style="color:var(--t2);font-size:.85rem;">{{ d.username }}</td>
+                        <td>{% if d.feedback_score %}<span style="color:var(--warn);font-weight:700;font-size:.85rem;">⭐ {{ d.feedback_score }}/5</span>{% else %}<span style="color:var(--t3)">—</span>{% endif %}</td>
+                        <td class="sb-mono">{{ d.created_at }}</td>
+                    </tr>
+                    <tr class="sb-detail" data-for="{{ d.id }}"><td colspan="7"><div class="inner"><div class="box">
+                        <p>{{ d.summary or '—' }}</p>
+                        <span style="display:flex;gap:8px;">
+                            <button type="button" class="sb-btn" onclick="event.stopPropagation(); openDecisionAI({{ d.id }})">🤖 ניתוח AI</button>
+                            <a class="sb-btn" href="/dashboard/decisions" onclick="event.stopPropagation()">לכל ההחלטות ←</a>
+                        </span>
+                    </div></div></td></tr>
+                    {% endfor %}
+                    {% if not recent_decisions %}
+                    <tr><td colspan="7" class="sb-empty">אין החלטות עדיין. ״החלטה חדשה״ למעלה פותחת את הראשונה.</td></tr>
+                    {% endif %}
+                </tbody>
+            </table>
         </div>
     </div>
 
+</div>
+
+<div class="sb-toast" id="sb-toast" role="status" hidden>
+    <span class="bolt">⚡</span>
+    <div><div id="sb-toast-text" style="font-weight:600;"></div><div style="font-size:.8rem;color:#8fa0b8;">הרשימה תתעדכן בטעינה הבאה</div></div>
+    <button type="button" class="sb-btn" onclick="location.reload()">רענן</button>
 </div>
 
 
@@ -701,6 +672,7 @@
     </div>
 </div>
 
+<script src="/static/js/substation_bg.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 <script>
 /* ── AI section renderer ──────────────────────────────────────────────── */
@@ -769,76 +741,266 @@ async function openDecisionAI(id, refresh) {
     }
 }
 
-/* ── Charts ─────────────────────────────────────────────────────────────── */
-const CHART_DEFAULTS = {
-    plugins: { legend: { labels: { color: '#a8b0d0', font: { family: 'Heebo', size: 12 } } } },
+/* ══ Live substation dashboard ══════════════════════════════════════════
+   Every number is already rendered server-side; this script only moves it.
+   Without Motion (CDN down) or with reduced motion, the page is complete
+   and still — nothing ever waits at opacity 0. */
+const SB_M = window.Motion;
+const SB_GO = !!SB_M && !matchMedia('(prefers-reduced-motion: reduce)').matches;
+const SB_EASE = [.16, 1, .3, 1];
+const SB_POLL_MS = 45000;
+const SB_TYPES  = { normal: ['רגיל', '--ok'], info: ['מידע', '--info'], uncertain: ['לא ודאי', '--warn'], critical: ['קריטי', '--crit'] };
+const SB_STATUS = { approved: ['מאושר', '--ok'], executed: ['בוצע', '--info'], pending: ['ממתין', '--t2'], rejected: ['נדחה', '--crit'] };
+const sbRoot = document.getElementById('sb');
+const sbVar = v => getComputedStyle(sbRoot).getPropertyValue(v).trim();
+const SVG_NS = 'http://www.w3.org/2000/svg';
+function svgEl(tag, attrs) { const e = document.createElementNS(SVG_NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); return e; }
+
+let sbState = {
+    total_decisions: {{ total_decisions | tojson }},
+    pending_approvals: {{ pending_approvals | tojson }},
+    week_total: {{ week_total | tojson }},
+    type_counts: {{ type_counts | tojson }},
+    status_counts: {{ status_counts | tojson }},
+    daily_labels: {{ daily_labels | tojson }},
+    daily_data: {{ daily_data | tojson }},
+    latest_id: {{ (recent_decisions[0].id if recent_decisions else 0) | tojson }},
 };
 
-Chart.defaults.color = '#a8b0d0';
-Chart.defaults.borderColor = '#1a1e38';
-Chart.defaults.font.family = 'Heebo';
+/* ── clock + "updated N seconds ago" ── */
+let sbLastSync = Date.now();
+function sbTickClock() {
+    document.getElementById('sb-clock').textContent = new Date().toLocaleTimeString('he-IL');
+    const sec = Math.round((Date.now() - sbLastSync) / 1000);
+    document.getElementById('sb-updated').textContent = sec < 5 ? 'חי · עודכן עכשיו' : `חי · עודכן לפני ${sec} שנ׳`;
+    document.getElementById('sb-led').classList.toggle('stale', sec > SB_POLL_MS / 1000 * 2.5);
+}
+setInterval(sbTickClock, 1000); sbTickClock();
 
-const TYPE_COLORS   = { info: '#17d8f5', normal: '#36e273', critical: '#ff6b7a', uncertain: '#ffd700' };
-const STATUS_COLORS = { pending: '#a0a8c0', approved: '#36e273', rejected: '#ff6b7a', executed: '#17d8f5' };
+/* ── counters: tween from the old value (0 on load) to the new one ── */
+function sbCount(el, to, from = 0, delay = 0) {
+    if (to === null || to === undefined) { el.textContent = '—'; return; }
+    const dec = +(el.dataset.dec || 0);
+    if (!SB_GO || from === to) { el.textContent = (+to).toFixed(dec); return; }
+    SB_M.animate(from, +to, { duration: 1.3, delay, ease: SB_EASE, onUpdate: v => { el.textContent = v.toFixed(dec); } });
+}
+function sbLiveValues(d) {
+    const tot = d.total_decisions || 0, pct = n => tot ? Math.round(n / tot * 100) : 0;
+    const crit = (d.type_counts || {}).critical || 0, appr = (d.status_counts || {}).approved || 0, raci = d.raci_counts || {};
+    return {
+        total_decisions: tot, week_total: d.week_total, pending_approvals: d.pending_approvals,
+        critical: crit, critical_pct: pct(crit), approved: appr, approved_pct: pct(appr),
+        avg_feedback: d.avg_feedback, total_users: d.total_users, written_count: d.written_count,
+        raci_R: raci.R || 0, raci_A: raci.A || 0, raci_C: raci.C || 0, raci_I: raci.I || 0,
+    };
+}
 
-const typeData = {{ type_counts | tojson }};
-new Chart(document.getElementById('typeChart'), {
-    type: 'doughnut',
-    data: {
-        labels: Object.keys(typeData).map(k => ({ info:'מידע', normal:'רגיל', critical:'קריטי', uncertain:'לא ודאי' })[k] || k),
-        datasets: [{
-            data: Object.values(typeData),
-            backgroundColor: Object.keys(typeData).map(k => (TYPE_COLORS[k] || '#888') + 'cc'),
-            borderColor:     Object.keys(typeData).map(k => TYPE_COLORS[k] || '#888'),
-            borderWidth: 2,
-            hoverBorderWidth: 3,
-        }]
-    },
-    options: { ...CHART_DEFAULTS, cutout: '65%' }
-});
+/* ── background + busbar reflect this week's real activity ── */
+function sbSyncGrid(d) {
+    const max = Math.max(1, ...d.daily_data);
+    const load = Math.min(1, d.week_total / Math.max(7, max * 7 * 0.6));   // a busy week = a full yard
+    document.getElementById('sb-busbar').style.setProperty('--flow', (4.2 - 2.8 * load).toFixed(2) + 's');
+    if (window.SubstationBG) { SubstationBG.setLoad(load); SubstationBG.setAlarm(d.pending_approvals > 0); }
+}
 
-const statusData = {{ status_counts | tojson }};
-new Chart(document.getElementById('statusChart'), {
-    type: 'doughnut',
-    data: {
-        labels: Object.keys(statusData).map(k => ({ pending:'ממתין', approved:'מאושר', rejected:'נדחה', executed:'בוצע' })[k] || k),
-        datasets: [{
-            data: Object.values(statusData),
-            backgroundColor: Object.keys(statusData).map(k => (STATUS_COLORS[k] || '#888') + 'cc'),
-            borderColor:     Object.keys(statusData).map(k => STATUS_COLORS[k] || '#888'),
-            borderWidth: 2,
-            hoverBorderWidth: 3,
-        }]
-    },
-    options: { ...CHART_DEFAULTS, cutout: '65%' }
-});
+/* ── donuts ── */
+let sbFilter = null;
+function sbDonut(svgId, legendId, data, dict, key, animate) {
+    const svg = document.getElementById(svgId), leg = document.getElementById(legendId);
+    svg.replaceChildren(); leg.replaceChildren();
+    const entries = Object.keys(dict).filter(k => data[k]).map(k => [k, data[k]]);
+    const total = entries.reduce((a, [, v]) => a + v, 0), R = 50, CIRC = 2 * Math.PI * R;
+    svg.appendChild(svgEl('circle', { cx: 66, cy: 66, r: R, fill: 'none', stroke: sbVar('--line'), 'stroke-width': 14 }));
+    let acc = 0;
+    entries.forEach(([k, v], i) => {
+        const len = Math.max(0, v / total * CIRC - 2), color = sbVar(dict[k][1]);
+        const seg = svgEl('circle', { cx: 66, cy: 66, r: R, class: 'seg', stroke: color, 'stroke-dasharray': `${len} ${CIRC - len}`, 'stroke-dashoffset': -acc, transform: 'rotate(-90 66 66)' });
+        seg.style.color = color;
+        const t = svgEl('title', {}); t.textContent = `${dict[k][0]}: ${v}`; seg.appendChild(t);
+        seg.addEventListener('click', () => sbApplyFilter(key, k, dict[k][0]));
+        svg.appendChild(seg);
+        if (animate && SB_GO) SB_M.animate(seg, { strokeDasharray: [`0 ${CIRC}`, `${len} ${CIRC - len}`] }, { duration: .9, delay: .35 + i * .12, ease: SB_EASE });
+        acc += v / total * CIRC;
+        const b = document.createElement('button'); b.type = 'button'; b.dataset.key = key; b.dataset.val = k;
+        const sw = document.createElement('i'); sw.style.background = color;
+        const nm = document.createElement('span'); nm.textContent = dict[k][0];
+        const n = document.createElement('b'); n.textContent = v;
+        b.append(sw, nm, n);
+        b.addEventListener('click', () => sbApplyFilter(key, k, dict[k][0]));
+        leg.appendChild(b);
+    });
+    const num = svgEl('text', { x: 66, y: 76, 'text-anchor': 'middle', class: 'num' }); num.textContent = total;
+    svg.appendChild(num);
+    if (!total) leg.innerHTML = '<div class="sb-empty">אין נתונים עדיין</div>';
+    sbMarkFilter();
+}
 
-new Chart(document.getElementById('dailyChart'), {
-    type: 'line',
-    data: {
-        labels: {{ daily_labels | safe }},
-        datasets: [{
-            label: 'החלטות',
-            data: {{ daily_data | safe }},
-            borderColor: '#8b9cf4',
-            backgroundColor: 'rgba(139,156,244,0.12)',
-            tension: 0.4,
-            fill: true,
-            pointBackgroundColor: '#8b9cf4',
-            pointBorderColor: '#fff',
-            pointRadius: 4,
-            pointHoverRadius: 6,
-            borderWidth: 2,
-        }]
-    },
-    options: {
-        ...CHART_DEFAULTS,
-        scales: {
-            x: { ticks: { color: '#a8b0d0', font: { family: 'Heebo', size: 11 } }, grid: { color: '#1a1e38' } },
-            y: { ticks: { color: '#a8b0d0', stepSize: 1, font: { family: 'Heebo', size: 11 } }, grid: { color: '#1a1e38' }, beginAtZero: true }
-        }
+/* ── 7-day sparkline that draws itself ── */
+function sbSpark(labels, data, animate) {
+    const svg = document.getElementById('sb-spark'), H = 160, P = 24;
+    const W = Math.max(240, Math.round(svg.clientWidth || 400));     // draw at the real width: no stretched text
+    svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+    svg.replaceChildren();
+    const max = Math.max(1, ...data), e = sbVar('--energy');
+    const X = i => W - P - i * (W - 2 * P) / Math.max(1, data.length - 1);   // RTL: oldest on the right
+    const Y = v => H - P - (v / max) * (H - 2 * P);
+    const pts = data.map((v, i) => [X(i), Y(v)]);
+    const line = pts.map((p, i) => (i ? 'L' : 'M') + p[0].toFixed(1) + ' ' + p[1].toFixed(1)).join(' ');
+    const defs = svgEl('defs', {}), g = svgEl('linearGradient', { id: 'sb-g', x1: 0, y1: 0, x2: 0, y2: 1 });
+    g.append(svgEl('stop', { offset: 0, 'stop-color': e, 'stop-opacity': .35 }), svgEl('stop', { offset: 1, 'stop-color': e, 'stop-opacity': 0 }));
+    defs.appendChild(g); svg.appendChild(defs);
+    [0, .5, 1].forEach(f => svg.appendChild(svgEl('line', { x1: P, x2: W - P, y1: Y(max * f), y2: Y(max * f), stroke: sbVar('--line'), 'stroke-dasharray': '3 4' })));
+    [0, max].forEach(v => { const t = svgEl('text', { x: W - 4, y: Y(v) + 3, 'text-anchor': 'end' }); t.textContent = v; svg.appendChild(t); });
+    const area = svgEl('path', { d: `${line} L${X(data.length - 1)} ${H - P} L${X(0)} ${H - P}Z`, fill: 'url(#sb-g)' });
+    const path = svgEl('path', { d: line, fill: 'none', stroke: e, 'stroke-width': 2.5, 'stroke-linejoin': 'round', pathLength: 1, 'stroke-dasharray': '1 1' });
+    path.style.filter = `drop-shadow(0 0 6px ${e})`;
+    svg.append(area, path);
+    const dots = pts.map((p, i) => {
+        const last = i === pts.length - 1;
+        const c = svgEl('circle', { cx: p[0], cy: p[1], r: last ? 5 : 3, fill: last ? e : '#070b12', stroke: e, 'stroke-width': 2 });
+        const t = svgEl('title', {}); t.textContent = `${labels[i]}: ${data[i]} החלטות`; c.appendChild(t);
+        svg.appendChild(c);
+        const lb = svgEl('text', { x: p[0], y: H - 5, 'text-anchor': 'middle' }); lb.textContent = labels[i]; svg.appendChild(lb);
+        return c;
+    });
+    const endLbl = svgEl('text', { x: pts[pts.length - 1][0], y: pts[pts.length - 1][1] - 11, 'text-anchor': 'middle' });
+    endLbl.textContent = data[data.length - 1]; endLbl.style.fill = e; endLbl.style.fontSize = '12px';
+    svg.appendChild(endLbl);
+    if (animate && SB_GO) {
+        SB_M.animate(path, { strokeDashoffset: [1, 0] }, { duration: 1.4, delay: .5, ease: 'easeInOut' });
+        SB_M.animate(area, { opacity: [0, 1] }, { duration: .8, delay: 1.3 });
+        SB_M.animate(dots, { scale: [0, 1] }, { delay: SB_M.stagger(.1, { startDelay: .6 }), type: 'spring', stiffness: 400, damping: 12 });
     }
+}
+
+/* ── filter + expanding rows ── */
+function sbMarkFilter() {
+    document.querySelectorAll('.sb-legend button').forEach(b => b.classList.toggle('on', !!sbFilter && b.dataset.key === sbFilter.key && b.dataset.val === sbFilter.val));
+}
+function sbApplyFilter(key, val, label) {
+    sbFilter = (sbFilter && sbFilter.key === key && sbFilter.val === val) ? null : { key, val };
+    document.getElementById('sb-filter-note').textContent = sbFilter ? `מסונן: ${label} · לחץ שוב לביטול` : 'כל ההחלטות · לחץ על שורה לפרטים';
+    sbMarkFilter();
+    const shown = [];
+    document.querySelectorAll('#sb-rows .sb-row').forEach(tr => {
+        const ok = !sbFilter || tr.dataset[sbFilter.key] === sbFilter.val;
+        tr.hidden = !ok;
+        const det = document.querySelector(`.sb-detail[data-for="${tr.dataset.id}"]`);
+        if (det) det.hidden = !ok;
+        if (ok) shown.push(tr);
+    });
+    if (SB_GO && shown.length) SB_M.animate(shown, { opacity: [0, 1], x: [-24, 0] }, { delay: SB_M.stagger(.04) });
+}
+function sbToggleRow(tr) {
+    const det = document.querySelector(`.sb-detail[data-for="${tr.dataset.id}"]`);
+    if (!det) return;
+    const inner = det.querySelector('.inner'), open = inner.dataset.open === '1';
+    inner.dataset.open = open ? '0' : '1';
+    const h = inner.scrollHeight;
+    if (!SB_GO) { inner.style.height = open ? '0' : 'auto'; return; }
+    SB_M.animate(inner, { height: open ? [inner.offsetHeight, 0] : [0, h] }, { type: 'spring', stiffness: 260, damping: 28 })
+        .then(() => { if (!open) inner.style.height = 'auto'; });
+}
+document.querySelectorAll('#sb-rows .sb-row').forEach(tr => {
+    tr.addEventListener('click', () => sbToggleRow(tr));
+    tr.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); sbToggleRow(tr); } });
 });
+
+/* ── bay cards: 3D tilt, cursor glow, spring back ── */
+document.querySelectorAll('.sb-bay').forEach(bay => {
+    const card = bay.querySelector('.sb-card');
+    bay.addEventListener('pointermove', e => {
+        const r = card.getBoundingClientRect(), x = (e.clientX - r.left) / r.width - .5, y = (e.clientY - r.top) / r.height - .5;
+        card.style.setProperty('--mx', (e.clientX - r.left) + 'px'); card.style.setProperty('--my', (e.clientY - r.top) + 'px');
+        if (SB_GO) SB_M.animate(card, { rotateY: -x * 14, rotateX: -y * 14, y: -5 }, { duration: .25 });
+    });
+    bay.addEventListener('pointerleave', () => SB_GO && SB_M.animate(card, { rotateY: 0, rotateX: 0, y: 0 }, { type: 'spring', stiffness: 300, damping: 14 }));
+});
+
+/* ── ripple on every button ── */
+document.querySelectorAll('.sb-btn').forEach(b => b.addEventListener('click', e => {
+    if (!SB_GO) return;
+    const r = b.getBoundingClientRect(), s = document.createElement('span');
+    s.className = 'ripple'; s.style.left = (e.clientX - r.left) + 'px'; s.style.top = (e.clientY - r.top) + 'px';
+    b.appendChild(s);
+    SB_M.animate(s, { scale: [0, 30], opacity: [1, 0] }, { duration: .6 }).then(() => s.remove());
+}));
+
+/* ── live background on/off, remembered per browser ── */
+(function () {
+    const btn = document.getElementById('sb-bg-toggle');
+    let on = true;
+    try { on = localStorage.getItem('sb-bg') !== 'off'; } catch (e) {}
+    const apply = () => {
+        btn.setAttribute('aria-pressed', on);
+        btn.textContent = on ? '⚡ רקע חי' : '○ רקע כבוי';
+        document.body.classList.toggle('bg-off', !on);
+        if (window.SubstationBG) SubstationBG.setRunning(on);
+    };
+    btn.addEventListener('click', () => { on = !on; try { localStorage.setItem('sb-bg', on ? 'on' : 'off'); } catch (e) {} apply(); });
+    window.addEventListener('load', apply);
+})();
+
+/* ── entrance ── */
+if (SB_GO) {
+    SB_M.animate('#sb-busbar', { scaleX: [0, 1] }, { duration: .8, ease: 'easeOut' });
+    SB_M.animate('.sb-bay .sb-card', { y: [-46, 0], opacity: [0, 1], scale: [.9, 1] }, { delay: SB_M.stagger(.08, { startDelay: .25 }), type: 'spring', stiffness: 260, damping: 18 });
+    SB_M.animate('.sb-relay', { x: [30, 0], opacity: [0, 1] }, { delay: SB_M.stagger(.06, { startDelay: .6 }) });
+    SB_M.animate('.sb-meter i, .sb-role-bar i', { scaleX: [0, 1] }, { delay: SB_M.stagger(.08, { startDelay: .7 }), duration: 1, ease: SB_EASE });
+    SB_M.animate('#sb-rows .sb-row', { opacity: [0, 1], x: [-24, 0] }, { delay: SB_M.stagger(.05, { startDelay: .8 }) });
+}
+const sbInit = sbLiveValues({ ...sbState,
+    avg_feedback: {{ avg_feedback | tojson }}, total_users: {{ total_users | tojson }}, written_count: {{ written_count | tojson }},
+    raci_counts: {{ raci_counts | tojson }} });
+document.querySelectorAll('[data-live]').forEach((el, i) => sbCount(el, sbInit[el.dataset.live], 0, .3 + i * .04));
+sbDonut('sb-d-type', 'sb-l-type', sbState.type_counts, SB_TYPES, 'type', true);
+sbDonut('sb-d-status', 'sb-l-status', sbState.status_counts, SB_STATUS, 'status', true);
+sbSpark(sbState.daily_labels, sbState.daily_data, true);
+let sbSparkT = 0;
+window.addEventListener('resize', () => { clearTimeout(sbSparkT); sbSparkT = setTimeout(() => sbSpark(sbState.daily_labels, sbState.daily_data, false), 150); });
+window.addEventListener('load', () => sbSyncGrid(sbState));
+
+/* ── live polling: counters move, a new decision fires a surge ── */
+let sbPrev = sbInit;
+async function sbPoll() {
+    if (document.hidden) return;
+    try {
+        const r = await fetch('/dashboard/live', { headers: { 'Accept': 'application/json' } });
+        if (!r.ok) return;
+        const d = await r.json();
+        sbLastSync = Date.now();
+        const vals = sbLiveValues(d);
+        document.querySelectorAll('[data-live]').forEach(el => {
+            const k = el.dataset.live;
+            if (vals[k] !== sbPrev[k]) {
+                sbCount(el, vals[k], +sbPrev[k] || 0);
+                const bay = el.closest('.sb-bay');
+                if (bay) { bay.classList.remove('bump'); void bay.offsetWidth; bay.classList.add('bump'); }
+            }
+        });
+        document.getElementById('sb-week').textContent = d.week_total;
+        const pb = document.getElementById('sb-pending-bay');
+        pb.classList.toggle('alarm', d.pending_approvals > 0); pb.classList.toggle('c-ok', !d.pending_approvals);
+        document.getElementById('sb-pending-foot').textContent = d.pending_approvals ? 'לחץ לטיפול ←' : 'אין מה לאשר';
+        if (JSON.stringify(d.type_counts) !== JSON.stringify(sbState.type_counts)) sbDonut('sb-d-type', 'sb-l-type', d.type_counts, SB_TYPES, 'type', false);
+        if (JSON.stringify(d.status_counts) !== JSON.stringify(sbState.status_counts)) sbDonut('sb-d-status', 'sb-l-status', d.status_counts, SB_STATUS, 'status', false);
+        if (JSON.stringify(d.daily_data) !== JSON.stringify(sbState.daily_data)) sbSpark(d.daily_labels, d.daily_data, false);
+        const newest = (d.recent_decisions && d.recent_decisions[0]) ? d.recent_decisions[0].id : 0;
+        if (newest > sbState.latest_id) {
+            const nd = d.recent_decisions[0];
+            document.getElementById('sb-toast-text').textContent = `⚡ החלטה חדשה #${nd.id}: ${nd.summary || ''}`.slice(0, 120);
+            const toast = document.getElementById('sb-toast');
+            toast.hidden = false;
+            if (SB_GO) SB_M.animate(toast, { y: [40, 0], opacity: [0, 1], scale: [.9, 1] }, { type: 'spring', stiffness: 380, damping: 20 });
+            if (window.SubstationBG) SubstationBG.surge();
+        }
+        sbState = { ...d, latest_id: Math.max(newest, sbState.latest_id) };
+        sbPrev = vals;
+        sbSyncGrid(d);
+    } catch (e) { /* the LED turns amber on its own when syncs stop arriving */ }
+}
+setInterval(sbPoll, SB_POLL_MS);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) sbPoll(); });
 
 /* ── New Decision flow ──────────────────────────────────────────────────── */
 let allUsers = [];

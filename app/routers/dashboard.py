@@ -87,12 +87,12 @@ async def _pending_approvals_count(user_id: int, session: AsyncSession) -> int:
     return result.scalar() or 0
 
 
-@router.get("/", response_class=HTMLResponse)
-async def dashboard(
-    request: Request,
-    session: AsyncSession = Depends(get_db_session),
-    current_user: User = Depends(get_current_user),
-):
+DASHBOARD_DAYS = 7          # the daily sparkline window, zero-filled so every day shows
+
+
+async def _dashboard_stats(current_user: User, session: AsyncSession) -> dict:
+    """Everything the main dashboard shows. The page renders it once and
+    `/dashboard/live` re-serves it as JSON, so the two can never disagree."""
     uid = current_user.id
 
     # Subquery: decisions distributed to this user
@@ -141,8 +141,10 @@ async def dashboard(
     total_users_q = await session.execute(select(func.count()).select_from(User))
     total_users = total_users_q.scalar()
 
-    # --- Last 7 days ---
-    week_ago = datetime.utcnow() - timedelta(days=7)
+    # --- Last 7 days (zero-filled: a quiet day is a point on the line, not a gap) ---
+    today = datetime.utcnow().date()
+    first_day = today - timedelta(days=DASHBOARD_DAYS - 1)
+    week_ago = datetime.combine(first_day, datetime.min.time())
     daily_q = await session.execute(
         select(
             func.date_trunc("day", Decision.created_at).label("day"),
@@ -153,9 +155,10 @@ async def dashboard(
         .group_by("day")
         .order_by("day")
     )
-    daily_rows = daily_q.all()
-    daily_labels = [row.day.strftime("%d/%m") for row in daily_rows]
-    daily_data = [row.cnt for row in daily_rows]
+    by_day = {row.day.date(): row.cnt for row in daily_q.all()}
+    days = [first_day + timedelta(days=i) for i in range(DASHBOARD_DAYS)]
+    daily_labels = [d.strftime("%d/%m") for d in days]
+    daily_data = [by_day.get(d, 0) for d in days]
 
     # --- Recent decisions (last 10) ---
     recent_q = await session.execute(
@@ -220,16 +223,15 @@ async def dashboard(
         "executed": "בוצע",
     }
 
-    return templates.TemplateResponse("dashboard.html", {
-        "request": request,
-        "current_user": current_user,
+    return {
         "total_decisions": total_decisions,
         "total_users": total_users,
         "avg_feedback": avg_feedback,
         "type_counts": type_counts,
         "status_counts": status_counts,
-        "daily_labels": json.dumps(daily_labels),
-        "daily_data": json.dumps(daily_data),
+        "daily_labels": daily_labels,
+        "daily_data": daily_data,
+        "week_total": sum(daily_data),
         "recent_decisions": recent_decisions,
         "role_counts": role_counts,
         "type_labels_he": type_labels_he,
@@ -237,7 +239,34 @@ async def dashboard(
         "pending_approvals": pending_approvals,
         "raci_counts": raci_counts,
         "written_count": written_count,
+    }
+
+
+@router.get("/", response_class=HTMLResponse)
+async def dashboard(
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+    current_user: User = Depends(get_current_user),
+):
+    stats = await _dashboard_stats(current_user, session)
+    return templates.TemplateResponse("dashboard.html", {
+        "request": request,
+        "current_user": current_user,
+        **stats,
     })
+
+
+@router.get("/live")
+async def dashboard_live(
+    session: AsyncSession = Depends(get_db_session),
+    current_user: User = Depends(get_current_user),
+):
+    """The same numbers as the page, polled by it so the counters move without a reload."""
+    stats = await _dashboard_stats(current_user, session)
+    stats.pop("type_labels_he")
+    stats.pop("status_labels_he")
+    stats["server_time"] = datetime.utcnow().isoformat(timespec="seconds")
+    return JSONResponse(stats)
 
 
 # -----------------------------------------------------------------------
