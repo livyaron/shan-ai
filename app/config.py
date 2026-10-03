@@ -27,7 +27,8 @@ class Settings(BaseSettings):
     PROJECT_VERSION: str = "1.0.0"
     DEBUG: bool = True
 
-    # Bearer token for read-only GET /api/inventory. Empty keeps the endpoint closed (503).
+    # Bearer token for read-only GET /api/inventory and GET /api/missions.
+# Empty keeps both endpoints closed (503). There is no second key.
     INVENTORY_API_KEY: str = os.getenv("INVENTORY_API_KEY", "")
 
     # Telegram Bot

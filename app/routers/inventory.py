@@ -44,11 +44,20 @@ def _bearer_token(authorization: str | None) -> str | None:
     return token or None
 
 
-def _require_inventory_key(authorization: str | None) -> None:
+def _require_inventory_key(
+    authorization: str | None,
+    *,
+    unconfigured_detail: str = "Inventory API is not configured",
+) -> None:
+    """Shared bearer check for the read-only APIs that use INVENTORY_API_KEY.
+
+    Missing or wrong token is 401. An unset key is 503 so the route stays
+    closed rather than world-readable. Callers may override the 503 text.
+    """
     expected = _configured_key()
     if not expected:
         # Do not leave the route open when the key was never set.
-        raise HTTPException(status_code=503, detail="Inventory API is not configured")
+        raise HTTPException(status_code=503, detail=unconfigured_detail)
     token = _bearer_token(authorization)
     if token is None or not hmac.compare_digest(token, expected):
         raise HTTPException(status_code=401, detail="Unauthorized")
