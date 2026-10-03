@@ -20,6 +20,7 @@ from app.routers import files as files_router  # noqa: E402
 from app.routers import ask as ask_router  # noqa: E402
 from app.routers import logs as logs_router  # noqa: E402
 from app.routers import projects as projects_router  # noqa: E402
+from app.routers import inventory as inventory_router  # noqa: E402
 from app.routers import llm_config as llm_config_router  # noqa: E402
 from app.routers import eval_loop as eval_loop_router  # noqa: E402
 from app.routers import learning_rules as learning_rules_router  # noqa: E402
@@ -48,6 +49,7 @@ app.include_router(files_router.router)
 app.include_router(ask_router.router)
 app.include_router(logs_router.router)
 app.include_router(projects_router.router)
+app.include_router(inventory_router.router)
 app.include_router(llm_config_router.router)
 app.include_router(eval_loop_router.router)
 app.include_router(learning_rules_router.router)
