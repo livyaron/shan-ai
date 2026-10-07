@@ -28,6 +28,15 @@ GEMMA_MODELS = [
 
 _BASE = "https://generativelanguage.googleapis.com/v1beta/models"
 
+# Gemma 4 thinks before it answers, and the thinking is charged to
+# maxOutputTokens. Callers size max_tokens for the ANSWER (a brief asks for
+# 150), so on 2026-10-07 82 of the calls in the logs came back with
+# finishReason=MAX_TOKENS and no text — the whole budget spent thinking. The
+# headroom is added on top; the answer's length is still set by the prompt.
+# Thinking is not switched off instead: Google documents no supported switch for
+# Gemma 4, and an unknown generationConfig field answers 400 (forum reports).
+THINKING_HEADROOM = 2048
+
 
 # The key is a query parameter on every Google AI URL, so an httpx error string
 # carries it verbatim — into the logs, and out through the /llm-health endpoint.
@@ -170,7 +179,7 @@ async def gemma_chat(
         system_text = f"{system_text}\n\n{json_instruction}" if system_text else json_instruction
 
     gen_config: dict = {
-        "maxOutputTokens": max_tokens,
+        "maxOutputTokens": max_tokens + THINKING_HEADROOM,
         "temperature": temperature,
     }
     if json_mode:
@@ -183,7 +192,9 @@ async def gemma_chat(
     if system_text:
         payload["system_instruction"] = {"parts": [{"text": system_text}]}
 
-    model_list = models or GEMMA_MODELS
+    # `models` comes through llm_router for BOTH providers; a Groq model name
+    # (llama-3.1-8b-instant) sent here is a guaranteed 404 on every fallback.
+    model_list = [m for m in (models or []) if m.startswith(("gemma", "gemini"))] or GEMMA_MODELS
     last_error: Exception | None = None
 
     async with httpx.AsyncClient(timeout=60.0) as client:

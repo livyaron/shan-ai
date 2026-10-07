@@ -265,3 +265,58 @@ def test_public_base_url_prefers_the_railway_domain(monkeypatch):
 
     s = Settings(RAILWAY_PUBLIC_DOMAIN="", BASE_URL="http://localhost:8000")
     assert s.public_base_url == "http://localhost:8000"
+
+
+# ── Gemma 4: thinking headroom and foreign model names (2026-10-07) ────────
+
+class _Resp:
+    def __init__(self, data):
+        self._data = data
+
+    def raise_for_status(self):
+        pass
+
+    def json(self):
+        return self._data
+
+
+async def _capture_gemma(monkeypatch, **kwargs):
+    from app.services import gemma_client
+    sent = []
+
+    class _Client:
+        def __init__(self, *a, **k):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def post(self, url, json):
+            sent.append((url.split("/models/")[1].split(":")[0], json))
+            return _Resp({"candidates": [{"content": {"parts": [
+                {"text": "thinking…", "thought": True}, {"text": "תשובה"}]}}]})
+
+    monkeypatch.setattr(gemma_client.settings, "GOOGLE_AI_API_KEY", "k")
+    monkeypatch.setattr(gemma_client.httpx, "AsyncClient", _Client)
+    out = await gemma_client.gemma_chat([{"role": "user", "content": "x"}], **kwargs)
+    return out, sent
+
+
+async def test_gemma_gets_room_to_think_before_it_answers(monkeypatch):
+    from app.services import gemma_client
+    out, sent = await _capture_gemma(monkeypatch, max_tokens=150)
+    assert out == "תשובה"                                   # the thought part is not the answer
+    cfg = sent[0][1]["generationConfig"]
+    assert cfg["maxOutputTokens"] == 150 + gemma_client.THINKING_HEADROOM
+    assert set(cfg) == {"maxOutputTokens", "temperature"}    # no undocumented thinking field
+
+
+async def test_a_groq_model_name_is_never_sent_to_google(monkeypatch):
+    from app.services import gemma_client
+    _, sent = await _capture_gemma(monkeypatch, models=["llama-3.1-8b-instant"])
+    assert sent[0][0] == gemma_client.GEMMA_MODELS[0]
+    _, sent = await _capture_gemma(monkeypatch, models=["gemma-4-26b-a4b-it"])
+    assert sent[0][0] == "gemma-4-26b-a4b-it"
