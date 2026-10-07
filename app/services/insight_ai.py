@@ -33,15 +33,24 @@ USAGE = "pattern_analysis"
 AREA_SECTORS = (ss.PLANNING, ss.SUPERVISION, ss.EXECUTION, ss.PM_DEPT)
 DIVISION = "division"
 
-# Context caps — Groq's daily token budget is shared with the per-project
-# briefs that run on the same sync.
+# Size. The Groq account (on_demand tier) allows 8,000 tokens PER MINUTE, and
+# Groq counts prompt + max_tokens against it — a 9,137-token request was
+# refused outright on 2026-10-07 (413) and the whole analysis fell through to
+# a failing fallback. So every context is packed into a character budget
+# (`_pack`): Hebrew runs at no less than ~2 chars/token, so 7,000 chars of
+# context + ~2,200 of system prompt + the reply cap stays under 8,000.
+GROQ_TPM = 8000             # the account's per-minute limit (Groq on_demand tier)
+CHARS_PER_TOKEN = 2.0       # conservative for Hebrew; real text tokenizes denser
+CONTEXT_CHARS = {"area": 7000, "project": 7000}
+MAX_TOKENS = {"area": 2400, "project": 2200}
 MAX_HOT_PROJECTS = 15       # 🔴+🟠 projects written out in full per area
 MAX_FOLLOW_PROJECTS = 25    # 🟡 projects listed with their reasons only
 AREA_WEEKS = 2              # newest weekly texts per hot project (area levels)
 PROJECT_WEEKS = 8           # newest weekly texts for a project deep-dive
 TEXT_CHARS = 220            # per weekly text, area levels
-PROJECT_TEXT_CHARS = 500    # per weekly text, project level
-MAX_TOKENS = {"area": 2800, "project": 2000}
+PROJECT_TEXT_CHARS = 450    # per weekly text, project level
+TPM_WAIT_SECONDS = 65       # one Groq per-minute window, plus slack
+ATTEMPTS = 3                # per analysis, a TPM window apart
 
 _NUM = re.compile(r"\d+(?:\.\d+)?")
 
@@ -116,22 +125,49 @@ def _project_line(x: dict, tri: dict, aliases: dict) -> str:
             f"סיבות: {reasons}")
 
 
-def _hot_block(projects: list[dict], tri: dict, aliases: dict, weekly: dict[str, list[tuple[str, str]]]) -> list[str]:
+# Line priorities for `_pack`: lower survives longer when the budget is tight.
+MUST, HOT, WEEK1, FOLLOW, WEEK2 = 0, 1, 2, 3, 4
+
+
+def _pack(items: list[tuple[int, str]], budget: int) -> str:
+    """Join (priority, line) pairs into at most `budget` chars, keeping the
+    order. When it does not fit, whole lines go — lowest priority first, the
+    last of them first — and the context says how many, so the model knows
+    the list is not complete."""
+    keep = [True] * len(items)
+    total = sum(len(t) + 1 for _, t in items)
+    dropped = 0
+    for prio in sorted({p for p, _ in items if p != MUST}, reverse=True):
+        for i in range(len(items) - 1, -1, -1):
+            if total <= budget:
+                break
+            if keep[i] and items[i][0] == prio:
+                keep[i] = False
+                total -= len(items[i][1]) + 1
+                dropped += 1
+    lines = [t for (_, t), k in zip(items, keep) if k]
+    if dropped:
+        lines.append(f"(הושמטו {dropped} שורות מחוסר מקום — הרשימות למעלה אינן מלאות.)")
+    return "\n".join(lines)
+
+
+def _hot_block(projects: list[dict], tri: dict, aliases: dict,
+               weekly: dict[str, list[tuple[str, str]]]) -> list[tuple[int, str]]:
     order = {lv: i for i, lv in enumerate(it.ORDER)}
     ranked = sorted(projects, key=lambda x: (order[tri.get(x["identifier"], {"level": it.FYI})["level"]],
                                              -(x.get("forecast_moved_months") or 0)))
     hot = [x for x in ranked if tri.get(x["identifier"], {}).get("level") in (it.ESCALATE, it.WEEK)]
     follow = [x for x in ranked if tri.get(x["identifier"], {}).get("level") == it.FOLLOW]
-    lines = [f"פרויקטים בדרגת הסלמה / טיפול מנהל אגף ({len(hot)}, מוצגים עד {MAX_HOT_PROJECTS}):"]
+    items = [(MUST, f"פרויקטים בדרגת הסלמה / טיפול מנהל אגף ({len(hot)}, מוצגים עד {MAX_HOT_PROJECTS}):")]
     for x in hot[:MAX_HOT_PROJECTS]:
-        lines.append("- " + _project_line(x, tri, aliases))
+        items.append((HOT, "- " + _project_line(x, tri, aliases)))
         if x.get("escalation"):
-            lines.append(f"  עמודת לטיפול: {_clean(x['escalation'], 120)}")
-        for week, text in weekly.get(x["identifier"], [])[:AREA_WEEKS]:
-            lines.append(f"  דיווח {week}: {_clean(text, TEXT_CHARS)}")
-    lines.append(f"פרויקטים במעקב ({len(follow)}, מוצגים עד {MAX_FOLLOW_PROJECTS}):")
-    lines += ["- " + _project_line(x, tri, aliases) for x in follow[:MAX_FOLLOW_PROJECTS]]
-    return lines
+            items.append((HOT, f"  עמודת לטיפול: {_clean(x['escalation'], 120)}"))
+        for n, (week, text) in enumerate(weekly.get(x["identifier"], [])[:AREA_WEEKS]):
+            items.append((WEEK1 if n == 0 else WEEK2, f"  דיווח {week}: {_clean(text, TEXT_CHARS)}"))
+    items.append((MUST, f"פרויקטים במעקב ({len(follow)}, מוצגים עד {MAX_FOLLOW_PROJECTS}):"))
+    items += [(FOLLOW, "- " + _project_line(x, tri, aliases)) for x in follow[:MAX_FOLLOW_PROJECTS]]
+    return items
 
 
 def _sector_row(s: dict) -> str:
@@ -165,8 +201,8 @@ def division_context(p: dict, tri: dict, weekly: dict, aliases: dict) -> str:
     topics = sorted(m.get("risk_categories", {}).get("value", []), key=lambda r: -r["projects"])[:6]
     if topics:
         lines += ["", "נושאים שכותבים עליהם (פרויקטים): " + " | ".join(f"{r['category']}: {r['projects']}" for r in topics)]
-    lines += [""] + _hot_block(p.get("projects", []), tri, aliases, weekly)
-    return "\n".join(lines)
+    items = [(MUST, ln) for ln in lines] + [(MUST, "")] + _hot_block(p.get("projects", []), tri, aliases, weekly)
+    return _pack(items, CONTEXT_CHARS["area"])
 
 
 def sector_context(p: dict, tri: dict, weekly: dict, aliases: dict, sector: str) -> str:
@@ -183,8 +219,8 @@ def sector_context(p: dict, tri: dict, weekly: dict, aliases: dict, sector: str)
     for x in projects:
         stages[x["stage"]] = stages.get(x["stage"], 0) + 1
     lines.append("תמהיל שלבים: " + " | ".join(f"{k}: {v}" for k, v in sorted(stages.items(), key=lambda kv: -kv[1])))
-    lines += [""] + _hot_block(projects, tri, aliases, weekly)
-    return "\n".join(lines)
+    items = [(MUST, ln) for ln in lines] + [(MUST, "")] + _hot_block(projects, tri, aliases, weekly)
+    return _pack(items, CONTEXT_CHARS["area"])
 
 
 def project_context(h: dict, triage: dict, aliases: dict) -> str:
@@ -219,9 +255,12 @@ def project_context(h: dict, triage: dict, aliases: dict) -> str:
     if cur.get("risks"):
         lines.append(f"עמודת הסיכונים: {_clean(cur['risks'], 300)}")
     lines += ["", f"הדיווחים השבועיים (החדש ראשון, עד {PROJECT_WEEKS}):"]
-    lines += [f"- {w['week']}: {_clean(w['text'], PROJECT_TEXT_CHARS)}" + (" (זהה לקודם)" if w.get("same_as_before") else "")
-              for w in h.get("weekly", [])[:PROJECT_WEEKS]]
-    return "\n".join(lines)
+    items = [(MUST, ln) for ln in lines]
+    # Older reports give way first: priority grows with age.
+    items += [(HOT + n, f"- {w['week']}: {_clean(w['text'], PROJECT_TEXT_CHARS)}"
+                        + (" (זהה לקודם)" if w.get("same_as_before") else ""))
+              for n, w in enumerate(h.get("weekly", [])[:PROJECT_WEEKS])]
+    return _pack(items, CONTEXT_CHARS["project"])
 
 
 _RULES = """כללים מחייבים:
@@ -336,12 +375,31 @@ async def _ask(system: str, context: str, kind: str) -> tuple[dict, str]:
     from app.services.llm_router import get_last_llm_meta, llm_chat
     raw = await llm_chat(USAGE, [{"role": "system", "content": system},
                                  {"role": "user", "content": context}],
-                         max_tokens=MAX_TOKENS[kind], temperature=0.2, json_mode=True)
+                         max_tokens=MAX_TOKENS[kind], temperature=0.2, json_mode=True,
+                         reasoning_effort="low")
     provider, _ = get_last_llm_meta()
     reply = _extract_json(raw)
     if not isinstance(reply, dict):
         raise ValueError("reply is not a JSON object")
     return reply, provider
+
+
+_sleep = asyncio.sleep   # swapped out in tests
+
+
+async def _ask_retrying(system: str, context: str, kind: str, attempts: int = ATTEMPTS) -> tuple[dict, str]:
+    """`_ask`, retried a per-minute window apart: a rate limit, a fallback
+    timeout or a reply cut mid-JSON are all worth one more try a minute later."""
+    for n in range(attempts):
+        try:
+            return await _ask(system, context, kind)
+        except Exception as e:
+            if n == attempts - 1:
+                raise
+            logger.warning(f"insight_ai: {kind} attempt {n + 1} failed ({type(e).__name__}: {str(e)[:160]}) "
+                           f"— retrying in {TPM_WAIT_SECONDS}s")
+            await _sleep(TPM_WAIT_SECONDS)
+    raise RuntimeError("unreachable")
 
 
 async def _store(session, kind: str, as_of: date, payload: dict, provider: str) -> None:
@@ -409,12 +467,14 @@ async def generate_areas(force: bool = False) -> dict:
                 for k in AREA_SECTORS:
                     jobs.append((sector_kind(k), (lambda k=k: sector_context(p, tri, weekly, aliases, k)),
                                  [x for x in p.get("projects", []) if k in x.get("sectors", [])]))
-                for kind, build, projects in jobs:
-                    if kind in have or not projects:
-                        continue
+                pending = [j for j in jobs if j[0] not in have and j[2]]
+                for i, (kind, build, projects) in enumerate(pending):
+                    if i:
+                        # Each call takes most of a minute's token budget.
+                        await _sleep(TPM_WAIT_SECONDS)
                     try:
                         ctx = build()
-                        reply, provider = await _ask(AREA_SYSTEM, ctx, "area")
+                        reply, provider = await _ask_retrying(AREA_SYSTEM, ctx, "area")
                         payload = decorate(validate(reply, ctx, {x["identifier"] for x in projects}, []), tri)
                         payload["_aliases"] = aliases
                         await _store(session, kind, date.fromisoformat(p["as_of"]), payload, provider)

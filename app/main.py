@@ -12,6 +12,11 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
+# httpx logs every request URL at INFO — and the Telegram bot token sits in the
+# URL path, the Google AI key in its query string. Both were found in plain text
+# in the Railway logs (2026-10-07). Warnings and errors still come through, and
+# those pass through gemma_client.redact where they carry a URL.
+logging.getLogger("httpx").setLevel(logging.WARNING)
 from app.database import engine  # noqa: E402
 from app.models import Base  # noqa: E402
 from app.routers import auth, telegram, dashboard, login  # noqa: E402

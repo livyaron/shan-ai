@@ -632,15 +632,13 @@ async def sync_projects_file(file_path: str, sheet_name: str | None = None,
         # History changes no live row — nothing to brief, nothing to report.
         return result
 
-    # Spawn brief generation as a background task (don't wait for it)
-    asyncio.create_task(generate_all_briefs())
+    # The patterns-page AI reading first, then the per-project briefs: both
+    # draw on the same Groq per-minute token budget, and the briefs (one call
+    # per project, ~80 minutes on 2026-10-07) left no room for the analysis.
+    asyncio.create_task(_ai_then_briefs())
 
     # Trigger project reports for all enabled-schedule users after sync
     asyncio.create_task(_trigger_reports_after_sync())
-
-    # Deep AI reading of the patterns page for the new report (PLAN.md P5).
-    from app.services.insight_ai import generate_areas
-    asyncio.create_task(generate_areas())
 
     return result
 
@@ -706,6 +704,16 @@ async def _save_weekly_entries(session, project_id: int, row: pd.Series,
     except Exception as exc:
         logger.warning(f"project_sync: weekly history failed for project {project_id}: {exc}")
         await session.rollback()
+
+
+async def _ai_then_briefs() -> None:
+    """After a live sync: the patterns-page AI reading (PLAN.md P5), then briefs."""
+    try:
+        from app.services.insight_ai import generate_areas
+        await generate_areas()
+    except Exception as e:   # the briefs must run even if the analysis cannot
+        logger.warning(f"project_sync: AI analysis after sync failed: {e}")
+    await generate_all_briefs()
 
 
 async def _trigger_reports_after_sync() -> None:

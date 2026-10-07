@@ -126,3 +126,25 @@ async def test_a_rate_limited_model_is_still_retried_next_round():
         with pytest.raises(RateLimitError):
             await gc.groq_chat([{"role": "user", "content": "hi"}])
     assert len(seen) == len(gc.MODELS) * 2
+
+
+@pytest.mark.asyncio
+async def test_reasoning_effort_goes_out_in_the_request_body():
+    seen = {}
+
+    class _Stub:
+        class chat:
+            class completions:
+                @staticmethod
+                async def create(**kw):
+                    seen.update(kw)
+                    r = type("R", (), {})()
+                    r.choices = [type("C", (), {"message": type("M", (), {"content": "ok"})()})()]
+                    return r
+
+    with patch.object(gc, "get_client", return_value=_Stub()):
+        await gc.groq_chat([{"role": "user", "content": "hi"}], reasoning_effort="low")
+        assert seen["extra_body"] == {"reasoning_effort": "low"}
+        seen.clear()
+        await gc.groq_chat([{"role": "user", "content": "hi"}])
+        assert "extra_body" not in seen

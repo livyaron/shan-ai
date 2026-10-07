@@ -4,6 +4,7 @@ from datetime import date, timedelta
 import pandas as pd
 import pytest
 
+from app.services.il_format import template_env
 from app.services import pattern_service as pt
 from app.services import stage_sectors as ss
 
@@ -191,8 +192,7 @@ def page_ctx(ai=None, running=False):
 
 def _render(p):
     from types import SimpleNamespace
-    from jinja2 import Environment, FileSystemLoader
-    env = Environment(loader=FileSystemLoader("app/templates"))
+    env = template_env()
     request = SimpleNamespace(url=SimpleNamespace(path="/dashboard/projects/insights"))
     user = SimpleNamespace(is_admin=True, username="u", role=None, id=1)
     from app.services import insight_access
@@ -270,11 +270,10 @@ def test_project_history_marks_repeated_weekly_text_and_unknown_is_none():
 
 def test_project_page_renders():
     from types import SimpleNamespace
-    from jinja2 import Environment, FileSystemLoader
     from app.services import project_chart as pc
     frames = _frames()
     h = pt._plain(pt.project_history(frames, pt._plain(pt.compute_patterns(frames)), "P-1"))
-    html = Environment(loader=FileSystemLoader("app/templates")).get_template("project_page.html").render(
+    html = template_env().get_template("project_page.html").render(
         request=SimpleNamespace(url=SimpleNamespace(path="/dashboard/projects/p/P-1")),
         current_user=SimpleNamespace(is_admin=True, username="u", role=None, id=1),
         h=h, project=None, delay=pc.delay_story(h), matrix=pc.risk_matrix(h),
