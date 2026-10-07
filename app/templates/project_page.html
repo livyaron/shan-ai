@@ -82,12 +82,12 @@
 
     {# ── Status ── #}
     <div class="card-x">
-        <h2>סטטוס — נכון לדוח {{ h.as_of }}</h2>
+        <h2>סטטוס — נכון לדוח {{ h.as_of|il_date }}</h2>
         <div class="grid mt-2">
             <div class="kv"><div class="k">שלב</div><div class="v">{{ r.stage if r else '—' }}</div>
                 {% if r and r.weeks_in_stage is not none %}<div class="sub">{{ "לפחות " if r.weeks_lower_bound }}{{ r.weeks_in_stage }} שבועות בשלב</div>{% endif %}</div>
-            <div class="kv"><div class="k">יעד חשמול מסתמן</div><div class="v mono">{{ (r.fc if r else none) or ('מלל' if r and r.undated else '—') }}</div></div>
-            <div class="kv"><div class="k">יעד תכנית פיתוח</div><div class="v mono">{{ (r.dev if r else none) or '—' }}</div></div>
+            <div class="kv"><div class="k">יעד חשמול מסתמן</div><div class="v mono">{{ r.fc|il_date if r and r.fc else ('מלל' if r and r.undated else '—') }}</div></div>
+            <div class="kv"><div class="k">יעד תכנית פיתוח</div><div class="v mono">{{ (r.dev if r else none)|il_date }}</div></div>
             <div class="kv"><div class="k">פער מול התכנית</div><div class="v mono">{{ '—' if not r or r.slip_months is none else r.slip_months ~ ' ח׳' }}</div></div>
             <div class="kv"><div class="k">היעד זז מאז התאריך הראשון שנמסר</div><div class="v mono">{{ '—' if not r or r.forecast_moved_months is none else r.forecast_moved_months ~ ' ח׳' }}</div></div>
             <div class="kv"><div class="k">התכנית זזה מאז התאריך הראשון שנמסר</div><div class="v mono">{{ '—' if not r or r.baseline_moved_months is none else r.baseline_moved_months ~ ' ח׳' }}</div></div>
@@ -112,23 +112,23 @@
                 <button class="btn btn-outline-info btn-sm">{{ '↻ נתח מחדש' if ai else '🧠 נתח לעומק' }}</button></form>
         </div>
         {% if triage and triage.reasons %}
-        <div class="sub mt-1">דרגת הטיפול נקבעה בכללים: {% for x in triage.reasons %}{{ levels[x.level].icon }} {{ x.text }}{% if not loop.last %} · {% endif %}{% endfor %}</div>
+        <div class="sub mt-1">דרגת הטיפול נקבעה בכללים: {% for x in triage.reasons %}{{ levels[x.level].icon }} {{ x.text|il_dates }}{% if not loop.last %} · {% endif %}{% endfor %}</div>
         {% endif %}
         {% if ai_error %}<div class="caveat" style="color:var(--s-high)">הניתוח נכשל (ייתכן שמכסת המודל נוצלה) — נסה שוב בעוד כמה דקות.</div>{% endif %}
         {% if ai %}{% set x = ai.payload %}
-        {% if x.headline %}<div class="mt-2" style="font-weight:600;font-size:1.05rem">{{ x.headline }}</div>{% endif %}
-        {% if x.story %}<div class="sub mt-2" style="color:var(--text-2)">מה קרה</div><div style="line-height:1.65">{{ x.story }}</div>{% endif %}
-        {% if x.root_cause %}<div class="sub mt-2">סיבת שורש סבירה</div><div style="line-height:1.65">{{ x.root_cause }}</div>{% endif %}
-        {% for e in x.evidence or [] %}<div class="quote"><span class="mono">{{ e.week }}</span> — {{ e.quote }}</div>{% endfor %}
-        {% if x.action %}<div class="mt-2" style="color:var(--cyan)">👉 {{ x.action }}{% if x.owner %} <span class="sub">· בעלים: {{ x.owner }}</span>{% endif %}</div>{% endif %}
-        {% if x.questions %}<div class="sub mt-2">❓ לשאול את מנה"פ</div><ul style="margin:.2rem 0;padding-right:1.2rem">{% for q in x.questions %}<li>{{ q }}</li>{% endfor %}</ul>{% endif %}
-        {% if x.watch %}<div class="sub mt-2">👁 לבדוק בדוח הבא</div><div>{{ x.watch }}</div>{% endif %}
+        {% if x.headline %}<div class="mt-2" style="font-weight:600;font-size:1.05rem">{{ x.headline|il_dates }}</div>{% endif %}
+        {% if x.story %}<div class="sub mt-2" style="color:var(--text-2)">מה קרה</div><div style="line-height:1.65">{{ x.story|il_dates }}</div>{% endif %}
+        {% if x.root_cause %}<div class="sub mt-2">סיבת שורש סבירה</div><div style="line-height:1.65">{{ x.root_cause|il_dates }}</div>{% endif %}
+        {% for e in x.evidence or [] %}<div class="quote"><span class="mono">{{ e.week|il_date }}</span> — {{ e.quote|il_dates }}</div>{% endfor %}
+        {% if x.action %}<div class="mt-2" style="color:var(--cyan)">👉 {{ x.action|il_dates }}{% if x.owner %} <span class="sub">· בעלים: {{ x.owner }}</span>{% endif %}</div>{% endif %}
+        {% if x.questions %}<div class="sub mt-2">❓ לשאול את מנה"פ</div><ul style="margin:.2rem 0;padding-right:1.2rem">{% for q in x.questions %}<li>{{ q|il_dates }}</li>{% endfor %}</ul>{% endif %}
+        {% if x.watch %}<div class="sub mt-2">👁 לבדוק בדוח הבא</div><div>{{ x.watch|il_dates }}</div>{% endif %}
         {% set c = x._checks or {} %}
-        <div class="caveat">🤖 נוסח ע״י AI{% if ai.provider %} ({{ ai.provider }}){% endif %}{% if ai.created_at %} · {{ ai.created_at.strftime('%d/%m %H:%M') }} UTC{% endif %} מתוך נתוני הדף בלבד; ציטוט שלא נמצא מילה במילה בדיווחים הוסר.
+        <div class="caveat">🤖 נוסח ע״י AI{% if ai.provider %} ({{ ai.provider }}){% endif %}{% if ai.created_at %} · {{ ai.created_at|il_datetime }}{% endif %} מתוך נתוני הדף בלבד; ציטוט שלא נמצא מילה במילה בדיווחים הוסר.
             {% if c.numbers_replaced %} ⚠ {{ c.numbers_replaced }} מספרים שלא הופיעו בנתונים הוחלפו ב-[?].{% endif %}
             {% if c.quotes_dropped %} ⚠ {{ c.quotes_dropped }} ציטוטים לא אומתו והוסרו.{% endif %}</div>
         {% elif not ai_error %}
-        <div class="sub mt-2">עוד אין ניתוח לדוח {{ h.as_of }}. הניתוח קורא את כל הדיווחים והתזוזות ומנסח סיבת שורש, פעולה ושאלות.</div>
+        <div class="sub mt-2">עוד אין ניתוח לדוח {{ h.as_of|il_date }}. הניתוח קורא את כל הדיווחים והתזוזות ומנסח סיבת שורש, פעולה ושאלות.</div>
         {% endif %}
     </div>
 
@@ -139,7 +139,7 @@
         <div class="sub">כל שורה היא כלל מחושב על הנתונים שבדף — לא ניסוח של מודל שפה.</div>
         <div class="mt-2">
             {% for f in h.flags %}
-            <div class="flag"><span class="lvl lvl-{{ f.level }}">{{ lvl_he[f.level] }}</span><span>{{ f.text }}</span></div>
+            <div class="flag"><span class="lvl lvl-{{ f.level }}">{{ lvl_he[f.level] }}</span><span>{{ f.text|il_dates }}</span></div>
             {% else %}
             <div class="sub">לא זוהו סימני סיכון מחושבים.</div>
             {% endfor %}
@@ -162,7 +162,7 @@
         {% for t in h.topics %}
         <div class="mt-3">
             <strong>{{ t.category }}</strong> <span class="sub">· {{ 'רק בעמודת הסיכונים/לטיפול' if t.weeks == 0 else 'הוזכר בשבוע אחד' if t.weeks == 1 else 'הוזכר ב-' ~ t.weeks ~ ' שבועות' }}</span>
-            {% for e in t.evidence %}<div class="quote"><span class="mono">{{ e.source }}</span> — {{ e.quote }}</div>{% endfor %}
+            {% for e in t.evidence %}<div class="quote"><span class="mono">{{ e.source|il_date }}</span> — {{ e.quote|il_dates }}</div>{% endfor %}
         </div>
         {% endfor %}
     </div>
@@ -181,10 +181,10 @@
             <div class="scroll"><table class="t mt-2">
                 <tr><th>דוח</th><th>שלב</th><th>יעד חשמול</th><th>ת.פיתוח</th>{% for s in delay.series %}<th>{{ s.label }} (ח׳)</th>{% endfor %}<th>זז בדוח הזה</th></tr>
                 {% for pt in delay.points|reverse %}
-                <tr><td class="n">{{ pt.date }}</td><td>{{ pt.stage }}{% if pt.stage_changed %} <span class="chip">שלב חדש</span>{% endif %}</td>
-                    <td class="n">{{ pt.fc or (pt.fc_text[:30] if pt.fc_text else '—') }}</td><td class="n">{{ pt.dev or '—' }}</td>
+                <tr><td class="n">{{ pt.date|il_date }}</td><td>{{ pt.stage }}{% if pt.stage_changed %} <span class="chip">שלב חדש</span>{% endif %}</td>
+                    <td class="n">{{ pt.fc|il_date if pt.fc else (pt.fc_text[:30] if pt.fc_text else '—') }}</td><td class="n">{{ pt.dev|il_date }}</td>
                     {% for s in delay.series %}<td class="n">{{ '—' if pt[s.key] is none else pt[s.key] }}</td>{% endfor %}
-                    <td>{% for mv in pt.moves %}{{ 'יעד' if mv.kind == 'forecast' else 'תכנית' }} +{{ mv.months }}{% if not loop.last %}, {% endif %}{% endfor %}</td></tr>
+                    <td>{% for mv in pt.moves %}{{ 'יעד' if mv.kind == 'forecast' else 'תכנית' }} <bdi dir="ltr">+{{ mv.months }}</bdi>{% if not loop.last %}, {% endif %}{% endfor %}</td></tr>
                 {% endfor %}
             </table></div>
         </details>
@@ -206,7 +206,7 @@
                 <tr><th>נושא</th><th>שבועות</th><th>הופיע לראשונה</th><th>הופיע לאחרונה</th></tr>
                 {% for r in matrix.rows %}
                 {% set hits = [] %}{% for c in r.cells %}{% if c.hit %}{% set _ = hits.append(matrix.weeks[loop.index0]) %}{% endif %}{% endfor %}
-                <tr><td>{{ r.label }}</td><td class="n">{{ r.weeks }}</td><td class="n">{{ hits[0] if hits else '—' }}</td><td class="n">{{ hits[-1] if hits else '—' }}</td></tr>
+                <tr><td>{{ r.label }}</td><td class="n">{{ r.weeks }}</td><td class="n">{{ hits[0]|il_date if hits else '—' }}</td><td class="n">{{ hits[-1]|il_date if hits else '—' }}</td></tr>
                 {% endfor %}
             </table></div>
         </details>
@@ -217,7 +217,7 @@
         <h2 class="mt-4" style="font-size:1rem">שינויים בעמודות הסיכונים / לטיפול בקובץ</h2>
         <div class="sub">רק דוחות שבהם הטקסט השתנה. חדש למעלה.</div>
         {% for c in risk_changes %}
-        <div class="week"><div class="w">{{ c.date }}{% if c.first %} <span class="same">(הדוח הראשון בהיסטוריה)</span>{% endif %}</div><div>{{ c.text }}</div></div>
+        <div class="week"><div class="w">{{ c.date|il_date }}{% if c.first %} <span class="same">(הדוח הראשון בהיסטוריה)</span>{% endif %}</div><div>{{ c.text|il_dates }}</div></div>
         {% endfor %}
         {% endif %}
     </div>
@@ -232,7 +232,7 @@
         <div class="scroll"><table class="t mt-2">
             <tr><th>מקטע</th><th>מה זז</th><th>חודשים</th><th>שלב בזמן הדחייה</th></tr>
             {% for e in h.events|reverse %}
-            <tr><td class="n">{{ e.from }} → {{ e.to }}{% if e.undated_between %}<div class="sub">מעל {{ e.undated_between }} דוחות בלי תאריך</div>{% endif %}</td><td>{{ 'יעד חשמול' if e.kind == 'forecast' else 'תכנית פיתוח' }}</td>
+            <tr><td class="n"><bdi>{{ e.from|il_date }}</bdi> ← <bdi>{{ e.to|il_date }}</bdi>{% if e.undated_between %}<div class="sub">מעל {{ e.undated_between }} דוחות בלי תאריך</div>{% endif %}</td><td>{{ 'יעד חשמול' if e.kind == 'forecast' else 'תכנית פיתוח' }}</td>
                 <td class="n">{{ e.months }}</td><td>{{ e.stage }}</td></tr>
             {% endfor %}
         </table></div>
@@ -243,14 +243,14 @@
     <div class="card-x">
         <h2>דיווחים שבועיים ({{ h.weekly|length }})</h2>
         {% for w in h.weekly[:8] %}
-        <div class="week"><div class="w">{{ w.week }}{% if w.same_as_before %} <span class="same">🔁 זהה לשבוע הקודם</span>{% endif %}</div><div>{{ w.text }}</div></div>
+        <div class="week"><div class="w">{{ w.week|il_date }}{% if w.same_as_before %} <span class="same">🔁 זהה לשבוע הקודם</span>{% endif %}</div><div>{{ w.text|il_dates }}</div></div>
         {% else %}
         <div class="sub">אין דיווחים שבועיים שמורים.</div>
         {% endfor %}
         {% if h.weekly|length > 8 %}
         <details class="mt-2"><summary>עוד {{ h.weekly|length - 8 }} דיווחים</summary>
             {% for w in h.weekly[8:] %}
-            <div class="week"><div class="w">{{ w.week }}{% if w.same_as_before %} <span class="same">🔁 זהה לשבוע הקודם</span>{% endif %}</div><div>{{ w.text }}</div></div>
+            <div class="week"><div class="w">{{ w.week|il_date }}{% if w.same_as_before %} <span class="same">🔁 זהה לשבוע הקודם</span>{% endif %}</div><div>{{ w.text|il_dates }}</div></div>
             {% endfor %}
         </details>
         {% endif %}

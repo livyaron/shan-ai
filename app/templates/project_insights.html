@@ -81,7 +81,7 @@
 {% macro meta(x) %}<span class="meta"><bdi class="ltr">n={{ x.n }}</bdi> · {{ conf_he.get(x.confidence, x.confidence) }}</span>{% endmacro %}
 {# Numbers that carry a sign or a prefix (−2.5, ≥25) and date spans: isolated LTR, or RTL prints "2.5-" / "25≤". #}
 {% macro num(v) %}{% if v is none %}—{% else %}<bdi class="ltr">{{ v }}</bdi>{% endif %}{% endmacro %}
-{% macro span(a, b) %}<bdi class="ltr">{{ a }}</bdi> ← <bdi class="ltr">{{ b }}</bdi>{% endmacro %}
+{% macro span(a, b) %}<bdi class="ltr">{{ a|il_date }}</bdi> ← <bdi class="ltr">{{ b|il_date }}</bdi>{% endmacro %}
 {% macro weeks(x) %}{% if x.weeks_in_stage is none %}—{% else %}<bdi class="ltr">{{ '≥' if x.weeks_lower_bound }}{{ x.weeks_in_stage }}</bdi>{% endif %}{% endmacro %}
 {% macro pct(v) %}{{ '—' if v is none else v ~ '%' }}{% endmacro %}
 {# A number that drills down to the rows behind it (insight_access.drill_for). #}
@@ -134,7 +134,7 @@
         <div class="scroll"><table class="t mt-2">
             <tr><th>תאריך צילום</th><th>פרויקטים</th><th>נספר כדוח של</th></tr>
             {% for d in h.snapshot_dates|reverse %}
-            <tr><td class="n">{{ d.date }}</td><td class="n">{{ d.rows }}</td><td class="n">{{ d.report_date or '— לא נספר' }}</td></tr>
+            <tr><td class="n">{{ d.date|il_date }}</td><td class="n">{{ d.rows }}</td><td class="n">{{ d.report_date|il_date if d.report_date else '— לא נספר' }}</td></tr>
             {% endfor %}
         </table></div>
         <div class="caveat" style="direction:ltr;text-align:left">{% for i in h.snapshot_indexes %}{{ i }}<br>{% endfor %}</div>
@@ -146,33 +146,36 @@
     {% else %}
 
     <div class="card-x">
-        <div class="sub mb-1">נכון לדוח <strong style="color:var(--text-1)">{{ p.as_of }}</strong> · {{ p.report_dates|length }} דוחות בהיסטוריה:</div>
-        {% for d in p.report_dates %}<span class="chip">{{ d }}</span>{% endfor %}
+        <div class="sub mb-1">נכון לדוח <strong style="color:var(--text-1)">{{ p.as_of|il_date }}</strong>
+            <span title="תאריך הדוח נלקח משם הקובץ, ואם אין בו תאריך מלא — מעמודת 'פירוט שבועי' האחרונה בקובץ">ⓘ</span>
+            {% if master_loaded %}· הקובץ האחרון נטען {{ master_loaded.at|il_datetime }}{% if master_loaded.name %} (<bdi>{{ master_loaded.name }}</bdi>){% endif %}{% endif %}
+            · {{ p.report_dates|length }} דוחות בהיסטוריה:</div>
+        {% for d in p.report_dates %}<span class="chip">{{ d|il_date }}</span>{% endfor %}
     </div>
 
     {% set sm = view.summary %}
     <div class="tiles">
-        <div class="tile" title="{{ m.forecast_drift.caveat }}">
+        <div class="tile" title="{{ m.forecast_drift.caveat|il_dates }}">
             <div class="num"><a class="dn" href="{{ dl('tile', 'forecast') }}">{{ sm.forecast_later }}</a><span class="of"> / {{ sm.forecast_n }}</span></div>
             <div class="lbl">יעד חשמול נדחה מאז התאריך הראשון שנמסר</div>
         </div>
-        <div class="tile" title="{{ m.baseline_moves.caveat }}">
+        <div class="tile" title="{{ m.baseline_moves.caveat|il_dates }}">
             <div class="num"><a class="dn" href="{{ dl('tile', 'baseline') }}">{{ sm.baseline_later }}</a><span class="of"> / {{ sm.baseline_n }}</span></div>
             <div class="lbl">יעד תכנית פיתוח נדחה (הבסיס זז)</div>
         </div>
-        <div class="tile" title="{{ m.stuck.caveat }}">
+        <div class="tile" title="{{ m.stuck.caveat|il_dates }}">
             <div class="num"><a class="dn" href="{{ dl('tile', 'stuck') }}">{{ sm.stuck }}</a><span class="of"> / {{ sm.n }}</span></div>
             <div class="lbl">תקועים 12 שבועות ומעלה באותו שלב</div>
         </div>
-        <div class="tile" title="{{ m.stale_reporting.caveat }}">
+        <div class="tile" title="{{ m.stale_reporting.caveat|il_dates }}">
             <div class="num"><a class="dn" href="{{ dl('tile', 'stale') }}">{{ sm.stale }}</a></div>
             <div class="lbl">דיווח שבועי זהה 4 שבועות</div>
         </div>
-        <div class="tile" title="{{ m.undated.caveat }}">
+        <div class="tile" title="{{ m.undated.caveat|il_dates }}">
             <div class="num"><a class="dn" href="{{ dl('tile', 'undated') }}">{{ sm.undated }}</a></div>
             <div class="lbl">יעד חשמול כמלל, לא תאריך</div>
         </div>
-        <div class="tile" title="{{ m.past_due.caveat }}">
+        <div class="tile" title="{{ m.past_due.caveat|il_dates }}">
             <div class="num"><a class="dn" href="{{ dl('tile', 'past_due') }}">{{ sm.past_due }}</a></div>
             <div class="lbl">יעד מסתמן כבר עבר</div>
         </div>
@@ -181,21 +184,21 @@
     {# ── Deep AI reading (PLAN.md P5). Levels = rules (insight_triage); prose = AI. ── #}
     {% macro lvbadge(lv) %}{% if lv %}<span class="lv lv-{{ lv }}">{{ levels[lv].icon }} {{ levels[lv].label }}</span>{% endif %}{% endmacro %}
     {% macro area(a) %}{% set x = a.payload %}
-        {% if x.headline %}<div class="ai-head">{{ x.headline }}</div>{% endif %}
-        {% if x.situation %}<p class="ai-p">{{ x.situation }}</p>{% endif %}
+        {% if x.headline %}<div class="ai-head">{{ x.headline|il_dates }}</div>{% endif %}
+        {% if x.situation %}<p class="ai-p">{{ x.situation|il_dates }}</p>{% endif %}
         {% for f in x.findings or [] %}
         <div class="ai-find lvb-{{ f.level or 'none' }}">
-            <div class="d-flex flex-wrap align-items-center gap-2">{{ lvbadge(f.level) }}<strong>{{ f.title }}</strong></div>
-            <div class="ai-p">{{ f.analysis }}</div>
+            <div class="d-flex flex-wrap align-items-center gap-2">{{ lvbadge(f.level) }}<strong>{{ f.title|il_dates }}</strong></div>
+            <div class="ai-p">{{ f.analysis|il_dates }}</div>
             {% if f.projects %}<div class="ai-projects">{% for i in f.projects %}{{ plink(i) }} <a class="pname" href="/dashboard/projects/p/{{ i|urlencode }}">{{ (view.names.get(i) or '')[:40] }}</a>{% if view.triage_of.get(i) %} {{ levels[view.triage_of[i].level].icon }}{% endif %}{% if not loop.last %} · {% endif %}{% endfor %}</div>{% endif %}
-            {% if f.action %}<div class="ai-act">👉 {{ f.action }}{% if f.owner %} <span class="mix">· בעלים: {{ f.owner }}</span>{% endif %}</div>{% endif %}
+            {% if f.action %}<div class="ai-act">👉 {{ f.action|il_dates }}{% if f.owner %} <span class="mix">· בעלים: {{ f.owner|il_dates }}</span>{% endif %}</div>{% endif %}
         </div>
         {% endfor %}
-        {% if x.patterns %}<div class="ai-sub">🔁 דפוסים רוחביים</div><ul class="ai-ul">{% for t in x.patterns %}<li>{{ t }}</li>{% endfor %}</ul>{% endif %}
-        {% if x.questions %}<div class="ai-sub">❓ שאלות לישיבת הסטטוס</div><ul class="ai-ul">{% for t in x.questions %}<li>{{ t }}</li>{% endfor %}</ul>{% endif %}
-        {% if x.watch %}<div class="ai-sub">👁 לבדוק בדוח הבא</div><div class="ai-p">{{ x.watch }}</div>{% endif %}
+        {% if x.patterns %}<div class="ai-sub">🔁 דפוסים רוחביים</div><ul class="ai-ul">{% for t in x.patterns %}<li>{{ t|il_dates }}</li>{% endfor %}</ul>{% endif %}
+        {% if x.questions %}<div class="ai-sub">❓ שאלות לישיבת הסטטוס</div><ul class="ai-ul">{% for t in x.questions %}<li>{{ t|il_dates }}</li>{% endfor %}</ul>{% endif %}
+        {% if x.watch %}<div class="ai-sub">👁 לבדוק בדוח הבא</div><div class="ai-p">{{ x.watch|il_dates }}</div>{% endif %}
         {% set c = x._checks or {} %}
-        <div class="caveat">🤖 נוסח ע״י AI{% if a.provider %} ({{ a.provider }}){% endif %}{% if a.created_at %} · {{ a.created_at.strftime('%d/%m %H:%M') }} UTC{% endif %} מתוך המנוע בלבד. דרגות הטיפול נקבעו בכללים, לא ע״י המודל.
+        <div class="caveat">🤖 נוסח ע״י AI{% if a.provider %} ({{ a.provider }}){% endif %}{% if a.created_at %} · {{ a.created_at|il_datetime }}{% endif %} מתוך המנוע בלבד. דרגות הטיפול נקבעו בכללים, לא ע״י המודל.
             {% if c.numbers_replaced %} ⚠ {{ c.numbers_replaced }} מספרים שלא הופיעו בנתונים הוחלפו ב-[?].{% endif %}
             {% if c.projects_dropped %} ⚠ {{ c.projects_dropped }} הפניות לפרויקטים לא מוכרים הוסרו.{% endif %}</div>
     {% endmacro %}
@@ -216,7 +219,7 @@
                 </div>
                 {% if lv != 'fyi' %}
                 {% for x in rows[:6] %}
-                <div class="tri-row">{{ plink(x.identifier) }} {{ pname(x) }}<div class="mix">{{ x.triage.reasons[0].text if x.triage.reasons else '' }}{% if x.triage.reasons|length > 1 %} · ועוד {{ x.triage.reasons|length - 1 }}{% endif %}</div></div>
+                <div class="tri-row">{{ plink(x.identifier) }} {{ pname(x) }}<div class="mix">{{ x.triage.reasons[0].text|il_dates if x.triage.reasons else '' }}{% if x.triage.reasons|length > 1 %} · ועוד {{ x.triage.reasons|length - 1 }}{% endif %}</div></div>
                 {% endfor %}
                 {% if rows|length > 6 %}<a class="mix" href="{{ dl('triage', lv) }}">ועוד {{ rows|length - 6 }} ←</a>{% endif %}
                 {% endif %}
@@ -234,7 +237,7 @@
         {% endif %}
         {% for k in view.ai_kinds if k != 'division' %}
         <details class="ai-box" {% if view.ai_kinds|length == 1 %}open{% endif %}>
-            <summary><span class="ai-level">רמה 2 · {{ ai_sector_labels.get(k, k) }}</span>{% if ai.get(k) and ai[k].payload.headline %} — {{ ai[k].payload.headline }}{% endif %}</summary>
+            <summary><span class="ai-level">רמה 2 · {{ ai_sector_labels.get(k, k) }}</span>{% if ai.get(k) and ai[k].payload.headline %} — {{ ai[k].payload.headline|il_dates }}{% endif %}</summary>
             {% if ai.get(k) %}{{ area(ai[k]) }}{% else %}<div class="sub">{{ '⏳ הניתוח בהכנה — הדף יתעדכן לבד.' if pending else 'אין עדיין ניתוח לדוח הזה.' }}</div>{% endif %}
         </details>
         {% endfor %}
@@ -255,7 +258,7 @@
     {% if drill %}
     <div class="card-x drill" id="drill">
         <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
-            <h2>🔎 {{ drill.label }} ({{ drill.rows|length }})</h2>
+            <h2>🔎 {{ drill.label|il_dates }} ({{ drill.rows|length }})</h2>
             <a class="btn btn-outline-secondary btn-sm" href="/dashboard/projects/insights{% if drill_keep %}?{{ drill_keep }}{% endif %}">✕ סגור פירוט</a>
         </div>
         <div class="scroll" style="max-height: 520px; overflow-y: auto;"><table class="t mt-2">
@@ -270,7 +273,7 @@
             <tr><th>זיהוי</th><th>פרויקט</th><th>מנה"פ</th><th>שלב</th><th>יעד מסתמן</th><th>ת.פיתוח</th><th>יעד זז (ח')</th><th>בסיס זז (ח')</th><th>שבועות בשלב</th></tr>
             {% for x in drill.rows %}
             <tr><td class="n">{{ plink(x.identifier) }}</td><td>{{ pname(x) }}</td><td>{{ mgr(x) }}</td><td>{{ stg(x) }}</td>
-                <td class="n">{{ x.fc or ('מלל' if x.undated else '—') }}</td><td class="n">{{ x.dev or '—' }}</td>
+                <td class="n">{{ x.fc|il_date if x.fc else ('מלל' if x.undated else '—') }}</td><td class="n">{{ x.dev|il_date }}</td>
                 <td class="n">{{ num(x.forecast_moved_months) }}</td>
                 <td class="n">{{ num(x.baseline_moved_months) }}</td>
                 <td class="n">{{ weeks(x) }}</td></tr>
@@ -291,7 +294,7 @@
             {% for x in view.projects %}
             <tr>
                 <td class="n">{{ plink(x.identifier) }}</td><td>{{ pname(x) }}</td><td>{{ mgr(x) }}</td><td>{{ stg(x) }}</td>
-                <td class="n">{{ x.fc or ('מלל' if x.undated else '—') }}</td><td class="n">{{ x.dev or '—' }}</td>
+                <td class="n">{{ x.fc|il_date if x.fc else ('מלל' if x.undated else '—') }}</td><td class="n">{{ x.dev|il_date }}</td>
                 <td class="n">{{ num(x.forecast_moved_months) }}</td>
                 <td class="n">{{ num(x.baseline_moved_months) }}</td>
                 <td class="n">{{ weeks(x) }}</td>
@@ -321,7 +324,7 @@
             </tr>
             {% endfor %}
         </table></div>
-        <div class="caveat">{{ m.slip_attribution.caveat }}</div>
+        <div class="caveat">{{ m.slip_attribution.caveat|il_dates }}</div>
     </div>
 
     {% endif %}
@@ -335,7 +338,7 @@
         <div class="scroll"><table class="t mt-2">
             <tr><th>מקטע</th><th>שבועות</th><th>יעד מסתמן נדחה</th><th class="barcell"></th><th>תכנית פיתוח נדחתה</th><th>שניהם</th></tr>
             {% for w in waves %}
-            <tr title="{{ w['from'] }} עד {{ w.to }}: {{ w.forecast_later }} יעדים נדחו מתוך {{ w.n }}">
+            <tr title="{{ w['from']|il_date }} עד {{ w.to|il_date }}: {{ w.forecast_later }} יעדים נדחו מתוך {{ w.n }}">
                 <td class="n"><a class="dn" href="{{ dl('wave', w['from'], 'any') }}">{{ span(w['from'], w.to) }}</a></td>
                 <td class="n"><a class="dn" href="{{ dl('wave', w['from'], 'any') }}">{{ w.weeks }}</a></td>
                 <td class="n"><a class="dn" href="{{ dl('wave', w['from'], 'forecast') }}">{{ w.forecast_later }}</a></td>
@@ -345,7 +348,7 @@
             </tr>
             {% endfor %}
         </table></div>
-        <div class="caveat">{{ m.update_waves.caveat }}</div>
+        <div class="caveat">{{ m.update_waves.caveat|il_dates }}</div>
     </div>
 
     {% endif %}
@@ -406,7 +409,7 @@
                 <td><span class="badge-x b-{{ r.signal }}">{{ sig_he[r.signal] }}</span></td></tr>
             {% endfor %}
         </table></div>
-        <div class="caveat">{{ li.caveat }}</div>
+        <div class="caveat">{{ li.caveat|il_dates }}</div>
     </div>
 
     {% endif %}
@@ -425,7 +428,7 @@
                 <td class="n"><a class="dn" href="{{ dl('risk', r.category, 'column') }}">{{ r.in_risk_column }}</a></td></tr>
             {% endfor %}
         </table></div>
-        <div class="caveat">{{ rc.caveat }}</div>
+        <div class="caveat">{{ rc.caveat|il_dates }}</div>
     </div>
 
     {% endif %}
@@ -443,13 +446,13 @@
         ] %}
         {% for key, label, rows, cav in lists %}
         <details><summary>{{ label }} ({{ rows|length }})</summary>
-            <div class="listhead mt-2"><span class="caveat" style="margin:0">{{ cav }}</span>
+            <div class="listhead mt-2"><span class="caveat" style="margin:0">{{ cav|il_dates }}</span>
                 <a class="btn btn-outline-info btn-sm" href="{{ dl('tile', key) }}">🔎 פירוט מלא</a></div>
             <div class="scroll"><table class="t mt-2">
                 <tr><th>זיהוי</th><th>פרויקט</th><th>מנה"פ</th><th>שלב</th><th>יעד מסתמן</th><th>שבועות בשלב</th></tr>
                 {% for x in rows %}
                 <tr><td class="n">{{ plink(x.identifier) }}</td><td>{{ pname(x) }}</td><td>{{ mgr(x) }}</td><td>{{ stg(x) }}</td>
-                    <td class="n">{{ x.fc or ('מלל' if x.undated else '—') }}</td><td class="n">{{ weeks(x) }}</td></tr>
+                    <td class="n">{{ x.fc|il_date if x.fc else ('מלל' if x.undated else '—') }}</td><td class="n">{{ weeks(x) }}</td></tr>
                 {% else %}<tr><td colspan="6" class="sub">אין.</td></tr>{% endfor %}
             </table></div>
         </details>
@@ -459,7 +462,7 @@
     {% set sv = m.slip_vs_plan %}{% set fd = m.forecast_drift.value %}{% set bm = m.baseline_moves.value %}
     <div class="callout">
         לפי הדוח עצמו {{ sv.value.late }} מתוך {{ sv.n }} פרויקטים מאחרים מול תכנית הפיתוח (חציון {{ sv.value.median_months }} ח'),
-        אבל {{ fd.later }} נדחו מאז התאריך הראשון שנמסר ו-{{ bm.later }} יעדי תכנית פיתוח זזו קדימה. {{ sv.caveat }}
+        אבל {{ fd.later }} נדחו מאז התאריך הראשון שנמסר ו-{{ bm.later }} יעדי תכנית פיתוח זזו קדימה. {{ sv.caveat|il_dates }}
     </div>
     {% endif %}
     {% endif %}

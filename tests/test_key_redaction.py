@@ -77,3 +77,10 @@ def test_a_telegram_bot_token_is_redacted():
     assert "AAEhBOweik6" not in out
     assert "getWebhookInfo" in out          # the useful part survives
     assert token not in redact(f"InvalidToken: {token}")
+
+
+def test_request_urls_are_not_logged():
+    """httpx's INFO line is the full URL: bot token in the path, API key in the query."""
+    import logging
+    import app.main  # noqa: F401  — the logging setup lives there
+    assert logging.getLogger("httpx").getEffectiveLevel() >= logging.WARNING

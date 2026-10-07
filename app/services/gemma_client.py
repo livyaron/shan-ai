@@ -146,6 +146,7 @@ async def gemma_chat(
     temperature: float = 0.2,
     json_mode: bool = False,
     models: list[str] | None = None,
+    reasoning_effort: str | None = None,   # Groq-only knob; accepted so the router can pass it to either
 ) -> str:
     """Call Google AI Studio (Gemma 4) with automatic model fallback on quota errors.
 

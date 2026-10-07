@@ -22,6 +22,8 @@ ALLOWED_EXTENSIONS = {"xlsx", "csv"}
 
 router = APIRouter(prefix="/dashboard/projects", tags=["projects"])
 templates = Jinja2Templates(directory="app/templates")
+from app.services.il_format import register as _register_il_format  # noqa: E402
+_register_il_format(templates.env)   # dates on the patterns pages read DD/MM/YYYY
 
 
 def _ext(filename: str) -> str:
@@ -230,6 +232,8 @@ async def project_insights_page(
     # (single-flight, skips what exists) — the page never waits for a model.
     from app.services import insight_ai, insight_triage
     ai_rows = await insight_ai.load(session, view["ai_kinds"], p.get("as_of"))
+    master = (await session.execute(select(KnowledgeFile).where(KnowledgeFile.is_master)
+                                    .order_by(KnowledgeFile.created_at.desc()).limit(1))).scalars().first()
     ai_started = bool(set(view["ai_kinds"]) - set(ai_rows)) and insight_ai.claim_autostart(p.get("as_of"))
     if ai_started:
         import asyncio
@@ -248,6 +252,7 @@ async def project_insights_page(
         "ai": {k: insight_ai.for_display(v) for k, v in ai_rows.items()},
         "ai_status": insight_ai.STATUS,
         "ai_started": ai_started,
+        "master_loaded": {"at": master.created_at, "name": master.original_name} if master else None,
         "ai_sector_labels": {insight_ai.sector_kind(k): stage_sectors.SECTORS[k] for k in insight_ai.AREA_SECTORS},
         "levels": insight_triage.LEVELS,
         "level_order": insight_triage.ORDER,

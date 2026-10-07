@@ -52,6 +52,7 @@ async def groq_chat(
     json_mode: bool = False,
     client: AsyncGroq = None,
     models: list[str] | None = None,
+    reasoning_effort: str | None = None,
 ) -> str:
     """Call Groq with automatic fallback across models on 429 rate limit.
 
@@ -64,6 +65,10 @@ async def groq_chat(
     kwargs = dict(messages=messages, max_tokens=max_tokens, temperature=temperature)
     if json_mode:
         kwargs["response_format"] = {"type": "json_object"}
+    if reasoning_effort:
+        # gpt-oss spends its reasoning out of max_tokens; "low" leaves the room
+        # to the answer. extra_body works on every SDK version.
+        kwargs["extra_body"] = {"reasoning_effort": reasoning_effort}
 
     model_list = models or MODELS
     # 2 rounds, not 3: each model has a separate rate-limit bucket, so we try them

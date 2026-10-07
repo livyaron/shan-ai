@@ -2,8 +2,8 @@
 from types import SimpleNamespace
 
 import pytest
-from jinja2 import Environment, FileSystemLoader
 
+from app.services.il_format import template_env
 from app.services import insight_access as ia
 from app.services import pattern_service as pt
 from app.services import stage_sectors as ss
@@ -73,7 +73,7 @@ def test_who_is_allowed_at_all(scope, allowed):
     ia.Scope(managers=frozenset({"מנהל א"})),
 ])
 def test_page_renders_for_every_role_and_hides_admin_sections(scope):
-    env = Environment(loader=FileSystemLoader("app/templates"))
+    env = template_env()
     html = env.get_template("project_insights.html").render(
         request=SimpleNamespace(url=SimpleNamespace(path="/dashboard/projects/insights")),
         current_user=SimpleNamespace(is_admin=scope.admin, username="u", role=None, id=1),
@@ -85,7 +85,7 @@ def test_page_renders_for_every_role_and_hides_admin_sections(scope):
 
 
 def test_access_page_renders():
-    env = Environment(loader=FileSystemLoader("app/templates"))
+    env = template_env()
     users = [SimpleNamespace(id=1, username="ירון", is_admin=True, sector=None),
              SimpleNamespace(id=2, username="גלי", is_admin=False, sector=ss.PM_DEPT)]
     html = env.get_template("project_insights_access.html").render(
@@ -97,7 +97,7 @@ def test_access_page_renders():
 
 
 def test_preview_banner_and_selector_render_for_the_admin():
-    env = Environment(loader=FileSystemLoader("app/templates"))
+    env = template_env()
     html = env.get_template("project_insights.html").render(
         request=SimpleNamespace(url=SimpleNamespace(path="/dashboard/projects/insights"),
                                 query_params={"as_sector": ss.EXECUTION}),
@@ -159,7 +159,7 @@ def test_risk_topics_drill_both_counts():
 
 
 def _admin_html(p=P_WITH_HEALTH):
-    env = Environment(loader=FileSystemLoader("app/templates"))
+    env = template_env()
     return env.get_template("project_insights.html").render(
         request=SimpleNamespace(url=SimpleNamespace(path="/dashboard/projects/insights")),
         current_user=SimpleNamespace(is_admin=True, username="u", role=None, id=1),
