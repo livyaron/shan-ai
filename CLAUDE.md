@@ -89,4 +89,5 @@
 
 ## 8. superpowers
 - in every response, try to use supwerpowers skills if possible.
+- **find-skills (vercel-labs/skills) — always use it (user instruction 2026-10-09).** Installed project-scoped at `.claude/skills/find-skills/` (pinned in `skills-lock.json`). Before starting any task, check whether an installed or installable skill covers it (`npx skills find <query>`). Install new skills **project-scoped** (`npx skills add <owner/repo> --skill <name> --agent claude-code -y`), never `-g`: cloud sessions are ephemeral and a global install dies with the container. Read every SKILL.md before committing it — skills run with full agent permissions and the repo is public.
 
