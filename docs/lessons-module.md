@@ -1,7 +1,7 @@
-# מערכת לקחים — runbook (P1)
+# מערכת לקחים — runbook (P1–P2)
 
-Phase P1 of the lessons module: schema `lessons`, the PostgREST service and the
-`/lessons/api` gateway. The SPA (P2) and the data import (P3) are not here yet.
+P1: schema `lessons`, the PostgREST service and the `/lessons/api` gateway.
+P2: the React app at `/lessons/`. The data import (P3) is not here yet.
 
 ## Pieces
 
@@ -10,7 +10,19 @@ Phase P1 of the lessons module: schema `lessons`, the PostgREST service and the
 | Schema, roles, grants | `app/services/lessons_schema.py` | Runs at startup (`ensure_schema`), idempotent, never raises. Never issues DDL on `public` — tested. |
 | Guards (pure) | `app/services/lessons_access.py` | Who you are (`Identity`), which writes pass (`check_request`). |
 | Gateway | `app/routers/lessons_gateway.py` | `/lessons/api/*`. Shan-AI session required; API paths answer 401 JSON. |
+| SPA serving | `app/routers/lessons_spa.py` | `/lessons/*`: built file as is (public, cached by kind); any other path needs a Shan-AI session → `index.html`, else `/login?next=…`. |
+| UI source | `lessons_ui/` | Copied from acumen-spark-hub (no `.env`, `supabase/`, Lovable plugins). Built in the Docker stage `ui` → `static/lessons`. |
 | Tests | `tests/test_lessons_module.py` | No DB. In the CI list. |
+
+## UI changes vs. the Lovable app
+
+- `base: /lessons/`, `BrowserRouter basename="/lessons"`, PWA scope `/lessons/`; the service worker never answers `/lessons/api/*`.
+- `client.ts` builds `SUPABASE_URL` from `window.location.origin + /lessons/api` at runtime; no env vars.
+- Login = `/lessons/api/me`. No session → `/login?next=/lessons/`. Logout → Shan-AI `/logout`.
+- No passwords anywhere (user picker, change-password dialog and admin password field removed).
+- `UserSwitcher` = "act as": yourself or a referent group from `/me` (kept per tab in `sessionStorage`).
+- AI buttons get the gateway's 503 and show "שירות ה-AI אינו מחובר כרגע".
+- `/login` keeps `next` (`login.safe_next`: same-site paths only — never an open redirect).
 
 ## Identity
 

@@ -1,3 +1,11 @@
+# מערכת לקחים UI (lessons_ui/) — built here, copied into static/lessons below.
+FROM node:22-slim AS ui
+WORKDIR /ui
+COPY lessons_ui/package.json lessons_ui/package-lock.json ./
+RUN npm ci --no-audit --no-fund
+COPY lessons_ui/ ./
+RUN npm run build
+
 FROM python:3.11-slim
 
 WORKDIR /app
@@ -25,6 +33,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application
 COPY . .
+COPY --from=ui /ui/dist /app/static/lessons
 
 # Expose FastAPI port (Railway injects $PORT at runtime)
 EXPOSE 8000

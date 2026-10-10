@@ -68,3 +68,9 @@ bot token.py
 
 # Generated report media (videos/audio created at runtime)
 static/project_reports/
+
+# מערכת לקחים UI: built into the image, never committed. src/lib is source, not a Python lib/.
+!lessons_ui/src/lib/
+lessons_ui/node_modules/
+lessons_ui/dist/
+static/lessons/
