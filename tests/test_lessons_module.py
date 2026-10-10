@@ -769,5 +769,56 @@ async def test_group_admin_is_shan_admin_only_and_not_swallowed_by_the_gateway(m
 def test_group_admin_writes_only_schema_lessons():
     from pathlib import Path
     src = Path("app/routers/lessons_admin.py").read_text(encoding="utf-8")
-    for stmt in re.findall(r'"((?:INSERT|UPDATE|DELETE)[^"]*)', src):
-        assert "lessons.referent_members" in stmt and "public." not in stmt, stmt
+    stmts = re.findall(r'"((?:INSERT|UPDATE|DELETE)[^"]*)', src)
+    assert stmts
+    for stmt in stmts:
+        assert ("lessons.referent_members" in stmt or "lessons.profiles" in stmt) and "public." not in stmt, stmt
+
+
+def test_group_page_shows_its_login_account_or_a_link_form():
+    from app.routers.lessons_admin import render_groups
+    users = [{"id": 40, "username": "רפרנט מגזר ביצוע", "job_title": None}]
+    linked = render_groups([{"id": "r1", "name": "רפרנט מגזר ביצוע", "login_user_id": 40,
+                             "login_username": "רפרנט מגזר ביצוע"}], {}, users)
+    assert "חשבון כניסה: <b>רפרנט מגזר ביצוע</b>" in linked and 'value="unlink"' in linked
+    unlinked = render_groups([{"id": "r1", "name": "רפרנט", "login_user_id": None}], {}, users)
+    assert 'value="link"' in unlinked and 'action="/lessons/api/_groups/login"' in unlinked
+
+
+@pytest.mark.asyncio
+async def test_group_login_is_shan_admin_only(monkeypatch):
+    from app.database import get_db_session
+    from app.routers import lessons_admin
+
+    async def no_db():
+        yield None
+
+    async def not_admin(request, session):
+        return None
+
+    monkeypatch.setattr(lessons_admin, "_shan_admin", not_admin)
+    app.dependency_overrides[get_db_session] = no_db
+    try:
+        async with _client() as c:
+            r = await c.post("/lessons/api/_groups/login",
+                             data={"profile_id": "r1", "action": "link", "shan_user_id": "40"})
+    finally:
+        app.dependency_overrides.clear()
+    assert r.status_code == 403
+
+
+def test_a_linked_referent_keeps_its_login_across_reimport():
+    from pathlib import Path
+    src = Path("app/services/lessons_import.py").read_text(encoding="utf-8")
+    assert "WHERE (role = 'referent' AND shan_user_id IS NULL) OR name = ANY(:n)" in src
+
+
+def test_a_referent_login_account_signs_in_as_the_referent():
+    rows = [{"id": "s40", "role": "viewer", "is_login": True},
+            {"id": "u1773149388077", "role": "referent", "is_login": True}]
+    picked = la.pick_profile(rows)
+    assert picked["id"] == "u1773149388077"
+    ident = la.Identity(shan_user_id=40, profile=picked)
+    assert ident.role == "referent" and not ident.is_viewer
+    assert la.check_request("POST", "/rpc/apply_lesson_workflow_event", [],
+                            {"p_actor_id": "u1773149388077", "p_actor_role": "referent"}, ident) is None
