@@ -127,8 +127,9 @@ def test_authenticator_password_is_never_interpolated_unsafely():
     assert ls.authenticator_password_sql(None) is None
     assert ls.authenticator_password_sql("short") is None
     assert ls.authenticator_password_sql("abc'; DROP ROLE x; --aaaaaaaaaa") is None
-    ok = ls.authenticator_password_sql("A1b2C3d4E5f6G7h8_-x")
-    assert ok == "ALTER ROLE lessons_authenticator PASSWORD 'A1b2C3d4E5f6G7h8_-x'"
+    # Low-entropy on purpose: a realistic-looking literal trips secret scanners.
+    pw = "test_" + "x" * 12 + "-0"
+    assert ls.authenticator_password_sql(pw) == f"ALTER ROLE lessons_authenticator PASSWORD '{pw}'"
 
 
 @pytest.mark.asyncio
