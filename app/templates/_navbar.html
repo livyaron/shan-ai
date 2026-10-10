@@ -185,6 +185,10 @@
             </button>
             <div class="shan-nav-dd-menu">
                 <a href="/dashboard/users" class="shan-nav-link{% if _path.startswith('/dashboard/users') %} active{% endif %}">👥 משתמשים</a>
+                {% if _u and _u.is_admin %}
+                <a href="/lessons/api/_groups" class="shan-nav-link">📚 לקחים: קבוצות רפרנטים</a>
+                <a href="/lessons/api/_import" class="shan-nav-link">📚 לקחים: ייבוא מ-Lovable</a>
+                {% endif %}
                 <a href="/dashboard/learning" class="shan-nav-link{% if _path.startswith('/dashboard/learning') and not _path.startswith('/dashboard/learning/rules') %} active{% endif %}">🎓 למידה</a>
                 <a href="/dashboard/learning/rules" class="shan-nav-link{% if _path.startswith('/dashboard/learning/rules') %} active{% endif %}">📜 חוקי למידה</a>
                 <a href="/dashboard/logs" class="shan-nav-link{% if _path.startswith('/dashboard/logs') %} active{% endif %}">📑 לוגים</a>

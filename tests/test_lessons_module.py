@@ -861,3 +861,12 @@ def test_startup_schedules_the_nightly_cleanup():
     from pathlib import Path
     src = Path("app/main.py").read_text(encoding="utf-8")
     assert "_lessons_nightly_task = asyncio.create_task(_lessons_nightly(engine))" in src
+
+
+def test_admin_menu_links_to_the_lessons_admin_pages_for_admins_only():
+    from pathlib import Path
+    nav = Path("app/templates/_navbar.html").read_text(encoding="utf-8")
+    guard = nav.index("{% if _u and _u.is_admin %}")
+    for href in ('href="/lessons/api/_groups"', 'href="/lessons/api/_import"'):
+        pos = nav.index(href)
+        assert guard < pos < nav.index("{% endif %}", guard), href
