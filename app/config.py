@@ -65,6 +65,17 @@ class Settings(BaseSettings):
     # Public base URL (for profile links etc.)
     BASE_URL: str = os.getenv("BASE_URL", "http://localhost:8000")
 
+    # מערכת לקחים (PLAN-lessons-module.md). PostgREST is a private Railway
+    # service; only the /lessons/api gateway talks to it.
+    LESSONS_POSTGREST_URL: str = os.getenv("LESSONS_POSTGREST_URL", "http://postgrest.railway.internal:3000")
+    LESSONS_UPLOAD_DIR: str = os.getenv("LESSONS_UPLOAD_DIR", "uploads/lessons")
+    RESEND_API_KEY: str = os.getenv("RESEND_API_KEY", "")
+    # Until a sending domain is verified every lessons e-mail goes to one inbox
+    # (same behaviour as the Lovable version). "false" sends to the real recipient.
+    LESSONS_EMAIL_SANDBOX: bool = os.getenv("LESSONS_EMAIL_SANDBOX", "true").lower() != "false"
+    LESSONS_EMAIL_SANDBOX_TO: str = os.getenv("LESSONS_EMAIL_SANDBOX_TO", "")
+    LESSONS_EMAIL_FROM: str = os.getenv("LESSONS_EMAIL_FROM", "מערכת לקחים <onboarding@resend.dev>")
+
     @property
     def public_base_url(self) -> str:
         """Public base URL, preferring Railway's live domain so a Railway
