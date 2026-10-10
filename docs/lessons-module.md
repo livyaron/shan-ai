@@ -101,3 +101,17 @@ App service variables:
 Shan-AI admin page: pick members from the Shan-AI users list per referent group (add / remove).
 `referent_members` is closed to PostgREST, so this page is the only way in. Included in
 `app.main` before the gateway (its catch-all would 404 these paths). Survives re-import.
+
+## Nightly cleanup — `app/services/lessons_maintenance.py`
+
+00:30 UTC daily: `lessons.notifications` older than 30 days are deleted (owner decision
+2026-10-10). Only rows whose `time` starts with a date are compared — Lovable's monthly pg_cron job
+failed every month since June on one row holding "לפני שעה". Never raises.
+
+## Daily DB backup — Railway service `db-backup`
+
+Cron `0 0 * * *` (UTC). Start command runs the `DAILY_BACKUP_SCRIPT` variable: read-only
+`pg_dump` of `postgres-v2` (`BACKUP_DB_URL`, built from postgres-v2 references) to
+`/backups/daily-<ts>.dump` + row counts; keeps 14; never touches the migration dumps.
+**Config changes on a cron service only apply on a NEW deployment** (bump a variable, e.g.
+`BACKUP_CONFIG_VERSION`) — `redeploy` re-runs the previous config (learned 2026-10-10).

@@ -822,3 +822,51 @@ def test_a_referent_login_account_signs_in_as_the_referent():
     assert ident.role == "referent" and not ident.is_viewer
     assert la.check_request("POST", "/rpc/apply_lesson_workflow_event", [],
                             {"p_actor_id": "u1773149388077", "p_actor_role": "referent"}, ident) is None
+
+
+# ------------------------------------------------------------------ nightly notifications cleanup
+
+def test_cleanup_deletes_only_dated_old_lessons_notifications():
+    from app.services import lessons_maintenance as lm
+    sql = lm.CLEANUP_SQL
+    assert sql.startswith("DELETE FROM lessons.notifications WHERE ")
+    assert "public." not in sql
+    # The row that broke Lovable's job for months ("לפני שעה") is filtered out
+    # before any cast, so it can never abort the delete again.
+    assert "\"time\" ~ '^\\d{4}-\\d{2}-\\d{2}'" in sql
+    assert "interval '30 days'" in sql
+
+
+def test_cleanup_runs_at_the_next_0030_utc():
+    import datetime as dt
+
+    from app.services.lessons_maintenance import seconds_until
+    assert seconds_until(dt.datetime(2026, 10, 10, 19, 30)) == 5 * 3600
+    assert seconds_until(dt.datetime(2026, 10, 10, 0, 10)) == 20 * 60
+    assert seconds_until(dt.datetime(2026, 10, 10, 0, 30)) == 24 * 3600
+
+
+@pytest.mark.asyncio
+async def test_cleanup_failure_never_raises():
+    from app.services.lessons_maintenance import cleanup_notifications
+
+    class Boom:
+        def begin(self):
+            raise RuntimeError("db down")
+
+    assert await cleanup_notifications(Boom()) is None
+
+
+def test_startup_schedules_the_nightly_cleanup():
+    from pathlib import Path
+    src = Path("app/main.py").read_text(encoding="utf-8")
+    assert "_lessons_nightly_task = asyncio.create_task(_lessons_nightly(engine))" in src
+
+
+def test_admin_menu_links_to_the_lessons_admin_pages_for_admins_only():
+    from pathlib import Path
+    nav = Path("app/templates/_navbar.html").read_text(encoding="utf-8")
+    guard = nav.index("{% if _u and _u.is_admin %}")
+    for href in ('href="/lessons/api/_groups"', 'href="/lessons/api/_import"'):
+        pos = nav.index(href)
+        assert guard < pos < nav.index("{% endif %}", guard), href

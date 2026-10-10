@@ -107,6 +107,8 @@ async def _webhook_watchdog() -> None:
 # Seconds between attempts to start a bot that failed at boot; the last value repeats.
 TELEGRAM_START_RETRY_SECONDS = (15, 30, 60, 120, 300)
 _telegram_retry_task = None
+# Held so the event loop does not garbage-collect it mid-sleep.
+_lessons_nightly_task = None
 
 
 async def _start_telegram_bot() -> bool:
@@ -460,6 +462,10 @@ async def startup():
     # §2.2). Never raises — a lessons failure must not take Shan-AI down.
     from app.services.lessons_schema import ensure_schema as _ensure_lessons_schema
     lessons_gateway_router.SCHEMA_STATUS.update(await _ensure_lessons_schema(engine))
+    # Nightly: lessons notifications older than 30 days (owner decision 2026-10-10).
+    from app.services.lessons_maintenance import run_nightly as _lessons_nightly
+    global _lessons_nightly_task
+    _lessons_nightly_task = asyncio.create_task(_lessons_nightly(engine))
 
     # Warm the fastembed model in the background so the FIRST user question doesn't
     # pay the one-time model load (download + init) inside its own latency budget.
