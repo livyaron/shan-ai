@@ -10,6 +10,7 @@ went green, and neither was visible from inside the app:
    gone until somebody restarted the service by hand.
 """
 
+import asyncio
 import inspect
 import types
 
@@ -139,3 +140,42 @@ def test_the_watchdog_is_started_in_webhook_mode():
 
     assert "_webhook_watchdog" in src
     assert main_mod.WEBHOOK_WATCHDOG_SECONDS <= 900
+
+
+# ---------------------------------------------------------------------------
+# A failed bot start at boot must not leave the bot dead (2026-10-10)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_failed_bot_start_is_reported_not_raised(monkeypatch):
+    async def boom():
+        raise ConnectionError("api.telegram.org unreachable")
+
+    monkeypatch.setattr(main_mod.telegram_bot, "initialize", boom)
+    assert await main_mod._start_telegram_bot() is False
+
+
+@pytest.mark.asyncio
+async def test_bot_start_is_retried_until_it_succeeds(monkeypatch):
+    calls = []
+
+    async def flaky():
+        calls.append(1)
+        return len(calls) >= 3
+
+    monkeypatch.setattr(main_mod, "TELEGRAM_START_RETRY_SECONDS", (0,))
+    monkeypatch.setattr(main_mod, "_start_telegram_bot", flaky)
+    await asyncio.wait_for(main_mod._retry_telegram_start(), timeout=5)
+    assert len(calls) == 3
+
+
+def test_startup_schedules_the_retry_when_the_first_start_fails():
+    from pathlib import Path
+    src = Path("app/main.py").read_text(encoding="utf-8")
+    assert "if not await _start_telegram_bot():" in src
+    assert "asyncio.create_task(_retry_telegram_start())" in src
+    assert main_retry_backoff_is_capped()
+
+
+def main_retry_backoff_is_capped() -> bool:
+    return max(main_mod.TELEGRAM_START_RETRY_SECONDS) <= 300 and min(main_mod.TELEGRAM_START_RETRY_SECONDS) >= 1
