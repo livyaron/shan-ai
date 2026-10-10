@@ -74,6 +74,8 @@ USAGE_LABELS: dict[str, str] = {
     "wall_motto":              "משפט השעה על מסך לוח המצב",
     # Patterns page (PLAN.md P5)
     "pattern_analysis":        "ניתוח AI מעמיק בדפוסים וסיכונים",
+    # מערכת לקחים (/lessons) — the six AI functions ported from Lovable
+    "lessons_ai":              "מערכת לקחים: ניתוחי AI",
 }
 
 

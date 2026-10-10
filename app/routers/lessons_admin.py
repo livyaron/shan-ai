@@ -24,7 +24,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db_session
-from app.routers.lessons_gateway import _shan_admin
+from app.routers.lessons_gateway import _shan_admin, login_redirect
 
 router = APIRouter(prefix="/lessons/api/_groups", tags=["lessons"])
 
@@ -112,6 +112,8 @@ async def _load(session: AsyncSession) -> tuple[list, dict, list]:
 @router.get("")
 async def groups_page(request: Request, msg: str | None = None,
                       session: AsyncSession = Depends(get_db_session)) -> Response:
+    if (redirect := login_redirect(request)) is not None:
+        return redirect
     if await _shan_admin(request, session) is None:
         return JSONResponse({"message": "Shan-AI admin only"}, status_code=403)
     groups, members, users = await _load(session)

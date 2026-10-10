@@ -14,6 +14,7 @@ Ported from the verified Bun gateway (lessons-handoff/api.ts).
 from __future__ import annotations
 
 import html
+import json
 import logging
 import time
 from collections import defaultdict, deque
@@ -22,7 +23,7 @@ from typing import Any
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -224,9 +225,146 @@ def _email_html(subject: str, body: str) -> str:
         </div>"""
 
 
+# --------------------------------------------------------------------- AI functions
+
+AI_FUNCTIONS = frozenset({"summarize-lessons", "review-lesson", "analyze-lessons",
+                          "classify-ai-feedback", "suggest-categories", "admin-insights"})
+# Per Shan-AI user, per minute. The Groq quota is shared with the bot and the
+# dashboard; one user hammering "ניתוח AI" must not starve them.
+AI_PER_MINUTE = 12
+_ai_hits: dict[int, deque] = defaultdict(deque)
+AI_BUSY = "שירות ה-AI עמוס כרגע, נסה שוב בעוד דקה"
+
+
+def _acting_id(body: dict, keys: tuple[str, ...], identity: la.Identity) -> str:
+    """The module id a request may act as: the one it names if it is the
+    caller's own (or a group of theirs; admin: anyone), else the caller."""
+    for k in keys:
+        v = body.get(k)
+        if v and (identity.is_admin or str(v) in identity.actor_ids):
+            return str(v)
+    return identity.profile_id
+
+
+async def _prefs_and_insights(session: AsyncSession, user_id: str) -> tuple[list[dict], list[dict]]:
+    prefs = [dict(r) for r in (await session.execute(text(
+        "SELECT preference_key, preference_value FROM lessons.ai_user_preferences WHERE user_id = :u"
+    ), {"u": user_id})).mappings().all()]
+    insights = [dict(r) for r in (await session.execute(text(
+        "SELECT insight_text, context_type, context_value FROM lessons.ai_global_insights"
+    ))).mappings().all()]
+    return prefs, insights
+
+
 @router.api_route("/functions/v1/{name:path}", methods=["GET", "POST"])
-async def ai_functions(name: str, identity: la.Identity = Depends(current_identity)):
-    return _json({"error": "שירות ה-AI אינו מחובר כרגע"}, 503)
+async def ai_functions(name: str, request: Request, identity: la.Identity = Depends(current_identity),
+                       session: AsyncSession = Depends(get_db_session)):
+    from app.services import lessons_ai as ai
+
+    if name not in AI_FUNCTIONS:
+        return _json({"error": "Not found"}, 404)
+    if request.method != "POST":
+        return _json({"error": "Use POST"}, 405)
+    hits = _ai_hits[identity.shan_user_id]
+    now = time.monotonic()
+    while hits and now - hits[0] > 60:
+        hits.popleft()
+    if len(hits) >= AI_PER_MINUTE:
+        return _json({"error": "חריגה ממגבלת בקשות AI, נסה שוב בעוד דקה"}, 429)
+    hits.append(now)
+    body, err = la.parse_json_body(await request.body())
+    if err or not isinstance(body, dict):
+        return _json({"error": "Expected a JSON object"}, 400)
+
+    try:
+        if name == "summarize-lessons":
+            prefs, insights = await _prefs_and_insights(session, _acting_id(body, ("userId",), identity))
+            system, user = ai.build_summarize(body, prefs, insights)
+            answer = await ai.ask(system, user, json_mode=False, max_tokens=1800)
+            return Response(ai.sse_body(answer), media_type="text/event-stream")
+
+        if name == "review-lesson":
+            built = ai.build_review(body)
+            if built is None:
+                return _json({"error": "Invalid type. Use 'pre_submit', 'post_approve', or 're_analyze'"}, 400)
+            reply = ai.parse_json(await ai.ask(*built, json_mode=True))
+            return _json({"review": ai.normalize_review(body.get("type"), reply)})
+
+        if name == "analyze-lessons":
+            prefs, insights = await _prefs_and_insights(session, _acting_id(body, ("userId",), identity))
+            lesson_ids = [int(lid) for lid in (l.get("id") for l in body.get("allLessons") or [] if isinstance(l, dict))
+                          if isinstance(lid, int)]
+            rows = [dict(r) for r in (await session.execute(text(
+                "SELECT lesson_id, is_relevant, is_implemented, responded_at FROM lessons.lesson_implementations "
+                "WHERE lesson_id = ANY(:ids)"), {"ids": lesson_ids})).mappings().all()] if lesson_ids else []
+            system, user = ai.build_analyze(body, prefs, insights, ai.quality_scores(lesson_ids, rows))
+            reply = ai.parse_json(await ai.ask(system, user, json_mode=True))
+            referent_ids = {str(r.get("id")) for r in body.get("referents") or [] if isinstance(r, dict) and r.get("id")}
+            return _json(ai.normalize_analyze(reply, set(lesson_ids), referent_ids))
+
+        if name == "classify-ai-feedback":
+            return await _classify_feedback(body, identity, session)
+
+        if name == "suggest-categories":
+            reply = ai.parse_json(await ai.ask(*ai.build_suggest_categories(body), json_mode=True, max_tokens=800))
+            sugg = [{"name": str(s.get("name")), "description": str(s.get("description") or "")}
+                    for s in reply.get("suggestions") or [] if isinstance(s, dict) and s.get("name")]
+            return _json({"suggestions": sugg})
+
+        # admin-insights
+        if not body.get("patterns"):
+            return _json({"phrasings": []})
+        reply = ai.parse_json(await ai.ask(*ai.build_admin_insights(body), json_mode=True, max_tokens=1000))
+        phr = [{"id": str(p.get("id")), "sentence": str(p.get("sentence") or "")}
+               for p in reply.get("phrasings") or [] if isinstance(p, dict) and p.get("id") is not None]
+        return _json({"phrasings": phr})
+    except ai.AIUnavailable:
+        return _json({"error": AI_BUSY}, 503)
+
+
+async def _classify_feedback(body: dict, identity: la.Identity, session: AsyncSession) -> Response:
+    """classify-ai-feedback: classify, store, apply personal prefs, queue public insights."""
+    from app.services import lessons_ai as ai
+
+    feedback_text, user_id, user_name = body.get("feedback_text"), body.get("user_id"), body.get("user_name")
+    if not feedback_text or not user_id or not user_name:
+        return _json({"error": "חסרים שדות חובה"}, 400)
+    if not identity.is_admin and str(user_id) not in identity.actor_ids:
+        return _json({"error": "user_id must be you or a group you belong to"}, 403)
+    reply = ai.parse_json(await ai.ask(ai.CLASSIFY_SYSTEM, f'פידבק המשתמש: "{feedback_text}"', json_mode=True, max_tokens=800))
+    public, personal = ai.normalize_classify(reply)
+    classification = "public" if public else "personal"
+    fid = (await session.execute(text(
+        "INSERT INTO lessons.ai_feedback (user_id, user_name, context_type, context_id, feedback_text, classification, "
+        "extracted_mistakes, extracted_preferences, processed) VALUES (:u, :n, :ct, :cid, :t, :c, "
+        "CAST(:m AS jsonb), CAST(:p AS jsonb), true) RETURNING id"
+    ), {"u": str(user_id), "n": str(user_name), "ct": body.get("context_type") or "dashboard",
+        "cid": body.get("context_id"), "t": str(feedback_text), "c": classification,
+        "m": json.dumps(public, ensure_ascii=False), "p": json.dumps(personal, ensure_ascii=False)})).scalar_one()
+    for pref in personal:
+        await session.execute(text(
+            "INSERT INTO lessons.ai_user_preferences (user_id, preference_key, preference_value, source_feedback_id, updated_at) "
+            "VALUES (:u, :k, :v, :f, now()) ON CONFLICT (user_id, preference_key) DO UPDATE SET "
+            "preference_value = EXCLUDED.preference_value, source_feedback_id = EXCLUDED.source_feedback_id, updated_at = now()"
+        ), {"u": str(user_id), "k": pref["key"], "v": pref["value"], "f": fid})
+    for item in public:
+        probe = item["text"][:50].replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        existing = (await session.execute(text(
+            "SELECT id, frequency FROM lessons.ai_candidate_insights WHERE context_type = :ct AND status = 'pending' "
+            "AND insight_text ILIKE :q LIMIT 1"), {"ct": item["context_type"], "q": f"%{probe}%"})).first()
+        if existing:
+            await session.execute(text(
+                "UPDATE lessons.ai_candidate_insights SET frequency = frequency + 1, "
+                "source_feedback_ids = COALESCE(source_feedback_ids, CAST('[]' AS jsonb)) || to_jsonb(CAST(:f AS integer)), "
+                "confidence = LEAST(100, 50 + (frequency + 1) * 10) WHERE id = :id"), {"f": fid, "id": existing[0]})
+        else:
+            await session.execute(text(
+                "INSERT INTO lessons.ai_candidate_insights (insight_text, context_type, context_value, source_feedback_ids, "
+                "frequency, confidence, status) VALUES (:t, :ct, :cv, CAST(:ids AS jsonb), 1, 50, 'pending')"
+            ), {"t": item["text"], "ct": item["context_type"], "cv": item["context_value"], "ids": json.dumps([fid])})
+    await session.commit()
+    return _json({"id": fid, "classification": classification,
+                  "extracted_public": public, "extracted_personal": personal})
 
 
 def storage_path(key: str) -> Path | None:
@@ -312,6 +450,18 @@ run.onclick = () => { if (confirm('לייבא ולהחליף את נתוני ה�
 </script></body></html>"""
 
 
+def login_redirect(request: Request) -> Response | None:
+    """For the admin HTML pages: no valid session → the login page, then back here."""
+    from urllib.parse import quote
+
+    from app.utils.session import verify_token
+
+    token = request.cookies.get("access_token")
+    if token and verify_token(token):
+        return None
+    return RedirectResponse(f"/login?next={quote(request.url.path, safe='/')}", status_code=303)
+
+
 async def _shan_admin(request: Request, session: AsyncSession) -> User | None:
     user = await _session_user(request, session)
     return user if user.is_admin else None
@@ -319,6 +469,8 @@ async def _shan_admin(request: Request, session: AsyncSession) -> User | None:
 
 @router.get("/_import")
 async def import_page(request: Request, session: AsyncSession = Depends(get_db_session)):
+    if (redirect := login_redirect(request)) is not None:
+        return redirect
     if await _shan_admin(request, session) is None:
         return _json({"message": "Shan-AI admin only"}, 403)
     return Response(_IMPORT_PAGE, media_type="text/html; charset=utf-8", headers={"Cache-Control": "no-store"})
