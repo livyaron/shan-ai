@@ -316,7 +316,7 @@ const Dashboard = () => {
 
       if (!resp.ok) {
         if (resp.status === 503) {
-          toast({ title: "שירות ה-AI אינו מחובר כרגע", description: "האפשרות תחזור כשיחובר מודל", variant: "destructive" });
+          toast({ title: "שירות ה-AI עמוס כרגע", description: "נסה שוב בעוד דקה", variant: "destructive" });
           setIsStreaming(false);
           return;
         }

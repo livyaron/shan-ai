@@ -15,6 +15,7 @@ from app.routers import lessons_gateway as gw
 from app.routers import lessons_spa as spa
 from app.routers.login import safe_next
 from app.services import lessons_access as la
+from app.services import lessons_ai as ai
 from app.services import lessons_import as li
 from app.services import lessons_schema as ls
 
@@ -317,8 +318,8 @@ def upstream(monkeypatch):
     return seen
 
 
-def _client():
-    return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
+def _client(**kw):
+    return AsyncClient(transport=ASGITransport(app=app), base_url="http://test", **kw)
 
 
 @pytest.mark.asyncio
@@ -377,11 +378,11 @@ async def test_postgrest_down_is_a_503(as_user, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_ai_functions_are_a_friendly_503_and_unknown_paths_404_json(as_user):
+async def test_unknown_function_and_unknown_api_paths_are_404_json(as_user):
     as_user(_ident())
     async with _client() as c:
-        r = await c.post("/lessons/api/functions/v1/summarize-lessons", json={})
-        assert r.status_code == 503 and "AI" in r.json()["error"]
+        r = await c.post("/lessons/api/functions/v1/no-such-function", json={})
+        assert r.status_code == 404
         r = await c.get("/lessons/api/nope")
         assert r.status_code == 404 and r.json() == {"error": "Not found"}
 
@@ -717,7 +718,8 @@ async def test_import_endpoints_are_shan_admin_only(monkeypatch):
 @pytest.mark.asyncio
 async def test_import_page_requires_a_session():
     async with _client() as c:
-        assert (await c.get("/lessons/api/_import")).status_code == 401
+        r = await c.get("/lessons/api/_import", follow_redirects=False)
+        assert r.status_code == 303 and r.headers["location"] == "/login?next=/lessons/api/_import"
         assert (await c.post("/lessons/api/_import?mode=dry")).status_code == 401
 
 
@@ -754,9 +756,10 @@ async def test_group_admin_is_shan_admin_only_and_not_swallowed_by_the_gateway(m
         return None
 
     monkeypatch.setattr(lessons_admin, "_shan_admin", not_admin)
+    _logged_in(monkeypatch)
     app.dependency_overrides[get_db_session] = no_db
     try:
-        async with _client() as c:
+        async with _client(cookies={"access_token": "t"}) as c:
             assert (await c.get("/lessons/api/_groups")).status_code == 403
             r = await c.post("/lessons/api/_groups/add", data={"profile_id": "r1", "shan_user_id": "7"})
             assert r.status_code == 403
@@ -870,3 +873,177 @@ def test_admin_menu_links_to_the_lessons_admin_pages_for_admins_only():
     for href in ('href="/lessons/api/_groups"', 'href="/lessons/api/_import"'):
         pos = nav.index(href)
         assert guard < pos < nav.index("{% endif %}", guard), href
+
+
+@pytest.mark.asyncio
+async def test_groups_page_without_session_redirects_to_login():
+    async with _client() as c:
+        r = await c.get("/lessons/api/_groups", follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"] == "/login?next=/lessons/api/_groups"
+
+
+# ------------------------------------------------------------------ AI functions (lessons_ai)
+
+def test_ai_runs_on_the_shan_ai_router_with_its_own_label():
+    from app.services.llm_router import USAGE_LABELS
+    assert ai.USAGE in USAGE_LABELS
+
+
+def test_parse_json_survives_fences_and_prose():
+    assert ai.parse_json('```json\n{"a": 1}\n```') == {"a": 1}
+    assert ai.parse_json('הנה התשובה: {"a": [1, 2]} בהצלחה') == {"a": [1, 2]}
+    assert ai.parse_json("not json") == {} and ai.parse_json("[1,2]") == {}
+
+
+def test_clip_lines_says_what_it_left_out():
+    out = ai.clip_lines(["x" * 10] * 5, 25)
+    assert out.count("x" * 10) == 2 and "עוד 3 שורות" in out
+
+
+def test_quality_scores_match_the_lovable_maths():
+    rows = [{"lesson_id": 1, "is_relevant": True, "is_implemented": True, "responded_at": "t"},
+            {"lesson_id": 1, "is_relevant": False, "is_implemented": None, "responded_at": "t"},
+            {"lesson_id": 1, "is_relevant": None, "is_implemented": None, "responded_at": "t"},
+            {"lesson_id": 1, "is_relevant": True, "is_implemented": False, "responded_at": None}]
+    q = ai.quality_scores([1, 2], rows)
+    assert q[1]["responses"] == 2 and q[1]["avg"] == 1.0 and q[1]["rate"] == 0.5
+    assert q[1]["shrunk"] == (1.0 * 2 + 1.0 * 3) / 5
+    assert q[2] == {"responses": 0, "avg": None, "rate": None, "shrunk": 1.0}
+
+
+def test_summary_prompt_keeps_the_lovable_format_and_scope():
+    body = {"role": "project_manager", "userName": "משה", "lessons": [{"title": "t", "project": "p"}],
+            "projects": [{"name": "p", "equipment": ["שנאי"]}], "userProjects": [{"name": "p", "equipment": []}]}
+    system, user = ai.build_summarize(body, [{"preference_key": "length", "preference_value": "קצר"}], [])
+    assert "🎯 **Top 3 עדיפויות**" in system and "מנהל פרויקט בשם משה" in system
+    assert "• length: קצר" in system and "הפרויקטים שאני (משה) מנהל" in user
+    admin_system, _ = ai.build_summarize({**body, "role": "admin"}, [], [])
+    assert "עבור מנהל המערכת" in admin_system
+
+
+def test_contexts_stay_inside_the_groq_minute_budget():
+    lessons = [{"id": i, "title": "ל" * 80, "project": "פ" * 30, "projectName": "פ" * 30, "category": "ק", "stage": "ש",
+                "risk": "high", "status": "approved", "equipment": ["שנאי"] * 5, "description": "ת" * 200} for i in range(400)]
+    projects = [{"name": "פ" * 30, "stage": "ש", "type": "t", "station": "s", "equipment": ["שנאי"] * 5} for _ in range(200)]
+    s1, u1 = ai.build_summarize({"role": "admin", "lessons": lessons, "projects": projects}, [], [])
+    s2, u2 = ai.build_analyze({"allLessons": lessons, "projectLessons": lessons[:50], "referents": []}, [], [],
+                              ai.quality_scores([l["id"] for l in lessons], []))
+    s3, u3 = ai.build_review({"type": "pre_submit", "lesson": {}, "existingLessons": lessons})
+    for system, user in ((s1, u1), (s2, u2), (s3, u3)):
+        # 2 chars/token, conservative (insight_ai); + max_tokens must fit 8,000/min.
+        assert (len(system) + len(user)) / 2 + 1800 < 8000, len(system) + len(user)
+
+
+def test_review_types_and_normalised_shapes():
+    assert ai.build_review({"type": "bogus"}) is None
+    for kind in ("pre_submit", "post_approve", "re_analyze"):
+        system, _user = ai.build_review({"type": kind, "lesson": {"title": "t", "stage": "תכנון"}})
+        assert "JSON" in system
+    pre = ai.normalize_review("pre_submit", {"quality_score": "14", "improvements": ["a"]})
+    assert pre["quality_score"] == 10 and pre["improvements"] == ["a"] and pre["strengths"] == []
+    dist = ai.normalize_review("post_approve", {"recommended_projects": [{"project_name": "p", "priority": "urgent"}]})
+    assert dist["recommended_projects"][0]["priority"] == "medium"
+    assert set(dist) == {"recommended_projects", "recommended_referents", "implementation_steps", "attention_points", "summary"}
+
+
+def test_analyze_drops_ids_the_model_invented():
+    reply = {"project_analysis": {"summary": "s"},
+             "relevant_lessons": [{"lesson_id": 5, "priority": "high"}, {"lesson_id": 999}, {"lesson_id": "x"}],
+             "relevant_referents": [{"referent_id": "r1"}, {"referent_id": "ghost"}]}
+    out = ai.normalize_analyze(reply, {5}, {"r1"})
+    assert [l["lesson_id"] for l in out["relevant_lessons"]] == [5]
+    assert [r["referent_id"] for r in out["relevant_referents"]] == ["r1"]
+    assert out["project_analysis"]["strengths"] == []
+
+
+def test_classify_keeps_only_real_items():
+    pub, per = ai.normalize_classify({"public_items": [{"text": "חסר סיכון"}, {"text": "  "}],
+                                      "personal_items": [{"key": "length", "value": "קצר"}, {"key": "x"}]})
+    assert pub == [{"text": "חסר סיכון", "context_type": "general", "context_value": None}]
+    assert per == [{"key": "length", "value": "קצר"}]
+
+
+def test_sse_body_is_what_the_dashboard_parses():
+    import json as _j
+    lines = [ln for ln in ai.sse_body("שלום").split("\n") if ln]
+    assert _j.loads(lines[0][6:])["choices"][0]["delta"]["content"] == "שלום"
+    assert lines[-1] == "data: [DONE]"
+
+
+@pytest.fixture
+def ai_stub(monkeypatch):
+    calls = []
+
+    async def fake_ask(system, user, *, json_mode, max_tokens=1500):
+        calls.append({"system": system, "user": user, "json_mode": json_mode})
+        return calls[-1].get("reply") or ('{"suggestions": [{"name": "בטיחות", "description": "d"}]}' if json_mode else "סיכום")
+
+    async def no_prefs(session, user_id):
+        calls.append({"prefs_for": user_id})
+        return [], []
+
+    monkeypatch.setattr(ai, "ask", fake_ask)
+    monkeypatch.setattr(gw, "_prefs_and_insights", no_prefs)
+    gw._ai_hits.clear()
+    return calls
+
+
+@pytest.fixture
+def no_db_session():
+    from app.database import get_db_session
+
+    async def none():
+        yield None
+    app.dependency_overrides[get_db_session] = none
+    yield
+    app.dependency_overrides.pop(get_db_session, None)
+
+
+@pytest.mark.asyncio
+async def test_suggest_categories_end_to_end(as_user, ai_stub, no_db_session):
+    as_user(_ident())
+    async with _client() as c:
+        r = await c.post("/lessons/api/functions/v1/suggest-categories", json={"existingCategories": ["א"]})
+    assert r.status_code == 200 and r.json() == {"suggestions": [{"name": "בטיחות", "description": "d"}]}
+
+
+@pytest.mark.asyncio
+async def test_summary_streams_sse_and_reads_only_own_prefs(as_user, ai_stub, no_db_session):
+    as_user(_ident(groups=("r1",)))
+    async with _client() as c:
+        r = await c.post("/lessons/api/functions/v1/summarize-lessons",
+                         json={"role": "project_manager", "userId": "u1", "lessons": [], "projects": []})
+    assert r.status_code == 200 and r.headers["content-type"].startswith("text/event-stream")
+    assert "data: [DONE]" in r.text
+    # u1 is someone else: the caller's own preferences are used instead.
+    assert {"prefs_for": "u2"} in ai_stub
+
+
+@pytest.mark.asyncio
+async def test_ai_down_is_a_friendly_503(as_user, monkeypatch, no_db_session):
+    async def down(*a, **k):
+        raise ai.AIUnavailable("quota")
+    monkeypatch.setattr(ai, "ask", down)
+    gw._ai_hits.clear()
+    as_user(_ident())
+    async with _client() as c:
+        r = await c.post("/lessons/api/functions/v1/review-lesson", json={"type": "pre_submit", "lesson": {}})
+    assert r.status_code == 503 and "עמוס" in r.json()["error"]
+
+
+@pytest.mark.asyncio
+async def test_ai_is_rate_limited_per_user(as_user, ai_stub, no_db_session):
+    as_user(_ident())
+    async with _client() as c:
+        codes = [(await c.post("/lessons/api/functions/v1/suggest-categories", json={})).status_code
+                 for _ in range(gw.AI_PER_MINUTE + 1)]
+    assert codes[:-1] == [200] * gw.AI_PER_MINUTE and codes[-1] == 429
+
+
+@pytest.mark.asyncio
+async def test_feedback_cannot_be_filed_as_someone_else(as_user, ai_stub, no_db_session):
+    as_user(_ident())
+    async with _client() as c:
+        r = await c.post("/lessons/api/functions/v1/classify-ai-feedback",
+                         json={"feedback_text": "x", "user_id": "u1", "user_name": "ירון"})
+    assert r.status_code == 403

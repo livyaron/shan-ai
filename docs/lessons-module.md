@@ -21,7 +21,7 @@ P2: the React app at `/lessons/`. The data import (P3) is not here yet.
 - Login = `/lessons/api/me`. No session → `/login?next=/lessons/`. Logout → Shan-AI `/logout`.
 - No passwords anywhere (user picker, change-password dialog and admin password field removed).
 - `UserSwitcher` = "act as": yourself or a referent group from `/me` (kept per tab in `sessionStorage`).
-- AI buttons get the gateway's 503 and show "שירות ה-AI אינו מחובר כרגע".
+- AI buttons call `/lessons/api/functions/v1/<name>` (see "AI functions" below); a 503 there means "busy".
 - `/login` keeps `next` (`login.safe_next`: same-site paths only — never an open redirect).
 
 ## Identity
@@ -115,3 +115,18 @@ Cron `0 0 * * *` (UTC). Start command runs the `DAILY_BACKUP_SCRIPT` variable: r
 `/backups/daily-<ts>.dump` + row counts; keeps 14; never touches the migration dumps.
 **Config changes on a cron service only apply on a NEW deployment** (bump a variable, e.g.
 `BACKUP_CONFIG_VERSION`) — `redeploy` re-runs the previous config (learned 2026-10-10).
+
+## AI functions — `app/services/lessons_ai.py`
+
+The six Lovable edge functions (summarize-lessons, review-lesson, analyze-lessons,
+classify-ai-feedback, suggest-categories, admin-insights) run on Shan-AI's router:
+`llm_chat("lessons_ai", …)` — Groq first, Gemma on failure; switch provider on "🤖 מודל AI".
+Lovable's `LOVABLE_API_KEY` is a Lovable-internal gateway secret: not readable, not reusable.
+- Prompts are the Lovable ones word for word; tool calling became JSON mode (schema in the
+  prompt, reply normalised to the exact keys the React code reads).
+- Context is packed to `CONTEXT_CHARS` so prompt + max_tokens fits Groq's 8,000 TPM (a test
+  builds 400 lessons and checks it).
+- The gateway: 12 calls/min per user (shared Groq quota), preferences read only for the caller
+  or their groups, feedback filed only as the caller or their groups, lesson/referent ids the
+  model invents are dropped. Both providers down → 503 "שירות ה-AI עמוס כרגע".
+- Admin HTML pages (`_groups`, `_import`) send a logged-out browser to `/login?next=…`.
