@@ -15,6 +15,7 @@ from app.routers import lessons_gateway as gw
 from app.routers import lessons_spa as spa
 from app.routers.login import safe_next
 from app.services import lessons_access as la
+from app.services import lessons_import as li
 from app.services import lessons_schema as ls
 
 ALL_SQL = ls.SCHEMA_STATEMENTS + ls.ROLE_STATEMENTS
@@ -607,3 +608,114 @@ def test_ui_has_no_lovable_or_password_leftovers():
     ctx = (ui / "src/context/UserContext.tsx").read_text(encoding="utf-8")
     assert "password" not in ctx and "remembered_user_id" not in ctx
     assert 'basename="/lessons"' in (ui / "src/App.tsx").read_text(encoding="utf-8")
+
+
+# ------------------------------------------------------------------ P3: import from Lovable
+
+def test_drift_allows_only_the_planned_password_drop():
+    tgt = {"profiles": {"id", "name", "shan_user_id"}, "lessons": {"id", "title"}}
+    assert li.drift({"profiles": {"id", "name", "password"}, "lessons": {"id", "title"}}, tgt) == {}
+    assert li.drift({"lessons": {"id", "title", "new_col"}}, tgt) == {"lessons": ["new_col"]}
+
+
+def test_password_never_reaches_the_target():
+    rows = li.clean_rows("profiles", [{"id": "u1", "name": "x", "password": "secret"}])
+    assert rows == [{"id": "u1", "name": "x"}]
+    assert li.clean_rows("lessons", [{"id": 1, "password": "kept: not a profile"}])[0]["password"]
+
+
+def test_insert_columns_skip_target_only_and_keep_order():
+    rows = [{"id": 1, "name": "a", "gone": 1}, {"id": 2, "site": "s"}]
+    assert li.insert_columns(rows, {"id", "name", "site", "shan_project_identifier"}) == ["id", "name", "site"]
+
+
+def test_names_match_as_word_sets_not_strings():
+    assert li.name_words("משה ברקוביץ ") == li.name_words("ברקוביץ  משה")
+    assert li.name_words("עמר דוד") == li.name_words("דוד עמר")
+    assert li.name_words("דוד עמר") != li.name_words("דוד עמרני")
+
+
+def test_links_are_applied_only_when_the_names_agree():
+    profiles = {"u1": "ירון ליב", "u2": "משה ברקוביץ", "u1773127270329": "עמר דוד",
+                "u1773149118417": "נוי כהנאסיה", "u1773053807361": "עמית בלונסקי"}
+    users = {3: "ירון ליב", 24: "משה ברקוביץ ", 15: "דוד עמר", 28: "נוי כהן", 29: "עמית בלונסקי"}
+    ok, problems = li.plan_links(profiles, users)
+    assert ("u1", 3) in ok and ("u2", 24) in ok and ("u1773127270329", 15) in ok
+    assert ("u1773149118417", 28) not in ok  # different name → never forced
+    assert any("u1773149118417" in p for p in problems)
+    assert any("u1773009448642" in p for p in problems)  # not in this import
+
+
+def test_links_match_the_owner_decisions():
+    assert dict(li.LINKS) == {"u1": 3, "u1773149118417": 28, "u1773053807361": 29, "u2": 24,
+                              "u1773009448642": 26, "u1773127270329": 15}
+
+
+def _source(pages: dict[str, list], total_override: dict | None = None):
+    def handler(req: httpx.Request):
+        table = req.url.path.rsplit("/", 1)[-1]
+        rows = pages.get(table, [])
+        off, lim = int(req.url.params["offset"]), int(req.url.params["limit"])
+        total = (total_override or {}).get(table, len(rows))
+        assert req.method == "GET" and req.headers["apikey"] == "k"
+        return httpx.Response(200, json=rows[off:off + lim], headers={"content-range": f"0-0/{total}"})
+    return httpx.AsyncClient(transport=httpx.MockTransport(handler))
+
+
+@pytest.mark.asyncio
+async def test_fetch_pages_through_everything(monkeypatch):
+    monkeypatch.setattr(li, "PAGE", 2)
+    rows = [{"id": i} for i in range(5)]
+    async with _source({"notifications": rows}) as c:
+        assert await li.fetch_all(c, "https://src", "k", "notifications") == rows
+
+
+@pytest.mark.asyncio
+async def test_a_short_read_aborts(monkeypatch):
+    monkeypatch.setattr(li, "PAGE", 2)
+    async with _source({"lessons": [{"id": 1}, {"id": 2}, {"id": 3}]}, {"lessons": 9}) as c:
+        with pytest.raises(li.ImportAbort):
+            await li.fetch_all(c, "https://src", "k", "lessons")
+
+
+@pytest.mark.asyncio
+async def test_import_without_source_config_aborts_before_any_io():
+    with pytest.raises(li.ImportAbort):
+        await li.run_import(object(), "", "", write=True)
+
+
+def test_import_never_writes_outside_schema_lessons():
+    from pathlib import Path
+    src = Path("app/services/lessons_import.py").read_text(encoding="utf-8")
+    for stmt in re.findall(r'"((?:INSERT|UPDATE|DELETE|ALTER)[^"]*)', src):
+        assert "public." not in stmt and "lessons." in stmt, stmt
+    truncate = next(ln for ln in src.splitlines() if '"TRUNCATE ' in ln)
+    assert 'f"lessons.{t}" for t in (*TABLES, "referent_members")' in truncate
+    assert "SELECT id, username FROM public.users" in src  # the one read of Shan-AI data
+
+
+@pytest.mark.asyncio
+async def test_import_endpoints_are_shan_admin_only(monkeypatch):
+    from app.database import get_db_session
+
+    async def no_db():
+        yield None
+
+    for is_admin, expected in ((False, 403), (True, 400)):
+        async def user(request, session, _a=is_admin):
+            return type("U", (), {"id": 3, "is_admin": _a})()
+        monkeypatch.setattr(gw, "_session_user", user)
+        app.dependency_overrides[get_db_session] = no_db
+        try:
+            async with _client() as c:
+                r = await c.post("/lessons/api/_import?mode=bogus")
+        finally:
+            app.dependency_overrides.clear()
+        assert r.status_code == expected
+
+
+@pytest.mark.asyncio
+async def test_import_page_requires_a_session():
+    async with _client() as c:
+        assert (await c.get("/lessons/api/_import")).status_code == 401
+        assert (await c.post("/lessons/api/_import?mode=dry")).status_code == 401
