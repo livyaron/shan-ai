@@ -12,6 +12,8 @@ from httpx import ASGITransport, AsyncClient
 
 from app.main import app
 from app.routers import lessons_gateway as gw
+from app.routers import lessons_spa as spa
+from app.routers.login import safe_next
 from app.services import lessons_access as la
 from app.services import lessons_schema as ls
 
@@ -495,3 +497,113 @@ async def test_missing_schema_is_a_503_not_a_500(monkeypatch):
     finally:
         app.dependency_overrides.clear()
     assert r.status_code == 503
+
+
+# ------------------------------------------------------------------ P2: the SPA at /lessons/
+
+@pytest.fixture
+def built(tmp_path, monkeypatch):
+    (tmp_path / "assets").mkdir()
+    (tmp_path / "index.html").write_text("<html>APP</html>")
+    (tmp_path / "assets" / "index-abc.js").write_text("js")
+    (tmp_path / "manifest.webmanifest").write_text("{}")
+    (tmp_path / "sw.js").write_text("sw")
+    monkeypatch.setattr(spa, "SPA_DIR", tmp_path)
+    return tmp_path
+
+
+def _logged_in(monkeypatch, ok=True):
+    import app.utils.session as sess
+    monkeypatch.setattr(sess, "verify_token", lambda t: {"user_id": 1, "username": "u"} if ok else None)
+
+
+@pytest.mark.asyncio
+async def test_spa_route_without_session_goes_to_login_and_back(built, monkeypatch):
+    _logged_in(monkeypatch, ok=False)
+    async with _client() as c:
+        r = await c.get("/lessons/projects/3", follow_redirects=False)
+    assert r.status_code == 303
+    assert r.headers["location"] == "/login?next=/lessons/projects/3"
+
+
+@pytest.mark.asyncio
+async def test_spa_route_with_session_is_index_never_cached(built, monkeypatch):
+    _logged_in(monkeypatch)
+    async with _client() as c:
+        for path in ("/lessons/", "/lessons/lessons/12", "/lessons/admin"):
+            r = await c.get(path, cookies={"access_token": "t"})
+            assert r.status_code == 200 and r.text == "<html>APP</html>", path
+            assert r.headers["cache-control"] == "no-cache"
+        r = await c.get("/lessons", follow_redirects=False)
+        assert r.status_code == 307 and r.headers["location"] == "/lessons/"
+
+
+@pytest.mark.asyncio
+async def test_built_files_are_public_and_cached_by_kind(built, monkeypatch):
+    _logged_in(monkeypatch, ok=False)
+    async with _client() as c:
+        js = await c.get("/lessons/assets/index-abc.js")
+        assert js.status_code == 200 and "immutable" in js.headers["cache-control"]
+        # The browser fetches the manifest without cookies — gating it breaks install.
+        man = await c.get("/lessons/manifest.webmanifest")
+        assert man.status_code == 200 and man.headers["cache-control"] == "no-cache"
+        assert (await c.get("/lessons/sw.js")).headers["cache-control"] == "no-cache"
+        # An old hashed asset after a deploy is a 404, never index.html as JS.
+        assert (await c.get("/lessons/assets/index-old.js")).status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_api_paths_are_never_the_spa(built, monkeypatch, as_user):
+    _logged_in(monkeypatch)
+    as_user(_ident())
+    async with _client() as c:
+        for path in ("/lessons/api", "/lessons/api/", "/lessons/api/nope"):
+            r = await c.get(path, cookies={"access_token": "t"})
+            assert r.status_code == 404 and "APP" not in r.text, path
+
+
+def test_spa_files_cannot_escape_the_build(built):
+    assert spa.spa_file("assets/index-abc.js") is not None
+    for bad in ("../x", "assets/../../etc/passwd", "a\\b", "x\x00", ""):
+        assert spa.spa_file(bad) is None, bad
+
+
+@pytest.mark.asyncio
+async def test_unbuilt_server_says_so(tmp_path, monkeypatch):
+    monkeypatch.setattr(spa, "SPA_DIR", tmp_path)
+    _logged_in(monkeypatch)
+    async with _client() as c:
+        r = await c.get("/lessons/", cookies={"access_token": "t"})
+    assert r.status_code == 503 and "לא נבנה" in r.text
+
+
+def test_login_next_is_never_an_open_redirect():
+    assert safe_next("/lessons/") == "/lessons/"
+    assert safe_next("/lessons/projects/3?x=1") == "/lessons/projects/3?x=1"
+    for bad in (None, "", "https://evil.example", "//evil.example", "/\\evil.example",
+                "lessons", "/x\r\nSet-Cookie: a=b"):
+        assert safe_next(bad) is None, bad
+
+
+def test_navbar_links_to_the_module_and_docker_builds_it():
+    from pathlib import Path
+    assert 'href="/lessons/"' in Path("app/templates/_navbar.html").read_text(encoding="utf-8")
+    docker = Path("Dockerfile").read_text(encoding="utf-8")
+    assert "FROM node:22-slim AS ui" in docker
+    assert "COPY --from=ui /ui/dist /app/static/lessons" in docker
+
+
+def test_ui_has_no_lovable_or_password_leftovers():
+    from pathlib import Path
+    ui = Path("lessons_ui")
+    assert not (ui / ".env").exists() and not (ui / "supabase").exists()
+    for f in [*ui.joinpath("src").rglob("*.ts"), *ui.joinpath("src").rglob("*.tsx"),
+              ui / "vite.config.ts", ui / "index.html", ui / "package.json"]:
+        if f.name == "types.ts":  # generated Supabase types: describe the old schema
+            continue
+        text = f.read_text(encoding="utf-8")
+        assert "lovable" not in text.lower(), f
+        assert "previewAuthStorage" not in text and "VITE_SUPABASE" not in text, f
+    ctx = (ui / "src/context/UserContext.tsx").read_text(encoding="utf-8")
+    assert "password" not in ctx and "remembered_user_id" not in ctx
+    assert 'basename="/lessons"' in (ui / "src/App.tsx").read_text(encoding="utf-8")

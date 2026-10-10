@@ -367,6 +367,7 @@
   <!-- Login form -->
   <div class="form-wrap">
     <form method="POST" action="/login">
+      {% if next_url %}<input type="hidden" name="next" value="{{ next_url }}">{% endif %}
       <div class="form-panel">
         <div class="col">
           <div class="field-lbl">OPERATOR · משתמש</div>
