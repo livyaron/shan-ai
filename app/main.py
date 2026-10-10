@@ -32,6 +32,7 @@ from app.routers import eval_loop as eval_loop_router  # noqa: E402
 from app.routers import learning_rules as learning_rules_router  # noqa: E402
 from app.routers import project_reports as project_reports_router  # noqa: E402
 from app.routers import war_room as war_room_router  # noqa: E402
+from app.routers import lessons_gateway as lessons_gateway_router  # noqa: E402
 from app.services.telegram_polling import telegram_bot  # noqa: E402
 from app.services.feedback_service import run_feedback_scheduler  # noqa: E402
 
@@ -62,6 +63,7 @@ app.include_router(eval_loop_router.router)
 app.include_router(learning_rules_router.router)
 app.include_router(project_reports_router.router)
 app.include_router(war_room_router.router)
+app.include_router(lessons_gateway_router.router)
 app.include_router(profile_router)
 
 # How often to ask Telegram whether it still points at this container.
@@ -399,6 +401,11 @@ async def startup():
     # Ensure uploads directory exists
     from pathlib import Path
     Path("uploads").mkdir(exist_ok=True)
+
+    # מערכת לקחים: its own schema, roles and grants (PLAN-lessons-module.md
+    # §2.2). Never raises — a lessons failure must not take Shan-AI down.
+    from app.services.lessons_schema import ensure_schema as _ensure_lessons_schema
+    lessons_gateway_router.SCHEMA_STATUS.update(await _ensure_lessons_schema(engine))
 
     # Warm the fastembed model in the background so the FIRST user question doesn't
     # pay the one-time model load (download + init) inside its own latency budget.

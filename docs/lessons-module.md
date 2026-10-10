@@ -1,0 +1,63 @@
+# מערכת לקחים — runbook (P1)
+
+Phase P1 of the lessons module: schema `lessons`, the PostgREST service and the
+`/lessons/api` gateway. The SPA (P2) and the data import (P3) are not here yet.
+
+## Pieces
+
+| Piece | Where | Notes |
+|---|---|---|
+| Schema, roles, grants | `app/services/lessons_schema.py` | Runs at startup (`ensure_schema`), idempotent, never raises. Never issues DDL on `public` — tested. |
+| Guards (pure) | `app/services/lessons_access.py` | Who you are (`Identity`), which writes pass (`check_request`). |
+| Gateway | `app/routers/lessons_gateway.py` | `/lessons/api/*`. Shan-AI session required; API paths answer 401 JSON. |
+| Tests | `tests/test_lessons_module.py` | No DB. In the CI list. |
+
+## Identity
+
+- A Shan-AI user's module profile = the `lessons.profiles` row with `shan_user_id = users.id`
+  (a linked person beats a lazy viewer row). None → a viewer `s<user_id>` is inserted on first visit.
+- Referent groups: `lessons.referent_members(profile_id, shan_user_id)`; the profile must be
+  `role='referent'` (trigger). Not exposed to PostgREST.
+- Writes may name as actor only the caller's own profile or a group they belong to; module
+  `admin` may act for anyone. Actor fields per table: `lessons_access.ACTOR_FIELDS`.
+- Non-admins may PATCH `profiles` only for `assigned_projects` (the SPA syncs it when a PM
+  creates a project) and their own `email_preferences`.
+
+## PostgREST service (Railway, project Shan-AI)
+
+Create only after this branch is deployed (the schema must exist first).
+
+| Setting | Value |
+|---|---|
+| Image | `postgrest/postgrest:v12.2.3` |
+| Service name | `postgrest` (→ `postgrest.railway.internal`) |
+| Public domain | **none** — private network only |
+| `PGRST_DB_URI` | `postgres://lessons_authenticator:<LESSONS_PGRST_PASSWORD>@${{postgres-v2.RAILWAY_PRIVATE_DOMAIN}}:5432/${{postgres-v2.POSTGRES_DB}}` |
+| `PGRST_DB_SCHEMAS` | `lessons` |
+| `PGRST_DB_ANON_ROLE` | `lessons_anon` |
+| `PGRST_DB_EXTRA_SEARCH_PATH` | `lessons` (default is `public`) |
+| `PGRST_DB_MAX_ROWS` | `1000` |
+| `PGRST_SERVER_PORT` | `3000` |
+| `PGRST_OPENAPI_MODE` | `disabled` |
+
+App service variables:
+
+| Variable | Purpose |
+|---|---|
+| `LESSONS_PGRST_PASSWORD` | 16–128 chars of `[A-Za-z0-9_-]`. Applied at startup to `lessons_authenticator`. Same value in `PGRST_DB_URI`. |
+| `LESSONS_POSTGREST_URL` | Default `http://postgrest.railway.internal:3000`. |
+| `RESEND_API_KEY` | Optional. Without it the e-mail function answers 503. |
+| `LESSONS_EMAIL_SANDBOX` / `LESSONS_EMAIL_SANDBOX_TO` | Sandbox on by default: every mail goes to `…_SANDBOX_TO`. |
+| `LESSONS_UPLOAD_DIR` | Default `uploads/lessons` (the uploads volume). |
+
+## Verify (no sandbox access to Railway — open in a browser as a module admin)
+
+`GET /lessons/api/_status` →
+`{"schema": true, "roles": true, "leaks": [], "error": null, "postgrest": true}`.
+
+- `roles: false` → the app's DB user lacks CREATEROLE; create the two roles by hand
+  (statements in `ROLE_STATEMENTS`).
+- `leaks` non-empty → some relation outside `lessons` is granted to PUBLIC and `lessons_anon`
+  can reach it. Do not route traffic until it is empty.
+- The admin check needs a module admin profile, which exists only after the P3 import + links.
+  Until then the startup log line `lessons schema ready; lessons_anon isolated…` is the proof.
