@@ -104,6 +104,54 @@ async def _webhook_watchdog() -> None:
             logger.warning(f"Telegram webhook watchdog check failed: {redact(str(e))}")
 
 
+# Seconds between attempts to start a bot that failed at boot; the last value repeats.
+TELEGRAM_START_RETRY_SECONDS = (15, 30, 60, 120, 300)
+_telegram_retry_task = None
+
+
+async def _start_telegram_bot() -> bool:
+    """Start the bot once. True on success; never raises."""
+    global _webhook_watchdog_task
+    try:
+        await telegram_bot.initialize()
+        await telegram_bot.start()
+
+        use_polling = settings.USE_POLLING or (
+            not settings.RAILWAY_PUBLIC_DOMAIN and
+            not settings.TELEGRAM_WEBHOOK_URL and
+            any(h in (settings.BASE_URL or "") for h in ["localhost", "127.0.0.1", "0.0.0.0"])
+        )
+
+        if use_polling:
+            await telegram_bot.start_polling()
+            print("Telegram bot started in polling mode (local).")
+        else:
+            await telegram_bot.set_webhook()
+            print("Telegram bot started and webhook registered.")
+            _webhook_watchdog_task = asyncio.create_task(_webhook_watchdog())
+
+        # Start 48-hour feedback scheduler
+        asyncio.create_task(run_feedback_scheduler(telegram_bot.application.bot))
+        print("Feedback scheduler started.")
+        return True
+    except Exception as e:
+        print(f"Warning: Telegram bot failed to start: {e}")
+        logger.error(f"Telegram bot startup error: {e}")
+        return False
+
+
+async def _retry_telegram_start() -> None:
+    """Keep trying until the bot is up — the container may live for days."""
+    attempt = 0
+    while True:
+        delay = TELEGRAM_START_RETRY_SECONDS[min(attempt, len(TELEGRAM_START_RETRY_SECONDS) - 1)]
+        await asyncio.sleep(delay)
+        attempt += 1
+        if await _start_telegram_bot():
+            print(f"Telegram bot started on retry {attempt}.")
+            return
+
+
 @app.on_event("startup")
 async def startup():
     """Initialize database tables and start Telegram bot polling."""
@@ -473,31 +521,13 @@ async def startup():
             print(f"Warning: password default-flag backfill failed: {e}")
     asyncio.create_task(_backfill_password_flags())
 
-    # Start Telegram bot — polling locally, webhook on Railway
-    try:
-        await telegram_bot.initialize()
-        await telegram_bot.start()
-
-        use_polling = settings.USE_POLLING or (
-            not settings.RAILWAY_PUBLIC_DOMAIN and
-            not settings.TELEGRAM_WEBHOOK_URL and
-            any(h in (settings.BASE_URL or "") for h in ["localhost", "127.0.0.1", "0.0.0.0"])
-        )
-
-        if use_polling:
-            await telegram_bot.start_polling()
-            print("Telegram bot started in polling mode (local).")
-        else:
-            await telegram_bot.set_webhook()
-            print("Telegram bot started and webhook registered.")
-            _webhook_watchdog_task = asyncio.create_task(_webhook_watchdog())
-
-        # Start 48-hour feedback scheduler
-        asyncio.create_task(run_feedback_scheduler(telegram_bot.application.bot))
-        print("Feedback scheduler started.")
-    except Exception as e:
-        print(f"Warning: Telegram bot failed to start: {e}")
-        logger.error(f"Telegram bot startup error: {e}")
+    # Start Telegram bot — polling locally, webhook on Railway. A failed start
+    # (one network blip to api.telegram.org at boot) used to leave the bot dead
+    # until the next deploy, with the site itself green (2026-10-10). It now
+    # retries in the background until it is up.
+    if not await _start_telegram_bot():
+        global _telegram_retry_task
+        _telegram_retry_task = asyncio.create_task(_retry_telegram_start())
 
     # Start eval-loop nightly cron (03:00 UTC) + abbrev sync (03:30 UTC)
     try:
