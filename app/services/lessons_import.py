@@ -215,7 +215,10 @@ async def run_import(engine, base: str, key: str, *, write: bool) -> dict[str, A
                 "VALUES (:id, :name, :email, :role, :shan_user_id) ON CONFLICT (id) DO NOTHING"
             ), v)
         await conn.execute(text(
-            "UPDATE lessons.profiles SET is_login = false WHERE role = 'referent' OR name = ANY(:n)"
+            # A referent group is not a login — unless an admin gave it a
+            # (temporary) login account of its own, owner decision 2026-10-10.
+            "UPDATE lessons.profiles SET is_login = false "
+            "WHERE (role = 'referent' AND shan_user_id IS NULL) OR name = ANY(:n)"
         ), {"n": list(NO_LOGIN_NAMES)})
         for pid, uid in links:
             # Never override a link an admin already set or changed.
