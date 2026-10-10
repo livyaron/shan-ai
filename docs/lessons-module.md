@@ -73,3 +73,25 @@ App service variables:
   can reach it. Do not route traffic until it is empty.
 - The admin check needs a module admin profile, which exists only after the P3 import + links.
   Until then the startup log line `lessons schema ready; lessons_anon isolated…` is the proof.
+
+## Rollout order (learned 2026-10-10)
+
+1. Deploy the app with `LESSONS_PGRST_PASSWORD` set **first** — the password is applied to
+   `lessons_authenticator` at app startup.
+2. Only then start PostgREST. Started earlier, it fails auth in a loop until Railway marks it
+   CRASHED; a plain redeploy of the `postgrest` service fixes it once the app is up.
+3. `PGRST_SERVER_HOST=*` (IPv4 + IPv6 on Railway's private network), `PGRST_LOG_LEVEL=warn`.
+   Healthy log: `Successfully connected to PostgreSQL` + `Schema cache loaded 18 Relations`.
+
+## Import from Lovable (P3) — `app/services/lessons_import.py`
+
+- Admin page: `/lessons/api/_import` (Shan-AI `is_admin`). "בדיקה" = dry run (fetch, drift
+  check, link preview, no writes); "ייבוא" = replace all module data in ONE transaction.
+- Source: `LESSONS_SRC_URL` + `LESSONS_SRC_KEY` (the Lovable site's public anon key) on the app
+  service. GETs only; the Lovable site is never written to.
+- Aborts before writing on a short read or a source column the target lacks (only
+  `profiles.password` is dropped on purpose). Count mismatch after load rolls everything back.
+- Re-import keeps module-local state: Shan-AI links, referent group members, project links,
+  lazy viewer profiles. Links from `LINKS` apply only when the names are the same word set and
+  never override a link an admin set.
+- Referent profiles, `מנהל פרויקט - עבר` and `צפייה בלבד` get `is_login = false`.

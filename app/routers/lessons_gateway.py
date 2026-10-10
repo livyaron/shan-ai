@@ -287,6 +287,66 @@ async def storage_upload(bucket: str, key: str, request: Request,
     return _json({"Key": f"{BUCKET}/{key}", "Id": key, "path": key})
 
 
+# --------------------------------------------------------------------- import (P3)
+
+_IMPORT_PAGE = """<!doctype html><html lang="he" dir="rtl"><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1"><title>ייבוא מערכת לקחים</title>
+<body style="font-family:system-ui,sans-serif;max-width:760px;margin:2rem auto;padding:0 16px">
+<h1>ייבוא מערכת לקחים מ-Lovable</h1>
+<p>קורא בלבד מהאתר הישן. "בדיקה" לא כותבת כלום. "ייבוא" מחליף את כל נתוני המודול בעסקה אחת —
+כשל באמצע מבטל הכל. קישורי משתמשים, חברי קבוצות ופרופילי צפייה נשמרים.</p>
+<button id="dry">1. בדיקה (בלי לכתוב)</button>
+<button id="run" disabled>2. ייבוא</button>
+<pre id="out" style="background:#f4f4f5;padding:1rem;white-space:pre-wrap;direction:ltr;text-align:left"></pre>
+<script>
+const out = document.getElementById('out'), run = document.getElementById('run');
+async function go(mode) {
+  out.textContent = '...';
+  const r = await fetch('/lessons/api/_import?mode=' + mode, {method: 'POST', credentials: 'same-origin'});
+  const j = await r.json();
+  out.textContent = JSON.stringify(j, null, 2);
+  if (mode === 'dry' && j.ok) run.disabled = false;
+}
+document.getElementById('dry').onclick = () => go('dry');
+run.onclick = () => { if (confirm('לייבא ולהחליף את נתוני המודול?')) go('run'); };
+</script></body></html>"""
+
+
+async def _shan_admin(request: Request, session: AsyncSession) -> User | None:
+    user = await _session_user(request, session)
+    return user if user.is_admin else None
+
+
+@router.get("/_import")
+async def import_page(request: Request, session: AsyncSession = Depends(get_db_session)):
+    if await _shan_admin(request, session) is None:
+        return _json({"message": "Shan-AI admin only"}, 403)
+    return Response(_IMPORT_PAGE, media_type="text/html; charset=utf-8", headers={"Cache-Control": "no-store"})
+
+
+@router.post("/_import")
+async def import_run(request: Request, mode: str = "dry", session: AsyncSession = Depends(get_db_session)):
+    from app.database import engine
+    from app.services import lessons_import as li
+
+    admin = await _shan_admin(request, session)
+    if admin is None:
+        return _json({"message": "Shan-AI admin only"}, 403)
+    if mode not in {"dry", "run"}:
+        return _json({"message": "mode must be dry or run"}, 400)
+    try:
+        report = await li.run_import(engine, settings.LESSONS_SRC_URL, settings.LESSONS_SRC_KEY,
+                                     write=(mode == "run"))
+    except li.ImportAbort as e:
+        logger.warning("lessons import aborted (%s): %s", mode, e)
+        return _json({"ok": False, "error": str(e)}, 409)
+    except Exception as e:  # the transaction rolled back; say why
+        logger.exception("lessons import failed (%s)", mode)
+        return _json({"ok": False, "error": f"{type(e).__name__}: {e}"[:500]}, 500)
+    logger.info("lessons import %s by user %s", mode, admin.id)
+    return _json(report)
+
+
 @router.api_route("/{path:path}", methods=["GET", "HEAD", "POST", "PATCH", "PUT", "DELETE"])
 async def not_found(path: str):
     # Keeps an unknown API path a JSON 404 — never the SPA's index.html (P2).

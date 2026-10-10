@@ -75,6 +75,10 @@ class Settings(BaseSettings):
     LESSONS_EMAIL_SANDBOX: bool = os.getenv("LESSONS_EMAIL_SANDBOX", "true").lower() != "false"
     LESSONS_EMAIL_SANDBOX_TO: str = os.getenv("LESSONS_EMAIL_SANDBOX_TO", "")
     LESSONS_EMAIL_FROM: str = os.getenv("LESSONS_EMAIL_FROM", "מערכת לקחים <onboarding@resend.dev>")
+    # Source of the one-off import (the Lovable/Supabase project). Read-only:
+    # the key is the public anon key the Lovable site itself ships to browsers.
+    LESSONS_SRC_URL: str = os.getenv("LESSONS_SRC_URL", "")
+    LESSONS_SRC_KEY: str = os.getenv("LESSONS_SRC_KEY", "")
 
     @property
     def public_base_url(self) -> str:
