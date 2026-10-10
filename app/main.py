@@ -32,6 +32,7 @@ from app.routers import eval_loop as eval_loop_router  # noqa: E402
 from app.routers import learning_rules as learning_rules_router  # noqa: E402
 from app.routers import project_reports as project_reports_router  # noqa: E402
 from app.routers import war_room as war_room_router  # noqa: E402
+from app.routers import lessons_admin as lessons_admin_router  # noqa: E402
 from app.routers import lessons_gateway as lessons_gateway_router  # noqa: E402
 from app.routers import lessons_spa as lessons_spa_router  # noqa: E402
 from app.services.telegram_polling import telegram_bot  # noqa: E402
@@ -64,6 +65,8 @@ app.include_router(eval_loop_router.router)
 app.include_router(learning_rules_router.router)
 app.include_router(project_reports_router.router)
 app.include_router(war_room_router.router)
+# Before the gateway: its /lessons/api/* catch-all would answer these with 404.
+app.include_router(lessons_admin_router.router)
 app.include_router(lessons_gateway_router.router)
 # After the gateway: its /lessons/api/* catch-all must win over the SPA fallback.
 app.include_router(lessons_spa_router.router)
