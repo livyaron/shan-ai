@@ -95,3 +95,9 @@ App service variables:
   lazy viewer profiles. Links from `LINKS` apply only when the names are the same word set and
   never override a link an admin set.
 - Referent profiles, `מנהל פרויקט - עבר` and `צפייה בלבד` get `is_login = false`.
+
+## Referent groups — `/lessons/api/_groups` (`app/routers/lessons_admin.py`)
+
+Shan-AI admin page: pick members from the Shan-AI users list per referent group (add / remove).
+`referent_members` is closed to PostgREST, so this page is the only way in. Included in
+`app.main` before the gateway (its catch-all would 404 these paths). Survives re-import.

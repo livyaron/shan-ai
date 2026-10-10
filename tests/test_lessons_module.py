@@ -719,3 +719,55 @@ async def test_import_page_requires_a_session():
     async with _client() as c:
         assert (await c.get("/lessons/api/_import")).status_code == 401
         assert (await c.post("/lessons/api/_import?mode=dry")).status_code == 401
+
+
+# ------------------------------------------------------------------ referent group members (admin)
+
+def test_groups_page_escapes_every_name():
+    from app.routers.lessons_admin import render_groups
+    page = render_groups(
+        [{"id": "r1", "name": 'רפרנט <script>x</script>'}],
+        {"r1": [{"id": 7, "username": "דנה<b>"}]},
+        [{"id": 7, "username": "דנה<b>", "job_title": "מהנדסת & ראש צוות"}],
+        notice="<i>נוסף</i>",
+    )
+    assert "<script>" not in page and "<b>" not in page and "<i>" not in page
+    assert "&lt;script&gt;" in page and "&amp; ראש צוות" in page
+    assert 'action="/lessons/api/_groups/add"' in page and 'action="/lessons/api/_groups/remove"' in page
+
+
+def test_groups_page_shows_empty_groups():
+    from app.routers.lessons_admin import render_groups
+    page = render_groups([{"id": "r1", "name": "רפרנט"}], {}, [])
+    assert "אין חברים עדיין" in page
+
+
+@pytest.mark.asyncio
+async def test_group_admin_is_shan_admin_only_and_not_swallowed_by_the_gateway(monkeypatch):
+    from app.database import get_db_session
+    from app.routers import lessons_admin
+
+    async def no_db():
+        yield None
+
+    async def not_admin(request, session):
+        return None
+
+    monkeypatch.setattr(lessons_admin, "_shan_admin", not_admin)
+    app.dependency_overrides[get_db_session] = no_db
+    try:
+        async with _client() as c:
+            assert (await c.get("/lessons/api/_groups")).status_code == 403
+            r = await c.post("/lessons/api/_groups/add", data={"profile_id": "r1", "shan_user_id": "7"})
+            assert r.status_code == 403
+            r = await c.post("/lessons/api/_groups/remove", data={"profile_id": "r1", "shan_user_id": "7"})
+            assert r.status_code == 403
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_group_admin_writes_only_schema_lessons():
+    from pathlib import Path
+    src = Path("app/routers/lessons_admin.py").read_text(encoding="utf-8")
+    for stmt in re.findall(r'"((?:INSERT|UPDATE|DELETE)[^"]*)', src):
+        assert "lessons.referent_members" in stmt and "public." not in stmt, stmt
