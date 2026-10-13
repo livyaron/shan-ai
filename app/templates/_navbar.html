@@ -164,7 +164,7 @@
         </a>
         <a href="/dashboard/projects" class="shan-nav-link{% if _path.startswith('/dashboard/projects') %} active{% endif %}">📂 פרויקטים</a>
         <a href="/dashboard/war-room" class="shan-nav-link{% if _path.startswith('/dashboard/war-room') %} active{% endif %}">🎯 חדר מבצעים</a>
-        <a href="/lessons/" class="shan-nav-link">📚 לקחים</a>
+        <a href="/lessons/" class="shan-nav-link{% if _path.startswith('/lessons') %} active{% endif %}">📚 לקחים</a>
         <a href="/dashboard/ask" class="shan-nav-link{% if _path.startswith('/dashboard/ask') %} active{% endif %}">💬 שאל</a>
         <a href="/dashboard/files" class="shan-nav-link{% if _path.startswith('/dashboard/files') %} active{% endif %}">📁 קבצים</a>
 
@@ -186,6 +186,7 @@
             <div class="shan-nav-dd-menu">
                 <a href="/dashboard/users" class="shan-nav-link{% if _path.startswith('/dashboard/users') %} active{% endif %}">👥 משתמשים</a>
                 {% if _u and _u.is_admin %}
+                <a href="/lessons/admin?tab=users" class="shan-nav-link">📚 לקחים: קישור משתמשים</a>
                 <a href="/lessons/api/_groups" class="shan-nav-link">📚 לקחים: קבוצות רפרנטים</a>
                 <a href="/lessons/api/_import" class="shan-nav-link">📚 לקחים: ייבוא מ-Lovable</a>
                 {% endif %}

@@ -22,6 +22,7 @@ import FormFieldManager from "@/components/FormFieldManager";
 import AdminAIInsightsTab from "@/components/AdminAIInsightsTab";
 import AdminLessonQualityTab from "@/components/AdminLessonQualityTab";
 import NewsletterPanel from "@/components/admin/NewsletterPanel";
+import UserLinksPanel from "@/components/admin/UserLinksPanel";
 import SiteCombobox from "@/components/SiteCombobox";
 import SearchableSelect from "@/components/ui/searchable-select";
 
@@ -350,14 +351,14 @@ const Admin = () => {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-heading font-bold">ניהול מערכת</h1>
-        <p className="text-muted-foreground mt-1">ניהול משתמשים, פרויקטים, ציוד והרשאות</p>
+        <p className="text-muted-foreground mt-1">קישור משתמשים, פרויקטים, ציוד והרשאות</p>
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} dir="rtl">
         <TabsList className="bg-muted flex flex-wrap h-auto gap-1 p-1">
           <TabsTrigger value="users" className="gap-1.5 text-xs sm:text-sm">
             <Users className="w-4 h-4" />
-            <span className="hidden sm:inline">משתמשים</span>
+            <span className="hidden sm:inline">קישור משתמשים</span>
           </TabsTrigger>
           <TabsTrigger value="projects" className="gap-1.5 text-xs sm:text-sm">
             <FolderKanban className="w-4 h-4" />
@@ -413,52 +414,7 @@ const Admin = () => {
         </TabsList>
 
         <TabsContent value="users" className="mt-6">
-          <Card className="border-0 shadow-sm">
-            <CardHeader className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
-              <CardTitle className="text-base font-heading">משתמשים</CardTitle>
-              <Button size="sm" className="bg-accent text-accent-foreground hover:bg-accent/90" onClick={() => setNewUserDialogOpen(true)}>
-                + משתמש חדש
-              </Button>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-3">
-                {users.map((user) => (
-                   <div key={user.id} className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 rounded-xl bg-muted/50">
-                     <div className="flex items-center gap-3 min-w-0">
-                       <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
-                         <span className="text-sm font-bold text-primary">{user.name[0]}</span>
-                       </div>
-                       <div className="min-w-0">
-                         <p className="text-sm font-medium truncate">{user.name}</p>
-                         <p className="text-xs text-muted-foreground truncate">{user.email}</p>
-                          {user.role === "project_manager" && user.assignedProjects.length > 0 && (
-                            <p className="text-xs text-muted-foreground mt-0.5 truncate">
-                              פרויקטים: {user.assignedProjects.map((pid) => projects.find((p) => p.id === pid)?.name).filter(Boolean).join(", ")}
-                            </p>
-                          )}
-                           {user.role === "referent" && user.assignedStageIndexes && user.assignedStageIndexes.length > 0 && (
-                             <p className="text-xs text-muted-foreground mt-0.5 truncate">
-                               שלבים: {user.assignedStageIndexes.map((si) => PROJECT_STAGES[si]).filter(Boolean).join(", ")}
-                             </p>
-                           )}
-                       </div>
-                     </div>
-                     <div className="flex items-center gap-2 sm:gap-3 mr-13 sm:mr-0">
-                       <Badge variant="outline" className={roleBadgeColors[user.role]}>
-                         {roleLabels[user.role]}
-                       </Badge>
-                       <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEditUser(user)}>
-                         <Pencil className="w-4 h-4" />
-                       </Button>
-                       <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => setDeleteUserId(user.id)}>
-                         <Trash2 className="w-4 h-4" />
-                       </Button>
-                     </div>
-                   </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
+          <UserLinksPanel users={users} projects={projects} onEdit={openEditUser} />
         </TabsContent>
 
         <TabsContent value="projects" className="mt-6">

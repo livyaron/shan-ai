@@ -5,7 +5,6 @@ import {
   BookOpen,
   Bell,
   Settings,
-  LogOut,
   Lightbulb,
 } from "lucide-react";
 import { useUser, roleLabels } from "@/context/UserContext";
@@ -26,13 +25,13 @@ interface AppSidebarProps {
 
 const AppSidebar = ({ onNavigate }: AppSidebarProps) => {
   const location = useLocation();
-  const { currentUser, logout, unreadCount, lessons, implementations, projects, referentReviews } = useUser();
+  const { currentUser, unreadCount, lessons, implementations, projects, referentReviews } = useUser();
   const { lessonsActionCount, projectsActionCount } = useActionRequired(lessons, implementations, projects, currentUser, referentReviews);
 
   const navItems = allNavItems.filter((item) => item.roles.includes(currentUser.role));
 
   return (
-    <aside className="h-screen w-64 bg-sidebar text-sidebar-foreground flex flex-col">
+    <aside className="h-full w-64 bg-sidebar text-sidebar-foreground flex flex-col">
       {/* Logo */}
       <div className="p-6 flex items-center gap-3 border-b border-sidebar-border">
         <div className="w-10 h-10 rounded-lg bg-sidebar-primary flex items-center justify-center">
@@ -98,9 +97,6 @@ const AppSidebar = ({ onNavigate }: AppSidebarProps) => {
             <p className="text-sm font-medium text-sidebar-accent-foreground truncate">{currentUser.name}</p>
             <p className="text-xs text-sidebar-foreground/50">{roleLabels[currentUser.role]}</p>
           </div>
-          <button onClick={logout} className="text-sidebar-foreground/50 hover:text-sidebar-primary transition">
-            <LogOut className="w-4 h-4" />
-          </button>
         </div>
       </div>
     </aside>

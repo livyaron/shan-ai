@@ -7,6 +7,10 @@ import DarkModeToggle from "./DarkModeToggle";
 import { Button } from "./ui/button";
 import { useUser } from "@/context/UserContext";
 import FeedbackButton from "./FeedbackButton";
+import ShanNavbar from "./ShanNavbar";
+
+// Height of Shan-AI's top bar (set by ShanNavbar); 0 until it loads.
+const NAV_H = "var(--shan-nav-h, 0px)";
 
 const AppLayout = () => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -29,6 +33,7 @@ const AppLayout = () => {
 
   return (
     <div className="min-h-screen bg-background animate-fade-in">
+      <ShanNavbar />
       {/* Mobile overlay */}
       {sidebarOpen && (
         <div
@@ -38,17 +43,20 @@ const AppLayout = () => {
       )}
 
       {/* Sidebar - desktop: always visible, mobile: slide-in */}
-      <div className={`
-        fixed top-0 right-0 h-screen z-50 transition-transform duration-300
+      <div
+        className={`
+        fixed right-0 z-50 transition-transform duration-300
         md:translate-x-0
         ${sidebarOpen ? "translate-x-0" : "translate-x-full md:translate-x-0"}
-      `}>
+      `}
+        style={{ top: NAV_H, height: `calc(100vh - ${NAV_H})` }}
+      >
         <AppSidebar onNavigate={() => setSidebarOpen(false)} />
       </div>
 
       <main className="md:mr-64 min-h-screen">
         {/* Top bar */}
-        <div className="sticky top-0 z-30 bg-background/80 backdrop-blur-sm border-b border-border px-4 md:px-8 py-3 flex items-center justify-between">
+        <div style={{ top: NAV_H }} className="sticky z-30 bg-background/80 backdrop-blur-sm border-b border-border px-4 md:px-8 py-3 flex items-center justify-between">
           <Button
             variant="ghost"
             size="icon"

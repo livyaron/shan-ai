@@ -130,3 +130,19 @@ Lovable's `LOVABLE_API_KEY` is a Lovable-internal gateway secret: not readable, 
   or their groups, feedback filed only as the caller or their groups, lesson/referent ids the
   model invents are dropped. Both providers down → 503 "שירות ה-AI עמוס כרגע".
 - Admin HTML pages (`_groups`, `_import`) send a logged-out browser to `/login?next=…`.
+
+## People links — ניהול מערכת → קישור משתמשים (`/lessons/api/_links`)
+
+The module's admin tab (was "משתמשים"). Every existing profile — a person or a role imported
+from Lovable — gets the Shan-AI user who now signs in as it; that user inherits its role,
+projects and history. Picked from the Shan-AI users list only, never matched by name. A
+user may hold one login profile (409 otherwise). Lazy `s<id>` viewer rows and the historical
+names (`NO_LOGIN_NAMES`) are not link targets. Users are created only in Shan-AI — the tab no
+longer adds or deletes people; ✏️ still sets module role / projects / stages. Shan-AI admin only.
+
+## Top bar — `/lessons/api/_navbar`
+
+The SPA draws Shan-AI's own `_navbar.html` (rendered per request for the session user) above
+its layout and publishes its height as `--shan-nav-h`. Not injected into `index.html`: the
+service worker answers navigations from its precached copy, which would never carry it.
+Logout lives in that bar only.
