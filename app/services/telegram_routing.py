@@ -230,9 +230,11 @@ async def _ai_route_message(text: str, conversation_context: list[dict] | None =
         response = await llm_chat(
             "message_routing",
             messages=[{"role": "user", "content": prompt}],
-            max_tokens=100,
+            # llama-3.1-8b-instant answers 404 model_not_found since 2026-10-11. The
+            # default gpt-oss spends max_tokens on reasoning: low effort + headroom.
+            max_tokens=300,
             temperature=0.0,
-            models=["llama-3.1-8b-instant"],  # trivial classification — fast model, not scout
+            reasoning_effort="low",
         )
         logger.info(f"⏱ routing LLM call: {int((_t.perf_counter() - _t0) * 1000)}ms")
         result = _parse_routing_response(response)

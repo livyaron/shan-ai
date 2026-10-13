@@ -380,9 +380,11 @@ async def _ai_detect_intent(text: str) -> tuple[Optional[str], Optional[str]]:
         response = await llm_chat(
             "intent_detection",
             messages=[{"role": "user", "content": prompt}],
-            max_tokens=80,
+            # llama-3.1-8b-instant answers 404 model_not_found since 2026-10-11. The
+            # default gpt-oss spends max_tokens on reasoning: low effort + headroom.
+            max_tokens=300,
             temperature=0.0,
-            models=["llama-3.1-8b-instant"],  # trivial classification — fast model, not scout
+            reasoning_effort="low",
         )
         logger.info(f"⏱ project intent detection: {int((_t.perf_counter() - _t0) * 1000)}ms")
         match = _re.search(r'\{[^}]+\}', response)

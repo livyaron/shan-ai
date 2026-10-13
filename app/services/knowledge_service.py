@@ -1777,9 +1777,11 @@ async def _expand_query(question: str) -> str:
                 },
                 {"role": "user", "content": f"הרחב את השאילתה: {question}"},
             ],
-            max_tokens=100,
+            # llama-3.1-8b-instant answers 404 model_not_found since 2026-10-11. The
+            # default gpt-oss spends max_tokens on reasoning: low effort + headroom.
+            max_tokens=300,
             temperature=0.3,
-            models=["llama-3.1-8b-instant"],  # fast model — frees primary quota for answer
+            reasoning_effort="low",
         )
         return expansion.strip()
     except Exception as e:
