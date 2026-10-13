@@ -1362,6 +1362,9 @@ async def build_focus_summary(
             ],
             max_tokens=1600,
             temperature=0.3,
+            # gpt-oss spends max_tokens on reasoning; at the default effort the
+            # summary came back empty (2026-10-13 12:52 and 17:48 UTC).
+            reasoning_effort="low",
         )
     except Exception as e:
         logger.warning(f"missions_report: focus summary LLM failed, using plain list: {e}")
