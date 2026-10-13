@@ -16,9 +16,14 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-{# Reloads only at the END of a full rotation cycle: a fixed 60s refresh used to
-   cut the cycle short, so the later pages were never seen. #}
-<meta http-equiv="refresh" content="{{ wall_refresh }}">
+{# Refreshes only at the END of a full rotation cycle: a fixed 60s refresh used to
+   cut the cycle short, so the later pages were never seen.
+   The refresh is IN PLACE (the script at the bottom fetches this same URL and
+   swaps the body) — never a navigation. A meta refresh is a page load, and a TV
+   browser re-shows its address bar on every page load: on the wall that was the
+   URL bar popping in and out every cycle. The meta tag survives only for a
+   browser that runs no script. #}
+<noscript><meta http-equiv="refresh" content="{{ wall_refresh }}"></noscript>
 <title>חדר מבצעים · לוח מצב — SHAN-AI</title>
 <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;700;900&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
 <style>
@@ -274,12 +279,15 @@ a{color:var(--amber);text-decoration:none}
 </div>
 
 
-<script>
-// Everything below is display-only: no writes, no fetches. The page rotates
-// through the server-rendered pages so the room eventually sees every active
-// mission, then the meta refresh reloads it at the end of a full cycle.
+<script id="wlBoot">
+// Everything below is display-only: no writes. The page rotates through the
+// server-rendered pages so the room eventually sees every active mission, then
+// refreshes itself IN PLACE at the end of a full cycle (see the note in <head>).
 (function () {
   var ROTATE = {{ wall_rotate_ms }};
+  var REFRESH = {{ wall_refresh }} * 1000;
+  var timers = [];
+  function every(fn, ms) { timers.push(setInterval(fn, ms)); }
   var pages = Array.prototype.slice.call(document.querySelectorAll('.wl-page'));
   var pager = document.getElementById('wlPager');
   var idx = 0;
@@ -289,14 +297,14 @@ a{color:var(--amber);text-decoration:none}
     if (pager) pager.textContent = 'עמוד ' + (i + 1) + '/' + pages.length;
   }
   if (pages.length > 1) {
-    setInterval(function () { idx = (idx + 1) % pages.length; show(idx); }, ROTATE);
+    every(function () { idx = (idx + 1) % pages.length; show(idx); }, ROTATE);
   }
 
   // Board-wide status feed: one line at a time, so it stays readable from 4m.
   var feed = {{ wall_feed | tojson }};
   var el = document.getElementById('wlFeed'), fi = 0;
   if (feed.length > 1 && el) {
-    setInterval(function () {
+    every(function () {
       fi = (fi + 1) % feed.length;
       var u = feed[fi];
       el.textContent = (u.close ? '🔒 ' : '') + u.mission + ' — ' + u.text +
@@ -311,7 +319,33 @@ a{color:var(--amber);text-decoration:none}
     document.getElementById('wlClock').textContent =
       String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
   }
-  tick(); setInterval(tick, 10000);
+  tick(); every(tick, 10000);
+
+  // In-place refresh: fetch this same URL, swap the body, re-run this script
+  // from the NEW page (it carries the new pages, feed and refresh period).
+  // A network blip keeps the current board on screen and tries again next
+  // cycle. A reply that is not the wall (session expired → login page) falls
+  // back to a real reload, so the screen shows the truth, not a frozen board.
+  function refresh() {
+    fetch(location.href, { credentials: 'same-origin', cache: 'no-store' })
+      .then(function (r) { return r.ok ? r.text() : Promise.reject(r.status); })
+      .then(function (html) {
+        var doc = new DOMParser().parseFromString(html, 'text/html');
+        var boot = doc.getElementById('wlBoot');
+        if (!boot || !doc.querySelector('.wl-top')) { location.reload(); return; }
+        timers.forEach(clearInterval);
+        boot.parentNode.removeChild(boot);
+        document.title = doc.title;
+        document.body.className = doc.body.className;
+        document.body.innerHTML = doc.body.innerHTML;
+        var s = document.createElement('script');
+        s.id = 'wlBoot';
+        s.textContent = boot.textContent;
+        document.body.appendChild(s);
+      })
+      .catch(function () { setTimeout(refresh, REFRESH); });
+  }
+  setTimeout(refresh, REFRESH);
 })();
 </script>
 </body>
