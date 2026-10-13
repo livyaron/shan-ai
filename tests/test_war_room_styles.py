@@ -258,8 +258,20 @@ def test_wall_layout_offers_no_write_actions_at_all():
 def test_wall_layout_refreshes_itself():
     """Still self-refreshing — but only after a full rotation cycle, never mid-page."""
     html = _render("wall")
-    assert 'http-equiv="refresh"' in html
-    assert f'content="{wall.refresh_seconds(len(_context("wall")["wall_pages"]))}"' in html
+    secs = wall.refresh_seconds(len(_context("wall")["wall_pages"]))
+    assert f"var REFRESH = {secs} * 1000;" in html
+    assert f'<noscript><meta http-equiv="refresh" content="{secs}"></noscript>' in html
+
+
+def test_wall_refresh_is_in_place_never_a_navigation():
+    """A page load makes a TV browser re-show its address bar — on the wall that
+    was the URL bar popping in and out every cycle. Only a no-script browser may
+    get the meta refresh; with script the body is swapped in place."""
+    import re
+    html = _render("wall")
+    metas = re.findall(r'.{0,12}<meta http-equiv="refresh"', html)
+    assert metas == ['<noscript><meta http-equiv="refresh"'], metas
+    assert "fetch(location.href" in html and 'id="wlBoot"' in html
 
 
 def test_wall_layout_rotates_through_every_active_mission():
