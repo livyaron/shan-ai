@@ -11,7 +11,7 @@ import { toast } from "@/hooks/use-toast";
 
 /**
  * קישור משתמשים: every existing module profile (a person or a role imported
- * from Lovable) is linked to the Shan-AI user who now signs in as it. The
+ * from the old system) is linked to the Shan-AI user who now signs in as it. The
  * Shan-AI user inherits the profile's role, projects and history.
  *
  * Users are created in Shan-AI only (⚙️ מערכת → 👥 משתמשים); the module never
