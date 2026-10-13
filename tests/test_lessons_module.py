@@ -1047,3 +1047,32 @@ async def test_feedback_cannot_be_filed_as_someone_else(as_user, ai_stub, no_db_
         r = await c.post("/lessons/api/functions/v1/classify-ai-feedback",
                          json={"feedback_text": "x", "user_id": "u1", "user_name": "ירון"})
     assert r.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_ai_json_mode_failure_retries_as_plain_text(monkeypatch):
+    import app.services.llm_router as router
+    calls = []
+
+    async def fake_llm_chat(usage, messages, **kw):
+        calls.append(kw["json_mode"])
+        if kw["json_mode"]:
+            raise RuntimeError("json_validate_failed")
+        return 'הנה: {"ok": true}'
+    monkeypatch.setattr(router, "llm_chat", fake_llm_chat)
+    out = await ai.ask("s", "u", json_mode=True)
+    assert calls == [True, False] and ai.parse_json(out) == {"ok": True}
+
+
+@pytest.mark.asyncio
+async def test_ai_plain_failure_is_not_retried(monkeypatch):
+    import app.services.llm_router as router
+    calls = []
+
+    async def fake_llm_chat(usage, messages, **kw):
+        calls.append(kw["json_mode"])
+        raise RuntimeError("down")
+    monkeypatch.setattr(router, "llm_chat", fake_llm_chat)
+    with pytest.raises(ai.AIUnavailable):
+        await ai.ask("s", "u", json_mode=False)
+    assert calls == [False]

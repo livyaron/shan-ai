@@ -456,9 +456,19 @@ def build_admin_insights(body: dict) -> tuple[str, str]:
 
 async def ask(system: str, user: str, *, json_mode: bool, max_tokens: int = MAX_TOKENS) -> str:
     from app.services.llm_router import llm_chat
+    messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
     try:
-        return await llm_chat(USAGE, [{"role": "system", "content": system}, {"role": "user", "content": user}],
-                              max_tokens=max_tokens, temperature=0.3, json_mode=json_mode)
-    except Exception as e:  # both providers failed; the caller answers 503
+        return await llm_chat(USAGE, messages, max_tokens=max_tokens, temperature=0.3, json_mode=json_mode)
+    except Exception as e:
+        if not json_mode:  # both providers failed; the caller answers 503
+            logger.warning("lessons AI unavailable: %s", type(e).__name__)
+            raise AIUnavailable(str(e)) from e
+        # Groq's JSON mode rejects a reply it cannot validate (json_validate_failed,
+        # 2026-10-13) and Gemma then timed out. The prompt already asks for JSON and
+        # parse_json reads it out of plain text, so one retry without the mode.
+        logger.warning("lessons AI JSON mode failed (%s); retrying as plain text", type(e).__name__)
+    try:
+        return await llm_chat(USAGE, messages, max_tokens=max_tokens, temperature=0.3, json_mode=False)
+    except Exception as e:
         logger.warning("lessons AI unavailable: %s", type(e).__name__)
         raise AIUnavailable(str(e)) from e
