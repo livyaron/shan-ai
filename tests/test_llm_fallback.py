@@ -320,3 +320,13 @@ async def test_a_groq_model_name_is_never_sent_to_google(monkeypatch):
     assert sent[0][0] == gemma_client.GEMMA_MODELS[0]
     _, sent = await _capture_gemma(monkeypatch, models=["gemma-4-26b-a4b-it"])
     assert sent[0][0] == "gemma-4-26b-a4b-it"
+
+
+def test_no_call_pins_the_dead_groq_model():
+    # llama-3.1-8b-instant answers 404 model_not_found since 2026-10-11: every call
+    # that pinned it fell through to Gemma. Small calls use the default list with
+    # reasoning_effort="low" instead.
+    import pathlib
+    hits = [str(p) for p in pathlib.Path("app").rglob("*.py")
+            if 'models=["llama-3.1-8b-instant"]' in p.read_text(encoding="utf-8")]
+    assert hits == []
