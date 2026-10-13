@@ -499,6 +499,31 @@ async def import_run(request: Request, mode: str = "dry", session: AsyncSession 
     return _json(report)
 
 
+_nav_templates = None
+
+
+def render_navbar(request: Request, user: Any) -> str:
+    """Shan-AI's shared navbar (`_navbar.html`) as an HTML fragment.
+
+    The SPA fetches it and draws it above its own layout, so the module has the
+    same top bar as every other Shan-AI page. Rendered per request rather than
+    injected into index.html: the service worker answers navigations from its
+    precached index.html, which would never carry the server's navbar.
+    """
+    global _nav_templates
+    if _nav_templates is None:
+        from fastapi.templating import Jinja2Templates
+        _nav_templates = Jinja2Templates(directory="app/templates")
+    return _nav_templates.get_template("_navbar.html").render(request=request, current_user=user)
+
+
+@router.get("/_navbar")
+async def navbar(request: Request, session: AsyncSession = Depends(get_db_session)):
+    user = await _session_user(request, session)
+    return Response(render_navbar(request, user), media_type="text/html; charset=utf-8",
+                    headers={"Cache-Control": "no-store"})
+
+
 @router.api_route("/{path:path}", methods=["GET", "HEAD", "POST", "PATCH", "PUT", "DELETE"])
 async def not_found(path: str):
     # Keeps an unknown API path a JSON 404 — never the SPA's index.html (P2).

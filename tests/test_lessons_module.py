@@ -1076,3 +1076,80 @@ async def test_ai_plain_failure_is_not_retried(monkeypatch):
     with pytest.raises(ai.AIUnavailable):
         await ai.ask("s", "u", json_mode=False)
     assert calls == [False]
+
+
+# ------------------------------------------------------------------ people links (קישור משתמשים)
+
+def test_only_existing_entities_can_be_linked():
+    from app.routers.lessons_admin import is_linkable
+    assert is_linkable({"id": "u1773149118417", "name": "משה כהן", "role": "project_manager"})
+    assert is_linkable({"id": "u1773149388077", "name": "רפרנט מגזר ביצוע", "role": "referent"})
+    # The lazy viewer row IS a Shan-AI user; linking another user to it is meaningless.
+    assert not is_linkable({"id": "s40", "name": "x", "role": "viewer"})
+    # Historical role accounts stay history.
+    assert not is_linkable({"id": "u9", "name": "מנהל פרויקט - עבר", "role": "project_manager"})
+
+
+def test_link_rules():
+    from app.routers.lessons_admin import link_problem
+    pm = {"id": "u1", "name": "משה", "role": "project_manager"}
+    assert link_problem(pm, True, None) is None
+    assert link_problem(None, True, None) == "הפרופיל לא קיים"
+    assert link_problem(pm, False, None) == "משתמש Shan-AI לא קיים"
+    assert "כבר מקושר" in link_problem(pm, True, "דני ")
+    assert link_problem({"id": "s3", "name": "x", "role": "viewer"}, True, None) is not None
+
+
+@pytest.mark.asyncio
+async def test_links_are_shan_admin_only_and_not_swallowed_by_the_gateway(monkeypatch):
+    from app.database import get_db_session
+    from app.routers import lessons_admin
+
+    async def no_db():
+        yield None
+
+    async def not_admin(request, session):
+        return None
+
+    monkeypatch.setattr(lessons_admin, "_shan_admin", not_admin)
+    app.dependency_overrides[get_db_session] = no_db
+    try:
+        async with _client(cookies={"access_token": "t"}) as c:
+            assert (await c.get("/lessons/api/_links")).status_code == 403
+            r = await c.post("/lessons/api/_links", json={"profile_id": "u1", "shan_user_id": 7})
+            assert r.status_code == 403
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_navbar_fragment_is_the_shared_navbar(monkeypatch):
+    from types import SimpleNamespace
+
+    from app.database import get_db_session
+
+    async def no_db():
+        yield None
+
+    async def a_user(request, session):
+        return SimpleNamespace(username="ירון <b>", is_admin=True)
+
+    monkeypatch.setattr(gw, "_session_user", a_user)
+    app.dependency_overrides[get_db_session] = no_db
+    try:
+        async with _client(cookies={"access_token": "t"}) as c:
+            r = await c.get("/lessons/api/_navbar")
+    finally:
+        app.dependency_overrides.clear()
+    assert r.status_code == 200 and r.headers["cache-control"] == "no-store"
+    assert 'class="shan-nav"' in r.text and 'href="/logout"' in r.text
+    assert "ירון &lt;b&gt;" in r.text  # escaped
+    assert 'href="/lessons/admin?tab=users"' in r.text  # admin-only link
+    assert re.search(r'href="/lessons/" class="shan-nav-link active"', r.text)
+
+
+@pytest.mark.asyncio
+async def test_navbar_needs_a_session():
+    async with _client() as c:
+        r = await c.get("/lessons/api/_navbar")
+    assert r.status_code == 401
