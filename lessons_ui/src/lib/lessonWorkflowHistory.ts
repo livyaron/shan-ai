@@ -6,6 +6,7 @@
 
 export const WORKFLOW_EVENT_TYPES = {
   CREATED: "lesson_created",
+  SUBMITTED_FOR_APPROVAL: "submitted_for_approval",
   ASSIGNED_REFERENT: "assigned_to_referent",
   REFERENT_RESPONSE: "referent_response",
   RETURNED_TO_CREATOR: "returned_to_creator",
@@ -23,6 +24,7 @@ export type WorkflowEventType = (typeof WORKFLOW_EVENT_TYPES)[keyof typeof WORKF
 
 export const workflowEventLabels: Record<string, string> = {
   [WORKFLOW_EVENT_TYPES.CREATED]: "יצירת לקח",
+  [WORKFLOW_EVENT_TYPES.SUBMITTED_FOR_APPROVAL]: "שליחת טיוטה לאישור",
   [WORKFLOW_EVENT_TYPES.ASSIGNED_REFERENT]: "שיוך לרפרנט",
   [WORKFLOW_EVENT_TYPES.REFERENT_RESPONSE]: "התייחסות רפרנט",
   [WORKFLOW_EVENT_TYPES.RETURNED_TO_CREATOR]: "החזרה להשלמת יוצר",

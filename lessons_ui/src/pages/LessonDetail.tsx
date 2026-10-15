@@ -16,7 +16,8 @@ import { toast } from "@/hooks/use-toast";
 import { riskColors, riskLabels, statusLabels, statusColors, PROFESSIONAL_DOMAINS, WORKFLOW_STATUSES, workflowStatusColors, REFERENT_DECISIONS, referentDecisionColors } from "@/lib/constants";
 import { supabase } from "@/integrations/supabase/client";
 import { useActionRequired } from "@/hooks/useActionRequired";
-import { Zap } from "lucide-react";
+import { Zap, Send } from "lucide-react";
+import { canSubmitDraft, isDraft, referentOptions } from "@/lib/lessonAssignment";
 import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert";
 import { format, parseISO } from "date-fns";
 import { cn } from "@/lib/utils";
@@ -30,7 +31,7 @@ const LessonDetail = () => {
   const { getLabel } = useFieldLabels("lesson");
   const { id } = useParams();
   const navigate = useNavigate();
-  const { lessons, projects, equipment, users, implementations, referentReviews, respondToImplementation, respondToReferentReview, currentUser, updateLesson, updateLessonAIReview, deleteLesson, updateWorkflowStatus, updateReferentDecision, returnLessonToCreator, lessonCategories: categories } = useUser();
+  const { lessons, projects, equipment, users, implementations, referentReviews, respondToImplementation, respondToReferentReview, currentUser, updateLesson, updateLessonAIReview, deleteLesson, updateWorkflowStatus, updateReferentDecision, returnLessonToCreator, submitDraftLesson, lessonCategories: categories } = useUser();
   const [feedbackNotes, setFeedbackNotes] = useState<Record<string, string>>({});
   const [isEditing, setIsEditing] = useState(false);
   const [editTitle, setEditTitle] = useState("");
@@ -331,6 +332,38 @@ const LessonDetail = () => {
         </Alert>
       )}
 
+      {/* Draft — waits with its creator until a referent is assigned and it is sent for approval */}
+      {isDraft(lesson) && lesson.createdBy === currentUser.id && !isEditing && (
+        <Alert className="border-muted-foreground/30 bg-muted/40">
+          <Send className="w-4 h-4" />
+          <AlertTitle className="font-semibold">טיוטה — רק אתה רואה את הלקח</AlertTitle>
+          <AlertDescription className="text-sm text-muted-foreground space-y-2">
+            <p>
+              {canSubmitDraft(lesson, currentUser.id, users)
+                ? "הפרטים הושלמו ונבחר רפרנט. שלח את הלקח לאישור מנהל המערכת."
+                : "כדי לשלוח לאישור, ערוך את הלקח ושייך רפרנט בשדה \"אחראי ליישום\"."}
+            </p>
+            <Button
+              size="sm"
+              className="gap-1.5"
+              disabled={!canSubmitDraft(lesson, currentUser.id, users)}
+              onClick={async () => {
+                try {
+                  await submitDraftLesson(lesson.id);
+                  toast({ title: "הלקח נשלח לאישור מנהל המערכת ✓" });
+                } catch (err) {
+                  console.error("Submit draft error:", err);
+                  toast({ title: "השליחה נכשלה", description: "הלקח נשאר טיוטה — נסה שוב", variant: "destructive" });
+                }
+              }}
+            >
+              <Send className="w-3.5 h-3.5" />
+              שלח לאישור
+            </Button>
+          </AlertDescription>
+        </Alert>
+      )}
+
       {/* Workflow Timeline & Transparency */}
       {!isEditing && (
         <Card className="border-0 shadow-sm">
@@ -481,10 +514,8 @@ const LessonDetail = () => {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <div>
                   <Label className="text-xs">{getLabel("assigned_to", "אחראי ליישום")}</Label>
-                  <SearchableSelect value={editAssignedTo} onValueChange={setEditAssignedTo} placeholder="בחר משתמש"
-                    options={[
-                      ...users.map((u) => ({ value: String(u.id), label: u.name })),
-                    ]}
+                  <SearchableSelect value={editAssignedTo} onValueChange={setEditAssignedTo} placeholder="בחר רפרנט"
+                    options={referentOptions(users, lesson.assignedTo)}
                   />
                 </div>
                 <div>

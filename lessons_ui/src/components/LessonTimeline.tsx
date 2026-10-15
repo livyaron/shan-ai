@@ -30,6 +30,7 @@ const LessonTimeline = ({ lesson, users }: LessonTimelineProps) => {
 
   // Build active path: always show first 4 steps, then the relevant final step
   const activeSteps = TIMELINE_STEPS.slice(0, 4);
+  if (currentStatus === "טיוטה") activeSteps.unshift({ key: "טיוטה", label: "טיוטה" });
   if (isRejected) {
     activeSteps.push(TIMELINE_STEPS.find((s) => s.key === "נדחה")!);
   } else if (isApproved || isFinal) {

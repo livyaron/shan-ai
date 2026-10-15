@@ -19,6 +19,7 @@ export const riskLabelsShort: Record<string, string> = {
 };
 
 export const statusColors: Record<string, string> = {
+  draft: "bg-muted text-muted-foreground border-muted-foreground/20",
   new: "bg-info/10 text-info border-info/20",
   approved: "bg-success/10 text-success border-success/20",
   rejected: "bg-destructive/10 text-destructive border-destructive/20",
@@ -27,6 +28,7 @@ export const statusColors: Record<string, string> = {
 };
 
 export const statusLabels: Record<string, string> = {
+  draft: "טיוטה",
   new: "ממתין לאישור",
   approved: "מאושר",
   rejected: "נדחה",
@@ -35,6 +37,7 @@ export const statusLabels: Record<string, string> = {
 };
 
 export const statusLabelsShort: Record<string, string> = {
+  draft: "טיוטה",
   new: "ממתין",
   approved: "מאושר",
   rejected: "נדחה",
@@ -97,6 +100,7 @@ export const FINAL_WORKFLOW_STATUSES = [
 ];
 
 export const workflowStatusColors: Record<string, string> = {
+  "טיוטה": "bg-muted text-muted-foreground border-muted-foreground/20",
   "חדש": "bg-info/10 text-info border-info/20",
   "בטיפול רפרנט": "bg-warning/10 text-warning border-warning/20",
   "ממתין להשלמת יוצר": "bg-accent/10 text-accent border-accent/20",
