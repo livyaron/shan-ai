@@ -12,14 +12,21 @@ import { SUPABASE_URL } from "@/integrations/supabase/client";
  */
 const ShanNavbar = () => {
   const [html, setHtml] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     let alive = true;
     fetch(`${SUPABASE_URL}/_navbar`, { credentials: "same-origin" })
-      .then((r) => (r.ok ? r.text() : null))
+      .then((r) => {
+        if (!r.ok) throw new Error(`/_navbar ${r.status}`);
+        return r.text();
+      })
       .then((t) => alive && setHtml(t))
-      .catch(() => alive && setHtml(null));
+      .catch((e) => {
+        console.warn("Shan-AI navbar failed to load:", e);
+        if (alive) setFailed(true);
+      });
     return () => {
       alive = false;
     };
@@ -28,7 +35,7 @@ const ShanNavbar = () => {
   useEffect(() => {
     const root = document.documentElement;
     const el = ref.current;
-    if (!el || !html) {
+    if (!el) {
       root.style.setProperty("--shan-nav-h", "0px");
       return;
     }
@@ -40,8 +47,18 @@ const ShanNavbar = () => {
       ro.disconnect();
       root.style.setProperty("--shan-nav-h", "0px");
     };
-  }, [html]);
+  }, [html, failed]);
 
+  if (failed) {
+    // Never leave the module without a way back to Shan-AI.
+    return (
+      <div ref={ref} dir="rtl" className="sticky top-0 z-[60] flex items-center justify-between gap-4 px-5 py-3 text-sm"
+        style={{ background: "#070b12", borderBottom: "1px solid #1a2d47" }}>
+        <a href="/dashboard/" style={{ color: "#00d4ff", fontWeight: 600 }}>SHAN-AI / DSS ← חזרה לדשבורד</a>
+        <a href="/logout" style={{ color: "#94a3b8" }}>🚪 יציאה</a>
+      </div>
+    );
+  }
   if (!html) return null;
   // Server-rendered by Shan-AI from its own template (every value escaped by Jinja).
   return <div ref={ref} className="sticky top-0 z-[60]" dangerouslySetInnerHTML={{ __html: html }} />;
