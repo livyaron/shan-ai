@@ -1153,3 +1153,45 @@ async def test_navbar_needs_a_session():
     async with _client() as c:
         r = await c.get("/lessons/api/_navbar")
     assert r.status_code == 401
+
+
+# ------------------------------------------------------------------ referent assignment (2026-10-15)
+
+def _ui(path: str) -> str:
+    from pathlib import Path
+    return Path("lessons_ui/src", path).read_text(encoding="utf-8")
+
+
+def test_responsible_picker_lists_referents_only():
+    # Both "אחראי ליישום" pickers (create + edit) go through referentOptions — never all users.
+    lessons, detail = _ui("pages/Lessons.tsx"), _ui("pages/LessonDetail.tsx")
+    assert "value={newAssignedTo} onValueChange={setNewAssignedTo}" in lessons
+    assert "options={referentOptions(users)}" in lessons
+    assert "options={referentOptions(users, lesson.assignedTo)}" in detail
+    assert 'filter((u) => u.role === "referent")' in _ui("lib/lessonAssignment.ts")
+
+
+def test_approval_hands_off_to_the_creators_referent():
+    ctx = _ui("context/UserContext.tsx")
+    approve = ctx[ctx.index("const approveLesson"):ctx.index("const rejectLesson")]
+    assert "approvalReferent(lesson, users)" in approve
+    assert "workflow_status: REFERENT_WORKFLOW_STATUS" in approve and "assigned_to: referentId" in approve
+    assert "applyWorkflowTransition(" in approve            # status + history in one atomic call
+    assert "missingReviewReferents(" in approve             # no duplicate review row
+    # Distribution never replaces the referent the creator picked.
+    assert "const firstReferentId = !lesson.assignedTo &&" in ctx
+    # Notifications go to the real admins, not the Lovable demo user.
+    assert 'addNotification("u1"' not in ctx
+
+
+def test_ai_never_recommends_a_referent_after_approval():
+    lessons = _ui("pages/Lessons.tsx")
+    assert "referents: []," in lessons
+    assert "selectedAIReferents" not in lessons and "recommended_referents.map" not in lessons
+
+
+def test_drafts_stay_with_their_creator():
+    ctx = _ui("context/UserContext.tsx")
+    assert "initialLessonState(users, lesson.assignedTo)" in ctx
+    assert "lessons: visibleLessons," in ctx
+    assert "isVisibleLesson(l, currentUser.id)" in ctx

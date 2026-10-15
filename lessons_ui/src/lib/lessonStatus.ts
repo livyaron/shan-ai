@@ -20,7 +20,7 @@ export const classifyLesson = (lesson: Lesson): LessonBucket => {
   if (APPROVED_STATUSES.has(lesson.status) || lesson.workflowStatus === APPROVED_WORKFLOW) {
     return "approved";
   }
-  if (lesson.workflowStatus === DRAFT_WORKFLOW) {
+  if (lesson.workflowStatus === DRAFT_WORKFLOW || lesson.status === "draft") {
     return "draft";
   }
   return "pending";

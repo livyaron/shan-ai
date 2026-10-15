@@ -25,6 +25,7 @@ import { toast } from "@/hooks/use-toast";
 import { useFieldLabels } from "@/hooks/useFieldLabels";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
+import { isReferent as isReferentUser, referentOptions } from "@/lib/lessonAssignment";
 import { riskColors, riskLabelsShort as riskLabels, statusColors, statusLabels, PROFESSIONAL_DOMAINS, WORKFLOW_STATUSES, ACTIVE_WORKFLOW_STATUSES, workflowStatusColors, calculateSlaStatus, slaStatusColors, SLA_STATUS } from "@/lib/constants";
 import { useActionRequired } from "@/hooks/useActionRequired";
 import { Zap } from "lucide-react";
@@ -109,9 +110,7 @@ const Lessons = () => {
   const [isPostReviewing, setIsPostReviewing] = useState(false);
   const [reviewingLessonId, setReviewingLessonId] = useState<number | null>(null);
   const [selectedAIProjects, setSelectedAIProjects] = useState<number[]>([]);
-  const [selectedAIReferents, setSelectedAIReferents] = useState<string[]>([]);
   const [filteredOutAIProjects, setFilteredOutAIProjects] = useState<string[]>([]);
-  const [filteredOutAIReferents, setFilteredOutAIReferents] = useState<string[]>([]);
 
   // Manual distribution states
   const [manualDistDialogOpen, setManualDistDialogOpen] = useState(false);
@@ -288,7 +287,7 @@ const Lessons = () => {
   const hasActiveFilters = riskFilter !== "all" || statusFilter !== "all" || categoryFilter !== "all" || stageFilter !== "all" || projectFilter !== "all" || creatorFilter !== "all" || equipmentFilter !== "all" || monthFilter !== "all" || stationTypeFilter !== "all" || projectTypeFilter !== "all";
   const reviewingLesson = reviewingLessonId ? lessons.find((lesson) => lesson.id === reviewingLessonId) : null;
   const reviewingLessonStageIndex = reviewingLesson ? PROJECT_STAGES.indexOf(reviewingLesson.stage) : -1;
-  const autoDistributionTargetCount = selectedAIProjects.length + selectedAIReferents.length;
+  const autoDistributionTargetCount = selectedAIProjects.length;
 
   const clearFilters = () => {
     setRiskFilter("all");
@@ -307,9 +306,7 @@ const Lessons = () => {
     setPostReviewDialogOpen(false);
     setReviewingLessonId(null);
     setSelectedAIProjects([]);
-    setSelectedAIReferents([]);
     setFilteredOutAIProjects([]);
-    setFilteredOutAIReferents([]);
   };
 
   const userProjects = (currentUser.role === "admin" || currentUser.role === "referent")
@@ -406,7 +403,9 @@ const Lessons = () => {
       impactQualityDesc: newImpactQualityDesc || undefined,
       fileUrl,
     });
-    toast({ title: "לקח נוצר בהצלחה ✓", description: "הלקח נשלח לאישור מנהל המערכת" });
+    toast(isReferentUser(users, newAssignedTo)
+      ? { title: "לקח נוצר בהצלחה ✓", description: "הלקח נשלח לאישור מנהל המערכת" }
+      : { title: "הלקח נשמר כטיוטה", description: "רק אתה רואה אותו. שייך רפרנט בשדה \"אחראי ליישום\" ושלח לאישור מתוך כרטיס הלקח" });
     setDialogOpen(false);
     setNewTitle(""); setNewDesc(""); setNewRecommendation(""); setNewProject(""); setNewPastProjectName(""); setNewStage(""); setNewCategory(""); setNewRisk(""); setNewEquipmentIds([]);
     setNewProfessionalDomain(""); setNewEventDate(undefined); setNewAssignedTo("");
@@ -422,7 +421,13 @@ const Lessons = () => {
   // Post-approve AI review — auto-distributes after analysis
   const handleApprove = async (e: React.MouseEvent, id: number) => {
     e.stopPropagation();
-    approveLesson(id);
+    try {
+      await approveLesson(id);
+    } catch (err) {
+      console.error("Approve error:", err);
+      toast({ title: "האישור נכשל", description: "הלקח לא שונה — נסה שוב", variant: "destructive" });
+      return;
+    }
 
     // Trigger post-approve AI review
     setReviewingLessonId(id);
@@ -446,13 +451,6 @@ const Lessons = () => {
           station: stationTypeLabels[p.stationType],
           equipment: equipment.filter((eq) => p.equipmentIds.includes(eq.id)).map((eq) => eq.name),
         }));
-      const referents = users
-        .filter((user) => user.role === "referent")
-        .map((user) => ({
-          id: user.id,
-          name: user.name,
-          stages: user.assignedStageIndexes.map((stageIndex) => PROJECT_STAGES[stageIndex]).filter(Boolean),
-        }));
 
       const { data, error } = await supabase.functions.invoke("review-lesson", {
         body: {
@@ -467,7 +465,8 @@ const Lessons = () => {
             equipmentNames: lessonEquipment.map((eq) => eq.name),
           },
           projects: activeProjects,
-          referents,
+          // The referent is the creator's choice alone — the AI recommends projects only.
+          referents: [],
         },
       });
       if (error) throw error;
@@ -489,27 +488,11 @@ const Lessons = () => {
           }
         });
 
-        const validReferentIds: string[] = [];
-        const invalidReferentNames: string[] = [];
-
-        review.recommended_referents.forEach((recommendedReferent) => {
-          const foundReferent = users.find((user) => user.id === recommendedReferent.referent_id && user.role === "referent");
-          if (foundReferent && foundReferent.assignedStageIndexes.includes(lessonStageIndex)) {
-            validReferentIds.push(foundReferent.id);
-          } else {
-            invalidReferentNames.push(recommendedReferent.referent_name);
-          }
-        });
-
         setSelectedAIProjects(validProjectIds);
-        setSelectedAIReferents(validReferentIds);
         setFilteredOutAIProjects(invalidProjectNames);
-        setFilteredOutAIReferents(invalidReferentNames);
       } else {
         setSelectedAIProjects([]);
-        setSelectedAIReferents([]);
         setFilteredOutAIProjects([]);
-        setFilteredOutAIReferents([]);
       }
     } catch (e) {
       console.error("Post-approve AI error:", e);
@@ -994,11 +977,10 @@ const Lessons = () => {
                   <div className="grid grid-cols-2 gap-3">
                     <div className="space-y-2">
                       <Label>{getLabel("assigned_to", "אחראי ליישום")}</Label>
-                      <SearchableSelect value={newAssignedTo} onValueChange={setNewAssignedTo} placeholder="בחר משתמש"
-                        options={[
-                          ...users.map((u) => ({ value: String(u.id), label: u.name })),
-                        ]}
+                      <SearchableSelect value={newAssignedTo} onValueChange={setNewAssignedTo} placeholder="בחר רפרנט"
+                        options={referentOptions(users)}
                       />
+                      <p className="text-xs text-muted-foreground">בלי רפרנט הלקח יישמר כטיוטה ולא יישלח לאישור</p>
                     </div>
                   </div>
                 </div>
@@ -1084,7 +1066,7 @@ const Lessons = () => {
                <Brain className="w-5 h-5 text-accent" />
                המלצות AI לאחר אישור
              </DialogTitle>
-             <DialogDescription>פרויקטים ורפרנטים מומלצים להפצת הלקח</DialogDescription>
+             <DialogDescription>פרויקטים מומלצים להפצת הלקח</DialogDescription>
           </DialogHeader>
           {isPostReviewing ? (
             <div className="flex flex-col items-center gap-3 py-8">
@@ -1131,49 +1113,10 @@ const Lessons = () => {
                 </div>
               )}
 
-              {postReview.recommended_referents.length > 0 && (
-                <div className="space-y-2">
-                  <h4 className="text-sm font-semibold">👤 רפרנטים מומלצים להפצה:</h4>
-                  {postReview.recommended_referents.map((referent, i) => {
-                    const user = users.find((candidate) => candidate.id === referent.referent_id);
-                    const isStageMatch = !!user && user.assignedStageIndexes.includes(reviewingLessonStageIndex);
-                    return (
-                      <label key={i} className="flex items-start gap-3 p-3 rounded-lg bg-muted/50 cursor-pointer hover:bg-muted/70 transition">
-                        <Checkbox
-                          checked={selectedAIReferents.includes(referent.referent_id)}
-                          onCheckedChange={() => {
-                            if (!isStageMatch) return;
-                            setSelectedAIReferents((prev) =>
-                              prev.includes(referent.referent_id)
-                                ? prev.filter((id) => id !== referent.referent_id)
-                                : [...prev, referent.referent_id]
-                            );
-                          }}
-                          disabled={!isStageMatch}
-                          className="mt-0.5"
-                        />
-                        <div className="flex-1 space-y-1">
-                          <span className="text-sm font-medium">{referent.referent_name}</span>
-                          <p className="text-xs text-muted-foreground">{referent.reason}</p>
-                          {!isStageMatch && (
-                            <p className="text-xs text-destructive">נפסל לבחירה אוטומטית כי לרפרנט אין שיוך לאותו שלב של הלקח.</p>
-                          )}
-                        </div>
-                      </label>
-                    );
-                  })}
-                </div>
-              )}
-
-              {(filteredOutAIProjects.length > 0 || filteredOutAIReferents.length > 0) && (
+              {filteredOutAIProjects.length > 0 && (
                 <div className="rounded-lg border border-border bg-muted/30 p-3 space-y-2">
                   <h4 className="text-sm font-semibold">סוננו אוטומטית עקב חוסר התאמת שלב</h4>
-                  {filteredOutAIProjects.length > 0 && (
-                    <p className="text-xs text-muted-foreground">פרויקטים: {filteredOutAIProjects.join(", ")}</p>
-                  )}
-                  {filteredOutAIReferents.length > 0 && (
-                    <p className="text-xs text-muted-foreground">רפרנטים: {filteredOutAIReferents.join(", ")}</p>
-                  )}
+                  <p className="text-xs text-muted-foreground">פרויקטים: {filteredOutAIProjects.join(", ")}</p>
                 </div>
               )}
 
@@ -1206,13 +1149,10 @@ const Lessons = () => {
                     <Button
                       className="flex-1 gap-2"
                       onClick={() => {
-                        distributeLesson(reviewingLessonId, selectedAIProjects, selectedAIReferents, "ai");
-                        const parts = [];
-                        if (selectedAIProjects.length > 0) parts.push(`${selectedAIProjects.length} פרויקטים`);
-                        if (selectedAIReferents.length > 0) parts.push(`${selectedAIReferents.length} רפרנטים`);
+                        distributeLesson(reviewingLessonId, selectedAIProjects, [], "ai");
                         toast({
                           title: "לקח הופץ בהצלחה ✓",
-                          description: `הופץ ל-${parts.join(" ו-")}`,
+                          description: `הופץ ל-${selectedAIProjects.length} פרויקטים`,
                         });
                         closePostReviewDialog();
                       }}

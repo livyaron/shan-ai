@@ -1,5 +1,14 @@
-import { createContext, useContext, useState, useEffect, ReactNode, useCallback, useRef } from "react";
+import { createContext, useContext, useState, useEffect, ReactNode, useCallback, useRef, useMemo } from "react";
 import { supabase, SUPABASE_URL, SHAN_LOGIN_URL } from "@/integrations/supabase/client";
+import {
+  DRAFT_STATUS,
+  NEW_WORKFLOW_STATUS,
+  REFERENT_WORKFLOW_STATUS,
+  approvalReferent,
+  initialLessonState,
+  isVisibleLesson,
+  missingReviewReferents,
+} from "@/lib/lessonAssignment";
 import {
   LessonWorkflowEvent,
   WORKFLOW_EVENT_TYPES,
@@ -75,7 +84,7 @@ export const PROJECT_STAGES = [
   "חישמול",
 ];
 
-export type LessonStatus = "new" | "approved" | "rejected" | "distributed" | "closed";
+export type LessonStatus = "draft" | "new" | "approved" | "rejected" | "distributed" | "closed";
 
 export type ProjectType = "new_build" | "expansion" | "maintenance";
 export type StationType = "closed" | "open" | "switching" | "combined" | "mobile_substation";
@@ -299,7 +308,8 @@ interface AppContextType {
   fetchLessonWorkflowEvents: (lessonId: number) => Promise<LessonWorkflowEvent[]>;
   workflowEventsVersion: number;
 
-  approveLesson: (lessonId: number) => void;
+  approveLesson: (lessonId: number) => Promise<void>;
+  submitDraftLesson: (lessonId: number) => Promise<void>;
   rejectLesson: (lessonId: number) => void;
   closeLesson: (lessonId: number) => void;
   distributeLesson: (lessonId: number, targetProjectIds?: number[], targetReferentIds?: string[], distributionSource?: "manual" | "ai") => void;
@@ -971,6 +981,8 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
     const targetDateObj = new Date();
     targetDateObj.setDate(targetDateObj.getDate() + 10);
     const targetDate = targetDateObj.toISOString().split("T")[0];
+    // No referent picked → a draft that waits with its creator (not sent for approval).
+    const initial = initialLessonState(users, lesson.assignedTo);
 
     const insertData: any = {
       title: lesson.title,
@@ -981,11 +993,11 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
       stage: lesson.stage,
       category: lesson.category,
       risk: lesson.risk,
-      status: "new",
+      status: initial.status,
       date,
       created_by: currentUser.id,
       equipment_ids: lesson.equipmentIds,
-      workflow_status: "חדש",
+      workflow_status: initial.workflowStatus,
       target_date: targetDate,
     };
     if (lesson.professionalDomain) insertData.professional_domain = lesson.professionalDomain;
@@ -1015,15 +1027,95 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
       });
     }
 
-    const creator = users.find((u) => u.id === currentUser.id);
-    if (data) addNotification("u1", "new_lesson", "לקח חדש ממתין לאישור", `${lesson.title} (מאת ${creator?.name})`, data.id, "lesson");
-  }, [currentUser.id, addNotification, users, logActivity, recordWorkflowEvent]);
+    if (data && initial.status !== DRAFT_STATUS) {
+      users.filter((u) => u.role === "admin").forEach((admin) => {
+        addNotification(admin.id, "new_lesson", "לקח חדש ממתין לאישור", `${lesson.title} (מאת ${currentUser.name})`, data.id, "lesson");
+      });
+    }
+  }, [currentUser.id, currentUser.name, addNotification, users, logActivity, recordWorkflowEvent]);
+
+  /** The creator sends a completed draft (referent assigned) for admin approval. */
+  const submitDraftLesson = useCallback(async (lessonId: number) => {
+    const lesson = lessons.find((l) => l.id === lessonId);
+    if (!lesson || lesson.status !== DRAFT_STATUS) return;
+    const referent = approvalReferent(lesson, users);
+    if (!referent) throw new Error("יש לשייך רפרנט לפני השליחה לאישור");
+
+    await applyWorkflowTransition({
+      lessonId,
+      eventType: WORKFLOW_EVENT_TYPES.SUBMITTED_FOR_APPROVAL,
+      statusAfter: NEW_WORKFLOW_STATUS,
+      lessonUpdates: { status: "new", workflow_status: NEW_WORKFLOW_STATUS },
+      targetUserId: referent,
+      targetUserName: users.find((u) => u.id === referent)?.name ?? null,
+    });
+    setLessons((prev) => prev.map((l) => l.id === lessonId ? { ...l, status: "new" as LessonStatus, workflowStatus: NEW_WORKFLOW_STATUS } : l));
+
+    users.filter((u) => u.role === "admin").forEach((admin) => {
+      addNotification(admin.id, "new_lesson", "לקח חדש ממתין לאישור", `${lesson.title} (מאת ${currentUser.name})`, lessonId, "lesson");
+    });
+    void logActivity({
+      actionType: "update",
+      entityType: "lesson",
+      entityId: lessonId,
+      objectLabel: `לקח #${lessonId}`,
+      description: `שלח טיוטה לאישור: ${lesson.title}`,
+    });
+  }, [lessons, users, currentUser.name, applyWorkflowTransition, addNotification, logActivity]);
 
   const approveLesson = useCallback(async (lessonId: number) => {
+    const lesson = lessons.find((l) => l.id === lessonId);
+    const referentId = lesson ? approvalReferent(lesson, users) : null;
+
+    if (lesson && referentId) {
+      // Approval hands the lesson to the referent its creator picked — status,
+      // assignment and the history event in one atomic call. No second assignment.
+      const referentName = users.find((u) => u.id === referentId)?.name ?? null;
+      const referentStartDate = new Date().toISOString().split("T")[0];
+      await applyWorkflowTransition({
+        lessonId,
+        eventType: WORKFLOW_EVENT_TYPES.ASSIGNED_REFERENT,
+        statusAfter: REFERENT_WORKFLOW_STATUS,
+        lessonUpdates: {
+          status: "approved",
+          workflow_status: REFERENT_WORKFLOW_STATUS,
+          assigned_to: referentId,
+          referent_start_date: referentStartDate,
+        },
+        note: "אושר ע\"י מנהל המערכת — הועבר אוטומטית לרפרנט שבחר יוצר הלקח",
+        targetUserId: referentId,
+        targetUserName: referentName,
+      });
+      await supabase.from("lessons").update({ approved_by: currentUser.id }).eq("id", lessonId);
+
+      // The referent's handling card needs a review row; never insert a second one.
+      if (missingReviewReferents(referentReviews, lessonId, [referentId]).length > 0) {
+        const { data: refData } = await supabase.from("referent_reviews" as any).insert({
+          lesson_id: lessonId,
+          referent_id: referentId,
+          reason: "נבחר ע\"י יוצר הלקח",
+          priority: "medium",
+        }).select();
+        if (refData) setReferentReviews((prev) => [...prev, ...(refData as any[]).map(mapDbReferentReview)]);
+      }
+
+      setLessons((prev) => prev.map((l) => l.id === lessonId ? {
+        ...l,
+        status: "approved" as LessonStatus,
+        approvedBy: currentUser.id,
+        workflowStatus: REFERENT_WORKFLOW_STATUS,
+        assignedTo: referentId,
+        referentStartDate,
+      } : l));
+      addNotification(referentId, "new_lesson", "לקח חדש לטיפולך", `הלקח "${lesson.title}" אושר והועבר לטיפולך`, lessonId, "lesson");
+      addNotification(lesson.createdBy, "approved", "הלקח שלך אושר!", `${lesson.title} — הועבר לטיפול ${referentName ?? "הרפרנט"}`, lessonId, "lesson");
+      return;
+    }
+
+    // Legacy lesson without a valid referent: the existing flow (manual distribution).
     await supabase.from("lessons").update({ status: "approved", approved_by: currentUser.id }).eq("id", lessonId);
     setLessons((prev) => prev.map((l) => l.id === lessonId ? { ...l, status: "approved" as LessonStatus, approvedBy: currentUser.id } : l));
 
-    const lesson = lessons.find((l) => l.id === lessonId);
     if (lesson) {
       void recordWorkflowEvent({
         lessonId,
@@ -1032,7 +1124,7 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
       });
       addNotification(lesson.createdBy, "approved", "הלקח שלך אושר!", lesson.title, lessonId, "lesson");
     }
-  }, [currentUser.id, lessons, addNotification, recordWorkflowEvent]);
+  }, [currentUser.id, lessons, users, referentReviews, addNotification, recordWorkflowEvent, applyWorkflowTransition]);
 
   const rejectLesson = useCallback(async (lessonId: number) => {
     await supabase.from("lessons").update({ status: "rejected" }).eq("id", lessonId);
@@ -1123,9 +1215,10 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
         ? "הופץ ידנית"
         : "הופץ אוטומטית לפי שלב משויך";
 
-    // When distributing to referents, also set workflow to "בטיפול רפרנט"
+    // When distributing to referents, also set workflow to "בטיפול רפרנט" — but only
+    // for a lesson nobody owns yet: the referent its creator picked is never replaced.
     const referentStartDate = new Date().toISOString().split("T")[0];
-    const firstReferentId = referentIds.length > 0 ? referentIds[0] : null;
+    const firstReferentId = !lesson.assignedTo && referentIds.length > 0 ? referentIds[0] : null;
 
     const lessonUpdate: any = {
       status: "distributed",
@@ -1162,8 +1255,9 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
     });
 
     // Create referent review records and notify referents
-    if (referentIds.length > 0) {
-      const refInserts = referentIds.map((rid) => ({
+    const newReviewIds = missingReviewReferents(referentReviews, lessonId, referentIds);
+    if (newReviewIds.length > 0) {
+      const refInserts = newReviewIds.map((rid) => ({
         lesson_id: lessonId,
         referent_id: rid,
         reason: referentDistributionReason,
@@ -1173,7 +1267,7 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
       if (refData) {
         setReferentReviews((prev) => [...prev, ...(refData as any[]).map(mapDbReferentReview)]);
       }
-      relevantReferents.forEach((ref) => {
+      relevantReferents.filter((ref) => newReviewIds.includes(ref.id)).forEach((ref) => {
         addNotification(ref.id, "distributed", "לקח הופץ אליך", `${lesson.title} — רלוונטי לשלבים שלך`, lessonId, "lesson");
       });
     }
@@ -1204,8 +1298,11 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
     relevantProjectIds.forEach((pid) => {
       setTimeout(() => analyzeRelevantLessons(pid), 100);
     });
-  }, [lessons, projects, users, addNotification, analyzeRelevantLessons, recordWorkflowEvent]);
+  }, [lessons, projects, users, referentReviews, addNotification, analyzeRelevantLessons, recordWorkflowEvent]);
 
+
+  // A draft is its creator's alone until sent for approval (UI filter — the module has no row-level access).
+  const visibleLessons = useMemo(() => lessons.filter((l) => isVisibleLesson(l, currentUser.id)), [lessons, currentUser.id]);
 
   const unreadCount = notifications.filter((n) => n.userId === currentUser.id && !n.read).length;
 
@@ -1944,9 +2041,10 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
         removeEquipment,
         renameCategory,
         deleteCategory,
-        lessons,
+        lessons: visibleLessons,
         addLesson,
         approveLesson,
+        submitDraftLesson,
         rejectLesson,
         closeLesson,
         distributeLesson,

@@ -146,3 +146,17 @@ The SPA draws Shan-AI's own `_navbar.html` (rendered per request for the session
 its layout and publishes its height as `--shan-nav-h`. Not injected into `index.html`: the
 service worker answers navigations from its precached copy, which would never carry it.
 Logout lives in that bar only.
+
+## Referent assignment & drafts — `lessons_ui/src/lib/lessonAssignment.ts` (2026-10-15)
+
+Owner decisions: only the lesson's **creator** picks the referent; the AI never recommends one.
+
+| Created with | `status` / `workflow_status` | Next |
+|---|---|---|
+| a referent in "אחראי ליישום" | `new` / `חדש` | admin approves → one `apply_lesson_workflow_event` call sets `approved` / `בטיפול רפרנט` + `assigned_to`, event `assigned_to_referent`; a `referent_reviews` row is added only if missing |
+| no referent | `draft` / `טיוטה` | visible to its creator only; "שלח לאישור" (enabled once a referent is set) → `new` / `חדש`, event `submitted_for_approval` |
+
+- The "אחראי ליישום" pickers list `role='referent'` profiles only (`referentOptions`); a legacy non-referent value stays shown until changed.
+- A legacy lesson without a valid referent keeps the old flow (manual distribution). Distribution never replaces an existing `assigned_to`.
+- Draft visibility is a UI filter (`isVisibleLesson`) — the module has no row-level access; PostgREST still returns the row.
+- No schema change: both columns are free `text`.
