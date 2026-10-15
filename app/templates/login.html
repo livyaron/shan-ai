@@ -195,6 +195,20 @@
       margin-top: 8px; text-align: right;
     }
 
+    /* ── USER SEARCH / REMEMBER ME ── */
+    .user-search { margin-bottom: 6px; }
+    .remember-row {
+      display: flex; align-items: center; justify-content: space-between; gap: 12px;
+      margin-top: 8px; font-size: 12px; color: var(--ink2); direction: rtl; flex-wrap: wrap;
+    }
+    .remember-row label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+    .remember-row input[type=checkbox] { accent-color: var(--acc); width: 14px; height: 14px; }
+    .switch-user {
+      background: none; border: none; color: var(--acc); cursor: pointer;
+      font-family: 'Heebo', sans-serif; font-size: 12px; text-decoration: underline; padding: 0;
+    }
+    .welcome-back { color: var(--ink); font-weight: 600; }
+
     /* ── MEDIA BAR ── */
     .media-bar {
       width: 100%; max-width: 820px;
@@ -371,7 +385,8 @@
       <div class="form-panel">
         <div class="col">
           <div class="field-lbl">OPERATOR · משתמש</div>
-          <select name="user_id" required class="field-ctl">
+          <input type="search" id="user-search" class="field-ctl user-search" placeholder="‏הקלד שם לחיפוש…" autocomplete="off" aria-label="חיפוש משתמש">
+          <select name="user_id" id="user-select" required class="field-ctl">
             <option value="">— בחר —</option>
             {% for u in users %}
             <option value="{{ u.id }}">{{ u.username }}{% if u.job_title %} — {{ u.job_title }}{% endif %}</option>
@@ -384,11 +399,96 @@
         </div>
         <button type="submit" class="btn-energize">⏻ ENERGIZE</button>
       </div>
+      <div class="remember-row">
+        <label><input type="checkbox" id="remember-me"> ‏זכור אותי במכשיר זה</label>
+        <span id="remembered-box" hidden>
+          <span class="welcome-back" id="remembered-name"></span>
+          · <button type="button" class="switch-user" id="switch-user">‏החלפת משתמש</button>
+        </span>
+      </div>
     </form>
     <div class="hint">DEFAULT KEY · 1234</div>
   </div>
 
 </div>
+
+<script>
+/* User search + "remember me on this device".
+   Only the stable user id is kept in localStorage — never a password. It only
+   pre-selects the name: the password is still required, nothing is granted by it,
+   and an id that is no longer in the server's list is forgotten. */
+(function () {
+  const KEY = 'shan.remembered_user_id';
+  const search = document.getElementById('user-search');
+  const select = document.getElementById('user-select');
+  const remember = document.getElementById('remember-me');
+  const box = document.getElementById('remembered-box');
+  const nameEl = document.getElementById('remembered-name');
+  const switchBtn = document.getElementById('switch-user');
+  if (!search || !select) return;
+
+  const store = {
+    get() { try { return localStorage.getItem(KEY); } catch (e) { return null; } },
+    set(v) { try { localStorage.setItem(KEY, v); } catch (e) {} },
+    clear() { try { localStorage.removeItem(KEY); } catch (e) {} },
+  };
+
+  const placeholder = select.options[0];
+  const all = Array.from(select.options).slice(1).map(o => ({ value: o.value, text: o.textContent }));
+  const norm = s => (s || '').toLowerCase().replace(/["'״׳\-]/g, '').replace(/\s+/g, ' ').trim();
+
+  // Rebuild the list (hiding <option> is ignored by iOS Safari).
+  function render(query) {
+    const q = norm(query);
+    const keep = select.value;
+    const hits = q ? all.filter(u => norm(u.text).includes(q)) : all;
+    select.replaceChildren(placeholder);
+    hits.forEach(u => {
+      const o = document.createElement('option');
+      o.value = u.value; o.textContent = u.text;
+      select.appendChild(o);
+    });
+    if (hits.some(u => u.value === keep)) select.value = keep;
+    else if (hits.length === 1) select.value = hits[0].value;
+    else select.value = '';
+  }
+  search.addEventListener('input', () => render(search.value));
+  search.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && select.value) { e.preventDefault(); select.form.querySelector('[name=password]').focus(); }
+  });
+
+  function showRemembered(user) {
+    if (user) { nameEl.textContent = '‏שלום, ' + user.text.split(' — ')[0]; box.hidden = false; }
+    else { box.hidden = true; nameEl.textContent = ''; }
+  }
+
+  const savedId = store.get();
+  const saved = savedId ? all.find(u => u.value === savedId) : null;
+  if (saved) {
+    select.value = saved.value;
+    remember.checked = true;
+    showRemembered(saved);
+    const pw = select.form.querySelector('[name=password]');
+    if (pw) pw.focus();
+  } else if (savedId) {
+    store.clear();   // the user no longer exists / has no role — pick again
+  }
+
+  switchBtn.addEventListener('click', () => {
+    store.clear();
+    showRemembered(null);
+    search.value = '';
+    render('');
+    select.value = '';
+    search.focus();
+  });
+
+  select.form.addEventListener('submit', () => {
+    if (remember.checked && select.value) store.set(select.value);
+    else store.clear();
+  });
+})();
+</script>
 
 <!-- Telemetry bar -->
 <div class="telem">
