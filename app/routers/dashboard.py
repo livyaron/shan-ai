@@ -17,6 +17,7 @@ from sqlalchemy import select, func, or_, exists, update, delete, desc
 from app.database import get_db_session
 from app.models import Decision, User, DecisionTypeEnum, DecisionStatusEnum, RoleEnum, DecisionDistribution, DistributionTypeEnum, DistributionStatusEnum, DecisionFeedback, DecisionRaciRole, RaciRoleEnum, LessonLearned, Message, KnowledgeFile, QueryLog, RACISuggestion, RACISuggestionStatusEnum, RACIRule, ReportHistory, Mission, MissionUpdate, MissionDueChange
 from app.routers.login import get_current_user
+from app.services import dashboard_domains
 
 logger = logging.getLogger(__name__)
 
@@ -239,6 +240,8 @@ async def _dashboard_stats(current_user: User, session: AsyncSession) -> dict:
         "pending_approvals": pending_approvals,
         "raci_counts": raci_counts,
         "written_count": written_count,
+        # the other three stations on the page (missions / projects / lessons)
+        "stations": await dashboard_domains.all_domains(session, DASHBOARD_DAYS),
     }
 
 
