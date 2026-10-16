@@ -160,3 +160,20 @@ Owner decisions: only the lesson's **creator** picks the referent; the AI never 
 - A legacy lesson without a valid referent keeps the old flow (manual distribution). Distribution never replaces an existing `assigned_to`.
 - Draft visibility is a UI filter (`isVisibleLesson`) — the module has no row-level access; PostgREST still returns the row.
 - No schema change: both columns are free `text`.
+
+## Phone app login — M0 (PLAN-lessons-mobile.md, 2026-10-16)
+
+An installed PWA must sign in without leaving `/lessons/` (on iOS the out-of-scope `/login`
+opens outside the app, and its cookie may never reach it).
+
+- `/lessons/login` is the module's own login page (`pages/Login.tsx`), the ONLY app route that
+  opens without a session (`lessons_spa.PUBLIC_ROUTES`). `SHAN_LOGIN_URL` points there; the
+  provider never redirects while already on it (it would loop).
+- It talks to `GET /login/users` (id, name, job title — what `/login` already shows) and
+  `POST /login/app` (JSON; same `_check_credentials` as the HTML form). Remembers the user id
+  only, in the same `shan.remembered_user_id` key as Shan-AI's login page.
+- **"השאר אותי מחובר"** = `LESSONS_REMEMBER_DAYS` (clamped 7..90; JWT `exp` matches the cookie).
+  Default 7 = no change and the checkbox is hidden. **Raise it only after information-security
+  approval** — the cookie is Shan-AI's, so it opens every Shan-AI page for that long.
+- Opened from the home-screen icon (`lib/standalone.ts`): no Shan-AI navbar; a logout button sits
+  in the module's top bar and lands back on `/lessons/login`.

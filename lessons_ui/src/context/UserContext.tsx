@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useEffect, ReactNode, useCallback, useRef, useMemo } from "react";
 import { supabase, SUPABASE_URL, SHAN_LOGIN_URL } from "@/integrations/supabase/client";
+import { isLoginPath, isStandalone } from "@/lib/standalone";
 import {
   DRAFT_STATUS,
   NEW_WORKFLOW_STATUS,
@@ -612,7 +613,8 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
         // Identity is the Shan-AI session (PLAN-lessons-module.md decision 1).
         const me = await fetchMe();
         if (!me) {
-          window.location.href = SHAN_LOGIN_URL;
+          // The login page itself loads this provider too — never loop on it.
+          if (!isLoginPath(window.location.pathname)) window.location.href = SHAN_LOGIN_URL;
           return;
         }
         const [profilesRes, projectsRes, lessonsRes, equipmentRes, notificationsRes, implRes, catRes, feedbackRes, refReviewsRes] = await Promise.all([
@@ -1953,7 +1955,13 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
       description: "התנתק מהמערכת",
     });
     try { sessionStorage.removeItem(ACT_AS_KEY); } catch { /* private mode */ }
-    // Logging out of the module is logging out of Shan-AI.
+    // Logging out of the module is logging out of Shan-AI. An installed app
+    // stays inside its scope: clear the cookie, then its own login page.
+    if (isStandalone()) {
+      void fetch("/logout", { credentials: "same-origin", redirect: "manual" })
+        .finally(() => window.location.replace(SHAN_LOGIN_URL));
+      return;
+    }
     window.location.href = "/logout";
   }, [logActivity]);
 

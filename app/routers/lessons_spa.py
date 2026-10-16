@@ -26,6 +26,10 @@ NO_CACHE_FILES = frozenset({"index.html", "sw.js", "registerSW.js", "manifest.we
 _NO_CACHE = {"Cache-Control": "no-cache"}
 # Hashed by Vite: a new build is a new name.
 _IMMUTABLE = {"Cache-Control": "public, max-age=31536000, immutable"}
+# App routes that open without a session: the in-app login (PLAN-lessons-mobile.md
+# M0 — an installed PWA signs in without leaving /lessons/). The page holds no
+# data; everything behind it still goes through the gateway's session check.
+PUBLIC_ROUTES = frozenset({"login"})
 
 
 def spa_file(path: str, base: Path | None = None) -> Path | None:
@@ -70,7 +74,7 @@ async def lessons_app(path: str, request: Request) -> Response:
     if path.startswith("assets/"):
         return Response(status_code=404)
 
-    if not _has_session(request):
+    if path.strip("/") not in PUBLIC_ROUTES and not _has_session(request):
         return RedirectResponse(f"/login?next={quote('/lessons/' + path, safe='/')}", status_code=303)
 
     index = spa_file("index.html")

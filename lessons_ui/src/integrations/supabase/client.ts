@@ -19,5 +19,10 @@ export const supabase = createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABL
   },
 });
 
-/** Where the browser goes when the Shan-AI session is missing or expired. */
-export const SHAN_LOGIN_URL = `/login?next=${encodeURIComponent("/lessons/")}`;
+/**
+ * Where the browser goes when the Shan-AI session is missing or expired: the
+ * module's own login page, inside the PWA scope (PLAN-lessons-mobile.md M0).
+ * Shan-AI's /login is outside /lessons/, and an installed app that leaves its
+ * scope to sign in may never get the cookie back (iOS).
+ */
+export const SHAN_LOGIN_URL = "/lessons/login";
