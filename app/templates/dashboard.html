@@ -338,6 +338,16 @@
         .st-hint { text-align: center; font-family: var(--mono); font-size: .75rem; color: var(--t3); margin-top: 22px; }
         .st-hint kbd, .zm kbd { background: #0d1726; border: 1px solid var(--line-hi); color: var(--t2); border-radius: 4px; padding: 0 5px; font-size: .72rem; }
 
+        .st-note { font-size: .78rem; color: var(--warn); background: rgba(255,193,7,.07); border: 1px dashed rgba(255,193,7,.35); border-radius: 8px; padding: 5px 9px; }
+
+        /* ── שלי / כל האגף ── */
+        .sc-switch { position: relative; display: inline-flex; padding: 4px; border-radius: 12px; background: rgba(6,11,19,.8); border: 1px solid var(--line-hi); }
+        .sc-switch a { position: relative; z-index: 1; padding: 6px 14px; border-radius: 8px; color: var(--t2); font-weight: 600; font-size: .92rem; text-decoration: none; white-space: nowrap; transition: color .2s; }
+        .sc-switch a.on { color: #fff; }
+        .sc-switch a:hover { color: var(--t1); }
+        .sc-switch a:focus-visible { outline: 2px solid var(--energy); outline-offset: 2px; }
+        .sc-pill { position: absolute; top: 4px; bottom: 4px; right: 4px; width: 0; border-radius: 8px; background: linear-gradient(135deg, #0b3550, #0b2440); border: 1px solid var(--energy); box-shadow: 0 0 16px rgba(0,212,255,.35); }
+
         /* ── zoom shell ── */
         body.zoomed { overflow: hidden; }
         .zm { position: fixed; inset: 0; z-index: 1040; display: flex; flex-direction: column; color: var(--t1);
@@ -481,14 +491,14 @@
 {% set approved = status_counts.get('approved', 0) %}
 {% set critical = type_counts.get('critical', 0) %}
 {% macro pct(n) %}{{ ((n / total_decisions * 100) | round | int) if total_decisions else 0 }}{% endmacro %}
-{% set ms = stations.missions %}{% set ps = stations.projects %}{% set ls = stations.lessons %}
+{% set own_q = ('owner=' ~ current_user.id ~ '&') if scope == 'mine' else '' %}{% set ms = stations.missions %}{% set ps = stations.projects %}{% set ls = stations.lessons %}
 <div class="container-fluid py-4 px-4 sb" id="sb">
 
     <!-- Header -->
     <div class="sb-head">
         <div>
             <h1 class="sb-title">מרכז בקרה <span class="kv">⚡</span></h1>
-            <div class="sb-sub">ארבע תחנות על פס צבירה אחד · לחץ על תחנה כדי להיכנס אליה · הנתונים מתעדכנים לבד</div>
+            <div class="sb-sub">{{ 'העבודה שלי' if scope == 'mine' else 'כל האגף' }} · ארבע תחנות על פס צבירה אחד · לחץ על תחנה כדי להיכנס אליה</div>
         </div>
         <div class="sb-side">
             <div class="sb-live">
@@ -497,6 +507,10 @@
                 <span class="sb-clock" id="sb-clock">--:--:--</span>
             </div>
             <div class="sb-actions">
+                <div class="sc-switch" id="sc-switch" role="radiogroup" aria-label="היקף הנתונים">
+                    {% for key, label in scope_labels.items() %}<a role="radio" href="?scope={{ key }}" data-scope="{{ key }}" class="{{ 'on' if scope == key else '' }}" aria-checked="{{ 'true' if scope == key else 'false' }}">{{ '👤' if key == 'mine' else '🏢' }} {{ label }}</a>{% endfor %}
+                    <i class="sc-pill" id="sc-pill"></i>
+                </div>
                 <button type="button" class="sb-btn" id="sb-bg-toggle" aria-pressed="true" title="הפעלה/כיבוי של רקע התחנה החי">⚡ רקע חי</button>
                 <button type="button" class="sb-btn" onclick="openDashboardAI()">◈ ניתוח AI</button>
                 <a href="/dashboard/decisions?new=1" class="sb-btn primary">➕ החלטה חדשה</a>
@@ -510,19 +524,20 @@
 
         <button type="button" class="st {{ 'alarm' if pending_approvals else '' }}" data-zoom="decisions" style="--acc:#00d4ff" aria-label="החלטות — הגדל">
             <span class="st-hd"><span class="st-ic">◆</span><span class="st-name">החלטות</span><span class="st-led"></span><span class="st-go">⤢</span></span>
-            <span class="st-hero"><b data-live="total_decisions">{{ total_decisions }}</b><small>החלטות שאני מעורב בהן</small></span>
+            <span class="st-hero"><b data-live="total_decisions">{{ total_decisions }}</b><small>{{ 'כל ההחלטות באגף' if decisions_all else 'החלטות שאני מעורב בהן' }}</small></span>
             <span class="st-kpis">
                 <span class="{{ 'hot' if pending_approvals else '' }}"><b data-live="pending_approvals">{{ pending_approvals }}</b>ממתינות לי</span>
                 <span><b data-live="critical">{{ critical }}</b>קריטיות</span>
                 <span><b data-live="week_total">{{ week_total }}</b>ב-7 ימים</span>
             </span>
+            {% if scope == 'all' and not decisions_all %}<span class="st-note">החלטות מוצגות רק שלך — כך גם בדף ההחלטות</span>{% endif %}
             <svg class="st-spark" data-spark="decisions" viewBox="0 0 300 54" preserveAspectRatio="none" aria-hidden="true"></svg>
         </button>
 
         <button type="button" class="st {{ 'alarm' if ms.ok and ms.overdue else '' }}" data-zoom="missions" style="--acc:#ff9f43" aria-label="משימות — הגדל">
             <span class="st-hd"><span class="st-ic">◎</span><span class="st-name">משימות · חדר מבצעים</span><span class="st-led"></span><span class="st-go">⤢</span></span>
             {% if ms.ok %}
-            <span class="st-hero"><b data-live="m_open">{{ ms.open }}</b><small>משימות פתוחות</small></span>
+            <span class="st-hero"><b data-live="m_open">{{ ms.open }}</b><small>{{ 'משימות פתוחות שלי' if scope == 'mine' else 'משימות פתוחות באגף' }}</small></span>
             <span class="st-kpis">
                 <span class="{{ 'hot' if ms.overdue else '' }}"><b data-live="m_overdue">{{ ms.overdue }}</b>באיחור</span>
                 <span><b data-live="m_do_now">{{ ms.do_now }}</b>בצע עכשיו</span>
@@ -535,12 +550,13 @@
         <button type="button" class="st {{ 'alarm' if ps.ok and ps.past_due else '' }}" data-zoom="projects" style="--acc:#8b9cf4" aria-label="פרויקטים — הגדל">
             <span class="st-hd"><span class="st-ic">▣</span><span class="st-name">פרויקטים · קובץ המאסטר</span><span class="st-led"></span><span class="st-go">⤢</span></span>
             {% if ps.ok %}
-            <span class="st-hero"><b data-live="p_active">{{ ps.active }}</b><small>פרויקטים פעילים</small></span>
+            <span class="st-hero"><b data-live="p_active">{{ ps.active }}</b><small>{{ 'פרויקטים בתחום שלי' if scope == 'mine' else 'פרויקטים פעילים באגף' }}</small></span>
             <span class="st-kpis">
                 <span class="{{ 'hot' if ps.past_due else '' }}"><b data-live="p_past_due">{{ ps.past_due }}</b>יעד עבר</span>
                 <span><b data-live="p_late">{{ ps.late }}</b>מאחרים מהתכנון</span>
                 <span><b data-live="p_undated">{{ ps.undated }}</b>יעד כמלל</span>
             </span>
+            {% if ps.unlinked %}<span class="st-note">לא שויכת עדיין למגזר או לשם מנה״פ — מנהל מערכת משייך ב״דפוסים ← הרשאות״</span>{% endif %}
             <span class="st-strip" data-strip="projects" aria-hidden="true"></span>
             {% else %}<span class="st-off">התחנה לא זמינה כרגע</span>{% endif %}
         </button>
@@ -548,12 +564,13 @@
         <button type="button" class="st" data-zoom="lessons" style="--acc:#2dd4bf" aria-label="לקחים — הגדל">
             <span class="st-hd"><span class="st-ic">✦</span><span class="st-name">לקחים</span><span class="st-led"></span><span class="st-go">⤢</span></span>
             {% if ls.ok %}
-            <span class="st-hero"><b data-live="l_total">{{ ls.total }}</b><small>לקחים במערכת</small></span>
+            <span class="st-hero"><b data-live="l_total">{{ ls.total }}</b><small>{{ 'לקחים שלי' if scope == 'mine' else 'לקחים במערכת' }}</small></span>
             <span class="st-kpis">
                 <span><b data-live="l_approved">{{ ls.approved }}</b>אושרו והופצו</span>
                 <span><b data-live="l_pending">{{ ls.pending }}</b>בתהליך</span>
                 <span><b data-live="l_impl">{{ ls.impl_open }}</b>הטמעות פתוחות</span>
             </span>
+            {% if ls.unlinked %}<span class="st-note">אין לך עדיין פרופיל במערכת הלקחים</span>{% endif %}
             <svg class="st-spark" data-spark="lessons" viewBox="0 0 300 54" preserveAspectRatio="none" aria-hidden="true"></svg>
             {% else %}<span class="st-off">מערכת הלקחים לא זמינה כרגע</span>{% endif %}
         </button>
@@ -578,7 +595,7 @@
     <div class="zm-body" id="zm-body">
 
     <!-- ── החלטות: the original dashboard, unchanged ── -->
-    <section class="zv" data-view="decisions" data-title="מרכז בקרת החלטות" hidden>
+    <section class="zv" data-view="decisions" data-title="החלטות · {{ 'כל האגף' if decisions_all else 'שלי' }}" hidden>
     {% if recent_decisions %}
     <div class="sb-ticker" aria-label="החלטות אחרונות">
         <div class="track">
@@ -705,28 +722,28 @@
     </section>
 
     <!-- ── משימות ── -->
-    <section class="zv" data-view="missions" data-title="חדר מבצעים · משימות" hidden>
+    <section class="zv" data-view="missions" data-title="חדר מבצעים · {{ 'המשימות שלי' if scope == 'mine' else 'כל האגף' }}" hidden>
     {% if ms.ok %}
         <div class="sb-bus-label"><span>פס צבירה · חדר מבצעים</span><span>נפתחו <b>{{ ms.daily_data | sum }}</b> · נסגרו <b>{{ ms.daily_done | sum }}</b> ב-7 ימים</span></div>
         <div class="sb-busbar zv-bus"></div>
         <div class="sb-bays">
-            <a class="sb-bay c-e" style="--d:0s" href="/dashboard/war-room?kpi=open"><div class="sb-breaker"></div><div class="sb-card">
+            <a class="sb-bay c-e" style="--d:0s" href="/dashboard/war-room?{{ own_q }}kpi=open"><div class="sb-breaker"></div><div class="sb-card">
                 <div class="sb-k-label"><span>משימות פתוחות</span><span>📋</span></div>
                 <div class="sb-k-val" data-live="m_open">{{ ms.open }}</div>
                 <div class="sb-k-foot"><span data-live="m_undated">{{ ms.undated }}</span> בלי תאריך יעד</div></div></a>
-            <a class="sb-bay c-crit" style="--d:.4s" href="/dashboard/war-room?kpi=do"><div class="sb-breaker"></div><div class="sb-card">
+            <a class="sb-bay c-crit" style="--d:.4s" href="/dashboard/war-room?{{ own_q }}kpi=do"><div class="sb-breaker"></div><div class="sb-card">
                 <div class="sb-k-label"><span>בצע עכשיו</span><span>🔥</span></div>
                 <div class="sb-k-val" data-live="m_do_now">{{ ms.do_now }}</div>
                 <div class="sb-k-foot">דחוף · חשוב</div></div></a>
-            <a class="sb-bay {{ 'alarm' if ms.overdue else 'c-ok' }}" style="--d:.8s" href="/dashboard/war-room?kpi=overdue"><div class="sb-breaker"></div><div class="sb-card">
+            <a class="sb-bay {{ 'alarm' if ms.overdue else 'c-ok' }}" style="--d:.8s" href="/dashboard/war-room?{{ own_q }}kpi=overdue"><div class="sb-breaker"></div><div class="sb-card">
                 <div class="sb-k-label"><span>באיחור</span><span>⚠️</span></div>
                 <div class="sb-k-val" data-live="m_overdue">{{ ms.overdue }}</div>
                 <div class="sb-k-foot">{{ 'לחץ לטיפול ←' if ms.overdue else 'אין איחורים' }}</div></div></a>
-            <a class="sb-bay c-v" style="--d:1.2s" href="/dashboard/war-room"><div class="sb-breaker"></div><div class="sb-card">
+            <a class="sb-bay c-v" style="--d:1.2s" href="/dashboard/war-room?{{ own_q }}"><div class="sb-breaker"></div><div class="sb-card">
                 <div class="sb-k-label"><span>חדשות (24 שעות)</span><span>✨</span></div>
                 <div class="sb-k-val" data-live="m_new">{{ ms.new_24h }}</div>
                 <div class="sb-k-foot">נפתחו ביממה האחרונה</div></div></a>
-            <a class="sb-bay c-ok" style="--d:1.6s" href="/dashboard/war-room?kpi=done_week"><div class="sb-breaker"></div><div class="sb-card">
+            <a class="sb-bay c-ok" style="--d:1.6s" href="/dashboard/war-room?{{ own_q }}kpi=done_week"><div class="sb-breaker"></div><div class="sb-card">
                 <div class="sb-k-label"><span>הושלמו השבוע</span><span>✅</span></div>
                 <div class="sb-k-val" data-live="m_done_week">{{ ms.done_week }}</div>
                 <div class="sb-k-foot">7 ימים אחרונים</div></div></a>
@@ -734,7 +751,7 @@
         <div class="sb-h"><h2>זרמים</h2><span>מטריצת אייזנהאואר · נפתחו מול נסגרו</span></div>
         <div class="sb-charts">
             <div class="sb-panel"><h3>לפי רביע</h3><div class="sb-donut-wrap"><svg class="sb-donut" id="zm-d-quad" viewBox="0 0 132 132" role="img" aria-label="משימות פתוחות לפי רביע"></svg><div class="sb-legend" id="zm-l-quad"></div></div></div>
-            <div class="sb-panel"><h3>פתוחות לפי אחראי</h3><div id="zm-b-owners"></div></div>
+            <div class="sb-panel"><h3>{{ 'שלי, לפי תאריך יעד' if scope == 'mine' else 'פתוחות לפי אחראי' }}</h3><div id="zm-b-owners"></div></div>
             <div class="sb-panel"><h3>7 ימים אחרונים <span class="zv-key"><i style="background:var(--energy)"></i>נפתחו <i style="background:var(--ok)"></i>נסגרו</span></h3><svg class="sb-spark" id="zm-s-missions" viewBox="0 0 400 160" role="img" aria-label="משימות שנפתחו ונסגרו ביום"></svg></div>
         </div>
         <div class="sb-h"><h2>על השולחן</h2><span>משימות פתוחות לפי תאריך יעד · לחץ על שורה לחדר המבצעים</span></div>
@@ -755,12 +772,12 @@
                 </tbody>
             </table>
         </div>
-        <div class="zv-foot"><a class="sb-btn primary" href="/dashboard/war-room">לחדר המבצעים ←</a></div>
+        <div class="zv-foot"><a class="sb-btn primary" href="/dashboard/war-room?{{ own_q }}">לחדר המבצעים ←</a></div>
     {% else %}<div class="sb-empty">התחנה לא זמינה כרגע</div>{% endif %}
     </section>
 
     <!-- ── פרויקטים ── -->
-    <section class="zv" data-view="projects" data-title="פרויקטים · קובץ המאסטר" hidden>
+    <section class="zv" data-view="projects" data-title="פרויקטים · {{ 'בתחום שלי' if scope == 'mine' else 'כל האגף' }}" hidden>
     {% if ps.ok %}
         <div class="sb-bus-label"><span>פס צבירה · פרויקטים פעילים</span><span><b>{{ ps.watch_total }}</b> פרויקטים ברשימת המעקב</span></div>
         <div class="sb-busbar zv-bus"></div>
@@ -816,7 +833,7 @@
     </section>
 
     <!-- ── לקחים ── -->
-    <section class="zv" data-view="lessons" data-title="מערכת לקחים" hidden>
+    <section class="zv" data-view="lessons" data-title="לקחים · {{ 'שלי' if scope == 'mine' else 'כל המערכת' }}" hidden>
     {% if ls.ok %}
         <div class="sb-bus-label"><span>פס צבירה · לקחים</span><span><b>{{ ls.week_activity }}</b> פעולות בתהליך ב-7 ימים</span></div>
         <div class="sb-busbar zv-bus"></div>
@@ -1059,6 +1076,7 @@ const SB_M = window.Motion;
 const SB_GO = !!SB_M && !matchMedia('(prefers-reduced-motion: reduce)').matches;
 const SB_EASE = [.16, 1, .3, 1];
 const SB_POLL_MS = 45000;
+const SB_SCOPE = {{ scope | tojson }};
 const SB_TYPES  = { normal: ['רגיל', '--ok'], info: ['מידע', '--info'], uncertain: ['לא ודאי', '--warn'], critical: ['קריטי', '--crit'] };
 const SB_STATUS = { approved: ['מאושר', '--ok'], executed: ['בוצע', '--info'], pending: ['ממתין', '--t2'], rejected: ['נדחה', '--crit'] };
 const sbRoot = document.getElementById('sb');
@@ -1311,7 +1329,7 @@ const STATION_DRAW = {
     missions(a) {
         const s = stOf('missions'); if (!s.ok) return;
         sbDonut('zm-d-quad', 'zm-l-quad', toData(s.quadrants), toDict(s.quadrants, QUAD_TONE), null, a);
-        stBars('zm-b-owners', s.owners);
+        stBars('zm-b-owners', SB_SCOPE === 'mine' ? s.due_buckets : s.owners);
         sbSpark(sbState.daily_labels, s.daily_data, a, 'zm-s-missions', 'נפתחו', s.daily_done);
     },
     projects(a) {
@@ -1537,6 +1555,32 @@ document.addEventListener('keydown', e => {
     }
 });
 
+/* ── שלי / כל האגף: the pill slides, the stations power down, the page
+   comes back in the other scope (the server renders it — tables included) ── */
+(function () {
+    const sw = document.getElementById('sc-switch'), pill = document.getElementById('sc-pill');
+    const place = (a, animate) => {
+        const sr = sw.getBoundingClientRect(), ar = a.getBoundingClientRect();
+        const to = { right: (sr.right - ar.right) + 'px', width: ar.width + 'px' };
+        if (animate && SB_GO) return SB_M.animate(pill, to, { type: 'spring', stiffness: 420, damping: 30 });
+        Object.assign(pill.style, to);
+    };
+    const cur = () => sw.querySelector('a.on') || sw.querySelector('a');
+    place(cur(), false);
+    window.addEventListener('resize', () => place(cur(), false));
+    sw.querySelectorAll('a').forEach(a => a.addEventListener('click', e => {
+        if (a.classList.contains('on')) { e.preventDefault(); return; }
+        if (!SB_GO) return;                        // plain link: the server does the rest
+        e.preventDefault();
+        sw.querySelectorAll('a').forEach(x => { x.classList.toggle('on', x === a); x.setAttribute('aria-checked', x === a); });
+        place(a, true);
+        SB_M.animate('.st', { opacity: .25, scale: .97, filter: 'blur(4px)' }, { duration: .3, delay: SB_M.stagger(.04) });
+        SB_M.animate('.st-bus i', { opacity: .1 }, { duration: .3 });
+        if (window.SubstationBG) SubstationBG.setLoad(0);
+        setTimeout(() => { location.href = a.getAttribute('href') + location.hash; }, 330);
+    }));
+})();
+
 /* ── entrance: busbar cross draws from the hub, tiles fly in from their corners ── */
 if (SB_GO) {
     SB_M.animate('.st-bus .h', { scaleX: [0, 1] }, { duration: .9, ease: SB_EASE });
@@ -1567,7 +1611,7 @@ window.addEventListener('load', () => sbSyncGrid(sbState));
 async function sbPoll() {
     if (document.hidden) return;
     try {
-        const r = await fetch('/dashboard/live', { headers: { 'Accept': 'application/json' } });
+        const r = await fetch('/dashboard/live?scope=' + SB_SCOPE, { headers: { 'Accept': 'application/json' } });
         if (!r.ok) return;
         const d = await r.json();
         sbLastSync = Date.now();
