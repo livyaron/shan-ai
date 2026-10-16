@@ -30,6 +30,13 @@ _IMMUTABLE = {"Cache-Control": "public, max-age=31536000, immutable"}
 # M0 — an installed PWA signs in without leaving /lessons/). The page holds no
 # data; everything behind it still goes through the gateway's session check.
 PUBLIC_ROUTES = frozenset({"login"})
+# The service worker precaches /lessons/index.html with no session (it installs
+# while the login page is open). Gated, fetch() followed the 303 and Workbox
+# stored the /login page AS index.html — every app navigation after that,
+# including the redirect back from a successful login, was answered from the
+# cache with the login form again (Android, 2026-10-16). The shell holds no
+# data; the app itself sends a missing session to its own login.
+PRECACHE_SHELL = "index.html"
 
 
 def spa_file(path: str, base: Path | None = None) -> Path | None:
@@ -74,7 +81,7 @@ async def lessons_app(path: str, request: Request) -> Response:
     if path.startswith("assets/"):
         return Response(status_code=404)
 
-    if path.strip("/") not in PUBLIC_ROUTES and not _has_session(request):
+    if path != PRECACHE_SHELL and path.strip("/") not in PUBLIC_ROUTES and not _has_session(request):
         return RedirectResponse(f"/login?next={quote('/lessons/' + path, safe='/')}", status_code=303)
 
     index = spa_file("index.html")

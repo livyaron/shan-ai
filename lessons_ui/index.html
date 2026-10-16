@@ -13,6 +13,10 @@
     <meta name="apple-mobile-web-app-title" content="לקחים" />
     <link rel="apple-touch-icon" href="/lessons/pwa-192x192.png" />
     <link rel="icon" type="image/png" href="/lessons/pwa-192x192.png" />
+    <!-- Bump to make every installed service worker re-fetch this shell: a phone
+         that precached the /login page in its place (before 2026-10-16) keeps it
+         until this file's content, and so its precache revision, changes. -->
+    <meta name="shell-revision" content="2" />
   </head>
   <body>
     <div id="root"></div>
