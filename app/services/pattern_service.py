@@ -16,6 +16,7 @@ from __future__ import annotations
 import math
 import re
 from dataclasses import dataclass
+from functools import lru_cache
 from datetime import date
 from typing import Any
 
@@ -25,6 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Project, ProjectSnapshot, ProjectWeeklyEntry
 from app.services import stage_sectors as ss
+from app.services import target_reading as tr
 
 MONTH_DAYS = 30.44
 LATE_MONTHS = 1.0         # forecast more than a month past the plan = late
@@ -148,6 +150,11 @@ def _confidence(n: int) -> str:
     return "high" if n >= 30 else "medium" if n >= 10 else "low"
 
 
+def _d(ts) -> date | None:
+    """A frame cell (Timestamp / NaT / None) → date | None."""
+    return None if ts is None or pd.isna(ts) else pd.Timestamp(ts).date()
+
+
 def _months(days: float) -> float:
     return round(days / MONTH_DAYS, 1)
 
@@ -181,7 +188,7 @@ async def load_frames(session: AsyncSession) -> Frames:
         ProjectSnapshot.project_id, ProjectSnapshot.snapshot_date, ProjectSnapshot.stage,
         ProjectSnapshot.estimated_finish_date.label("fc"), ProjectSnapshot.dev_plan_date.label("dev"),
         ProjectSnapshot.risks, ProjectSnapshot.to_handle, ProjectSnapshot.finish_date_text,
-        ProjectSnapshot.controller,
+        ProjectSnapshot.controller, ProjectSnapshot.approved_date.label("appr"), ProjectSnapshot.approved_text,
     ))).all()
     projects = (await session.execute(select(
         Project.id.label("project_id"), Project.project_identifier.label("identifier"), Project.name,
@@ -193,7 +200,8 @@ async def load_frames(session: AsyncSession) -> Frames:
     ))).all()
     return Frames(
         snaps=pd.DataFrame(snaps, columns=["project_id", "snapshot_date", "stage", "fc", "dev",
-                                           "risks", "to_handle", "finish_date_text", "controller"]),
+                                           "risks", "to_handle", "finish_date_text", "controller",
+                                           "appr", "approved_text"]),
         projects=pd.DataFrame(projects, columns=["project_id", "identifier", "name", "manager",
                                                  "project_type", "is_active"]),
         weekly=pd.DataFrame(weekly, columns=["project_id", "week_date", "text", "text_hash"]),
@@ -247,10 +255,32 @@ def canonical_snaps(snaps: pd.DataFrame) -> pd.DataFrame:
     s["_named"] = s["snapshot_date"] == s["report_date"]
     s = (s.sort_values(["_named", "snapshot_date"])
           .drop_duplicates(["project_id", "report_date"], keep="last").drop(columns="_named"))
-    for c in ("fc", "dev"):
+    for c, text in (("appr", "approved_text"), ("finish_date_text", None), ("approved_text", None)):
+        if c not in s:                       # frames from before the approved target existed
+            s[c] = None
+    # A target written as prose is READ (target_reading, user decision 2026-10-16):
+    # a snapshot synced before the reading existed gets the same date a sync
+    # would store now. A date the text calls missed is never filled in.
+    s["fc"] = [_text_date(v, t) for v, t in zip(s["fc"], s["finish_date_text"])]
+    s["appr"] = [_text_date(v, t) for v, t in zip(s["appr"], s["approved_text"])]
+    for c in ("fc", "dev", "appr"):
         s[c] = pd.to_datetime(s[c])
     s["stage"] = s["stage"].map(ss.normalize_stage)
     return s
+
+
+@lru_cache(maxsize=4096)
+def read_target(text: str) -> dict | None:
+    return tr.read_text(text)
+
+
+def _text_date(value, text):
+    if value is not None and not (isinstance(value, float) and pd.isna(value)) and not pd.isna(value):
+        return value
+    if not isinstance(text, str):
+        return None
+    r = read_target(text)
+    return date.fromisoformat(r["date"]) if r and r["kind"] in tr.DATED and r["date"] else None
 
 
 # ── The engine ───────────────────────────────────────────────────────────
@@ -380,13 +410,32 @@ def compute_patterns(frames: Frames) -> dict:
                                   f"מלל שבועי זהה (או כמעט זהה — תיקון אות או פיסוק) {STALE_WEEKS} שבועות רצופים.")
 
     # 7–8. Undated targets and targets already behind us.
-    cur["energized"] = cur["finish_date_text"].map(lambda t: isinstance(t, str) and bool(ENERGIZED.match(t)))
-    undated = cur[cur["finish_date_text"].notna() & ~cur["energized"]]
+    cur["reading"] = cur["finish_date_text"].map(lambda t: read_target(t) if isinstance(t, str) else None)
+    cur["energized"] = cur["reading"].map(lambda r: bool(r and r["kind"] == tr.ENERGIZED))
+    # "undated" = prose that, READ, still holds no forecast date (unknown, missed
+    # with no new date, partly energized with nothing dated left)
+    undated = cur[cur["finish_date_text"].notna() & cur["fc"].isna() & ~cur["energized"]]
     past = cur[cur["fc"] < pd.Timestamp(r_last)]
     m["undated"] = metric({"count": len(undated), "projects": sorted(undated["identifier"])},
                           len(cur), _confidence(len(cur)), "יעד חשמול מסתמן כתוב כמלל ולא כתאריך — לא נמדד.")
     m["past_due"] = metric({"count": len(past), "projects": sorted(past["identifier"])},
                            len(cur), _confidence(len(cur)), f"יעד מסתמן לפני {r_last.isoformat()} ועדיין לא הסתיים.")
+
+    # 8b. The three targets: plan → approved (the delay the division manager
+    # accepted) → forecast (what is happening). Deviation = forecast more than
+    # OVER_APPROVED_DAYS past the approved target; earlier is not flagged.
+    cur["cmp"] = [tr.compare(_d(r.dev), _d(r.fc), r.finish_date_text if isinstance(r.finish_date_text, str) else None,
+                             _d(r.appr)) for r in cur.itertuples()]
+    with_appr = cur[cur["appr"].notna()]
+    over = cur[cur["cmp"].map(lambda c: c["over_approved"])]
+    lost = cur[cur["cmp"].map(lambda c: c["approved_lost"])]
+    m["over_approved"] = metric({"count": len(over), "projects": sorted(over["identifier"])},
+                                len(with_appr), _confidence(len(with_appr)),
+                                f"יעד מסתמן מאוחר ביותר מ-{tr.OVER_APPROVED_DAYS} ימים מהיעד שאישר מנהל האגף "
+                                f"(מתוך {len(with_appr)} פרויקטים עם יעד מאושר).")
+    m["approved_lost"] = metric({"count": len(lost), "projects": sorted(lost["identifier"])},
+                                len(with_appr), _confidence(len(with_appr)),
+                                "יש יעד מאושר, אבל היעד המסתמן אינו תאריך — לא נקבע, הוחמץ או לא ידוע.")
 
     # 9. Risk categories — what people write about.
     texts = wk.groupby("project_id")["text"].apply(" ".join)
@@ -532,8 +581,20 @@ def _project_rows(cur: pd.DataFrame, stale: set) -> list[dict]:
             "weeks_in_stage": None if pd.isna(r.weeks_in_stage) else int(r.weeks_in_stage),
             "weeks_lower_bound": bool(r.weeks_lower_bound),
             "stale": r.identifier in stale,
-            "undated": isinstance(r.finish_date_text, str) and not r.energized,
+            "undated": isinstance(r.finish_date_text, str) and pd.isna(r.fc) and not r.energized,
             "energized": bool(r.energized),
+            # the forecast cell READ (target_reading) and set against the approved target
+            "fc_kind": r.reading["kind"] if r.reading else None,
+            "fc_label": r.reading["label"] if r.reading else None,
+            "fc_reason": r.reading["reason"] if r.reading else None,
+            "fc_missed": r.reading.get("missed") if r.reading else None,
+            "fc_approx": bool(r.reading and r.reading["approx"]),
+            "appr": None if pd.isna(r.appr) else r.appr.date().isoformat(),
+            "appr_gap_days": r.cmp["forecast_vs_approved"],
+            "appr_vs_plan_days": r.cmp["approved_vs_plan"],
+            "over_approved": r.cmp["over_approved"],
+            "approved_lost": r.cmp["approved_lost"],
+            "unapproved": bool(r.reading and r.reading["kind"] == tr.UNAPPROVED),
             "fc_text": r.finish_date_text if isinstance(r.finish_date_text, str) else None,
             "fc": None if pd.isna(r.fc) else r.fc.date().isoformat(),
             "dev": None if pd.isna(r.dev) else r.dev.date().isoformat(),
@@ -720,8 +781,19 @@ def project_history(frames: Frames, p: dict, identifier: str) -> dict | None:
             flag("medium", f"מאחר {row['slip_months']} חודשים מול תכנית הפיתוח העדכנית.")
         if row["fc"] and p.get("as_of") and row["fc"] < p["as_of"]:
             flag("high", f"יעד החשמול המסתמן ({row['fc']}) כבר עבר והפרויקט לא הסתיים.")
-        if row["undated"]:
-            flag("medium", "יעד החשמול כתוב כמלל ולא כתאריך — אי אפשר למדוד אותו.")
+        if row.get("over_approved"):
+            flag("high", f"היעד המסתמן ({row['fc']}) מאוחר ב-{row['appr_gap_days']} ימים מהיעד שאישר מנהל האגף ({row['appr']}).")
+        if row.get("approved_lost"):
+            flag("high", f"יש יעד מאושר ({row['appr']}), אבל אין יעד מסתמן — {row.get('fc_label')}"
+                         + (f" ({row['fc_reason']})." if row.get("fc_reason") else "."))
+        if row.get("unapproved"):
+            flag("medium", "היעד המסתמן מסומן בקובץ 'לא מאושר'.")
+        if row.get("fc_missed"):
+            flag("medium", f"לפי הקובץ היעד {row['fc_missed']} לא יעמוד"
+                           + (f"; היעד החדש שנכתב: {row['fc']}." if row.get("fc") else ", ולא נכתב יעד חדש."))
+        if row["undated"] and not row.get("approved_lost"):
+            flag("medium", f"אין יעד חשמול: {row.get('fc_label') or 'מלל'}"
+                           + (f" — {row['fc_reason']}." if row.get("fc_reason") else ".") + " אי אפשר למדוד איחור.")
         if row["energized"]:
             flag("info", f"לפי הקובץ הפרויקט כבר חושמל (\"{row['fc_text'].strip()[:40]}\") — איחור ודחיות לא נמדדים.")
         if row["stuck"]:

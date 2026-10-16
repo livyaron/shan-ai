@@ -589,7 +589,7 @@
             <span class="st-kpis">
                 <span class="{{ 'hot' if ps.past_due else '' }}"><b data-live="p_past_due">{{ ps.past_due }}</b>יעד עבר</span>
                 <span><b data-live="p_late">{{ ps.late }}</b>מאחרים מהתכנון</span>
-                <span><b data-live="p_undated">{{ ps.undated }}</b>יעד כמלל</span>
+                <span class="{{ 'hot' if ps.over_approved else '' }}"><b data-live="p_over">{{ ps.over_approved }}</b>חורגים מהיעד המאושר</span>
             </span>
             {% if ps.unlinked %}<span class="st-note">לא שויכת עדיין למגזר או לשם מנה״פ — מנהל מערכת משייך ב״דפוסים ← הרשאות״</span>{% endif %}
             <span class="st-strip" data-strip="projects" aria-hidden="true"></span>
@@ -863,9 +863,17 @@
                 <div class="sb-k-val" data-live="p_late">{{ ps.late }}</div>
                 <div class="sb-k-foot">צפי &gt; תכנון + חודש</div></div></a>
             <a class="sb-bay c-e" style="--d:1.2s" href="/dashboard/projects"><div class="sb-breaker"></div><div class="sb-card">
-                <div class="sb-k-label"><span>יעד כמלל</span><span>✎</span></div>
+                <div class="sb-k-label"><span>אין יעד חשמול</span><span>✎</span></div>
                 <div class="sb-k-val" data-live="p_undated">{{ ps.undated }}</div>
-                <div class="sb-k-foot">אין תאריך — יש הסבר</div></div></a>
+                <div class="sb-k-foot">המלל נקרא — אין בו יעד</div></div></a>
+            <a class="sb-bay {{ 'alarm' if ps.over_approved else 'c-ok' }}" style="--d:.2s" href="/dashboard/projects/insights?drill=tile&dv=over_approved&dm=all#drill"><div class="sb-breaker"></div><div class="sb-card">
+                <div class="sb-k-label"><span>חורגים מהיעד המאושר</span><span>🎯</span></div>
+                <div class="sb-k-val" data-live="p_over">{{ ps.over_approved }}</div>
+                <div class="sb-k-foot">מסתמן &gt; מאושר + 15 יום · מתוך {{ ps.with_approved }}</div></div></a>
+            <a class="sb-bay {{ 'alarm' if ps.approved_lost else 'c-ok' }}" style="--d:.6s" href="/dashboard/projects/insights?drill=tile&dv=approved_lost&dm=all#drill"><div class="sb-breaker"></div><div class="sb-card">
+                <div class="sb-k-label"><span>יעד מאושר ללא צפי</span><span>❓</span></div>
+                <div class="sb-k-val" data-live="p_lost">{{ ps.approved_lost }}</div>
+                <div class="sb-k-foot">המסתמן לא נקבע / הוחמץ</div></div></a>
             <a class="sb-bay c-crit" style="--d:1.6s" href="/dashboard/projects"><div class="sb-breaker"></div><div class="sb-card">
                 <div class="sb-k-label"><span>חוסר כוח אדם</span><span>👷</span></div>
                 <div class="sb-k-val" data-live="p_short">{{ ps.short_staff }}</div>
@@ -875,6 +883,27 @@
         <div class="sb-charts two">
             <div class="sb-panel"><h3>לפי מגזר (לפי השלב)</h3><div class="sb-donut-wrap"><svg class="sb-donut" id="zm-d-sector" viewBox="0 0 132 132" role="img" aria-label="פרויקטים לפי מגזר"></svg><div class="sb-legend" id="zm-l-sector"></div></div></div>
             <div class="sb-panel"><h3>לפי שלב</h3><div id="zm-b-stages"></div></div>
+        </div>
+        <div class="sb-h"><h2>חריגה מהיעד המאושר</h2><span>יעד מסתמן מאוחר ביותר מ-15 יום מהיעד שאישר מנהל האגף, או יעד מאושר שאין לו צפי · מלל ביעד נקרא, לא מוצג כמות שהוא</span></div>
+        <div class="sb-panel sb-scroll">
+            <table class="sb-table">
+                <thead><tr><th>זיהוי</th><th>פרויקט</th><th>שלב</th><th>מנה״פ</th><th>תכנית פיתוח</th><th>מאושר</th><th>מסתמן</th><th>חריגה</th></tr></thead>
+                <tbody>
+                {% for p in ps.over_approved_rows %}
+                    <tr class="sb-row zv-row" tabindex="0" data-href="/dashboard/projects/p/{{ p.id | urlencode }}" data-type="{{ 'critical' if p.lost or (p.gap_days or 0) > 90 else 'uncertain' }}">
+                        <td class="sb-mono">{{ p.id }}</td>
+                        <td class="sb-sum">{{ p.name }}</td>
+                        <td style="font-size:.85rem;">{{ p.stage }}</td>
+                        <td style="color:var(--t2);font-size:.85rem;">{{ p.manager }}</td>
+                        <td class="sb-mono">{{ p.plan }}{% if p.approved_vs_plan %}<div style="color:var(--t3);font-size:.75rem">מאושר מול תכנית: <bdi dir="ltr">{{ '+' if p.approved_vs_plan > 0 }}{{ p.approved_vs_plan }}</bdi> י׳</div>{% endif %}</td>
+                        <td class="sb-mono">{{ p.approved }}</td>
+                        <td class="sb-mono">{{ p.forecast if p.forecast != '—' else '' }}{% if p.approx and p.forecast != '—' %}<span title="תאריך משוער: חודש/שנה בלבד, או יום שאינו קיים">~</span>{% endif %}{% if p.forecast_label %}<div style="color:var(--t2);font-size:.78rem;font-family:var(--ui)">{{ p.forecast_label }}{% if p.reason %} · {{ p.reason }}{% endif %}</div>{% endif %}</td>
+                        <td>{% if p.lost %}<span class="sb-pill p-critical">אין צפי</span>{% else %}<span class="sb-pill {{ 'p-critical' if p.gap_days > 90 else 'p-uncertain' }}"><bdi dir="ltr">+{{ p.gap_days }}</bdi> י׳</span>{% endif %}</td>
+                    </tr>
+                {% endfor %}
+                {% if not ps.over_approved_rows %}<tr><td colspan="8" class="sb-empty">{{ 'אין חריגות מהיעד המאושר.' if ps.with_approved else 'בקובץ האחרון שנטען אין עמודת יעד מאושר — טען את הקובץ העדכני.' }}</td></tr>{% endif %}
+                </tbody>
+            </table>
         </div>
         <div class="sb-h"><h2>רשימת מעקב</h2><span>יעד שעבר או איחור מול התכנון · לחץ על שורה לדף הפרויקט</span></div>
         <div class="sb-panel sb-scroll">
@@ -1197,6 +1226,7 @@ function sbLiveValues(d) {
         m_done_week: sv(ms, 'done_week'), m_new: sv(ms, 'new_24h'), m_undated: sv(ms, 'undated'),
         p_active: sv(ps, 'active'), p_past_due: sv(ps, 'past_due'), p_late: sv(ps, 'late'),
         p_undated: sv(ps, 'undated'), p_short: sv(ps, 'short_staff'),
+        p_over: sv(ps, 'over_approved'), p_lost: sv(ps, 'approved_lost'),
         l_total: sv(ls, 'total'), l_approved: sv(ls, 'approved'), l_pending: sv(ls, 'pending'),
         l_draft: sv(ls, 'draft'), l_impl: sv(ls, 'impl_open'),
     };

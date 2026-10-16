@@ -139,7 +139,7 @@ Tests enforce: every stage value seen in the file maps somewhere; a new unseen s
 - Project disappears from a later file → mark inactive, never delete history.
 - Weekly column header without year; header date after `report_date`.
 - Two files for the same report date (e.g. xlsx + Google-Sheet copy) → second is a no-op.
-- `יעד חשמול מסתמן` text that *contains* a date ("01/07/2026 לא אפשרי…") → store as text, do **not** extract the date (it is explicitly not the target).
+- `יעד חשמול מסתמן` text that *contains* a date ("01/07/2026 לא אפשרי…") → store as text; the date is a MISSED target, never the forecast. (2026-10-16: all other prose is now read — `target_reading.py`.)
 - Sync of an older file after a newer one → must not overwrite `projects` current state; only snapshots/weekly entries.
 
 ## 8. Open items / risks

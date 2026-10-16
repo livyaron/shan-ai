@@ -40,8 +40,8 @@ class _ProjectsSession:
         return _Rows(self.rows)
 
 
-def _proj(ident, stage, plan=None, forecast=None, text=None, sup=None, test=None):
-    return (ident, f"name {ident}", stage, "PM", plan, forecast, text, sup, test)
+def _proj(ident, stage, plan=None, forecast=None, text=None, sup=None, test=None, appr=None, atext=None):
+    return (ident, f"name {ident}", stage, "PM", plan, forecast, text, sup, test, appr, atext)
 
 
 @pytest.mark.asyncio
@@ -284,3 +284,21 @@ def test_the_feeder_follows_the_scroll_and_nothing_sticks():
     assert re.search(r"function rail\(", SCENES_JS.read_text(encoding="utf-8"))
     scene_css = re.search(r"\.zv-scene \{[^}]*\}", TEMPLATE).group(0)
     assert "sticky" not in scene_css                 # the user did not want a bar pinned while scrolling
+
+
+@pytest.mark.asyncio
+async def test_projects_station_reads_prose_and_flags_the_approved_target():
+    today = oms.today_il()
+    appr = today + datetime.timedelta(days=100)
+    later = (appr + datetime.timedelta(days=60)).strftime("%d/%m/%Y")
+    rows = [
+        _proj("A", "תכנון", text=f"{later}- לא מאושר", appr=appr),       # prose, 60 days late
+        _proj("B", "תכנון", text="טרם נקבע", appr=appr),                  # approved, no forecast
+        _proj("C", "תכנון", forecast=appr, appr=appr),                    # on target
+        _proj("D", "תכנון", text="חושמל 01/01/2025"),                     # energized: not undated, not past due
+    ]
+    s = await dd.projects_stats(_ProjectsSession(rows))
+    assert s["with_approved"] == 3 and s["over_approved"] == 1 and s["approved_lost"] == 1
+    assert [r["id"] for r in s["over_approved_rows"]] == ["A", "B"]
+    assert s["over_approved_rows"][0]["gap_days"] == 60
+    assert s["undated"] == 1 and s["past_due"] == 0

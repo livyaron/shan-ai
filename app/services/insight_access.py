@@ -94,6 +94,9 @@ def summarize(projects: list[dict], as_of: str | None) -> dict:
         "stuck": sum(p["stuck"] for p in projects),
         "stale": sum(p["stale"] for p in projects),
         "undated": sum(p["undated"] for p in projects),
+        "over_approved": sum(bool(p.get("over_approved")) for p in projects),
+        "approved_lost": sum(bool(p.get("approved_lost")) for p in projects),
+        "with_approved": sum(1 for p in projects if p.get("appr")),
         "past_due": sum(1 for p in projects if p["fc"] and as_of and p["fc"] < as_of),
     }
 
@@ -175,7 +178,9 @@ _PROJECT_TESTS = {
     "baseline": ("יעד תכנית פיתוח נדחה", lambda x: x["baseline_moved"] is True),
     "stuck": ("תקועים 12+ שבועות", lambda x: x["stuck"]),
     "stale": ("דיווח שבועי זהה", lambda x: x["stale"]),
-    "undated": ("יעד חשמול כמלל", lambda x: x["undated"]),
+    "undated": ("ללא יעד חשמול (המלל נקרא)", lambda x: x["undated"]),
+    "over_approved": ("חורגים מהיעד המאושר", lambda x: bool(x.get("over_approved"))),
+    "approved_lost": ("יעד מאושר ללא יעד מסתמן", lambda x: bool(x.get("approved_lost"))),
     "late": ("מאחרים מול תכנית פיתוח", lambda x: x["late"]),
     "all": ("כל הפרויקטים", lambda x: True),
 }

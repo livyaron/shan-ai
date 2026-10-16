@@ -86,8 +86,14 @@
         <div class="grid mt-2">
             <div class="kv"><div class="k">שלב</div><div class="v">{{ r.stage if r else '—' }}</div>
                 {% if r and r.weeks_in_stage is not none %}<div class="sub">{{ "לפחות " if r.weeks_lower_bound }}{{ r.weeks_in_stage }} שבועות בשלב</div>{% endif %}</div>
-            <div class="kv"><div class="k">יעד חשמול מסתמן</div><div class="v mono">{{ r.fc|il_date if r and r.fc else ('מלל' if r and r.undated else '—') }}</div></div>
+            {# the three targets side by side (user request 2026-10-16) — prose is READ, never shown raw alone #}
             <div class="kv"><div class="k">יעד תכנית פיתוח</div><div class="v mono">{{ (r.dev if r else none)|il_date }}</div></div>
+            <div class="kv"><div class="k">יעד חשמול מאושר ע״י מנהל האגף</div><div class="v mono">{{ (r.appr if r else none)|il_date }}</div>
+                {% if r and r.appr_vs_plan_days is not none %}<div class="sub"><bdi dir="ltr">{{ '+' if r.appr_vs_plan_days > 0 }}{{ r.appr_vs_plan_days }}</bdi> ימים מול התכנית</div>{% endif %}</div>
+            <div class="kv"><div class="k">יעד חשמול מסתמן</div><div class="v mono">{% if r and r.fc %}{{ r.fc|il_date }}{% if r.fc_approx %}~{% endif %}{% elif r and r.fc_kind %}{{ r.fc_label }}{% else %}—{% endif %}</div>
+                {% if r and r.fc and r.fc_kind and r.fc_kind != 'date' %}<div class="sub">{{ r.fc_label }}{% if r.fc_missed %} · היעד {{ r.fc_missed|il_date }} הוחמץ{% endif %}</div>{% endif %}
+                {% if r and not r.fc and r.fc_reason %}<div class="sub">{{ r.fc_reason }}</div>{% endif %}
+                {% if r and r.appr_gap_days is not none %}<div class="sub" {% if r.over_approved %}style="color:#ff6b6b"{% endif %}><bdi dir="ltr">{{ '+' if r.appr_gap_days > 0 }}{{ r.appr_gap_days }}</bdi> ימים מול היעד המאושר</div>{% endif %}</div>
             <div class="kv"><div class="k">פער מול התכנית</div><div class="v mono">{{ '—' if not r or r.slip_months is none else r.slip_months ~ ' ח׳' }}</div></div>
             <div class="kv"><div class="k">היעד זז מאז התאריך הראשון שנמסר</div><div class="v mono">{{ '—' if not r or r.forecast_moved_months is none else r.forecast_moved_months ~ ' ח׳' }}</div></div>
             <div class="kv"><div class="k">התכנית זזה מאז התאריך הראשון שנמסר</div><div class="v mono">{{ '—' if not r or r.baseline_moved_months is none else r.baseline_moved_months ~ ' ח׳' }}</div></div>
@@ -97,8 +103,8 @@
             <div class="kv"><div class="k">חוסר במשגיחים / בבודקים</div><div class="v">{{ '✔ כן' if project.short_supervisors else 'לא' }} / {{ '✔ כן' if project.short_testers else 'לא' }}</div></div>
             {% endif %}
         </div>
-        {% if r and r.undated and h.timeline and h.timeline[-1].fc_text %}
-        <div class="caveat">יעד חשמול כפי שנכתב: "{{ h.timeline[-1].fc_text }}"</div>
+        {% if r and r.fc_text %}
+        <div class="caveat">יעד חשמול מסתמן כפי שנכתב: "{{ r.fc_text }}" — נקרא כ: {{ r.fc_label }}{% if r.fc_approx %} (תאריך משוער — חודש/שנה בלבד, או יום שאינו קיים בחודש){% endif %}.</div>
         {% endif %}
     </div>
 

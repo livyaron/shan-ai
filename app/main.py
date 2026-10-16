@@ -370,7 +370,10 @@ async def startup():
                         "ADD COLUMN IF NOT EXISTS controller VARCHAR(255), "
                         "ADD COLUMN IF NOT EXISTS short_supervisors BOOLEAN, "
                         "ADD COLUMN IF NOT EXISTS short_testers BOOLEAN, "
-                        "ADD COLUMN IF NOT EXISTS critical_tier VARCHAR(32)"
+                        "ADD COLUMN IF NOT EXISTS critical_tier VARCHAR(32), "
+                        # the approved target (user request 2026-10-16) — target_reading.compare
+                        "ADD COLUMN IF NOT EXISTS approved_date DATE, "
+                        "ADD COLUMN IF NOT EXISTS approved_text TEXT"
                     ))
 
                 # LLM config table

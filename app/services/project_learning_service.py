@@ -298,6 +298,8 @@ async def save_snapshot(project: Project, session: AsyncSession,
         short_supervisors     = getattr(project, "short_supervisors", None),
         short_testers         = getattr(project, "short_testers", None),
         critical_tier         = getattr(project, "critical_tier", None),
+        approved_date         = getattr(project, "approved_date", None),
+        approved_text         = getattr(project, "approved_text", None),
     )
 
     stmt = pg_insert(ProjectSnapshot).values(**values).on_conflict_do_update(
