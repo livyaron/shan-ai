@@ -345,10 +345,11 @@
         .st > .st-scene { position: absolute; z-index: 0; left: 12px; top: 54px; width: 44%; height: 104px; pointer-events: none;
             -webkit-mask-image: linear-gradient(90deg, #000 70%, transparent); mask-image: linear-gradient(90deg, #000 70%, transparent); }
         .zv-scene { display: block; width: 100%; height: 130px; margin: 0 0 10px; pointer-events: none;
-            position: sticky; top: -22px; z-index: 5; background: #070b12; box-shadow: 0 12px 18px -6px #070b12; transition: height .35s cubic-bezier(.16,1,.3,1);
             -webkit-mask-image: linear-gradient(90deg, transparent, #000 8%, #000 92%, transparent); mask-image: linear-gradient(90deg, transparent, #000 8%, #000 92%, transparent); }
         .zm-bar .sc-switch { margin-inline-start: 6px; }
-        .zm.compact .zv-scene { height: 64px; }      /* scrolled: the scene stays, as a strip */
+        /* the feeder: once the scene has scrolled away, a thin live conductor stays down the side */
+        .zm-rail { position: absolute; left: 6px; top: 74px; height: calc(100% - 88px); width: 16px; z-index: 3; pointer-events: none; opacity: 0; transition: opacity .6s ease; }
+        .zm.deep .zm-rail { opacity: 1; }
         .zm-body:focus { outline: none; }
         .st-note { font-size: .78rem; color: var(--warn); background: rgba(255,193,7,.07); border: 1px dashed rgba(255,193,7,.35); border-radius: 8px; padding: 5px 9px; }
 
@@ -390,6 +391,7 @@
             .st { min-height: 0; }
             .st > .st-scene { width: 50%; opacity: .45; }
             .zv-scene { height: 96px; }
+            .zm-rail { left: 0; width: 10px; }
             .st-hint { display: none; }
             .zm-bar { padding: 8px 16px; }
             .zm-x span { display: none; }
@@ -612,6 +614,7 @@
             <i class="zm-ink" id="zm-ink"></i>
         </nav>
     </div>
+    <canvas class="zm-rail" data-scene="rail" aria-hidden="true"></canvas>
     <div class="zm-body" id="zm-body" tabindex="-1">
 
     <!-- ── החלטות: the original dashboard, unchanged ── -->
@@ -1023,8 +1026,8 @@
     </div>
 </div>
 
-<script src="/static/js/substation_bg.js"></script>
-<script src="/static/js/station_scenes.js"></script>
+<script src="/static/js/substation_bg.js?v={{ asset_v }}"></script>
+<script src="/static/js/station_scenes.js?v={{ asset_v }}"></script>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 <script>
 /* ── AI section renderer ──────────────────────────────────────────────── */
@@ -1460,7 +1463,8 @@ function zmShow(key, animateInk) {
     });
     zmInk(key, animateInk);
     ZM_BODY.scrollTop = 0;
-    ZM.classList.remove('compact');
+    ZM.classList.remove('deep');
+    if (window.StationScenes) StationScenes.set('rail', { color: ZM_ACC[key] });
     return zmView(key);
 }
 function zmSurge() {
@@ -1572,7 +1576,15 @@ window.addEventListener('popstate', () => {
     else zmClose();
 });
 document.getElementById('zm-close').addEventListener('click', zmRequestClose);
-ZM_BODY.addEventListener('scroll', () => ZM.classList.toggle('compact', ZM_BODY.scrollTop > 60), { passive: true });
+/* the feeder appears once the station's scene is out of view; scrolling quickens it */
+let zmLastTop = 0;
+ZM_BODY.addEventListener('scroll', () => {
+    const scene = zmOpen && zmView(zmOpen).querySelector('.zv-scene');
+    ZM.classList.toggle('deep', !!scene && scene.getBoundingClientRect().bottom < ZM_BODY.getBoundingClientRect().top + 10);
+    if (window.StationScenes) StationScenes.set('rail', { boost: Math.min(1, Math.abs(ZM_BODY.scrollTop - zmLastTop) / 60) });
+    zmLastTop = ZM_BODY.scrollTop;
+}, { passive: true });
+setInterval(() => window.StationScenes && StationScenes.set('rail', { boost: 0 }), 250);
 ZM.querySelectorAll('.zm-tabs button').forEach(b => b.addEventListener('click', () => zmSwitch(b.dataset.tab)));
 ZM.querySelectorAll('.zv-row').forEach(tr => {
     const go = () => { location.href = tr.dataset.href; };

@@ -268,3 +268,19 @@ def test_scope_switch_is_in_the_header_and_the_zoom_bar():
     assert html.count('class="sc-switch"') == 2
     zoom_bar = html[html.index('class="zm-bar"'):html.index('id="zm-body"')]
     assert 'data-scope="mine"' in zoom_bar and 'data-scope="all"' in zoom_bar
+
+
+def test_scripts_are_cache_busted_per_deploy():
+    """A cached station_scenes.js from the previous deploy mounts nothing for a
+    scene it does not know — the page must ask for this deploy's copy."""
+    off = {"missions": {"ok": False}, "projects": {"ok": False}, "lessons": {"ok": False}}
+    html = _render(off)
+    v = templates.env.globals["asset_v"]
+    assert v and f"/static/js/station_scenes.js?v={v}" in html and f"/static/js/substation_bg.js?v={v}" in html
+
+
+def test_the_feeder_follows_the_scroll_and_nothing_sticks():
+    assert 'class="zm-rail" data-scene="rail"' in TEMPLATE
+    assert re.search(r"function rail\(", SCENES_JS.read_text(encoding="utf-8"))
+    scene_css = re.search(r"\.zv-scene \{[^}]*\}", TEMPLATE).group(0)
+    assert "sticky" not in scene_css                 # the user did not want a bar pinned while scrolling
