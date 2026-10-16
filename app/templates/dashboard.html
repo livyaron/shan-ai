@@ -85,6 +85,10 @@
         /* ── Base ── */
         *, *::before, *::after { box-sizing: border-box; }
         body { background: #080a12; color: #e0e0e0; font-family: var(--ui); min-height: 100vh; }
+        /* An RTL page even 2px wider than the viewport makes Chromium paint the fixed
+           zoom shell shifted by a tile's width after zooming from the right column
+           (measured 2026-10-16). Nothing here may scroll sideways. */
+        html, body { overflow-x: clip; }
 
         /* override navbar background to match decisions */
         .navbar { background: #0e1020 !important; border-bottom: 1px solid #1a1e38; }
@@ -299,8 +303,8 @@
         .st-grid { position: relative; display: grid; grid-template-columns: 1fr 1fr; gap: 30px; margin-top: 8px; }
         .st-bus { position: absolute; inset: 0; pointer-events: none; z-index: 0; }
         .st-bus i { position: absolute; background: linear-gradient(90deg, transparent, var(--energy), #bff4ff, var(--energy), transparent); background-size: 200% 100%; animation: sbFlow 3s linear infinite; box-shadow: 0 0 14px rgba(0,212,255,.5); opacity: .75; }
-        .st-bus .h { top: calc(50% - 2px); right: -10px; left: -10px; height: 4px; border-radius: 2px; }
-        .st-bus .v { right: calc(50% - 2px); top: -10px; bottom: -10px; width: 4px; border-radius: 2px; background: linear-gradient(180deg, transparent, var(--energy), #bff4ff, var(--energy), transparent); background-size: 100% 200%; animation-name: sbFlowV; }
+        .st-bus .h { top: calc(50% - 2px); right: 0; left: 0; height: 4px; border-radius: 2px; }
+        .st-bus .v { right: calc(50% - 2px); top: 0; bottom: 0; width: 4px; border-radius: 2px; background: linear-gradient(180deg, transparent, var(--energy), #bff4ff, var(--energy), transparent); background-size: 100% 200%; animation-name: sbFlowV; }
         @keyframes sbFlowV { to { background-position: 0 -200%; } }
         .st-bus .hub { position: absolute; top: 50%; right: 50%; width: 52px; height: 52px; margin: -26px -26px 0 0; display: grid; place-items: center; border-radius: 50%; background: #070b12; border: 2px solid var(--energy); color: var(--energy); font-size: 1.4rem; box-shadow: 0 0 0 6px rgba(0,212,255,.08), 0 0 28px rgba(0,212,255,.55); z-index: 2; }
         .st-bus .hub::after { content: ""; position: absolute; inset: -8px; border-radius: 50%; border: 2px solid var(--energy); opacity: 0; animation: sbRing 2.4s ease-out infinite; }
@@ -338,6 +342,11 @@
         .st-hint { text-align: center; font-family: var(--mono); font-size: .75rem; color: var(--t3); margin-top: 22px; }
         .st-hint kbd, .zm kbd { background: #0d1726; border: 1px solid var(--line-hi); color: var(--t2); border-radius: 4px; padding: 0 5px; font-size: .72rem; }
 
+        .st > .st-scene { position: absolute; z-index: 0; left: 12px; top: 54px; width: 44%; height: 104px; pointer-events: none;
+            -webkit-mask-image: linear-gradient(90deg, #000 70%, transparent); mask-image: linear-gradient(90deg, #000 70%, transparent); }
+        .zv-scene { display: block; width: 100%; height: 130px; margin: -6px 0 10px; pointer-events: none;
+            -webkit-mask-image: linear-gradient(90deg, transparent, #000 8%, #000 92%, transparent); mask-image: linear-gradient(90deg, transparent, #000 8%, #000 92%, transparent); }
+        .zm-bar .sc-switch { margin-inline-start: 6px; }
         .st-note { font-size: .78rem; color: var(--warn); background: rgba(255,193,7,.07); border: 1px dashed rgba(255,193,7,.35); border-radius: 8px; padding: 5px 9px; }
 
         /* ── שלי / כל האגף ── */
@@ -376,6 +385,8 @@
             .st-grid { grid-template-columns: 1fr; gap: 16px; }
             .st-bus { display: none; }
             .st { min-height: 0; }
+            .st > .st-scene { width: 50%; opacity: .45; }
+            .zv-scene { height: 96px; }
             .st-hint { display: none; }
             .zm-bar { padding: 8px 16px; }
             .zm-x span { display: none; }
@@ -491,6 +502,10 @@
 {% set approved = status_counts.get('approved', 0) %}
 {% set critical = type_counts.get('critical', 0) %}
 {% macro pct(n) %}{{ ((n / total_decisions * 100) | round | int) if total_decisions else 0 }}{% endmacro %}
+{% macro scope_switch() %}<div class="sc-switch" role="radiogroup" aria-label="היקף הנתונים">
+    {% for key, label in scope_labels.items() %}<a role="radio" href="?scope={{ key }}" data-scope="{{ key }}" class="{{ 'on' if scope == key else '' }}" aria-checked="{{ 'true' if scope == key else 'false' }}">{{ '👤' if key == 'mine' else '🏢' }} {{ label }}</a>{% endfor %}
+    <i class="sc-pill"></i>
+</div>{% endmacro %}
 {% set own_q = ('owner=' ~ current_user.id ~ '&') if scope == 'mine' else '' %}{% set ms = stations.missions %}{% set ps = stations.projects %}{% set ls = stations.lessons %}
 <div class="container-fluid py-4 px-4 sb" id="sb">
 
@@ -507,10 +522,7 @@
                 <span class="sb-clock" id="sb-clock">--:--:--</span>
             </div>
             <div class="sb-actions">
-                <div class="sc-switch" id="sc-switch" role="radiogroup" aria-label="היקף הנתונים">
-                    {% for key, label in scope_labels.items() %}<a role="radio" href="?scope={{ key }}" data-scope="{{ key }}" class="{{ 'on' if scope == key else '' }}" aria-checked="{{ 'true' if scope == key else 'false' }}">{{ '👤' if key == 'mine' else '🏢' }} {{ label }}</a>{% endfor %}
-                    <i class="sc-pill" id="sc-pill"></i>
-                </div>
+                {{ scope_switch() }}
                 <button type="button" class="sb-btn" id="sb-bg-toggle" aria-pressed="true" title="הפעלה/כיבוי של רקע התחנה החי">⚡ רקע חי</button>
                 <button type="button" class="sb-btn" onclick="openDashboardAI()">◈ ניתוח AI</button>
                 <a href="/dashboard/decisions?new=1" class="sb-btn primary">➕ החלטה חדשה</a>
@@ -523,6 +535,7 @@
         <div class="st-bus" aria-hidden="true"><i class="h"></i><i class="v"></i><b class="hub">⚡</b></div>
 
         <button type="button" class="st {{ 'alarm' if pending_approvals else '' }}" data-zoom="decisions" style="--acc:#00d4ff" aria-label="החלטות — הגדל">
+            <canvas class="st-scene" data-scene="scope" aria-hidden="true"></canvas>
             <span class="st-hd"><span class="st-ic">◆</span><span class="st-name">החלטות</span><span class="st-led"></span><span class="st-go">⤢</span></span>
             <span class="st-hero"><b data-live="total_decisions">{{ total_decisions }}</b><small>{{ 'כל ההחלטות באגף' if decisions_all else 'החלטות שאני מעורב בהן' }}</small></span>
             <span class="st-kpis">
@@ -535,6 +548,7 @@
         </button>
 
         <button type="button" class="st {{ 'alarm' if ms.ok and ms.overdue else '' }}" data-zoom="missions" style="--acc:#ff9f43" aria-label="משימות — הגדל">
+            <canvas class="st-scene" data-scene="arc" aria-hidden="true"></canvas>
             <span class="st-hd"><span class="st-ic">◎</span><span class="st-name">משימות · חדר מבצעים</span><span class="st-led"></span><span class="st-go">⤢</span></span>
             {% if ms.ok %}
             <span class="st-hero"><b data-live="m_open">{{ ms.open }}</b><small>{{ 'משימות פתוחות שלי' if scope == 'mine' else 'משימות פתוחות באגף' }}</small></span>
@@ -548,6 +562,7 @@
         </button>
 
         <button type="button" class="st {{ 'alarm' if ps.ok and ps.past_due else '' }}" data-zoom="projects" style="--acc:#8b9cf4" aria-label="פרויקטים — הגדל">
+            <canvas class="st-scene" data-scene="line" aria-hidden="true"></canvas>
             <span class="st-hd"><span class="st-ic">▣</span><span class="st-name">פרויקטים · קובץ המאסטר</span><span class="st-led"></span><span class="st-go">⤢</span></span>
             {% if ps.ok %}
             <span class="st-hero"><b data-live="p_active">{{ ps.active }}</b><small>{{ 'פרויקטים בתחום שלי' if scope == 'mine' else 'פרויקטים פעילים באגף' }}</small></span>
@@ -562,6 +577,7 @@
         </button>
 
         <button type="button" class="st" data-zoom="lessons" style="--acc:#2dd4bf" aria-label="לקחים — הגדל">
+            <canvas class="st-scene" data-scene="globe" aria-hidden="true"></canvas>
             <span class="st-hd"><span class="st-ic">✦</span><span class="st-name">לקחים</span><span class="st-led"></span><span class="st-go">⤢</span></span>
             {% if ls.ok %}
             <span class="st-hero"><b data-live="l_total">{{ ls.total }}</b><small>{{ 'לקחים שלי' if scope == 'mine' else 'לקחים במערכת' }}</small></span>
@@ -584,6 +600,7 @@
     <div class="zm-bar">
         <button type="button" class="zm-x" id="zm-close" aria-label="חזרה לארבע התחנות">⤡ <span>כל התחנות</span></button>
         <h2 class="zm-title" id="zm-title"></h2>
+        {{ scope_switch() }}
         <nav class="zm-tabs" id="zm-tabs">
             <button type="button" data-tab="decisions" style="--acc:#00d4ff">החלטות</button>
             <button type="button" data-tab="missions" style="--acc:#ff9f43">משימות</button>
@@ -596,6 +613,7 @@
 
     <!-- ── החלטות: the original dashboard, unchanged ── -->
     <section class="zv" data-view="decisions" data-title="החלטות · {{ 'כל האגף' if decisions_all else 'שלי' }}" hidden>
+        <canvas class="zv-scene" data-scene="scope" aria-hidden="true"></canvas>
     {% if recent_decisions %}
     <div class="sb-ticker" aria-label="החלטות אחרונות">
         <div class="track">
@@ -723,6 +741,7 @@
 
     <!-- ── משימות ── -->
     <section class="zv" data-view="missions" data-title="חדר מבצעים · {{ 'המשימות שלי' if scope == 'mine' else 'כל האגף' }}" hidden>
+        <canvas class="zv-scene" data-scene="arc" aria-hidden="true"></canvas>
     {% if ms.ok %}
         <div class="sb-bus-label"><span>פס צבירה · חדר מבצעים</span><span>נפתחו <b>{{ ms.daily_data | sum }}</b> · נסגרו <b>{{ ms.daily_done | sum }}</b> ב-7 ימים</span></div>
         <div class="sb-busbar zv-bus"></div>
@@ -778,6 +797,7 @@
 
     <!-- ── פרויקטים ── -->
     <section class="zv" data-view="projects" data-title="פרויקטים · {{ 'בתחום שלי' if scope == 'mine' else 'כל האגף' }}" hidden>
+        <canvas class="zv-scene" data-scene="line" aria-hidden="true"></canvas>
     {% if ps.ok %}
         <div class="sb-bus-label"><span>פס צבירה · פרויקטים פעילים</span><span><b>{{ ps.watch_total }}</b> פרויקטים ברשימת המעקב</span></div>
         <div class="sb-busbar zv-bus"></div>
@@ -834,6 +854,7 @@
 
     <!-- ── לקחים ── -->
     <section class="zv" data-view="lessons" data-title="לקחים · {{ 'שלי' if scope == 'mine' else 'כל המערכת' }}" hidden>
+        <canvas class="zv-scene" data-scene="globe" aria-hidden="true"></canvas>
     {% if ls.ok %}
         <div class="sb-bus-label"><span>פס צבירה · לקחים</span><span><b>{{ ls.week_activity }}</b> פעולות בתהליך ב-7 ימים</span></div>
         <div class="sb-busbar zv-bus"></div>
@@ -1000,6 +1021,7 @@
 </div>
 
 <script src="/static/js/substation_bg.js"></script>
+<script src="/static/js/station_scenes.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 <script>
 /* ── AI section renderer ──────────────────────────────────────────────── */
@@ -1484,6 +1506,11 @@ async function zmOpenStation(key, opts = {}) {
         zmInk(key, false);
     }
     zvEnter(view, key, anim);
+    scPlaceAll();
+    if (window.StationScenes) {
+        document.querySelectorAll('.st-scene').forEach(c => StationScenes.setActive(c, false));   // covered by the shell
+        StationScenes.burst(SCENE_OF[key]);
+    }
     document.getElementById('zm-close').focus({ preventScroll: true });
     zmBusy = false;
 }
@@ -1504,6 +1531,7 @@ async function zmSwitch(key) {
         zmSurge();
     }
     zvEnter(view, key, SB_GO);
+    if (window.StationScenes) StationScenes.burst(SCENE_OF[key]);
     zmBusy = false;
 }
 
@@ -1521,6 +1549,7 @@ async function zmClose() {
     ZM.style.clipPath = '';
     [ZM_BAR, ZM_BODY].forEach(el => { el.style.opacity = ''; el.style.transform = ''; });
     document.body.classList.remove('zoomed');
+    if (window.StationScenes) document.querySelectorAll('.st-scene').forEach(c => StationScenes.setActive(c, true));
     const tiles = document.querySelectorAll('.st');
     if (SB_GO) SB_M.animate(tiles, { x: 0, y: 0, scale: 1, opacity: 1, filter: 'blur(0px)', rotateX: 0, rotateY: 0 }, { type: 'spring', stiffness: 240, damping: 22, delay: SB_M.stagger(.05) });
     else tiles.forEach(t => Object.assign(t.style, { transform: '', opacity: '', filter: '' }));
@@ -1558,28 +1587,51 @@ document.addEventListener('keydown', e => {
 /* ── שלי / כל האגף: the pill slides, the stations power down, the page
    comes back in the other scope (the server renders it — tables included) ── */
 (function () {
-    const sw = document.getElementById('sc-switch'), pill = document.getElementById('sc-pill');
-    const place = (a, animate) => {
-        const sr = sw.getBoundingClientRect(), ar = a.getBoundingClientRect();
+    // two copies of the same switch: the page header, and the zoom bar
+    const place = (sw, a, animate) => {
+        const pill = sw.querySelector('.sc-pill'), sr = sw.getBoundingClientRect(), ar = a.getBoundingClientRect();
+        if (!sr.width) return;                       // hidden (the zoom bar while closed)
         const to = { right: (sr.right - ar.right) + 'px', width: ar.width + 'px' };
         if (animate && SB_GO) return SB_M.animate(pill, to, { type: 'spring', stiffness: 420, damping: 30 });
         Object.assign(pill.style, to);
     };
-    const cur = () => sw.querySelector('a.on') || sw.querySelector('a');
-    place(cur(), false);
-    window.addEventListener('resize', () => place(cur(), false));
-    sw.querySelectorAll('a').forEach(a => a.addEventListener('click', e => {
+    const switches = [...document.querySelectorAll('.sc-switch')];
+    const cur = sw => sw.querySelector('a.on') || sw.querySelector('a');
+    window.scPlaceAll = () => switches.forEach(sw => place(sw, cur(sw), false));
+    scPlaceAll();
+    window.addEventListener('resize', scPlaceAll);
+    switches.forEach(sw => sw.querySelectorAll('a').forEach(a => a.addEventListener('click', e => {
         if (a.classList.contains('on')) { e.preventDefault(); return; }
-        if (!SB_GO) return;                        // plain link: the server does the rest
+        if (!SB_GO) return;                          // plain link: the server does the rest
         e.preventDefault();
-        sw.querySelectorAll('a').forEach(x => { x.classList.toggle('on', x === a); x.setAttribute('aria-checked', x === a); });
-        place(a, true);
-        SB_M.animate('.st', { opacity: .25, scale: .97, filter: 'blur(4px)' }, { duration: .3, delay: SB_M.stagger(.04) });
+        switches.forEach(w => {
+            const twin = w.querySelector(`[data-scope="${a.dataset.scope}"]`);
+            w.querySelectorAll('a').forEach(x => { x.classList.toggle('on', x === twin); x.setAttribute('aria-checked', x === twin); });
+            place(w, twin, true);
+        });
+        // the whole yard powers down before it comes back in the other scope
+        if (zmOpen) SB_M.animate(ZM_BODY, { opacity: .2, filter: 'blur(5px)', scale: .985 }, { duration: .3 });
+        else SB_M.animate('.st', { opacity: .25, scale: .97, filter: 'blur(4px)' }, { duration: .3, delay: SB_M.stagger(.04) });
         SB_M.animate('.st-bus i', { opacity: .1 }, { duration: .3 });
         if (window.SubstationBG) SubstationBG.setLoad(0);
         setTimeout(() => { location.href = a.getAttribute('href') + location.hash; }, 330);
-    }));
+    })));
 })();
+
+/* ── station scenes (static/js/station_scenes.js): each station's own live
+   electrical picture, fed the same numbers the page shows ── */
+function stFeedScenes(st) {
+    if (!window.StationScenes) return;
+    const m = (st.stations || {}).missions || {}, p = (st.stations || {}).projects || {}, l = (st.stations || {}).lessons || {};
+    const days = st.daily_data || [], max = Math.max(1, ...days);
+    StationScenes.set('scope', { load: Math.min(1, (st.week_total || 0) / Math.max(7, max * 4)), alarm: (st.pending_approvals || 0) > 0 });
+    StationScenes.set('arc', { level: m.ok ? Math.min(1, (m.open || 0) / 30) : .2, alarm: !!(m.ok && m.overdue) });
+    StationScenes.set('line', { count: p.ok ? p.active : 12, bad: p.ok && p.active ? (p.past_due || 0) / p.active : 0 });
+    StationScenes.set('globe', { amount: l.ok ? Math.min(1, (l.total || 0) / 200) : .2, charge: l.ok && l.total ? l.approved / l.total : 0 });
+}
+const SCENE_OF = { decisions: 'scope', missions: 'arc', projects: 'line', lessons: 'globe' };
+if (window.StationScenes) document.querySelectorAll('canvas[data-scene]').forEach(c => StationScenes.mount(c));
+stFeedScenes(sbState);
 
 /* ── entrance: busbar cross draws from the hub, tiles fly in from their corners ── */
 if (SB_GO) {
@@ -1646,6 +1698,13 @@ async function sbPoll() {
         zmTile('decisions').classList.toggle('alarm', d.pending_approvals > 0);
         zmTile('missions').classList.toggle('alarm', !!(stn.missions && stn.missions.ok && stn.missions.overdue));
         zmTile('projects').classList.toggle('alarm', !!(stn.projects && stn.projects.ok && stn.projects.past_due));
+        stFeedScenes(sbState);
+        if (window.StationScenes) {
+            if (vals.total_decisions !== sbPrev.total_decisions || vals.pending_approvals !== sbPrev.pending_approvals) StationScenes.burst('scope');
+            if (vals.m_open !== sbPrev.m_open || vals.m_overdue !== sbPrev.m_overdue) StationScenes.burst('arc');
+            if (vals.p_active !== sbPrev.p_active || vals.p_past_due !== sbPrev.p_past_due) StationScenes.burst('line');
+            if (vals.l_total !== sbPrev.l_total || vals.l_approved !== sbPrev.l_approved) StationScenes.burst('globe');
+        }
         if (stationsMoved) { stDrawTiles(false); if (zmOpen && zmOpen !== 'decisions') STATION_DRAW[zmOpen](false); }
         sbPrev = vals;
         sbSyncGrid(d);

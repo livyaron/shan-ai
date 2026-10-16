@@ -236,3 +236,35 @@ def test_switch_and_honest_labels_render():
     boss_all = _render(off, scope="all", decisions_all=True)
     assert "כל ההחלטות באגף" in boss_all and "החלטות מוצגות רק שלך" not in boss_all
     assert "/dashboard/live?scope=" in TEMPLATE
+
+
+# ── live station scenes ───────────────────────────────────────────────────
+
+SCENES_JS = Path("static/js/station_scenes.js")
+SCENE_OF = {"decisions": "scope", "missions": "arc", "projects": "line", "lessons": "globe"}
+
+
+def test_scenes_are_decoration_only():
+    js = SCENES_JS.read_text(encoding="utf-8")
+    assert "/static/js/station_scenes.js" in TEMPLATE
+    # driven by the page, never the other way round: no fetches, no text, no numbers on screen
+    assert "fetch(" not in js and "fillText" not in js and "innerHTML" not in js
+    assert "prefers-reduced-motion" in js
+    for scene in SCENE_OF.values():
+        assert re.search(rf"function {scene}\(", js), scene
+
+
+def test_every_station_has_its_scene_on_the_tile_and_in_the_zoom():
+    for key, scene in SCENE_OF.items():
+        tile = re.search(rf'data-zoom="{key}"[^>]*>\s*<canvas class="st-scene" data-scene="{scene}"', TEMPLATE)
+        view = re.search(rf'data-view="{key}"[^>]*>\s*<canvas class="zv-scene" data-scene="{scene}"', TEMPLATE)
+        assert tile and view, key
+    assert re.search(r"const SCENE_OF = \{ decisions: 'scope', missions: 'arc', projects: 'line', lessons: 'globe' \}", TEMPLATE)
+
+
+def test_scope_switch_is_in_the_header_and_the_zoom_bar():
+    off = {"missions": {"ok": False}, "projects": {"ok": False}, "lessons": {"ok": False}}
+    html = _render(off, scope="mine", decisions_all=False)
+    assert html.count('class="sc-switch"') == 2
+    zoom_bar = html[html.index('class="zm-bar"'):html.index('id="zm-body"')]
+    assert 'data-scope="mine"' in zoom_bar and 'data-scope="all"' in zoom_bar
