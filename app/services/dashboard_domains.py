@@ -29,10 +29,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import Mission, MissionStatusEnum, Project, User
 from app.services import exec_summary, insight_access
 from app.services import missions_menu_service as oms
+from app.services import project_kpis as pk
 from app.services import stage_sectors
-from app.services import target_reading as tr
 from app.services import war_room_kpis as kpis
-from app.services.pattern_service import LATE_MONTHS, MONTH_DAYS
 
 logger = logging.getLogger(__name__)
 
@@ -72,10 +71,6 @@ def _series(rows, days: list[datetime.date]) -> list[int]:
             continue
         by_day[day.date() if isinstance(day, datetime.datetime) else day] = cnt
     return [by_day.get(d, 0) for d in days]
-
-
-def date_or_none(iso: str | None) -> datetime.date | None:
-    return datetime.date.fromisoformat(iso) if iso else None
 
 
 def _fmt(d: datetime.date | None) -> str:
@@ -169,86 +164,32 @@ async def missions_stats(session: AsyncSession, n_days: int, owner_id: int | Non
 
 
 async def projects_stats(session: AsyncSession, scope: "insight_access.Scope | None" = None) -> dict:
-    """scope set = "mine": only projects insight_access lets this viewer see."""
-    today = oms.today_il()
-    late_days = round(LATE_MONTHS * MONTH_DAYS)
-    rows = (await session.execute(
-        select(Project.project_identifier, Project.name, Project.stage, Project.manager,
-               Project.dev_plan_date, Project.estimated_finish_date,
-               Project.finish_date_text, Project.short_supervisors, Project.short_testers,
-               Project.approved_date, Project.approved_text)
-        .where(Project.is_active)
-    )).all()
-
-    sectors = {k: 0 for k in stage_sectors.SECTORS}
-    stages: dict[str, int] = {}
-    active = past_due = late = undated = short = with_appr = 0
-    watch, over_appr = [], []
-    for ident, name, stage, manager, plan, forecast, ftext, s_sup, s_test, appr, atext in rows:
-        stage = stage_sectors.normalize_stage(stage)
-        secs = stage_sectors.sectors_for(stage)
-        if not secs:                                   # closed
-            continue
-        if scope is not None and not insight_access.sees_project(scope, secs, manager):
-            continue
-        active += 1
-        stages[stage or "ללא סטטוס"] = stages.get(stage or "ללא סטטוס", 0) + 1
-        for sec in secs:
-            sectors[sec] += 1
-        # prose targets are READ (target_reading): a row synced before the reading
-        # existed gets the same dates a sync would store now
-        appr = tr.effective_date(appr, atext)
-        cmp = tr.compare(plan, forecast, ftext, appr)
-        reading = cmp["reading"]
-        forecast = date_or_none(cmp["forecast"])
-        with_appr += bool(appr)
-        if cmp["over_approved"] or cmp["approved_lost"]:
-            over_appr.append({
-                "id": ident, "name": name or ident, "stage": stage or "—", "manager": manager or "—",
-                "plan": _fmt(plan), "approved": _fmt(appr), "forecast": _fmt(forecast),
-                "forecast_label": (reading["label"] if reading and (reading["kind"] != tr.DATE or not forecast)
-                                   else None if forecast else "התא ריק"),
-                "approx": bool(reading and reading["approx"]),
-                "reason": reading["reason"] if reading else None,
-                "gap_days": cmp["forecast_vs_approved"], "approved_vs_plan": cmp["approved_vs_plan"],
-                "lost": cmp["approved_lost"],
-            })
-        is_past = bool(forecast and forecast < today)
-        slip = (forecast - plan).days if forecast and plan else None
-        is_late = slip is not None and slip > late_days
-        past_due += is_past
-        late += is_late
-        undated += bool(ftext) and not forecast and not (reading and reading["kind"] == tr.ENERGIZED)
-        short += bool(s_sup or s_test)
-        if is_past or is_late:
-            watch.append({
-                "id": ident, "name": name or ident, "stage": stage or "—",
-                "manager": manager or "—", "forecast": _fmt(forecast), "plan": _fmt(plan),
-                "slip_months": round(slip / MONTH_DAYS, 1) if slip is not None else None,
-                "past_due": is_past, "_sort": slip if slip is not None else -1,
-            })
-    over_appr.sort(key=lambda r: (r["lost"], -(r["gap_days"] or 0)))
-    watch.sort(key=lambda r: (not r["past_due"], -r["_sort"]))
-    for r in watch:
-        r.pop("_sort")
-
+    """The projects station — the SAME numbers as the patterns page (user,
+    2026-10-16). Rows = the pattern engine's live projects, filtered by the
+    viewer's scope exactly as the patterns page filters them; every card is
+    counted by project_kpis, the one definition. scope set = "mine"."""
+    from app.services import pattern_service
+    p = await pattern_service.compute_cached(session)
+    rows = p.get("projects", []) if scope is None else insight_access.view_for(scope, p)["projects"]
+    exec_payload = await _exec_summary(session)
+    finished = None
+    if scope is None:     # the division view says how many finished projects the file still lists
+        stages = (await session.execute(
+            select(Project.stage).where(Project.is_active))).scalars().all()
+        finished = sum(1 for st in stages if stage_sectors.is_closed(stage_sectors.normalize_stage(st)))
+    b = pk.board(rows, p.get("as_of"), exec_payload, finished)
     return {
         "ok": True,
-        "active": active,
-        "past_due": past_due,
-        "late": late,
-        "undated": undated,
-        "short_staff": short,
-        # the approved target (יעד חשמול מאושר ע"י מנהל האגף) vs the forecast
-        "with_approved": with_appr,
-        "over_approved": sum(not r["lost"] for r in over_appr),
-        "approved_lost": sum(r["lost"] for r in over_appr),
-        "over_approved_rows": over_appr,
-        # per-sector, never summed: one stage belongs to two sectors
-        "sectors": [[k, label, sectors[k]] for k, label in stage_sectors.SECTORS.items() if sectors[k]],
-        "stages": sorted(stages.items(), key=lambda kv: -kv[1])[:TOP_BREAKDOWN],
-        "watch": watch[:RECENT_ROWS],
-        "watch_total": len(watch),
+        **b,
+        **{c["key"]: c["count"] for c in b["cards"]},
+        "as_of": p.get("as_of"),
+        "exec": None if not exec_payload else {
+            "sheet": exec_payload.get("sheet"), "as_of_il": exec_payload.get("as_of_il"),
+            "loaded_at_il": exec_payload.get("loaded_at_il"),
+            "sections": [{"i": i, "title": sec.get("title") or exec_payload.get("title") or "טבלה",
+                          "n": len(sec.get("rows") or [])}
+                         for i, sec in enumerate(exec_payload.get("sections") or [])],
+        },
         # "mine" with nothing in scope: the user was never linked to a sector or a PM name
         "unlinked": scope is not None and not scope.allowed,
     }
@@ -342,11 +283,6 @@ async def all_domains(session: AsyncSession, n_days: int, user: User | None = No
         except Exception:
             logger.exception("dashboard station %s failed", key)
             out[key] = {"ok": False}
-    # "All" = the division as the PM department itself summarised it: the master
-    # file's "תקציר הנהלה" sheet, shown as written (exec_summary). "Mine" stays
-    # computed — the summary is division-wide and cannot be narrowed to a viewer.
-    if not mine and out["projects"].get("ok"):
-        out["projects"]["exec"] = await _exec_summary(session)
     return out
 
 

@@ -658,6 +658,29 @@ async def compute(session: AsyncSession) -> dict:
     return _plain(result)
 
 
+_CACHE: dict[str, Any] = {"key": None, "at": 0.0, "p": None}
+CACHE_SECONDS = 600     # an upper bound only — any change in the data busts it at once
+
+
+async def compute_cached(session: AsyncSession) -> dict:
+    """compute_patterns for the dashboard (polled every 45s). Re-computed the
+    moment the data changes (a cheap fingerprint of the three tables), so the
+    dashboard and the patterns page never disagree for longer than one query."""
+    import time
+    from sqlalchemy import text
+    key = tuple((await session.execute(text(
+        "SELECT (SELECT count(*) FROM project_snapshots), (SELECT max(id) FROM project_snapshots), "
+        "(SELECT count(*) FROM project_weekly_entries), (SELECT max(id) FROM project_weekly_entries), "
+        "(SELECT max(last_updated) FROM projects), (SELECT count(*) FROM projects WHERE is_active)"
+    ))).one())
+    now = time.monotonic()
+    if _CACHE["p"] is not None and _CACHE["key"] == key and now - _CACHE["at"] < CACHE_SECONDS:
+        return _CACHE["p"]
+    p = _plain(compute_patterns(await load_frames(session)))
+    _CACHE.update(key=key, at=now, p=p)
+    return p
+
+
 async def data_health(session: AsyncSession, frames: Frames) -> dict:
     """What the history tables actually hold — shown on the page so a gap in
     the data is visible to the reader, not only to someone with DB access."""

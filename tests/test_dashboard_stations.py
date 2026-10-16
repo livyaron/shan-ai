@@ -31,39 +31,57 @@ class _Rows:
         return self._scalar
 
 
+class _Res:
+    def __init__(self, rows=()):
+        self._r = list(rows)
+
+    def all(self):
+        return self._r
+
+    def first(self):
+        return self._r[0] if self._r else None
+
+    def scalars(self):
+        return self
+
+
 class _ProjectsSession:
-    """Answers the single projects query with hand-made rows."""
-    def __init__(self, rows):
-        self.rows = rows
+    """The projects station's own queries: the stages of active rows (for the
+    finished count) and the newest exec summary (none here)."""
+    def __init__(self, stages=()):
+        self.stages = list(stages)
 
-    async def execute(self, *_a, **_k):
-        return _Rows(self.rows)
+    async def execute(self, stmt, *_a, **_k):
+        return _Res([] if "project_exec_summaries" in str(stmt) else self.stages)
 
 
-def _proj(ident, stage, plan=None, forecast=None, text=None, sup=None, test=None, appr=None, atext=None):
-    return (ident, f"name {ident}", stage, "PM", plan, forecast, text, sup, test, appr, atext)
+@pytest.fixture
+def engine(monkeypatch):
+    """The patterns engine's output on a synthetic history — what both the
+    dashboard and the patterns page read."""
+    from app.services import pattern_service as pt
+    from tests.test_target_reading import _approved_frames
+    p = pt._plain(pt.compute_patterns(_approved_frames()))
+
+    async def cached(_session):
+        return p
+    monkeypatch.setattr(pt, "compute_cached", cached)
+    return p
 
 
 @pytest.mark.asyncio
-async def test_projects_station_counts_and_never_sums_sectors():
-    today = oms.today_il()
-    long_ago = today - datetime.timedelta(days=400)
-    rows = [
-        _proj("A", "עבודה אזרחית והרכבות", plan=long_ago, forecast=today - datetime.timedelta(days=5)),
-        _proj("B", "תכנון", plan=today, forecast=today + datetime.timedelta(days=10)),
-        _proj("C", "", text="לא אפשרי, יתקבל יעד חדש", sup=True),
-        _proj("D", "הסתיים", forecast=long_ago),          # closed: not active, never past due
-    ]
-    s = await dd.projects_stats(_ProjectsSession(rows))
-    assert s["ok"] and s["active"] == 3
-    assert s["past_due"] == 1 and s["late"] == 1        # only A
-    assert s["undated"] == 1 and s["short_staff"] == 1  # only C
+async def test_projects_station_equals_the_patterns_page(engine):
+    """User, 2026-10-16: the dashboard and the patterns page must never disagree."""
+    s = await dd.projects_stats(_ProjectsSession(["תכנון", "הסתיים", "הסתיים"]))
+    page = insight_access.view_for(insight_access.Scope(admin=True), engine)["summary"]
+    assert s["ok"] and s["active"] == page["n"] == len(engine["projects"])
+    for c in s["cards"]:
+        assert c["count"] == page[c["key"]] == s[c["key"]], c["key"]
+    assert s["finished"] == 2 and s["in_file"] == s["active"] + 2
     sectors = {k: n for k, _label, n in s["sectors"]}
-    # A sits in two sectors at once, so the sector counts add up to more than the projects
-    assert sectors[stage_sectors.SUPERVISION] == 1 and sectors[stage_sectors.EXECUTION] == 1
-    assert sectors[stage_sectors.UNKNOWN] == 1
+    # P-4 sits in two sectors at once, so the sector counts add up to more than the projects
+    assert sectors[stage_sectors.SUPERVISION] == 1 and sectors[stage_sectors.EXECUTION] == 2
     assert sum(sectors.values()) > s["active"]
-    assert [w["id"] for w in s["watch"]] == ["A"] and s["watch"][0]["past_due"]
 
 
 @pytest.mark.asyncio
@@ -124,8 +142,8 @@ def test_stations_render_full_and_unavailable():
                      "daily_done": [0] * 7, "owners": [["dana", 4]],
                      "recent": [{"id": 9, "title": "<i>t</i>", "owner": "dana", "quadrant": "do",
                                  "quadrant_label": "🔥", "due": "01/01/2026", "overdue": True, "new": False}]},
-        "projects": {"ok": True, "active": 2, "past_due": 0, "late": 0, "undated": 0, "short_staff": 0,
-                     "sectors": [], "stages": [], "watch": [], "watch_total": 0},
+        "projects": {"ok": True, "active": 2, "finished": None, "in_file": None, "file_cards": [], "cards": [],
+                     "past_due": 0, "sectors": [], "stages": [], "exec": None},
         "lessons": {"ok": False},
     })
     assert 'data-live="m_overdue">2<' in full
@@ -172,18 +190,18 @@ async def test_my_missions_filter_every_query_by_owner():
 
 
 @pytest.mark.asyncio
-async def test_my_projects_follow_insight_access():
-    rows = [_proj("PLAN", "תכנון"), _proj("EXEC", "בדיקות"), _proj("BOTH", "עבודה אזרחית והרכבות")]
-    planning = await dd.projects_stats(_ProjectsSession(rows), insight_access.Scope(sector=stage_sectors.PLANNING))
-    assert planning["active"] == 1 and not planning["unlinked"]
-    execution = await dd.projects_stats(_ProjectsSession(rows), insight_access.Scope(sector=stage_sectors.EXECUTION))
-    assert execution["active"] == 2                     # בדיקות + the shared stage
-    named = await dd.projects_stats(_ProjectsSession(rows), insight_access.Scope(managers=frozenset({"PM"})))
-    assert named["active"] == 3                         # every row's manager is "PM"
-    nobody = await dd.projects_stats(_ProjectsSession(rows), insight_access.Scope())
-    assert nobody["active"] == 0 and nobody["unlinked"]  # never linked = nothing, never everything
-    admin = await dd.projects_stats(_ProjectsSession(rows), insight_access.Scope(admin=True))
-    assert admin["active"] == 3
+async def test_my_projects_follow_insight_access(engine):
+    for scope in (insight_access.Scope(sector=stage_sectors.PLANNING),
+                  insight_access.Scope(sector=stage_sectors.EXECUTION),
+                  insight_access.Scope(managers=frozenset({"מנהל ב"})),
+                  insight_access.Scope(admin=True)):
+        mine = await dd.projects_stats(_ProjectsSession(), scope)
+        page = insight_access.view_for(scope, engine)["summary"]       # the patterns page, same viewer
+        assert mine["active"] == page["n"] and not mine["unlinked"]
+        assert all(c["count"] == page[c["key"]] for c in mine["cards"])
+        assert mine["finished"] is None                    # "mine" never claims the file's totals
+    nobody = await dd.projects_stats(_ProjectsSession(), insight_access.Scope())
+    assert nobody["active"] == 0 and nobody["unlinked"]   # never linked = nothing, never everything
 
 
 @pytest.mark.asyncio
@@ -287,18 +305,31 @@ def test_the_feeder_follows_the_scroll_and_nothing_sticks():
 
 
 @pytest.mark.asyncio
-async def test_projects_station_reads_prose_and_flags_the_approved_target():
-    today = oms.today_il()
-    appr = today + datetime.timedelta(days=100)
-    later = (appr + datetime.timedelta(days=60)).strftime("%d/%m/%Y")
-    rows = [
-        _proj("A", "תכנון", text=f"{later}- לא מאושר", appr=appr),       # prose, 60 days late
-        _proj("B", "תכנון", text="טרם נקבע", appr=appr),                  # approved, no forecast
-        _proj("C", "תכנון", forecast=appr, appr=appr),                    # on target
-        _proj("D", "תכנון", text="חושמל 01/01/2025"),                     # energized: not undated, not past due
-    ]
-    s = await dd.projects_stats(_ProjectsSession(rows))
-    assert s["with_approved"] == 3 and s["over_approved"] == 1 and s["approved_lost"] == 1
-    assert [r["id"] for r in s["over_approved_rows"]] == ["A", "B"]
-    assert s["over_approved_rows"][0]["gap_days"] == 60
-    assert s["undated"] == 1 and s["past_due"] == 0
+async def test_every_card_opens_exactly_its_count(engine):
+    from app.services import project_kpis as pk
+    ids = [x["identifier"] for x in engine["projects"]]
+    ex = {"sheet": "תקציר הנהלה 07.10.26", "kpis": [
+        {"label": "סה״כ פרויקטים", "value": 99, "ids": ids + ["P-3"]},     # P-3 finished: not counted
+        {"label": "עם סיכון", "value": 3, "ids": ids[:2] + ["GONE"]},
+        {"label": "נוסחה אחרת", "value": 7, "ids": None},                  # not re-run: file's number, no list
+    ]}
+    b = pk.board(engine["projects"], engine["as_of"], ex)
+    total, risk, other = b["file_cards"]
+    assert total["is_total"] and total["count"] == len(ids)
+    assert risk["count"] == 2 and not risk["is_total"]
+    assert other["count"] == 7 and not other["listable"] and pk.rows_for("f2", engine["projects"], None, ex) is None
+    for c in b["file_cards"][:2] + b["cards"]:
+        _, _, rows = pk.rows_for(c["key"], engine["projects"], engine["as_of"], ex)
+        assert len(rows) == c["count"], c["key"]
+
+
+def test_projects_view_is_cards_that_link_to_lists(engine):
+    from app.services import project_kpis as pk
+    ps = {"ok": True, **pk.board(engine["projects"], engine["as_of"], None, 1), "exec": None, "unlinked": False}
+    ps.update({c["key"]: c["count"] for c in ps["cards"]})
+    html = _render({"missions": {"ok": False}, "projects": ps, "lessons": {"ok": False}})
+    view = html[html.index('data-view="projects"'):html.index('data-view="lessons"')]
+    assert "sb-table" not in view                       # no lists on the dashboard
+    for c in ps["cards"]:
+        assert f'href="/dashboard/projects/kpi/{c["key"]}"' in view
+    assert 'href="/dashboard/projects/kpi/active"' in view

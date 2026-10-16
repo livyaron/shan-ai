@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Shan-AI — {{ label }}</title>
+    <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-deep: #070b12; --bg-card: #0f1826; --border: #1a2d47; --border-hi: #1e3a5f;
+            --cyan: #00d4ff; --purple: #8b9cf4; --text-1: #e2e8f0; --text-2: #94a3b8; --text-3: #64748b;
+            --mono: 'IBM Plex Mono', monospace; --ui: 'Heebo', sans-serif; --crit: #ff6b6b;
+        }
+        body { background: var(--bg-deep); color: var(--text-1); font-family: var(--ui); margin: 0; }
+        .wrap { max-width: 1280px; margin: 0 auto; padding: 1.5rem 1rem 4rem; }
+        .top { display: flex; align-items: baseline; gap: 1rem; flex-wrap: wrap; margin-bottom: .4rem; }
+        h1 { font-size: 1.5rem; font-weight: 800; color: var(--purple); margin: 0; }
+        .count { font-size: 2.2rem; font-weight: 800; color: var(--cyan); font-variant-numeric: tabular-nums; }
+        .sub { color: var(--text-2); font-size: .9rem; margin-bottom: 1rem; }
+        .back { color: var(--text-2); text-decoration: none; border: 1px solid var(--border-hi); border-radius: 8px; padding: .25rem .7rem; font-size: .88rem; margin-inline-start: auto; }
+        .back:hover { color: var(--text-1); }
+        .card-x { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; padding: .4rem .8rem; overflow-x: auto; }
+        table { width: 100%; border-collapse: collapse; font-size: .9rem; }
+        th { color: var(--text-2); font-weight: 600; text-align: right; padding: .55rem .5rem; border-bottom: 1px solid var(--border-hi); white-space: nowrap; }
+        td { padding: .55rem .5rem; border-bottom: 1px solid var(--border); vertical-align: top; }
+        tr:last-child td { border-bottom: 0; }
+        .mono { font-family: var(--mono); white-space: nowrap; }
+        .note { color: var(--text-3); font-size: .78rem; }
+        a.id { color: var(--cyan); text-decoration: none; font-family: var(--mono); white-space: nowrap; }
+        a.id:hover { text-decoration: underline; }
+        .cell { white-space: pre-line; max-width: 46ch; line-height: 1.45; }
+        .bad { color: var(--crit); }
+        bdi.ltr { direction: ltr; unicode-bidi: isolate; }
+        .empty { color: var(--text-2); padding: 1.2rem .5rem; }
+    </style>
+</head>
+<body>
+<div class="wrap">
+    <div class="top">
+        <h1>{{ label }}</h1>
+        <span class="count">{{ (rows if rows is not none else table.rows) | length }}</span>
+        <a class="back" href="/dashboard/{{ '?scope=' ~ scope if scope else '' }}#projects">→ חזרה לדשבורד</a>
+    </div>
+    <div class="sub">{{ help }}{% if rows is not none %} · {{ 'בתחום שלי' if scope == 'mine' else 'כל האגף' }}{% if as_of %} · נכון לדוח {{ as_of | il_date }}{% endif %}{% endif %}</div>
+
+    {% if rows is not none %}
+    <div class="card-x"><table>
+        <thead><tr><th>זיהוי</th><th>פרויקט</th><th>מנה״פ</th><th>שלב</th><th>תכנית פיתוח</th><th>מאושר</th><th>מסתמן</th><th>מסתמן מול מאושר</th></tr></thead>
+        <tbody>
+        {% for x in rows %}
+        <tr>
+            <td><a class="id" href="/dashboard/projects/p/{{ x.identifier | urlencode }}">{{ x.identifier }}</a></td>
+            <td>{{ x.name or '' }}</td>
+            <td>{{ x.manager or '—' }}</td>
+            <td>{{ x.stage }}</td>
+            <td class="mono">{{ x.dev | il_date }}</td>
+            <td class="mono">{{ x.appr | il_date }}</td>
+            <td class="mono">{% if x.fc %}{{ x.fc | il_date }}{% if x.fc_approx %}~{% endif %}{% endif %}
+                {% if x.fc_kind and (x.fc_kind != 'date' or not x.fc) %}<div class="note" title="{{ x.fc_text or '' }}">{{ x.fc_label }}{% if x.fc_reason %} · {{ x.fc_reason }}{% endif %}</div>{% endif %}</td>
+            <td class="mono {{ 'bad' if x.over_approved or x.approved_lost }}">{% if x.approved_lost %}אין צפי{% elif x.appr_gap_days is not none %}<bdi class="ltr">{{ '+' if x.appr_gap_days > 0 }}{{ x.appr_gap_days }}</bdi> י׳{% else %}—{% endif %}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="8" class="empty">אין פרויקטים בכרטיס הזה.</td></tr>
+        {% endfor %}
+        </tbody>
+    </table></div>
+    {% else %}
+    <div class="card-x"><table>
+        {% if table.header %}<thead><tr>{% for h in table.header %}<th>{{ h }}</th>{% endfor %}</tr></thead>{% endif %}
+        <tbody>
+        {% for r in table.rows %}
+        <tr>{% for c in r %}{% if loop.index0 == table.id_col and c %}<td><a class="id" href="/dashboard/projects/p/{{ c | urlencode }}">{{ c }}</a></td>{% else %}<td><div class="cell">{{ c }}</div></td>{% endif %}{% endfor %}</tr>
+        {% endfor %}
+        </tbody>
+    </table></div>
+    {% endif %}
+</div>
+</body>
+</html>

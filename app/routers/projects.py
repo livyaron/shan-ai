@@ -249,11 +249,17 @@ async def project_insights_page(
     if ai_started:
         import asyncio
         asyncio.create_task(insight_ai.generate_areas())
+    # The file's "תקציר הנהלה" cards, counted over exactly the rows this page
+    # shows — the dashboard counts the same cards the same way (project_kpis).
+    from app.services import exec_summary, project_kpis
+    kpi_board = project_kpis.board(view["projects"], p.get("as_of"), await exec_summary.latest(session))
     return templates.TemplateResponse("project_insights.html", {
         "request": request,
         "current_user": current_user,
         "p": p,
         "view": view,
+        "kpi_board": kpi_board,
+        "kpi_scope": "" if insight_access.sees_all(scope) else "?scope=mine",
         "drill": drill,
         "drill_requested": bool(qp.get("drill")),
         "drill_keep": keep,
@@ -439,3 +445,61 @@ async def regenerate_briefs(
     from app.services.project_sync import generate_all_briefs
     background_tasks.add_task(generate_all_briefs)
     return JSONResponse({"status": "ok", "message": "יצירת סיכומים החלה ברקע."})
+
+
+async def _kpi_rows(session: AsyncSession, current_user: User, scope_name: str):
+    """(p, rows, exec payload) — the rows a projects card counts for this viewer:
+    "mine" = the patterns-page view of this user, else every live project
+    (the same rows the dashboard's "כל האגף" counts)."""
+    from app.services import exec_summary, insight_access, pattern_service
+    p = await pattern_service.compute_cached(session)
+    if scope_name == "mine":
+        scope = await insight_access.scope_for(session, current_user)
+        rows = insight_access.view_for(scope, p)["projects"]
+    else:
+        rows = p.get("projects", [])
+    return p, rows, await exec_summary.latest(session)
+
+
+@router.get("/kpi/{key}", response_class=HTMLResponse)
+async def project_kpi_list(
+    key: str,
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+    current_user: User = Depends(get_current_user),
+):
+    """The projects behind one card — exactly as many rows as the card says
+    (project_kpis.rows_for is what both count)."""
+    from app.services import project_kpis
+    scope_name = "mine" if request.query_params.get("scope") == "mine" else "all"
+    p, rows, ex = await _kpi_rows(session, current_user, scope_name)
+    found = project_kpis.rows_for(key, rows, p.get("as_of"), ex)
+    if found is None:
+        raise HTTPException(status_code=404, detail="אין רשימה מאחורי הכרטיס הזה")
+    label, help_, items = found
+    return templates.TemplateResponse("project_kpi_list.html", {
+        "request": request, "current_user": current_user, "label": label, "help": help_,
+        "rows": items, "scope": scope_name, "as_of": p.get("as_of"), "table": None,
+    })
+
+
+@router.get("/summary/{index}", response_class=HTMLResponse)
+async def project_summary_table(
+    index: int,
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+    current_user: User = Depends(get_current_user),
+):
+    """One table of the master file's "תקציר הנהלה" sheet, as written."""
+    from app.services import exec_summary
+    ex = await exec_summary.latest(session)
+    sections = (ex or {}).get("sections") or []
+    if not 0 <= index < len(sections):
+        raise HTTPException(status_code=404, detail="הטבלה לא נמצאה בתקציר האחרון")
+    sec = sections[index]
+    return templates.TemplateResponse("project_kpi_list.html", {
+        "request": request, "current_user": current_user,
+        "label": sec.get("title") or ex.get("title") or "טבלה",
+        "help": f"כפי שנכתב בגיליון ״{ex.get('sheet')}״", "rows": None, "scope": "all",
+        "as_of": ex.get("as_of"), "table": sec,
+    })
