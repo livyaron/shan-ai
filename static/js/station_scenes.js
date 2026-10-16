@@ -10,7 +10,7 @@
  *   StationScenes.setActive(canvas, on)  skip a canvas that is covered
  *
  *   scope  החלטות  3-phase oscilloscope; a fault spike while approvals wait
- *   breaker משימות  3-pole circuit breaker opening and closing; trips red when overdue
+ *   breaker משימות  one outdoor SF6 live-tank breaker opening and closing; alarm lamp when overdue
  *   xfmr    פרויקטים substation power transformer; pulses ride bus → windings → bus, red = late
  *   globe   לקחים   one plasma globe fed by streams from outside; touch gathers the discharge
  *   rail    the feeder down the side of a zoom, so the live picture follows the scroll
@@ -92,75 +92,119 @@
         if (s.fault > 0) { ctx.fillStyle = `rgba(255,95,109,${s.fault * .25})`; ctx.fillRect(0, 0, w, h); }
     }
 
-    /* ── משימות: a 3-pole circuit breaker that opens and closes ──────── */
-    // Current flows through the closed contacts; the moving contact pulls
-    // away, a soft arc is drawn out and quenched, the load side goes dark,
-    // then the breaker recloses. A busier board operates it more often;
-    // overdue missions trip it (red indicator, red-tinted arc).
+    /* ── משימות: one circuit breaker that opens and closes ───────────── */
+    // A busier board operates it more often; overdue missions light the
+    // cabinet's alarm lamp and tint the arc.
     function breaker(s, ctx, w, h, dt, p) {
-        const col = '#ff9f43', hot = p.alarm ? '#ff5f6d' : col;
-        const poles = 3, gapMax = Math.min(26, w * .05), units = Math.max(1, Math.round(w / 650));
-        s.t = (s.t || 0) + dt; s.flow = (s.flow || 0) + dt;
-        // state machine: closed → opening → open → closing → closed
-        if (!s.phase) { s.phase = 'closed'; s.left = rnd(1.5, 3); s.gap = 0; s.arc = 0; }
+        // One outdoor SF6 live-tank breaker, T-type, as it stands in a 161 kV yard:
+        // steel structure → mechanism cabinet (position flag: red = closed, green = open)
+        // → support insulator → horizontal interrupter chamber with a terminal pad at
+        // each end. Opening stops the current on BOTH sides — it is one series
+        // circuit; the line side stays at voltage but nothing flows.
+        const col = '#ff9f43', arcCol = p.alarm ? '#ff7a6b' : '#ffd7a8';
+        const cx = w / 2, L = Math.min(w * .56, h * 1.7), cy = h * .3, ch = Math.max(9, h * .15);
+        const gapMax = L * .07;
+        s.t = (s.t || 0) + dt;
+        if (!s.phase) { s.phase = 'closed'; s.left = rnd(1.5, 3); s.gap = 0; s.arc = 0; s.flow = 0; }
         s.left -= dt;
         if (s.phase === 'closed' && s.left <= 0) { s.phase = 'opening'; s.arc = 1; }
-        if (s.phase === 'opening') { s.gap = Math.min(gapMax, s.gap + dt * gapMax * 9); if (s.gap >= gapMax) { s.phase = 'open'; s.left = rnd(.5, 1.1); } }
+        if (s.phase === 'opening') { s.gap = Math.min(gapMax, s.gap + dt * gapMax * 8); if (s.gap >= gapMax) { s.phase = 'open'; s.left = rnd(.9, 1.6); } }
         if (s.phase === 'open' && s.left <= 0) s.phase = 'closing';
-        if (s.phase === 'closing') { s.gap = Math.max(0, s.gap - dt * gapMax * 6); if (!s.gap) { s.phase = 'closed'; s.left = rnd(1.4, 3.2) * (1.4 - p.level * .8); s.touch = .35; } }
-        s.arc = Math.max(0, s.arc - dt * 3.2);              // the arc is quenched in ~0.3 s
+        if (s.phase === 'closing') { s.gap = Math.max(0, s.gap - dt * gapMax * 6); if (!s.gap) { s.phase = 'closed'; s.left = rnd(1.6, 3.4) * (1.4 - p.level * .8); s.touch = .3; } }
+        s.arc = Math.max(0, s.arc - dt * 3.2);                // quenched in ~0.3 s by the SF6 blast
         s.touch = Math.max(0, (s.touch || 0) - dt);
         const conducting = s.phase === 'closed' || s.arc > .05;
-        for (let u = 0; u < units; u++) {
-            const cx = w * (u + .5) / units, bw = Math.min(150, w / units * .42), top = h * .14, bot = h * .86;
-            for (let k = 0; k < poles; k++) {
-                const y = top + (bot - top) * (k + .5) / poles;
-                const xL = cx - bw / 2, xR = cx + bw / 2;
-                // conductors (line side always live; load side only while conducting)
-                const x0 = u ? w * u / units : 0, x1 = (u + 1) * w / units;
-                ctx.lineWidth = 2;
-                ctx.strokeStyle = 'rgba(255,159,67,.55)'; ctx.beginPath(); ctx.moveTo(x0, y); ctx.lineTo(xL, y); ctx.stroke();
-                ctx.strokeStyle = conducting ? 'rgba(255,159,67,.55)' : 'rgba(79,98,128,.5)'; ctx.beginPath(); ctx.moveTo(xR, y); ctx.lineTo(x1, y); ctx.stroke();
-                // current: soft dashes riding the conductor
-                ctx.save(); ctx.setLineDash([6, 16]); ctx.lineDashOffset = s.flow * 70; ctx.lineWidth = 2.4;
-                ctx.strokeStyle = '#ffd7a8'; glow(ctx, col, 8); ctx.globalAlpha = .9;
-                ctx.beginPath(); ctx.moveTo(x0, y); ctx.lineTo(xL, y); ctx.stroke();
-                if (conducting) { ctx.beginPath(); ctx.moveTo(xR, y); ctx.lineTo(x1, y); ctx.stroke(); }
-                ctx.restore();
-                // the interrupter: a translucent insulating bottle
-                const hh = Math.min(22, (bot - top) / poles * .7);
-                ctx.fillStyle = 'rgba(20,34,54,.85)'; ctx.strokeStyle = 'rgba(143,160,184,.55)'; ctx.lineWidth = 1;
-                ctx.beginPath(); rrect(ctx, xL, y - hh / 2, bw, hh, hh / 2); ctx.fill(); ctx.stroke();
-                // contacts: fixed (line side) and moving (load side)
-                const mid = cx - 2, fixedEnd = mid, movingStart = mid + 4 + s.gap;
-                ctx.lineWidth = 4; ctx.lineCap = 'round';
-                ctx.strokeStyle = '#c9d6e8'; ctx.beginPath(); ctx.moveTo(xL + 4, y); ctx.lineTo(fixedEnd, y); ctx.stroke();
-                ctx.strokeStyle = '#9fb0c7'; ctx.beginPath(); ctx.moveTo(movingStart, y); ctx.lineTo(xR - 4, y); ctx.stroke();
-                if (s.phase === 'closed') {                   // current through the closed contacts
-                    ctx.strokeStyle = col; glow(ctx, col, 10); ctx.lineWidth = 1.6; ctx.globalAlpha = .7 + .3 * Math.sin(s.t * 18 + k);
-                    ctx.beginPath(); ctx.moveTo(xL + 4, y); ctx.lineTo(xR - 4, y); ctx.stroke(); ctx.globalAlpha = 1; ctx.shadowBlur = 0;
-                }
-                if (s.arc > .05) {                            // a soft arc drawn out between the contacts, then quenched
-                    const a = s.arc, len = movingStart - fixedEnd;
-                    ctx.strokeStyle = hot; ctx.lineWidth = 2 + 4 * a; ctx.globalAlpha = .35 * a; glow(ctx, hot, 18);
-                    ctx.beginPath(); ctx.moveTo(fixedEnd, y);
-                    ctx.quadraticCurveTo(fixedEnd + len / 2, y - 4 * Math.sin(s.t * 40 + k) * a, movingStart, y); ctx.stroke();
-                    ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.2; ctx.globalAlpha = .8 * a; ctx.stroke();
-                    ctx.globalAlpha = 1; ctx.shadowBlur = 0;
-                }
-                if (s.touch > 0) {                            // a small flash as the contacts meet
-                    ctx.fillStyle = `rgba(255,215,168,${s.touch * 1.6})`; glow(ctx, col, 14);
-                    ctx.beginPath(); ctx.arc(mid + 2, y, 3 + s.touch * 8, 0, TAU); ctx.fill(); ctx.shadowBlur = 0;
-                }
-            }
-            // operating mechanism: the rod linking the three moving contacts, and its indicator
-            const rodX = cx + 10 + s.gap;
-            ctx.strokeStyle = 'rgba(143,160,184,.6)'; ctx.lineWidth = 2;
-            ctx.beginPath(); ctx.moveTo(rodX, top + 4); ctx.lineTo(rodX, bot - 4); ctx.stroke();
-            const on = s.phase === 'closed', led = p.alarm ? '#ff5f6d' : (on ? '#36e273' : '#ffc107');
-            ctx.fillStyle = led; glow(ctx, led, 12);
-            ctx.beginPath(); ctx.arc(cx + bw / 2 + 12, top + 2, 3.5, 0, TAU); ctx.fill(); ctx.shadowBlur = 0;
+        s.amp = (s.amp ?? 1) + ((conducting ? 1 : 0) - (s.amp ?? 1)) * Math.min(1, dt * 10);
+        s.flow += dt * 70 * s.amp;
+        const xL = cx - L / 2, xR = cx + L / 2, ground = h * .97;
+        // ground and the steel structure
+        ctx.strokeStyle = 'rgba(79,98,128,.6)'; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(cx - L * .7, ground); ctx.lineTo(cx + L * .7, ground); ctx.stroke();
+        const cabTop = h * .66, cabH = h * .17, cabW = Math.max(16, L * .16), legW = cabW * .9;
+        ctx.strokeStyle = 'rgba(143,160,184,.6)'; ctx.lineWidth = 1.4;
+        ctx.beginPath();
+        ctx.moveTo(cx - legW / 2, cabTop + cabH); ctx.lineTo(cx - legW * .7, ground);
+        ctx.moveTo(cx + legW / 2, cabTop + cabH); ctx.lineTo(cx + legW * .7, ground);
+        ctx.moveTo(cx - legW / 2, cabTop + cabH); ctx.lineTo(cx + legW * .7, ground);   // lattice brace
+        ctx.moveTo(cx + legW / 2, cabTop + cabH); ctx.lineTo(cx - legW * .7, ground);
+        ctx.stroke();
+        // the operating mechanism cabinet, with its position flag and (when overdue) the alarm lamp
+        const cg = ctx.createLinearGradient(cx - cabW / 2, 0, cx + cabW / 2, 0);
+        cg.addColorStop(0, '#3a4a62'); cg.addColorStop(.5, '#56698a'); cg.addColorStop(1, '#3a4a62');
+        ctx.fillStyle = cg; ctx.strokeStyle = 'rgba(176,191,210,.6)'; ctx.lineWidth = 1;
+        ctx.beginPath(); rrect(ctx, cx - cabW / 2, cabTop, cabW, cabH, 2); ctx.fill(); ctx.stroke();
+        const closedish = s.phase === 'closed' || s.phase === 'closing';
+        ctx.fillStyle = closedish ? '#ff5f6d' : '#36e273'; glow(ctx, ctx.fillStyle, 6);
+        ctx.fillRect(cx - cabW * .18, cabTop + cabH * .3, cabW * .36, cabH * .35); ctx.shadowBlur = 0;
+        if (p.alarm) {
+            ctx.fillStyle = `rgba(255,193,7,${.5 + .5 * Math.sin(s.t * 6)})`; glow(ctx, '#ffc107', 10);
+            ctx.beginPath(); ctx.arc(cx + cabW * .32, cabTop + cabH * .25, Math.max(1.8, cabH * .1), 0, TAU); ctx.fill(); ctx.shadowBlur = 0;
         }
+        // the support insulator: a column of sheds, big and small alternating
+        const colTop = cy + ch / 2, colBot = cabTop, sheds = Math.max(5, Math.round((colBot - colTop) / 5));
+        ctx.fillStyle = '#7d8fa8';
+        ctx.fillRect(cx - ch * .14, colTop, ch * .28, colBot - colTop);
+        for (let i = 0; i < sheds; i++) {
+            const y = colTop + (colBot - colTop) * (i + .5) / sheds, rx = (i % 2 ? .38 : .56) * ch;
+            ctx.fillStyle = i % 2 ? '#8fa0b8' : '#a3b3c8';
+            ctx.beginPath(); ctx.ellipse(cx, y, rx, Math.max(1, ch * .09), 0, 0, TAU); ctx.fill();
+        }
+        // conductors from the far edges to the terminal pads; current dashes ride them
+        // and stop on BOTH sides the moment the arc is gone
+        const sag = h * .05;
+        const lead = (x0, x1) => { ctx.beginPath(); ctx.moveTo(x0, cy); ctx.quadraticCurveTo((x0 + x1) / 2, cy + sag, x1, cy); };
+        ctx.lineWidth = 2; ctx.strokeStyle = `rgba(255,159,67,${.25 + .35 * s.amp})`;
+        lead(0, xL - 4); ctx.stroke(); lead(xR + 4, w); ctx.stroke();
+        if (s.amp > .02) {
+            ctx.save(); ctx.setLineDash([6, 16]); ctx.lineDashOffset = -s.flow; ctx.lineWidth = 2.4;
+            ctx.strokeStyle = '#ffd7a8'; glow(ctx, col, 8); ctx.globalAlpha = .9 * s.amp;
+            lead(0, xL - 4); ctx.stroke(); lead(xR + 4, w); ctx.stroke();
+            ctx.restore();
+        }
+        // terminal pads
+        ctx.fillStyle = '#c9d6e8';
+        ctx.fillRect(xL - 6, cy - ch * .35, 5, ch * .7); ctx.fillRect(xR + 1, cy - ch * .35, 5, ch * .7);
+        // the interrupter chamber: insulator sheds along both arms, a flanged centre head
+        const armSheds = Math.max(4, Math.round(L * .5 / 7));
+        [[xL, cx - ch * .7], [cx + ch * .7, xR]].forEach(([a, b]) => {
+            ctx.fillStyle = '#7d8fa8'; ctx.fillRect(a, cy - ch * .32, b - a, ch * .64);
+            for (let i = 0; i < armSheds; i++) {
+                const x = a + (b - a) * (i + .5) / armSheds, ry = (i % 2 ? .44 : .62) * ch;
+                ctx.fillStyle = i % 2 ? '#8fa0b8' : '#a3b3c8';
+                ctx.beginPath(); ctx.ellipse(x, cy, Math.max(1, ch * .1), ry, 0, 0, TAU); ctx.fill();
+            }
+        });
+        const hg = ctx.createLinearGradient(0, cy - ch / 2, 0, cy + ch / 2);
+        hg.addColorStop(0, '#9fb0c7'); hg.addColorStop(.5, '#c9d6e8'); hg.addColorStop(1, '#6f819b');
+        ctx.fillStyle = hg; ctx.beginPath(); rrect(ctx, cx - ch * .7, cy - ch / 2, ch * 1.4, ch, 3); ctx.fill();
+        // a T-type breaker has an interrupter in EACH arm — two breaks in series that
+        // open together. Each window: fixed contact from the terminal side, moving
+        // contact from the centre head, pulled back toward the head when opening.
+        [-1, 1].forEach(side => {
+            const outer = cx + side * L * .4, inner = cx + side * ch * .9, wy = ch * .22;
+            const a = Math.min(outer, inner), b = Math.max(outer, inner);
+            ctx.fillStyle = 'rgba(7,11,18,.92)'; ctx.beginPath(); rrect(ctx, a, cy - wy, b - a, wy * 2, wy); ctx.fill();
+            ctx.strokeStyle = 'rgba(255,215,168,.35)'; ctx.lineWidth = 1; ctx.stroke();
+            const meet = (outer + inner) / 2, fixedEnd = meet + side, movingStart = meet - side * (1 + s.gap);
+            ctx.lineCap = 'round'; ctx.lineWidth = Math.max(2, wy * .9);
+            ctx.strokeStyle = '#e6edf7'; ctx.beginPath(); ctx.moveTo(outer - side * 2, cy); ctx.lineTo(fixedEnd, cy); ctx.stroke();
+            ctx.strokeStyle = '#b0bfd2'; ctx.beginPath(); ctx.moveTo(movingStart, cy); ctx.lineTo(inner + side * 2, cy); ctx.stroke();
+            if (s.phase === 'closed') {                         // current through the closed contacts
+                ctx.strokeStyle = col; glow(ctx, col, 10); ctx.lineWidth = 1.4; ctx.globalAlpha = .6 + .4 * Math.sin(s.t * 18 + side);
+                ctx.beginPath(); ctx.moveTo(outer - side * 2, cy); ctx.lineTo(inner + side * 2, cy); ctx.stroke(); ctx.globalAlpha = 1; ctx.shadowBlur = 0;
+            }
+            if (s.arc > .05) {                                  // drawn out between the contacts, then blown out
+                const k = s.arc;
+                ctx.strokeStyle = arcCol; ctx.lineWidth = 1.5 + 3 * k; ctx.globalAlpha = .4 * k; glow(ctx, arcCol, 16);
+                ctx.beginPath(); ctx.moveTo(fixedEnd, cy); ctx.quadraticCurveTo((fixedEnd + movingStart) / 2, cy - wy * .6 * Math.sin(s.t * 40 + side), movingStart, cy); ctx.stroke();
+                ctx.strokeStyle = '#fff'; ctx.lineWidth = 1; ctx.globalAlpha = .85 * k; ctx.stroke();
+                ctx.globalAlpha = 1; ctx.shadowBlur = 0;
+            }
+            if (s.touch > 0) {
+                ctx.fillStyle = `rgba(255,215,168,${s.touch * 2})`; glow(ctx, col, 12);
+                ctx.beginPath(); ctx.arc(meet, cy, 2 + s.touch * 8, 0, TAU); ctx.fill(); ctx.shadowBlur = 0;
+            }
+        });
     }
     breaker.burst = s => { if (s.phase === 'closed') s.left = 0; };   // operate now
 
