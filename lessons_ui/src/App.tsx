@@ -16,6 +16,9 @@ import Login from "./pages/Login";
 import Install from "./pages/Install";
 import NotFound from "./pages/NotFound";
 import ScrollToTop from "./components/ScrollToTop";
+import MobileShell from "./components/mobile/MobileShell";
+import LessonWizard from "./pages/mobile/LessonWizard";
+import MyDrafts from "./pages/mobile/MyDrafts";
 
 const AdminRoute = () => {
   const { currentUser } = useUser();
@@ -44,6 +47,12 @@ const App = () => (
               <Route path="/lessons/:id" element={<LessonDetail />} />
               <Route path="/notifications" element={<Notifications />} />
               <Route path="/admin" element={<AdminRoute />} />
+            </Route>
+            {/* Phone screens (PLAN-lessons-mobile.md M1) — full screen, no sidebar */}
+            <Route element={<MobileShell />}>
+              <Route path="/m/new" element={<LessonWizard />} />
+              <Route path="/m/lessons/:id/edit" element={<LessonWizard />} />
+              <Route path="/m/drafts" element={<MyDrafts />} />
             </Route>
             <Route path="*" element={<NotFound />} />
           </Routes>

@@ -17,7 +17,8 @@ import { riskColors, riskLabels, statusLabels, statusColors, PROFESSIONAL_DOMAIN
 import { supabase } from "@/integrations/supabase/client";
 import { useActionRequired } from "@/hooks/useActionRequired";
 import { Zap, Send } from "lucide-react";
-import { canSubmitDraft, isDraft, referentOptions } from "@/lib/lessonAssignment";
+import { canSubmitDraft, isDraft, missingForSubmit, referentOptions } from "@/lib/lessonAssignment";
+import { FIELD_NAMES } from "@/lib/lessonDraft";
 import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert";
 import { format, parseISO } from "date-fns";
 import { cn } from "@/lib/utils";
@@ -341,8 +342,11 @@ const LessonDetail = () => {
             <p>
               {canSubmitDraft(lesson, currentUser.id, users)
                 ? "הפרטים הושלמו ונבחר רפרנט. שלח את הלקח לאישור מנהל המערכת."
-                : "כדי לשלוח לאישור, ערוך את הלקח ושייך רפרנט בשדה \"אחראי ליישום\"."}
+                : `כדי לשלוח לאישור חסר: ${missingForSubmit(lesson, users).map((f) => FIELD_NAMES[f]).join(", ")}.`}
             </p>
+            <Button size="sm" variant="outline" className="gap-1.5 me-2" onClick={() => navigate(`/m/lessons/${lesson.id}/edit`)}>
+              ✏️ השלמה בשלבים
+            </Button>
             <Button
               size="sm"
               className="gap-1.5"

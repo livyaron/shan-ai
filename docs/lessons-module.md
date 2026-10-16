@@ -177,3 +177,24 @@ opens outside the app, and its cookie may never reach it).
   approval** — the cookie is Shan-AI's, so it opens every Shan-AI page for that long.
 - Opened from the home-screen icon (`lib/standalone.ts`): no Shan-AI navbar; a logout button sits
   in the module's top bar and lands back on `/lessons/login`.
+
+## Phone wizard — M1 (PLAN-lessons-mobile.md, 2026-10-16)
+
+`/lessons/m/new`, `/lessons/m/lessons/<id>/edit`, `/lessons/m/drafts` — full screen (`MobileShell`,
+no sidebar/navbar), `add_lessons` permission. Phones get here from "לקח חדש" / "הטיוטות שלי" on the
+lessons page (the dialog stays for `md` and up), from `?newLesson=<project>` on a phone, from
+"✏️ השלמה בשלבים" on a draft, and from the icon's long-press shortcuts.
+
+- **One rule for what a lesson needs** — `lessonAssignment.ts`: `SAVE_REQUIRED` (title, what
+  happened, project, risk — owner decision M-D5) and `SUBMIT_REQUIRED` (title, project, stage,
+  category, risk + a referent). `canSubmitDraft` (the computer's "שלח לאישור") uses the same list,
+  so a phone draft saved with the minimum cannot be sent without its classification.
+- `lessonDraft.ts` (pure, tested): form ⇄ lesson, `selectableProjects` (the dialog's rule, used by
+  both), `LESSON_STAGES` (moved out of `Lessons.tsx`), the phone copy in `localStorage`
+  (`lessons.wizard.<user>.<lessonId|new>`, kept until the server has the lesson; never a file).
+- `addLesson` now **returns the lesson and throws** when the insert is refused (it used to show
+  "created" on a failed insert — the dialog now says so). `{ draft: true }` keeps a lesson with its
+  creator even with a referent picked. `submitDraftLesson(id, snapshot)` takes the just-saved
+  lesson, since the provider's state lags a render. `updateLesson` can change the project.
+- Photos are shrunk on the phone before upload (`lessonFiles.ts`: long side 1600 px, JPEG 0.82).
+- Only the creator's **draft** opens in the wizard; a lesson already sent is edited on the computer.

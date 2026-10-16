@@ -8,6 +8,7 @@ import {
   approvalReferent,
   initialLessonState,
   isVisibleLesson,
+  missingForSubmit,
   missingReviewReferents,
 } from "@/lib/lessonAssignment";
 import {
@@ -302,7 +303,8 @@ interface AppContextType {
   renameCategory: (oldName: string, newName: string) => Promise<void>;
   deleteCategory: (categoryName: string) => Promise<void>;
   lessons: Lesson[];
-  addLesson: (lesson: Omit<Lesson, "id" | "date" | "status" | "createdBy" | "workflowStatus">) => void;
+  /** Creates the lesson and returns it; throws when the server refused. `draft` keeps it with its creator even when a referent is set. */
+  addLesson: (lesson: Omit<Lesson, "id" | "date" | "status" | "createdBy" | "workflowStatus">, opts?: { draft?: boolean }) => Promise<Lesson>;
   updateWorkflowStatus: (lessonId: number, status: string, note?: string, eventType?: string) => Promise<void>;
   returnLessonToCreator: (lessonId: number, reason: string, customReason?: string) => Promise<void>;
   updateReferentDecision: (reviewId: number, decision: string, responseText: string) => Promise<void>;
@@ -310,12 +312,13 @@ interface AppContextType {
   workflowEventsVersion: number;
 
   approveLesson: (lessonId: number) => Promise<void>;
-  submitDraftLesson: (lessonId: number) => Promise<void>;
+  /** `snapshot` = the lesson as just saved, when the provider's state has not caught up yet. */
+  submitDraftLesson: (lessonId: number, snapshot?: Lesson) => Promise<void>;
   rejectLesson: (lessonId: number) => void;
   closeLesson: (lessonId: number) => void;
   distributeLesson: (lessonId: number, targetProjectIds?: number[], targetReferentIds?: string[], distributionSource?: "manual" | "ai") => void;
   updateLessonAIReview: (lessonId: number, aiReview: LessonAIReview) => void;
-  updateLesson: (lessonId: number, updates: Partial<Pick<Lesson, "title" | "description" | "recommendation" | "stage" | "category" | "risk" | "equipmentIds" | "professionalDomain" | "eventDate" | "assignedTo" | "workflowStatus" | "impactScheduleDelay" | "impactBudgetCost" | "impactQualityDesc" | "fileUrl" | "referentStartDate" | "targetDate" | "closedDate">>) => Promise<void>;
+  updateLesson: (lessonId: number, updates: Partial<Pick<Lesson, "title" | "project" | "projectId" | "description" | "recommendation" | "stage" | "category" | "risk" | "equipmentIds" | "professionalDomain" | "eventDate" | "assignedTo" | "workflowStatus" | "impactScheduleDelay" | "impactBudgetCost" | "impactQualityDesc" | "fileUrl" | "referentStartDate" | "targetDate" | "closedDate">>) => Promise<void>;
   deleteLesson: (lessonId: number) => void;
   removeLessonFromProject: (lessonId: number, projectId: number) => Promise<void>;
   notifications: Notification[];
@@ -978,13 +981,13 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
     }
   }, [projects, currentUser.id, addNotification, users]);
 
-  const addLesson = useCallback(async (lesson: Omit<Lesson, "id" | "date" | "status" | "createdBy" | "workflowStatus">) => {
+  const addLesson = useCallback(async (lesson: Omit<Lesson, "id" | "date" | "status" | "createdBy" | "workflowStatus">, opts?: { draft?: boolean }): Promise<Lesson> => {
     const date = new Date().toISOString().split("T")[0];
     const targetDateObj = new Date();
     targetDateObj.setDate(targetDateObj.getDate() + 10);
     const targetDate = targetDateObj.toISOString().split("T")[0];
     // No referent picked → a draft that waits with its creator (not sent for approval).
-    const initial = initialLessonState(users, lesson.assignedTo);
+    const initial = opts?.draft ? initialLessonState(users, null) : initialLessonState(users, lesson.assignedTo);
 
     const insertData: any = {
       title: lesson.title,
@@ -1010,36 +1013,38 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
     if (lesson.impactQualityDesc) insertData.impact_quality_desc = lesson.impactQualityDesc;
     if (lesson.fileUrl) insertData.file_url = lesson.fileUrl;
 
-    const { data } = await supabase.from("lessons").insert(insertData).select().single();
+    const { data, error } = await supabase.from("lessons").insert(insertData).select().single();
+    // A refused insert used to look like a success (the toast said "created").
+    if (error || !data) throw error ?? new Error("lesson insert returned no row");
+    const createdLesson = mapDbLesson(data);
 
-    if (data) {
-      const createdLesson = mapDbLesson(data);
-      setLessons((prev) => [createdLesson, ...prev]);
-      void recordWorkflowEvent({
-        lessonId: createdLesson.id,
-        eventType: WORKFLOW_EVENT_TYPES.CREATED,
-        statusAfter: createdLesson.workflowStatus,
-      });
-      void logActivity({
-        actionType: "create",
-        entityType: "lesson",
-        entityId: createdLesson.id,
-        objectLabel: `לקח #${createdLesson.id}`,
-        description: `יצר לקח: ${createdLesson.title}`,
-      });
-    }
+    setLessons((prev) => [createdLesson, ...prev]);
+    void recordWorkflowEvent({
+      lessonId: createdLesson.id,
+      eventType: WORKFLOW_EVENT_TYPES.CREATED,
+      statusAfter: createdLesson.workflowStatus,
+    });
+    void logActivity({
+      actionType: "create",
+      entityType: "lesson",
+      entityId: createdLesson.id,
+      objectLabel: `לקח #${createdLesson.id}`,
+      description: `יצר לקח: ${createdLesson.title}`,
+    });
 
-    if (data && initial.status !== DRAFT_STATUS) {
+    if (initial.status !== DRAFT_STATUS) {
       users.filter((u) => u.role === "admin").forEach((admin) => {
         addNotification(admin.id, "new_lesson", "לקח חדש ממתין לאישור", `${lesson.title} (מאת ${currentUser.name})`, data.id, "lesson");
       });
     }
+    return createdLesson;
   }, [currentUser.id, currentUser.name, addNotification, users, logActivity, recordWorkflowEvent]);
 
   /** The creator sends a completed draft (referent assigned) for admin approval. */
-  const submitDraftLesson = useCallback(async (lessonId: number) => {
-    const lesson = lessons.find((l) => l.id === lessonId);
+  const submitDraftLesson = useCallback(async (lessonId: number, snapshot?: Lesson) => {
+    const lesson = snapshot ?? lessons.find((l) => l.id === lessonId);
     if (!lesson || lesson.status !== DRAFT_STATUS) return;
+    if (missingForSubmit(lesson, users).length > 0) throw new Error("יש להשלים את שדות החובה ולשייך רפרנט לפני השליחה לאישור");
     const referent = approvalReferent(lesson, users);
     if (!referent) throw new Error("יש לשייך רפרנט לפני השליחה לאישור");
 
@@ -1705,9 +1710,11 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
     setLessons((prev) => prev.map((l) => (l.id === lessonId ? { ...l, aiReview } : l)));
   }, []);
 
-  const updateLesson = useCallback(async (lessonId: number, updates: Partial<Pick<Lesson, "title" | "description" | "recommendation" | "stage" | "category" | "risk" | "equipmentIds" | "professionalDomain" | "eventDate" | "assignedTo" | "workflowStatus" | "impactScheduleDelay" | "impactBudgetCost" | "impactQualityDesc" | "fileUrl" | "referentStartDate" | "targetDate" | "closedDate">>) => {
+  const updateLesson = useCallback(async (lessonId: number, updates: Partial<Pick<Lesson, "title" | "project" | "projectId" | "description" | "recommendation" | "stage" | "category" | "risk" | "equipmentIds" | "professionalDomain" | "eventDate" | "assignedTo" | "workflowStatus" | "impactScheduleDelay" | "impactBudgetCost" | "impactQualityDesc" | "fileUrl" | "referentStartDate" | "targetDate" | "closedDate">>) => {
     const dbUpdates: any = {};
     if (updates.title !== undefined) dbUpdates.title = updates.title;
+    if (updates.project !== undefined) dbUpdates.project_name = updates.project;
+    if (updates.projectId !== undefined) dbUpdates.project_id = updates.projectId;
     if (updates.description !== undefined) dbUpdates.description = updates.description;
     if (updates.recommendation !== undefined) dbUpdates.recommendation = updates.recommendation;
     if (updates.stage !== undefined) dbUpdates.stage = updates.stage;
@@ -1734,6 +1741,7 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
     if (lesson) {
       const changedFields = describeChangedFields([
         updates.title !== undefined ? "כותרת" : "",
+        updates.project !== undefined ? "פרויקט" : "",
         updates.description !== undefined ? "תיאור" : "",
         updates.recommendation !== undefined ? "המלצה" : "",
         updates.stage !== undefined ? "שלב" : "",

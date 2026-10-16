@@ -15,3 +15,12 @@ export const isStandalone = (): boolean => {
 
 /** `/lessons/login` with or without a trailing slash. */
 export const isLoginPath = (pathname: string): boolean => /^\/lessons\/login\/?$/.test(pathname);
+
+/** A phone-width screen (below Tailwind's `md`) — where the wizard replaces the dialog. */
+export const isPhoneWidth = (): boolean => {
+  try {
+    return window.matchMedia?.("(max-width: 767px)").matches ?? false;
+  } catch {
+    return false;
+  }
+};

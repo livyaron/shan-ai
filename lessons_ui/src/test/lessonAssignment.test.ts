@@ -46,8 +46,12 @@ describe("draft vs. sent for approval", () => {
   });
 
   it("only the creator submits, and only with a referent", () => {
-    const draft = { id: 1, status: "draft", createdBy: "pm", assignedTo: "r1" };
+    const draft = { id: 1, status: "draft", createdBy: "pm", assignedTo: "r1",
+      title: "t", project: "p", stage: "תכנון", category: "c", risk: "low" };
     expect(canSubmitDraft(draft, "pm", users)).toBe(true);
+    // A phone draft saved with the minimum cannot skip the classification.
+    expect(canSubmitDraft({ ...draft, stage: "" }, "pm", users)).toBe(false);
+    expect(canSubmitDraft({ ...draft, category: " " }, "pm", users)).toBe(false);
     expect(canSubmitDraft(draft, "ad", users)).toBe(false);
     expect(canSubmitDraft({ ...draft, assignedTo: undefined }, "pm", users)).toBe(false);
     expect(canSubmitDraft({ ...draft, status: "new" }, "pm", users)).toBe(false);
