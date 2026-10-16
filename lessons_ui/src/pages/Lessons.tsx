@@ -26,6 +26,8 @@ import { useFieldLabels } from "@/hooks/useFieldLabels";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import { isReferent as isReferentUser, referentOptions } from "@/lib/lessonAssignment";
+import { LESSON_STAGES, selectableProjects } from "@/lib/lessonDraft";
+import { isPhoneWidth } from "@/lib/standalone";
 import { riskColors, riskLabelsShort as riskLabels, statusColors, statusLabels, PROFESSIONAL_DOMAINS, WORKFLOW_STATUSES, ACTIVE_WORKFLOW_STATUSES, workflowStatusColors, calculateSlaStatus, slaStatusColors, SLA_STATUS } from "@/lib/constants";
 import { useActionRequired } from "@/hooks/useActionRequired";
 import { Zap } from "lucide-react";
@@ -34,7 +36,7 @@ import { cn } from "@/lib/utils";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import LessonsKanbanBoard from "@/components/LessonsKanbanBoard";
 
-const stages = ["הקפאת תכולה", "הקפאת תצורה", "תכנון", "קבלת היתר", "בחירת קבלן", "עבודות אזרחיות", "הרכבות חשמליות", "בדיקות", "טופס 4", "חישמול"];
+const stages = LESSON_STAGES;
 // categories are now loaded dynamically from context
 
 interface PreSubmitReview {
@@ -141,13 +143,18 @@ const Lessons = () => {
   // Auto-open lesson dialog from project detail navigation
   useEffect(() => {
     const newLessonProjectId = searchParams.get("newLesson");
+    if (newLessonProjectId && isPhoneWidth()) {
+      // A phone gets the step-by-step wizard, not the dialog (PLAN-lessons-mobile.md M1).
+      navigate(`/m/new?project=${encodeURIComponent(newLessonProjectId)}`, { replace: true });
+      return;
+    }
     if (newLessonProjectId) {
       setNewProject(newLessonProjectId);
       setReturnToProjectId(newLessonProjectId);
       setDialogOpen(true);
       setSearchParams({}, { replace: true });
     }
-  }, [searchParams, setSearchParams]);
+  }, [searchParams, setSearchParams, navigate]);
 
   // Apply drill-down query params from dashboard/KPIs
   useEffect(() => {
@@ -309,9 +316,7 @@ const Lessons = () => {
     setFilteredOutAIProjects([]);
   };
 
-  const userProjects = (currentUser.role === "admin" || currentUser.role === "referent")
-    ? projects
-    : projects.filter((p) => p.managerId === currentUser.id);
+  const userProjects = selectableProjects(projects, currentUser);
 
   // Pre-submit AI review
   const handleAIReview = async () => {
@@ -385,7 +390,8 @@ const Lessons = () => {
       setIsUploading(false);
     }
 
-    addLesson({
+    try {
+    await addLesson({
       title: newTitle,
       description: newDesc,
       recommendation: newRecommendation,
@@ -403,6 +409,11 @@ const Lessons = () => {
       impactQualityDesc: newImpactQualityDesc || undefined,
       fileUrl,
     });
+    } catch (e) {
+      console.error("Create lesson error:", e);
+      toast({ title: "שמירת הלקח נכשלה", description: "הלקח לא נשמר — נסה שוב", variant: "destructive" });
+      return;
+    }
     toast(isReferentUser(users, newAssignedTo)
       ? { title: "לקח נוצר בהצלחה ✓", description: "הלקח נשלח לאישור מנהל המערכת" }
       : { title: "הלקח נשמר כטיוטה", description: "רק אתה רואה אותו. שייך רפרנט בשדה \"אחראי ליישום\" ושלח לאישור מתוך כרטיס הלקח" });
@@ -795,9 +806,20 @@ const Lessons = () => {
             ייצוא דוח
           </Button>
           {hasPermission("add_lessons") && (
+            <Button className="md:hidden bg-accent text-accent-foreground hover:bg-accent/90 gap-2" onClick={() => navigate("/m/new")}>
+              <Plus className="w-4 h-4" />
+              לקח חדש
+            </Button>
+          )}
+          {hasPermission("add_lessons") && (
+            <Button variant="outline" className="md:hidden gap-2" onClick={() => navigate("/m/drafts")}>
+              הטיוטות שלי
+            </Button>
+          )}
+          {hasPermission("add_lessons") && (
           <Dialog open={dialogOpen} onOpenChange={(open) => { setDialogOpen(open); if (!open) { setPreReview(null); if (returnToProjectId) { navigate(`/projects/${returnToProjectId}`); setReturnToProjectId(null); } } }}>
             <DialogTrigger asChild>
-              <Button className="bg-accent text-accent-foreground hover:bg-accent/90 gap-2">
+              <Button className="hidden md:inline-flex bg-accent text-accent-foreground hover:bg-accent/90 gap-2">
                 <Plus className="w-4 h-4" />
                 לקח חדש
               </Button>

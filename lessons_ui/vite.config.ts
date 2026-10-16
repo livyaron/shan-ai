@@ -36,6 +36,11 @@ export default defineConfig(() => ({
         lang: "he",
         start_url: "/lessons/",
         scope: "/lessons/",
+        // Long-press the icon (Android): straight into the wizard.
+        shortcuts: [
+          { name: "לקח חדש", short_name: "לקח חדש", url: "/lessons/m/new", icons: [{ src: "pwa-192x192.png", sizes: "192x192" }] },
+          { name: "הטיוטות שלי", short_name: "טיוטות", url: "/lessons/m/drafts", icons: [{ src: "pwa-192x192.png", sizes: "192x192" }] },
+        ],
         icons: [
           {
             src: "pwa-192x192.png",

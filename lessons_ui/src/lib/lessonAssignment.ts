@@ -25,6 +25,12 @@ interface LessonLike {
   status: string;
   createdBy: string;
   assignedTo?: string;
+  title?: string;
+  description?: string;
+  project?: string;
+  stage?: string;
+  category?: string;
+  risk?: string;
 }
 
 interface ReviewLike {
@@ -63,9 +69,28 @@ export const isDraft = (lesson: Pick<LessonLike, "status">): boolean => lesson.s
 export const isVisibleLesson = (lesson: LessonLike, viewerId: string): boolean =>
   !isDraft(lesson) || lesson.createdBy === viewerId;
 
-/** The creator may send a draft for approval once a referent is assigned. */
+/**
+ * What a draft may be saved with (PLAN-lessons-mobile.md M-D5): the phone wizard
+ * saves as soon as these are filled; everything else can be completed later.
+ */
+export const SAVE_REQUIRED = ["title", "description", "project", "risk"] as const;
+/** What a lesson must have before it goes for approval — on the phone and on the computer. */
+export const SUBMIT_REQUIRED = ["title", "project", "stage", "category", "risk", "assignedTo"] as const;
+export type RequiredField = (typeof SAVE_REQUIRED)[number] | (typeof SUBMIT_REQUIRED)[number];
+
+const filled = (v: string | undefined): boolean => !!v && v.trim() !== "";
+
+/** Fields still empty before a draft can be saved. */
+export const missingForSave = (lesson: Omit<LessonLike, "id" | "status" | "createdBy">): RequiredField[] =>
+  SAVE_REQUIRED.filter((k) => !filled(lesson[k]));
+
+/** Fields still missing before approval; `assignedTo` counts only when it is a referent. */
+export const missingForSubmit = (lesson: Omit<LessonLike, "id" | "status" | "createdBy">, users: UserLike[]): RequiredField[] =>
+  SUBMIT_REQUIRED.filter((k) => (k === "assignedTo" ? !isReferent(users, lesson.assignedTo) : !filled(lesson[k])));
+
+/** The creator may send a draft for approval once it is complete and a referent is assigned. */
 export const canSubmitDraft = (lesson: LessonLike, viewerId: string, users: UserLike[]): boolean =>
-  isDraft(lesson) && lesson.createdBy === viewerId && isReferent(users, lesson.assignedTo);
+  isDraft(lesson) && lesson.createdBy === viewerId && missingForSubmit(lesson, users).length === 0;
 
 /**
  * The referent approval hands the lesson to, or null — then the existing manual
