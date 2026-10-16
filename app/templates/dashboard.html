@@ -269,6 +269,8 @@
         .ex-table td { vertical-align: top; }
         .ex-cell { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; white-space: pre-line; min-width: 8ch; max-width: 46ch; font-size: .86rem; line-height: 1.45; }
         .ex-id { color: var(--energy); text-decoration: none; white-space: nowrap; }
+        .ex-links { display: flex; flex-wrap: wrap; gap: 10px; }
+        .ex-links b { font-family: var(--num); margin-inline-start: 6px; }
         .ex-id:hover { text-decoration: underline; }
         .sb-table { width: 100%; border-collapse: collapse; font-size: .9rem; color: var(--t1); }
         .sb-table th { font-weight: 600; color: var(--t2); text-align: right; padding: 8px 10px; border-bottom: 1px solid var(--line); font-size: .88rem; white-space: nowrap; }
@@ -521,7 +523,7 @@
     {% for key, label in scope_labels.items() %}<a role="radio" href="?scope={{ key }}" data-scope="{{ key }}" class="{{ 'on' if scope == key else '' }}" aria-checked="{{ 'true' if scope == key else 'false' }}">{{ '👤' if key == 'mine' else '🏢' }} {{ label }}</a>{% endfor %}
     <i class="sc-pill"></i>
 </div>{% endmacro %}
-{% set own_q = ('owner=' ~ current_user.id ~ '&') if scope == 'mine' else '' %}{% set ms = stations.missions %}{% set ps = stations.projects %}{% set ex = ps.exec if ps.ok else none %}{% set ls = stations.lessons %}
+{% set own_q = ('owner=' ~ current_user.id ~ '&') if scope == 'mine' else '' %}{% set ms = stations.missions %}{% set ps = stations.projects %}{% set ex = ps.exec if ps.ok else none %}{% set kq = '?scope=mine' if scope == 'mine' else '' %}{% set ls = stations.lessons %}
 <div class="container-fluid py-4 px-4 sb" id="sb">
 
     <!-- Header -->
@@ -579,19 +581,12 @@
         <button type="button" class="st {{ 'alarm' if ps.ok and ps.past_due else '' }}" data-zoom="projects" style="--acc:#8b9cf4" aria-label="פרויקטים — הגדל">
             <canvas class="st-scene" data-scene="xfmr" aria-hidden="true"></canvas>
             <span class="st-hd"><span class="st-ic">▣</span><span class="st-name">פרויקטים · קובץ המאסטר</span><span class="st-led"></span><span class="st-go">⤢</span></span>
-            {% if ps.ok and ex and ex.kpis %}
-            {# the PM department's own numbers, as written in "תקציר הנהלה" — never recomputed #}
-            <span class="st-hero"><b>{{ ex.kpis[0][1] }}</b><small>{{ ex.kpis[0][0] }}{% if ex.as_of_il %} · תקציר הנהלה {{ ex.as_of_il }}{% endif %}</small></span>
+            {% if ps.ok %}
+            {# every number = project_kpis over the patterns-page rows — the same everywhere #}
+            <span class="st-hero"><b data-live="p_active">{{ ps.active }}</b><small>{{ 'פרויקטים בתחום שלי' if scope == 'mine' else 'פרויקטים פעילים באגף' }}{% if ps.in_file is not none %} · {{ ps.in_file }} בקובץ, {{ ps.finished }} הסתיימו{% endif %}</small></span>
             <span class="st-kpis">
-                {% for label, value in ex.kpis[1:4] %}<span><b>{{ value }}</b>{{ label }}</span>{% endfor %}
-            </span>
-            <span class="st-strip" data-strip="projects" aria-hidden="true"></span>
-            {% elif ps.ok %}
-            <span class="st-hero"><b data-live="p_active">{{ ps.active }}</b><small>{{ 'פרויקטים בתחום שלי' if scope == 'mine' else 'פרויקטים פעילים באגף' }}</small></span>
-            <span class="st-kpis">
-                <span class="{{ 'hot' if ps.past_due else '' }}"><b data-live="p_past_due">{{ ps.past_due }}</b>יעד עבר</span>
-                <span><b data-live="p_late">{{ ps.late }}</b>מאחרים מהתכנון</span>
-                <span class="{{ 'hot' if ps.over_approved else '' }}"><b data-live="p_over">{{ ps.over_approved }}</b>חורגים מהיעד המאושר</span>
+                {% set fcs = ps.file_cards | rejectattr('is_total') | list %}{% set tile_cards = (fcs[:3] if fcs|length >= 3 else ps.cards[:3]) %}
+                {% for c in tile_cards %}<span><b data-live="p_{{ c.key }}">{{ c.count }}</b>{{ c.label }}</span>{% endfor %}
             </span>
             {% if ps.unlinked %}<span class="st-note">לא שויכת עדיין למגזר או לשם מנה״פ — מנהל מערכת משייך ב״דפוסים ← הרשאות״</span>{% endif %}
             <span class="st-strip" data-strip="projects" aria-hidden="true"></span>
@@ -822,110 +817,44 @@
     <section class="zv" data-view="projects" data-title="פרויקטים · {{ 'בתחום שלי' if scope == 'mine' else 'כל האגף' }}" hidden>
         <canvas class="zv-scene" data-scene="xfmr" aria-hidden="true"></canvas>
     {% if ps.ok %}
-        {% if ex %}
-        <div class="sb-bus-label"><span>פס צבירה · {{ ex.sheet }}</span><span>{% if ex.loaded_at_il %}נטען {{ ex.loaded_at_il }}{% endif %}</span></div>
+        {# Cards only — every list is one click away (user, 2026-10-16). Every number is
+           project_kpis over the patterns-page rows, and its list has exactly that many rows. #}
+        <div class="sb-bus-label"><span>פס צבירה · פרויקטים פעילים{% if ex %} · {{ ex.sheet }}{% endif %}</span><span>{% if ex and ex.loaded_at_il %}נטען {{ ex.loaded_at_il }}{% endif %}</span></div>
         <div class="sb-busbar zv-bus"></div>
-        {% if ex.title or ex.subtitle %}<div class="ex-head">{% if ex.title %}<h2>{{ ex.title }}</h2>{% endif %}{% if ex.subtitle %}<p>{{ ex.subtitle }}</p>{% endif %}</div>{% endif %}
-        <div class="sb-bays ex-bays">
-        {% for label, value in ex.kpis %}
-            <a class="sb-bay {{ 'c-v' if loop.first else 'c-e' }}" style="--d:{{ (loop.index0 % 5) * 0.4 }}s" href="/dashboard/projects"><div class="sb-breaker"></div><div class="sb-card">
-                <div class="sb-k-label"><span>{{ label }}</span></div>
-                <div class="sb-k-val">{{ value }}</div></div></a>
-        {% endfor %}
-        </div>
-        {% for sec in ex.sections %}
-        {% if sec.title %}<div class="sb-h"><h2>{{ sec.title }}</h2><span>{{ sec.rows | length }} שורות</span></div>{% else %}<div class="sb-h"><span>{{ sec.rows | length }} שורות</span></div>{% endif %}
-        <div class="sb-panel sb-scroll">
-            <table class="sb-table ex-table">
-                {% if sec.header %}<thead><tr>{% for h in sec.header %}<th>{{ h }}</th>{% endfor %}</tr></thead>{% endif %}
-                <tbody>
-                {% for r in sec.rows %}
-                    <tr>{% for c in r %}{% if loop.index0 == sec.id_col and c %}<td class="sb-mono"><a class="ex-id" href="/dashboard/projects/p/{{ c | urlencode }}">{{ c }}</a></td>{% else %}<td><div class="ex-cell" title="{{ c }}">{{ c }}</div></td>{% endif %}{% endfor %}</tr>
-                {% endfor %}
-                </tbody>
-            </table>
-        </div>
-        {% endfor %}
-        <div class="sb-h"><h2>מחושב מגיליון הדוח העדכני</h2><span>מה שהמערכת מחשבת מאותו קובץ — לא חלק מהתקציר</span></div>
-        {% else %}
-        <div class="sb-bus-label"><span>פס צבירה · פרויקטים פעילים</span><span><b>{{ ps.watch_total }}</b> פרויקטים ברשימת המעקב</span></div>
-        <div class="sb-busbar zv-bus"></div>
-        {% endif %}
         <div class="sb-bays">
-            <a class="sb-bay c-v" style="--d:0s" href="/dashboard/projects"><div class="sb-breaker"></div><div class="sb-card">
+            <a class="sb-bay c-v" style="--d:0s" href="/dashboard/projects/kpi/active{{ kq }}"><div class="sb-breaker"></div><div class="sb-card">
                 <div class="sb-k-label"><span>פרויקטים פעילים</span><span>🏗</span></div>
                 <div class="sb-k-val" data-live="p_active">{{ ps.active }}</div>
-                <div class="sb-k-foot">לפי קובץ המאסטר האחרון</div></div></a>
-            <a class="sb-bay {{ 'alarm' if ps.past_due else 'c-ok' }}" style="--d:.4s" href="/dashboard/projects"><div class="sb-breaker"></div><div class="sb-card">
-                <div class="sb-k-label"><span>יעד חשמול עבר</span><span>⏰</span></div>
-                <div class="sb-k-val" data-live="p_past_due">{{ ps.past_due }}</div>
-                <div class="sb-k-foot">הצפי כבר מאחורינו</div></div></a>
-            <a class="sb-bay c-w" style="--d:.8s" href="/dashboard/projects"><div class="sb-breaker"></div><div class="sb-card">
-                <div class="sb-k-label"><span>מאחרים מתכנון הפיתוח</span><span>📉</span></div>
-                <div class="sb-k-val" data-live="p_late">{{ ps.late }}</div>
-                <div class="sb-k-foot">צפי &gt; תכנון + חודש</div></div></a>
-            <a class="sb-bay c-e" style="--d:1.2s" href="/dashboard/projects"><div class="sb-breaker"></div><div class="sb-card">
-                <div class="sb-k-label"><span>אין יעד חשמול</span><span>✎</span></div>
-                <div class="sb-k-val" data-live="p_undated">{{ ps.undated }}</div>
-                <div class="sb-k-foot">המלל נקרא — אין בו יעד</div></div></a>
-            <a class="sb-bay {{ 'alarm' if ps.over_approved else 'c-ok' }}" style="--d:.2s" href="/dashboard/projects/insights?drill=tile&dv=over_approved&dm=all#drill"><div class="sb-breaker"></div><div class="sb-card">
-                <div class="sb-k-label"><span>חורגים מהיעד המאושר</span><span>🎯</span></div>
-                <div class="sb-k-val" data-live="p_over">{{ ps.over_approved }}</div>
-                <div class="sb-k-foot">מסתמן &gt; מאושר + 15 יום · מתוך {{ ps.with_approved }}</div></div></a>
-            <a class="sb-bay {{ 'alarm' if ps.approved_lost else 'c-ok' }}" style="--d:.6s" href="/dashboard/projects/insights?drill=tile&dv=approved_lost&dm=all#drill"><div class="sb-breaker"></div><div class="sb-card">
-                <div class="sb-k-label"><span>יעד מאושר ללא צפי</span><span>❓</span></div>
-                <div class="sb-k-val" data-live="p_lost">{{ ps.approved_lost }}</div>
-                <div class="sb-k-foot">המסתמן לא נקבע / הוחמץ</div></div></a>
-            <a class="sb-bay c-crit" style="--d:1.6s" href="/dashboard/projects"><div class="sb-breaker"></div><div class="sb-card">
-                <div class="sb-k-label"><span>חוסר כוח אדם</span><span>👷</span></div>
-                <div class="sb-k-val" data-live="p_short">{{ ps.short_staff }}</div>
-                <div class="sb-k-foot">משגיחים או בודקים</div></div></a>
+                <div class="sb-k-foot">{% if ps.in_file is not none %}{{ ps.in_file }} בקובץ · {{ ps.finished }} הסתיימו{% else %}בתחום שלי{% endif %}</div></div></a>
         </div>
+        {% if ps.file_cards %}
+        <div class="sb-h"><h2>תקציר הנהלה</h2><span>הנוסחאות של ״{{ ex.sheet if ex else 'תקציר הנהלה' }}״, נספרות על הפרויקטים הפעילים בלבד · לחץ על כרטיס לרשימה</span></div>
+        <div class="sb-bays ex-bays">
+        {% for c in ps.file_cards if not c.is_total %}
+            {% if c.listable %}<a class="sb-bay c-e" style="--d:{{ (loop.index0 % 5) * 0.4 }}s" href="/dashboard/projects/kpi/{{ c.key }}{{ kq }}">{% else %}<div class="sb-bay c-e" style="--d:{{ (loop.index0 % 5) * 0.4 }}s">{% endif %}<div class="sb-breaker"></div><div class="sb-card">
+                <div class="sb-k-label"><span>{{ c.label }}</span></div>
+                <div class="sb-k-val" data-live="p_{{ c.key }}">{{ c.count }}</div>
+                <div class="sb-k-foot">{% if not c.listable %}כפי שבקובץ — הנוסחה לא נספרה מחדש{% elif c.file_value != c.count %}בקובץ {{ c.file_value }} (כולל שהסתיימו){% else %}לרשימה ←{% endif %}</div></div>{% if c.listable %}</a>{% else %}</div>{% endif %}
+        {% endfor %}
+        </div>
+        {% endif %}
+        <div class="sb-h"><h2>יעדים</h2><span>תכנית · מאושר · מסתמן — אותם מספרים כמו בדפוסים וסיכונים · לחץ על כרטיס לרשימה</span></div>
+        <div class="sb-bays">
+        {% for c in ps.cards %}
+            <a class="sb-bay {{ 'alarm' if c.count and c.key in ('past_due', 'over_approved', 'approved_lost') else 'c-w' }}" style="--d:{{ (loop.index0 % 5) * 0.4 }}s" href="/dashboard/projects/kpi/{{ c.key }}{{ kq }}" title="{{ c.help }}"><div class="sb-breaker"></div><div class="sb-card">
+                <div class="sb-k-label"><span>{{ c.label }}</span></div>
+                <div class="sb-k-val" data-live="p_{{ c.key }}">{{ c.count }}</div>
+                <div class="sb-k-foot">{{ c.help }}</div></div></a>
+        {% endfor %}
+        </div>
+        {% if ex and ex.sections %}
+        <div class="sb-h"><h2>טבלאות התקציר</h2><span>כפי שנכתבו בקובץ</span></div>
+        <div class="ex-links">{% for t in ex.sections %}<a class="sb-btn" href="/dashboard/projects/summary/{{ t.i }}">{{ t.title }} <b>{{ t.n }}</b></a>{% endfor %}</div>
+        {% endif %}
         <div class="sb-h"><h2>זרמים</h2><span>פרויקט בשלב ״עבודה אזרחית והרכבות״ שייך לשני מגזרים — לכן המגזרים לא מסתכמים לסה״כ</span></div>
         <div class="sb-charts two">
             <div class="sb-panel"><h3>לפי מגזר (לפי השלב)</h3><div class="sb-donut-wrap"><svg class="sb-donut" id="zm-d-sector" viewBox="0 0 132 132" role="img" aria-label="פרויקטים לפי מגזר"></svg><div class="sb-legend" id="zm-l-sector"></div></div></div>
             <div class="sb-panel"><h3>לפי שלב</h3><div id="zm-b-stages"></div></div>
-        </div>
-        <div class="sb-h"><h2>חריגה מהיעד המאושר</h2><span>יעד מסתמן מאוחר ביותר מ-15 יום מהיעד שאישר מנהל האגף, או יעד מאושר שאין לו צפי · מלל ביעד נקרא, לא מוצג כמות שהוא</span></div>
-        <div class="sb-panel sb-scroll">
-            <table class="sb-table">
-                <thead><tr><th>זיהוי</th><th>פרויקט</th><th>שלב</th><th>מנה״פ</th><th>תכנית פיתוח</th><th>מאושר</th><th>מסתמן</th><th>חריגה</th></tr></thead>
-                <tbody>
-                {% for p in ps.over_approved_rows %}
-                    <tr class="sb-row zv-row" tabindex="0" data-href="/dashboard/projects/p/{{ p.id | urlencode }}" data-type="{{ 'critical' if p.lost or (p.gap_days or 0) > 90 else 'uncertain' }}">
-                        <td class="sb-mono">{{ p.id }}</td>
-                        <td class="sb-sum">{{ p.name }}</td>
-                        <td style="font-size:.85rem;">{{ p.stage }}</td>
-                        <td style="color:var(--t2);font-size:.85rem;">{{ p.manager }}</td>
-                        <td class="sb-mono">{{ p.plan }}{% if p.approved_vs_plan %}<div style="color:var(--t3);font-size:.75rem">מאושר מול תכנית: <bdi dir="ltr">{{ '+' if p.approved_vs_plan > 0 }}{{ p.approved_vs_plan }}</bdi> י׳</div>{% endif %}</td>
-                        <td class="sb-mono">{{ p.approved }}</td>
-                        <td class="sb-mono">{{ p.forecast if p.forecast != '—' else '' }}{% if p.approx and p.forecast != '—' %}<span title="תאריך משוער: חודש/שנה בלבד, או יום שאינו קיים">~</span>{% endif %}{% if p.forecast_label %}<div style="color:var(--t2);font-size:.78rem;font-family:var(--ui)">{{ p.forecast_label }}{% if p.reason %} · {{ p.reason }}{% endif %}</div>{% endif %}</td>
-                        <td>{% if p.lost %}<span class="sb-pill p-critical">אין צפי</span>{% else %}<span class="sb-pill {{ 'p-critical' if p.gap_days > 90 else 'p-uncertain' }}"><bdi dir="ltr">+{{ p.gap_days }}</bdi> י׳</span>{% endif %}</td>
-                    </tr>
-                {% endfor %}
-                {% if not ps.over_approved_rows %}<tr><td colspan="8" class="sb-empty">{{ 'אין חריגות מהיעד המאושר.' if ps.with_approved else 'עדיין לא נקלטו ערכי ״יעד חשמול מאושר ע״י מנהל האגף״ — הקליטה שלהם נוספה אחרי ההעלאה האחרונה. העלאה חוזרת של קובץ המאסטר תקלוט אותם.' }}</td></tr>{% endif %}
-                </tbody>
-            </table>
-        </div>
-        <div class="sb-h"><h2>רשימת מעקב</h2><span>יעד שעבר או איחור מול התכנון · לחץ על שורה לדף הפרויקט</span></div>
-        <div class="sb-panel sb-scroll">
-            <table class="sb-table">
-                <thead><tr><th>זיהוי</th><th>פרויקט</th><th>שלב</th><th>מנה״פ</th><th>תכנון</th><th>צפי</th><th>פער</th></tr></thead>
-                <tbody>
-                {% for p in ps.watch %}
-                    <tr class="sb-row zv-row" tabindex="0" data-href="/dashboard/projects/p/{{ p.id | urlencode }}" data-type="{{ 'critical' if p.past_due else 'uncertain' }}">
-                        <td class="sb-mono">{{ p.id }}</td>
-                        <td class="sb-sum">{{ p.name }}</td>
-                        <td style="font-size:.85rem;">{{ p.stage }}</td>
-                        <td style="color:var(--t2);font-size:.85rem;">{{ p.manager }}</td>
-                        <td class="sb-mono">{{ p.plan }}</td>
-                        <td class="sb-mono" {% if p.past_due %}style="color:var(--crit)"{% endif %}>{{ p.forecast }}</td>
-                        <td>{% if p.slip_months is not none %}<span class="sb-pill {{ 'p-critical' if p.slip_months >= 6 else 'p-uncertain' }}">{{ p.slip_months }} ח׳</span>{% else %}<span style="color:var(--t3)">—</span>{% endif %}</td>
-                    </tr>
-                {% endfor %}
-                {% if not ps.watch %}<tr><td colspan="7" class="sb-empty">אין פרויקטים מאחרים. כדאי לבדוק שהקובץ עדכני לפני שפותחים שמפניה.</td></tr>{% endif %}
-                </tbody>
-            </table>
         </div>
         <div class="zv-foot"><a class="sb-btn" href="/dashboard/projects/insights">🧠 דפוסים וסיכונים</a><a class="sb-btn primary" href="/dashboard/projects">לכל הפרויקטים ←</a></div>
     {% else %}<div class="sb-empty">התחנה לא זמינה כרגע</div>{% endif %}
@@ -1226,9 +1155,9 @@ function sbLiveValues(d) {
         raci_R: raci.R || 0, raci_A: raci.A || 0, raci_C: raci.C || 0, raci_I: raci.I || 0,
         m_open: sv(ms, 'open'), m_overdue: sv(ms, 'overdue'), m_do_now: sv(ms, 'do_now'),
         m_done_week: sv(ms, 'done_week'), m_new: sv(ms, 'new_24h'), m_undated: sv(ms, 'undated'),
-        p_active: sv(ps, 'active'), p_past_due: sv(ps, 'past_due'), p_late: sv(ps, 'late'),
-        p_undated: sv(ps, 'undated'), p_short: sv(ps, 'short_staff'),
-        p_over: sv(ps, 'over_approved'), p_lost: sv(ps, 'approved_lost'),
+        p_active: sv(ps, 'active'),
+        // one key per projects card (p_<card key>), file and engine alike — never re-spelled here
+        ...Object.fromEntries([...(ps.file_cards || []), ...(ps.cards || [])].map(c => ['p_' + c.key, ps.ok ? c.count : null])),
         l_total: sv(ls, 'total'), l_approved: sv(ls, 'approved'), l_pending: sv(ls, 'pending'),
         l_draft: sv(ls, 'draft'), l_impl: sv(ls, 'impl_open'),
     };

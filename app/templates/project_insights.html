@@ -156,6 +156,18 @@
     {# the forecast cell as READ (target_reading): a date, plus what the text said about it #}
     {% macro fcv(x) %}{% if x.fc %}{{ x.fc|il_date }}{% if x.fc_approx %}~{% endif %}{% if x.fc_kind and x.fc_kind != 'date' %}<div class="mix" style="font-family:var(--ui)" title="{{ x.fc_text }}">{{ x.fc_label }}{% if x.fc_missed %} · הוחמץ {{ x.fc_missed|il_date }}{% endif %}</div>{% endif %}{% elif x.fc_kind %}<span title="{{ x.fc_text }}">{{ x.fc_label }}{% if x.fc_reason %} · {{ x.fc_reason }}{% endif %}</span>{% if x.fc_missed %}<div class="mix" style="font-family:var(--ui)">הוחמץ {{ x.fc_missed|il_date }}</div>{% endif %}{% else %}—{% endif %}{% endmacro %}
     {% set sm = view.summary %}
+    {% if kpi_board and kpi_board.file_cards %}
+    {# the same cards as the dashboard's projects view — project_kpis counts both #}
+    <div class="sub" style="margin:.2rem 0 .4rem">תקציר הנהלה — נספר על הפרויקטים הפעילים ({{ sm.n }}) · זהה למסך הדשבורד</div>
+    <div class="tiles">
+        {% for c in kpi_board.file_cards if not c.is_total %}
+        <div class="tile">
+            <div class="num">{% if c.listable and not preview_label %}<a class="dn" href="/dashboard/projects/kpi/{{ c.key }}{{ kpi_scope }}">{{ c.count }}</a>{% else %}{{ c.count }}{% endif %}</div>
+            <div class="lbl">{{ c.label }}</div>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
     <div class="tiles">
         <div class="tile" title="{{ m.forecast_drift.caveat|il_dates }}">
             <div class="num"><a class="dn" href="{{ dl('tile', 'forecast') }}">{{ sm.forecast_later }}</a><span class="of"> / {{ sm.forecast_n }}</span></div>

@@ -8,11 +8,9 @@ from pathlib import Path
 
 import pytest
 
-from app.services import dashboard_domains as dd
 from app.services import exec_summary as es
 from app.services import project_sync
 
-from tests.test_dashboard_stations import _render
 
 ROWS = [
     ["מוקדים קריטיים | סטטוס 06.10.2026", None, None, None],
@@ -36,8 +34,8 @@ def test_parse_follows_the_sheet_not_a_fixed_layout():
     p = es.parse_rows(ROWS, "תקציר הנהלה 07.10.26")
     assert p["as_of"] == "2026-10-07"
     assert p["title"].startswith("מוקדים") and p["subtitle"] == "בסיס: 12 פרויקטים"
-    assert p["kpis"] == [["סה״כ פרויקטים", 12], ["עם סיכון/חסם", 5],
-                         ["מסומנים קריטיים", 3], ["מחסור בבודקים", 0]]
+    assert [(k["label"], k["value"]) for k in p["kpis"]] == [
+        ("סה״כ פרויקטים", 12), ("עם סיכון/חסם", 5), ("מסומנים קריטיים", 3), ("מחסור בבודקים", 0)]
     first, msgs, short = p["sections"]
     assert first["title"] is None and first["header"] == ["עדיפות", "פרויקט", "סיכון / חסם"]
     assert first["rows"] == [["1", "תחנה א", "חסר ציוד"], ["2", "תחנה ב", ""]]
@@ -51,7 +49,7 @@ def test_parse_follows_the_sheet_not_a_fixed_layout():
 def test_more_kpis_and_rows_in_the_next_file_need_no_code():
     rows = ROWS[:5] + [["חדש השבוע", 7, None, None]] + ROWS[5:] + [["X-2", "תחנה ג", None, None]]
     p = es.parse_rows(rows, "תקציר הנהלה 14.10.26")
-    assert p["kpis"][-1] == ["חדש השבוע", 7] and len(p["kpis"]) == 5
+    assert (p["kpis"][-1]["label"], p["kpis"][-1]["value"]) == ("חדש השבוע", 7) and len(p["kpis"]) == 5
     assert len(p["sections"][-1]["rows"]) == 2
 
 
@@ -66,28 +64,46 @@ def test_long_cells_are_clamped():
     assert len(p["sections"][0]["rows"][0][1]) == es.CELL_CHARS
 
 
-def _ps():
-    return {"ok": True, "active": 800, "past_due": 0, "late": 0, "undated": 0, "short_staff": 0,
-            "sectors": [], "stages": [], "watch": [], "watch_total": 0}
+SHEET = "דוח שבועי עדכני"
+# the record sheet, 0-based rows: row 1 junk, row 2 header, data from Excel row 3
+RECORD = [
+    ["junk"],
+    ["זיהוי", "פרויקט", "סיכון", "לטיפול", "בודקים"],
+    ["A-1", "תחנה א", "חסר ציוד", "מנהל אגף", "כן"],
+    ["A-2", "תחנה ב", "קבלן", None, None],
+    ["A-3", "תחנה ג", None, None, "כן"],
+    [None, "שורה בלי זיהוי", "סיכון", None, None],
+]
 
 
-def test_dashboard_shows_the_summary_numbers_as_written():
-    ex = {**es.parse_rows(ROWS, "תקציר הנהלה 07.10.26"), "as_of_il": "07/10/2026",
-          "loaded_at_il": "14/10/2026 10:00"}
-    html = _render({"missions": {"ok": False}, "projects": {**_ps(), "exec": ex}, "lessons": {"ok": False}})
-    tile = html[html.index('data-zoom="projects"'):html.index('data-zoom="lessons"')]
-    assert "<b>12</b><small>סה״כ פרויקטים" in tile and "800" not in tile
-    assert "<b>5</b>עם סיכון/חסם" in tile
-    view = html[html.index('data-view="projects"'):html.index('data-view="lessons"')]
-    assert "מסרים מוצעים להנהלה" in view and "לאשר תיעדוף רוחבי" in view
-    assert 'href="/dashboard/projects/p/X-1"' in view
-    for label, _ in ex["kpis"]:
-        assert label in view
+@pytest.mark.parametrize("formula, ids", [
+    (f"=COUNTA('{SHEET}'!B3:B6)", ["A-1", "A-2", "A-3"]),                    # the id-less row is not a project
+    (f"=COUNTA('{SHEET}'!C3:C5)", ["A-1", "A-2"]),
+    (f'=COUNTIF(\'{SHEET}\'!E3:E5,"<>")', ["A-1", "A-3"]),
+    (f'=COUNTIF(\'{SHEET}\'!E3:E5,"כן")', ["A-1", "A-3"]),
+    (f'=COUNTIFS(\'{SHEET}\'!C3:C5,"<>",\'{SHEET}\'!D3:D5,"")', ["A-2"]),  # risk with no handler
+])
+def test_resolve_re_runs_the_files_own_formula(formula, ids):
+    assert es.resolve(formula, SHEET, RECORD, 0) == ids
 
 
-def test_without_a_summary_the_computed_tile_stays():
-    html = _render({"missions": {"ok": False}, "projects": _ps(), "lessons": {"ok": False}})
-    assert 'data-live="p_active">800<' in html
+@pytest.mark.parametrize("formula", [
+    "=SUM(A1:A4)",                                          # not a count
+    f"=COUNTA('אחר'!B3:B6)",                                # another sheet
+    f'=COUNTIF(\'{SHEET}\'!E3:E5,">5")',                  # a criterion we do not re-run
+    f'=COUNTIFS(\'{SHEET}\'!C3:C5,"<>",\'{SHEET}\'!D4:D6,"")',  # ranges that do not line up
+    None,
+])
+def test_resolve_refuses_what_it_cannot_repeat_exactly(formula):
+    assert es.resolve(formula, SHEET, RECORD, 0) is None
+
+
+def test_parse_keeps_the_formula_behind_each_kpi():
+    formulas = [[None] * 4 for _ in ROWS]
+    formulas[3] = [None, f"=COUNTA('{SHEET}'!B3:B6)", None, "=1+1"]
+    p = es.parse_rows(ROWS, "תקציר הנהלה 07.10.26", formulas)
+    assert p["kpis"][0]["formula"].startswith("=COUNTA") and p["kpis"][1]["formula"] == "=1+1"
+    assert p["kpis"][2]["formula"] is None
 
 
 class _Res:
@@ -121,9 +137,3 @@ def test_master_upload_syncs_the_record_sheet_only():
     block = src[src.index("Sync to Projects table"):src.index("except Exception as sync_err")]
     assert "pick_master_sheet" in block
     assert not re.search(r"for \w+ in xls\.sheet_names", block)
-
-
-def test_mine_scope_never_gets_the_division_summary():
-    src = Path("app/services/dashboard_domains.py").read_text(encoding="utf-8")
-    assert 'if not mine and out["projects"].get("ok"):' in src
-    assert dd.MINE != dd.ALL

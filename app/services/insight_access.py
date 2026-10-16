@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import ManagerAlias, User
 from app.services import insight_triage as it
+from app.services import project_kpis as pk
 from app.services import stage_sectors as ss
 
 ADMIN_SECTIONS = frozenset({"leading", "risk", "waves", "health", "lists"})
@@ -93,11 +94,10 @@ def summarize(projects: list[dict], as_of: str | None) -> dict:
         "baseline_later": sum(p["baseline_moved"] for p in based), "baseline_n": len(based),
         "stuck": sum(p["stuck"] for p in projects),
         "stale": sum(p["stale"] for p in projects),
-        "undated": sum(p["undated"] for p in projects),
-        "over_approved": sum(bool(p.get("over_approved")) for p in projects),
-        "approved_lost": sum(bool(p.get("approved_lost")) for p in projects),
+        # the cards the dashboard shows too: counted by project_kpis, the ONE definition
+        **{key: sum(1 for p in projects if test(p, as_of))
+           for key, (_, _, test) in pk.ENGINE_KPIS.items()},
         "with_approved": sum(1 for p in projects if p.get("appr")),
-        "past_due": sum(1 for p in projects if p["fc"] and as_of and p["fc"] < as_of),
     }
 
 
@@ -178,10 +178,9 @@ _PROJECT_TESTS = {
     "baseline": ("יעד תכנית פיתוח נדחה", lambda x: x["baseline_moved"] is True),
     "stuck": ("תקועים 12+ שבועות", lambda x: x["stuck"]),
     "stale": ("דיווח שבועי זהה", lambda x: x["stale"]),
-    "undated": ("ללא יעד חשמול (המלל נקרא)", lambda x: x["undated"]),
-    "over_approved": ("חורגים מהיעד המאושר", lambda x: bool(x.get("over_approved"))),
-    "approved_lost": ("יעד מאושר ללא יעד מסתמן", lambda x: bool(x.get("approved_lost"))),
-    "late": ("מאחרים מול תכנית פיתוח", lambda x: x["late"]),
+    # the dashboard's cards: the label and the test both come from project_kpis
+    **{key: (label, lambda x, t=test: t(x, None))
+       for key, (label, _, test) in pk.ENGINE_KPIS.items() if key != "past_due"},
     "all": ("כל הפרויקטים", lambda x: True),
 }
 UNASSIGNED = "טרם הוקצה"   # the league's label for a project with no מנה"פ
@@ -211,7 +210,8 @@ def drill_for(view: dict, p: dict, kind: str, value: str = "", metric: str = "al
 
     if kind == "tile":
         if value == "past_due":
-            return project_rows("יעד מסתמן כבר עבר", lambda x: bool(x["fc"] and as_of and x["fc"] < as_of))
+            label, _, test = pk.ENGINE_KPIS["past_due"]
+            return project_rows(label, lambda x: test(x, as_of))
         if value in _PROJECT_TESTS:
             return project_rows(_PROJECT_TESTS[value][0], _PROJECT_TESTS[value][1])
         return None

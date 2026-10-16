@@ -17,6 +17,7 @@ access; `save` / `latest` the only DB access, both best-effort.
 import datetime
 import logging
 import re
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -24,6 +25,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 logger = logging.getLogger(__name__)
 
 SHEET_MARKER = "תקציר הנהלה"
+RECORD_MARKER = "עדכני"     # = project_sync.MASTER_SHEET_MARKER: the record sheet the formulas count
+DRAFT_MARKER = "טיוטה"
 HEADER_CELL_CHARS = 40        # a header cell is a short label, never a sentence
 CELL_CHARS = 600              # one cell on screen; the file keeps the rest
 ID_HEADERS = ("מזהה", "זיהוי")  # this column links to the project page
@@ -74,16 +77,17 @@ def _cell(v) -> str:
     return s if len(s) <= CELL_CHARS else s[:CELL_CHARS - 1] + "…"
 
 
-def _kpi_pairs(cells: list) -> list[list] | None:
-    """[label, number, label, number…] → pairs; None when the row is not that."""
-    vals = [v for v in cells if v is not None and str(v).strip() != ""]
+def _kpi_pairs(cells: list) -> list[tuple[str, Any, int]] | None:
+    """[label, number, label, number…] → (label, value, value's column index);
+    None when the row is not that."""
+    vals = [(i, v) for i, v in enumerate(cells) if v is not None and str(v).strip() != ""]
     if not vals or len(vals) % 2:
         return None
     pairs = []
-    for label, value in zip(vals[::2], vals[1::2]):
+    for (_, label), (col, value) in zip(vals[::2], vals[1::2]):
         if not isinstance(label, str) or _numeric_text(label) or not _is_num(value):
             return None
-        pairs.append([label.strip(), int(value) if float(value).is_integer() else value])
+        pairs.append((label.strip(), int(value) if float(value).is_integer() else value, col))
     return pairs
 
 
@@ -94,14 +98,18 @@ def _is_header(cells: list) -> bool:
         for v in vals)
 
 
-def parse_rows(rows: list[list], sheet: str = "") -> dict:
-    """Rows of raw cell values (column order kept) → the dashboard payload."""
+def parse_rows(rows: list[list], sheet: str = "", formula_rows: list[list] | None = None) -> dict:
+    """Rows of raw cell values (column order kept) → the dashboard payload.
+
+    formula_rows: the same sheet read WITH formulas — each KPI keeps the formula
+    behind its number, so the number can be re-counted over the record sheet
+    (`resolve`) and every card opens the exact projects it counts."""
     out = {"sheet": sheet, "as_of": None, "title": None, "subtitle": None,
            "kpis": [], "sections": []}
     d = sheet_date(sheet)
     out["as_of"] = d.isoformat() if d else None
     section = None
-    for raw in rows:
+    for row_i, raw in enumerate(rows):
         cells = list(raw)
         while cells and (cells[-1] is None or str(cells[-1]).strip() == ""):
             cells.pop()
@@ -120,7 +128,13 @@ def parse_rows(rows: list[list], sheet: str = "") -> dict:
             continue
         pairs = _kpi_pairs(cells)
         if pairs and section is None:
-            out["kpis"].extend(pairs)
+            for label, value, col in pairs:
+                f = None
+                if formula_rows and row_i < len(formula_rows) and col < len(formula_rows[row_i]):
+                    f = formula_rows[row_i][col]
+                out["kpis"].append({"label": label, "value": value,
+                                    "formula": f if isinstance(f, str) and f.startswith("=") else None,
+                                    "ids": None})
             continue
         if section is None:
             section = {"title": None, "header": None, "rows": [], "id_col": None}
@@ -151,13 +165,118 @@ def parse_rows(rows: list[list], sheet: str = "") -> dict:
     return out
 
 
+# ── Re-counting a KPI over the record sheet ────────────────────────────────
+# The summary's numbers are Excel formulas over "דוח שבועי עדכני" — COUNTA /
+# COUNTIF / COUNTIFS of filled or empty cells. Re-running them here gives the
+# PROJECTS behind each number, so the dashboard counts them over the ACTIVE
+# projects only (user decision 2026-10-16) and every card opens its own list.
+_FUNC = re.compile(r"^=\s*(COUNTA|COUNTIFS|COUNTIF)\s*\((.*)\)\s*$", re.I | re.S)
+_RANGE = re.compile(r"^(?:'((?:[^']|'')+)'|([^!'\s]+))!\$?([A-Z]{1,3})\$?(\d+):\$?([A-Z]{1,3})\$?(\d+)$")
+
+
+def _split_args(s: str) -> list[str]:
+    out, cur, quoted = [], "", False
+    for ch in s:
+        if ch == '"':
+            quoted = not quoted
+        if ch == "," and not quoted:
+            out.append(cur.strip())
+            cur = ""
+        else:
+            cur += ch
+    out.append(cur.strip())
+    return out
+
+
+def _col_index(letters: str) -> int:
+    n = 0
+    for ch in letters:
+        n = n * 26 + ord(ch.upper()) - 64
+    return n - 1
+
+
+def _filled(v) -> bool:
+    return v is not None and str(v).strip() != ""
+
+
+def _criterion(arg: str):
+    """A COUNTIF criterion → test(value) | None when not a form we can trust."""
+    if not (arg.startswith('"') and arg.endswith('"')):
+        return None
+    c = arg[1:-1]
+    if c == "<>":
+        return _filled
+    if c == "":
+        return lambda v: not _filled(v)
+    if c.startswith("<>"):
+        return lambda v, x=c[2:]: str(v).strip() != x if _filled(v) else True
+    c = c[1:] if c.startswith("=") else c
+    if any(op in c for op in ("<", ">", "*", "?")):
+        return None
+    return lambda v, x=c: _filled(v) and str(v).strip() == x
+
+
+def resolve(formula: str | None, sheet: str, rows: list[list], ident_col: int) -> list[str] | None:
+    """The identifiers of the record-sheet rows a summary formula counts.
+    rows: the record sheet, 0-based (rows[0] = Excel row 1). None = a formula
+    this module does not re-run (the card then shows the file's own number)."""
+    m = _FUNC.match(formula or "")
+    if not m:
+        return None
+    func, args = m.group(1).upper(), _split_args(m.group(2))
+    conds: list[tuple[int, int, int, Any]] = []      # (col, first row, last row, test)
+    if func == "COUNTA":
+        pairs = [(a, None) for a in args]
+        if len(pairs) != 1:
+            return None
+    elif func == "COUNTIF" and len(args) == 2:
+        pairs = [(args[0], args[1])]
+    elif func == "COUNTIFS" and len(args) >= 2 and len(args) % 2 == 0:
+        pairs = list(zip(args[::2], args[1::2]))
+    else:
+        return None
+    for rng, crit in pairs:
+        r = _RANGE.match(rng.strip())
+        if not r:
+            return None
+        name = (r.group(1) or r.group(2) or "").replace("''", "'")
+        if name.strip() != sheet.strip() or r.group(3) != r.group(5):
+            return None
+        test = _filled if crit is None else _criterion(crit)
+        if test is None:
+            return None
+        conds.append((_col_index(r.group(3)), int(r.group(4)), int(r.group(6)), test))
+    first, last = max(c[1] for c in conds), min(c[2] for c in conds)
+    if any(c[1] != first or c[2] != last for c in conds):
+        return None                                  # ranges must line up row by row
+    ids = []
+    for excel_row in range(first, last + 1):
+        row = rows[excel_row - 1] if excel_row - 1 < len(rows) else []
+        cell = lambda i: row[i] if i < len(row) else None   # noqa: E731
+        if all(test(cell(col)) for col, _, _, test in conds):
+            ident = cell(ident_col)
+            if _filled(ident):
+                ids.append(str(ident).strip())
+    return ids
+
+
+def _ident_col(rows: list[list]) -> int | None:
+    for row in rows[:6]:
+        for i, v in enumerate(row):
+            if isinstance(v, str) and v.strip() == "זיהוי":
+                return i
+    return None
+
+
 def read_file(file_path: str) -> dict | None:
-    """The summary sheet of an XLSX, parsed; None when the workbook has none."""
+    """The summary sheet of an XLSX, parsed, each KPI with the projects it counts;
+    None when the workbook has none."""
     if not str(file_path).lower().endswith((".xlsx", ".xlsm")):
         return None
     import openpyxl
     try:
         wb = openpyxl.load_workbook(file_path, data_only=True, read_only=True)
+        wf = openpyxl.load_workbook(file_path, data_only=False, read_only=True)
     except Exception as exc:
         logger.warning(f"exec_summary: cannot open {file_path}: {exc}")
         return None
@@ -167,12 +286,23 @@ def read_file(file_path: str) -> dict | None:
             logger.info(f"exec_summary: no '{SHEET_MARKER}' sheet in {file_path} — dashboard keeps the previous one")
             return None
         rows = [list(r) for r in wb[name].iter_rows(values_only=True)]
+        formulas = [list(r) for r in wf[name].iter_rows(values_only=True)]
+        record = next((n for n in wb.sheetnames if RECORD_MARKER in n and DRAFT_MARKER not in n), None)
+        record_rows = [list(r) for r in wb[record].iter_rows(values_only=True)] if record else []
     finally:
         wb.close()
-    payload = parse_rows(rows, name)
+        wf.close()
+    payload = parse_rows(rows, name, formulas)
     if not payload["kpis"] and not payload["sections"]:
         logger.warning(f"exec_summary: sheet '{name}' parsed empty")
         return None
+    ident_col = _ident_col(record_rows)
+    for k in payload["kpis"]:
+        if record and ident_col is not None:
+            k["ids"] = resolve(k["formula"], record, record_rows, ident_col)
+        if k["ids"] is not None and len(k["ids"]) != k["value"]:
+            logger.warning(f"exec_summary: '{k['label']}' — file says {k['value']}, re-count found "
+                           f"{len(k['ids'])} rows with an identifier")
     return payload
 
 
