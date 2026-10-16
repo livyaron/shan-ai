@@ -123,6 +123,18 @@ async def projects_data(
     ])
 
 
+async def _sync_and_summarize(file_path: str, original_name: str | None) -> None:
+    """Sync the record sheet, then (live reports only) its "תקציר הנהלה" sheet."""
+    from app.services import exec_summary
+    from app.database import async_session_maker
+    from app.services.project_sync import deactivate_missing, sync_projects_file
+    result = await sync_projects_file(file_path)
+    if result.get("processed") and not result.get("historical"):
+        async with async_session_maker() as session:
+            await deactivate_missing(session, result.get("identifiers"))
+        await exec_summary.save_from_file(file_path, original_name)
+
+
 @router.post("/upload")
 async def upload_project_file(
     background_tasks: BackgroundTasks,
@@ -145,8 +157,7 @@ async def upload_project_file(
     file_path.write_bytes(contents)
 
     # Dispatch to background task
-    from app.services.project_sync import sync_projects_file
-    background_tasks.add_task(sync_projects_file, str(file_path))
+    background_tasks.add_task(_sync_and_summarize, str(file_path), file.filename)
 
     return JSONResponse({
         "status": "ok",

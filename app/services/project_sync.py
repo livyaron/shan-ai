@@ -804,6 +804,27 @@ async def generate_all_briefs() -> None:
 MASTER_SHEET_MARKER = "עדכני"   # "דוח שבועי עדכני" — the sheet that is the record
 
 
+MIN_INVENTORY = 50   # fewer identifiers than this = a broken parse, never "the division shrank"
+
+
+async def deactivate_missing(session, identifiers) -> int:
+    """The record sheet is the full inventory: an active project missing from it
+    is no longer active. Skipped when the parse looks broken (or was a history
+    replay, which returns no identifiers) — an upload must never wipe the table."""
+    idents = set(identifiers or ())
+    if len(idents) < MIN_INVENTORY:
+        return 0
+    from sqlalchemy import update as sa_update
+    res = await session.execute(
+        sa_update(Project)
+        .where(Project.is_active.is_(True), Project.project_identifier.notin_(idents))
+        .values(is_active=False)
+        .execution_options(synchronize_session=False)
+    )
+    await session.commit()
+    return res.rowcount or 0
+
+
 def pick_master_sheet(file_path: str) -> str | None:
     """The sheet of a master workbook that holds the weekly report.
 
