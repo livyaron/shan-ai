@@ -214,3 +214,17 @@ def test_every_league_and_sector_label_links_to_its_drill():
             link = urlencode({"drill": "manager", "dv": r["manager"], "dm": "all"}) + "&" + urlencode({"ds": st})
             assert link in html, (r["manager"], st)
     assert "drill=stage" in html and "dm=any" in html
+
+
+def test_the_fyi_column_names_its_projects():
+    """User, 2026-10-16: the 🟢 לידיעה column showed a count and nothing else."""
+    view = ia.view_for(ia.Scope(admin=True), P_WITH_HEALTH)
+    fyi = view["triage"]["fyi"]
+    html = _admin_html()
+    start = html.index('tri-col lvb-fyi">')
+    col = html[start:html.index('class="ai-box"', start)]
+    assert "אף כלל לא הופעל" in col
+    if fyi:
+        assert f'/dashboard/projects/p/{fyi[0]["identifier"]}' in col
+    else:
+        assert "לכל פרויקט פעיל הופעל לפחות כלל אחד" in col
