@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { ChevronRight, ExternalLink, FileText, Monitor, X } from "lucide-react";
 import { useUser } from "@/context/UserContext";
 import { Button } from "@/components/ui/button";
-import { useActionRequired } from "@/hooks/useActionRequired";
+import LessonActions from "@/components/mobile/LessonActions";
 import { riskColors, riskLabels, statusLabels } from "@/lib/constants";
 import { isDraft } from "@/lib/lessonAssignment";
 import { isImageUrl } from "@/lib/lessonFiles";
@@ -16,8 +16,7 @@ import { ilDate } from "@/lib/ilDate";
 const MobileLessonView = () => {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { lessons, users, equipment, implementations, projects, referentReviews, currentUser } = useUser();
-  const { lessonNeedsAction } = useActionRequired(lessons, implementations, projects, currentUser, referentReviews);
+  const { lessons, users, equipment, currentUser } = useUser();
   const [zoom, setZoom] = useState(false);
 
   const lesson = lessons.find((l) => l.id === Number(id));
@@ -32,7 +31,6 @@ const MobileLessonView = () => {
 
   const name = (uid?: string) => (uid ? users.find((u) => u.id === uid)?.name ?? "" : "");
   const eqNames = equipment.filter((e) => lesson.equipmentIds.includes(e.id)).map((e) => e.name);
-  const action = lessonNeedsAction(lesson.id);
   const mineDraft = isDraft(lesson) && lesson.createdBy === currentUser.id;
   const back = () => (window.history.length > 1 ? navigate(-1) : navigate("/m/lessons"));
 
@@ -55,7 +53,6 @@ const MobileLessonView = () => {
               <span className="rounded-full border border-border px-2 py-0.5">{lesson.workflowStatus}</span>
             )}
           </div>
-          {action.needed && <p className="text-sm rounded-lg bg-warning/15 text-warning px-3 py-2 font-medium">{action.label}</p>}
         </div>
 
         {mineDraft && (
@@ -63,6 +60,8 @@ const MobileLessonView = () => {
             ✏️ השלמה בשלבים
           </Button>
         )}
+
+        <LessonActions lesson={lesson} />
 
         <dl className="grid grid-cols-2 gap-x-4 gap-y-3 text-sm rounded-xl bg-muted/40 p-4">
           <Item label="פרויקט" value={lesson.project} wide />
@@ -113,7 +112,7 @@ const MobileLessonView = () => {
         )}
 
         <Link to={`/lessons/${lesson.id}`} className="flex items-center justify-center gap-2 py-3 text-sm text-muted-foreground">
-          <Monitor className="w-4 h-4" /> פתיחה בתצוגה המלאה (תגובה, אישור, היסטוריה)
+          <Monitor className="w-4 h-4" /> פתיחה בתצוגה המלאה (היסטוריה, הפצה, AI)
         </Link>
       </main>
 

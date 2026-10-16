@@ -1,9 +1,10 @@
 import { useEffect } from "react";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { BookOpen, FileEdit, Home, Plus } from "lucide-react";
+import { BookOpen, ClipboardCheck, FileEdit, Home, Plus } from "lucide-react";
 import { useUser } from "@/context/UserContext";
 import { cn } from "@/lib/utils";
 import { showsTabBar } from "@/lib/standalone";
+import { useMyTasks } from "@/hooks/useMyTasks";
 
 /**
  * Full-screen frame for the phone screens under /m (PLAN-lessons-mobile.md):
@@ -14,6 +15,7 @@ import { showsTabBar } from "@/lib/standalone";
 const TABS = [
   { to: "/m", label: "בית", icon: Home, end: true },
   { to: "/m/lessons", label: "לקחים", icon: BookOpen, end: false },
+  { to: "/m/tasks", label: "משימות", icon: ClipboardCheck, end: true },
   { to: "/m/drafts", label: "טיוטות", icon: FileEdit, end: true },
 ];
 
@@ -23,6 +25,7 @@ const MobileShell = () => {
   const { pathname } = useLocation();
   const canAdd = hasPermission("add_lessons");
   const isWizard = !showsTabBar(pathname);
+  const taskCount = useMyTasks().length;
 
   useEffect(() => {
     if (!isLoading && !isLoggedIn) navigate("/login", { replace: true });
@@ -53,7 +56,7 @@ const MobileShell = () => {
           aria-label="ניווט"
           className="fixed bottom-0 inset-x-0 z-30 bg-background/95 backdrop-blur border-t border-border pb-[env(safe-area-inset-bottom)]"
         >
-          <div className="grid grid-cols-4 h-16">
+          <div className="grid grid-cols-5 h-16">
             {TABS.slice(0, 2).map((t) => <Tab key={t.to} {...t} />)}
             {canAdd ? (
               <Link to="/m/new" aria-label="לקח חדש" className="flex items-center justify-center">
@@ -62,7 +65,8 @@ const MobileShell = () => {
                 </span>
               </Link>
             ) : <span />}
-            {canAdd ? <Tab {...TABS[2]} /> : <span />}
+            <Tab {...TABS[2]} badge={taskCount} />
+            {canAdd ? <Tab {...TABS[3]} /> : <span />}
           </div>
         </nav>
       )}
@@ -70,7 +74,7 @@ const MobileShell = () => {
   );
 };
 
-const Tab = ({ to, label, icon: Icon, end }: (typeof TABS)[number]) => (
+const Tab = ({ to, label, icon: Icon, end, badge }: (typeof TABS)[number] & { badge?: number }) => (
   <NavLink
     to={to}
     end={end}
@@ -78,7 +82,12 @@ const Tab = ({ to, label, icon: Icon, end }: (typeof TABS)[number]) => (
       cn("flex flex-col items-center justify-center gap-0.5 text-xs", isActive ? "text-primary font-medium" : "text-muted-foreground")
     }
   >
-    <Icon className="w-5 h-5" />
+    <span className="relative">
+      <Icon className="w-5 h-5" />
+      {!!badge && (
+        <span className="absolute -top-1.5 -left-2 min-w-4 h-4 px-1 rounded-full bg-destructive text-[10px] leading-4 text-destructive-foreground text-center">{badge}</span>
+      )}
+    </span>
     {label}
   </NavLink>
 );

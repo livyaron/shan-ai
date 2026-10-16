@@ -4,7 +4,7 @@ import { Bell, FileEdit, LogOut, Monitor, Plus } from "lucide-react";
 import { useUser, roleLabels } from "@/context/UserContext";
 import { Button } from "@/components/ui/button";
 import LessonCard from "@/components/mobile/LessonCard";
-import { useActionRequired } from "@/hooks/useActionRequired";
+import { useMyTasks } from "@/hooks/useMyTasks";
 import { isDraft } from "@/lib/lessonAssignment";
 import { hasContent, loadLocalDraft } from "@/lib/lessonDraft";
 import { myScope } from "@/lib/lessonScope";
@@ -15,8 +15,8 @@ const RECENT = 5;
 /** The phone's home (PLAN-lessons-mobile.md M2): add a lesson, what waits for me, my latest. */
 const MobileHome = () => {
   const navigate = useNavigate();
-  const { currentUser, lessons, implementations, projects, referentReviews, unreadCount, hasPermission, logout } = useUser();
-  const { totalActionCount } = useActionRequired(lessons, implementations, projects, currentUser, referentReviews);
+  const { currentUser, lessons, unreadCount, hasPermission, logout } = useUser();
+  const taskCount = useMyTasks().length;
   const canAdd = hasPermission("add_lessons");
 
   const draftCount = useMemo(() => {
@@ -68,8 +68,8 @@ const MobileHome = () => {
         )}
 
         <div className="grid grid-cols-2 gap-3">
-          <Link to="/m/lessons?action=1" className="rounded-xl border border-border bg-card p-4 active:bg-muted">
-            <p className="text-3xl font-bold">{totalActionCount}</p>
+          <Link to="/m/tasks" className="rounded-xl border border-border bg-card p-4 active:bg-muted">
+            <p className="text-3xl font-bold">{taskCount}</p>
             <p className="text-sm text-muted-foreground">ממתינים לי</p>
           </Link>
           {canAdd ? (
