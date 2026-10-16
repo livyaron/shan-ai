@@ -194,7 +194,8 @@ const LessonWizard = () => {
     navigate("/m/new", { replace: true });
   };
 
-  const exit = () => navigate("/lessons");
+  // Phone home; the computer layout's users came from /lessons and "back" takes them there.
+  const exit = () => (window.history.length > 1 ? navigate(-1) : navigate("/m"));
 
   // First: a lesson just sent is no longer a draft, and must not read as "not allowed".
   if (done) {
@@ -225,7 +226,7 @@ const LessonWizard = () => {
           <Button variant="outline" className="w-full h-12 text-base" onClick={() => navigate("/m/drafts")}>
             הטיוטות שלי
           </Button>
-          <Button variant="ghost" className="w-full h-12 text-base" onClick={exit}>
+          <Button variant="ghost" className="w-full h-12 text-base" onClick={() => navigate("/m/lessons")}>
             לרשימת הלקחים
           </Button>
         </div>

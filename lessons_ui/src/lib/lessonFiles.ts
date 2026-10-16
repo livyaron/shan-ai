@@ -48,3 +48,8 @@ export const uploadLessonFile = async (file: File): Promise<string> => {
   if (error) throw error;
   return supabase.storage.from(BUCKET).getPublicUrl(path).data.publicUrl;
 };
+
+const IMAGE_EXT = /\.(jpe?g|png|gif|webp|heic|heif)(\?|#|$)/i;
+
+/** An attachment the phone shows as a picture (by its name — the URL carries no type). */
+export const isImageUrl = (url: string | undefined): boolean => !!url && IMAGE_EXT.test(url);

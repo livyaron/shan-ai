@@ -198,3 +198,21 @@ lessons page (the dialog stays for `md` and up), from `?newLesson=<project>` on 
   lesson, since the provider's state lags a render. `updateLesson` can change the project.
 - Photos are shrunk on the phone before upload (`lessonFiles.ts`: long side 1600 px, JPEG 0.82).
 - Only the creator's **draft** opens in the wizard; a lesson already sent is edited on the computer.
+
+## Phone browsing — M2 (PLAN-lessons-mobile.md, 2026-10-16)
+
+`/lessons/m` (home), `/lessons/m/lessons` (list), `/lessons/m/lessons/<id>` (read-only view), inside
+`MobileShell` with a bottom tab bar (בית / לקחים / ➕ / טיוטות; never on the wizard — `showsTabBar`).
+
+- **A phone opens `/m`** when it loads `/` (`App.tsx` `HomeRoute`, `opensPhoneHome()` = phone width
+  and no `lessons.preferDesktop`). "תצוגת מחשב" on the home sets the preference; "תצוגת טלפון" in the
+  computer layout's top bar (phones only) clears it.
+- **Who sees which lessons** = `lib/lessonScope.ts` (`myScope` / `scopedLessons` / `canToggleScope`),
+  moved out of `Lessons.tsx`; the computer's list and the phone list both call it. Drafts of others
+  are already filtered by the provider (`isVisibleLesson`).
+- List: search (title / project / description), "שלי / הכול", "ממתינים לי" (`useActionRequired`, the
+  same "needs action" as the computer), project; what waits for me first, then newest; 30 more per scroll.
+  Filters live in the URL, so "back" from a lesson keeps them.
+- View: read only; an image attachment opens full screen; a draft of mine → "✏️ השלמה בשלבים";
+  responding / approving stays on the full page (`/lessons/<id>`) until M3.
+- Dates people read on the phone are DD/MM/YYYY (`lib/ilDate.ts`).
