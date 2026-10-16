@@ -176,6 +176,20 @@ async def test_in_app_login_needs_no_session_but_nothing_else_opens(built):
             assert r.status_code == 303 and r.headers["location"].startswith("/login?next="), path
 
 
+@pytest.mark.asyncio
+async def test_precached_shell_is_the_app_never_the_login_page(built):
+    # The service worker fetches /lessons/index.html without a session; a 303 there
+    # was stored as the shell and every login "bounced" back to the form.
+    async with _client() as c:
+        r = await c.get("/lessons/index.html?__WB_REVISION__=abc", follow_redirects=False)
+    assert r.status_code == 200 and r.text == "<html>APP</html>"
+
+
+def test_shell_revision_marker_is_present():
+    # Its bump is what evicts a poisoned precache from phones already in the field.
+    assert '<meta name="shell-revision"' in Path("lessons_ui/index.html").read_text(encoding="utf-8")
+
+
 def test_spa_sends_a_missing_session_to_its_own_login():
     client = Path("lessons_ui/src/integrations/supabase/client.ts").read_text(encoding="utf-8")
     assert 'export const SHAN_LOGIN_URL = "/lessons/login";' in client
