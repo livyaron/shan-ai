@@ -76,6 +76,7 @@ def _render(**over):
         recent_decisions=[], role_counts={}, pending_approvals=0, raci_counts={}, written_count=0,
         type_labels_he={"critical": "קריטי"}, status_labels_he={"pending": "ממתין"},
         stations={"missions": {"ok": False}, "projects": {"ok": False}, "lessons": {"ok": False}},
+        scope="mine", decisions_all=False, scope_labels={"mine": "שלי", "all": "כל האגף"},
     )
     ctx.update(over)
     return templates.env.get_template("dashboard.html").render(ctx)

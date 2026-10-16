@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Form, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, or_, exists, update, delete, desc
+from sqlalchemy import select, func, or_, exists, update, delete, desc, true
 
 from app.database import get_db_session
 from app.models import Decision, User, DecisionTypeEnum, DecisionStatusEnum, RoleEnum, DecisionDistribution, DistributionTypeEnum, DistributionStatusEnum, DecisionFeedback, DecisionRaciRole, RaciRoleEnum, LessonLearned, Message, KnowledgeFile, QueryLog, RACISuggestion, RACISuggestionStatusEnum, RACIRule, ReportHistory, Mission, MissionUpdate, MissionDueChange
@@ -88,13 +88,21 @@ async def _pending_approvals_count(user_id: int, session: AsyncSession) -> int:
     return result.scalar() or 0
 
 
+DASHBOARD_SCOPE_COOKIE = "dash_scope"   # שלי / כל האגף, remembered per browser
 DASHBOARD_DAYS = 7          # the daily sparkline window, zero-filled so every day shows
 
 
-async def _dashboard_stats(current_user: User, session: AsyncSession) -> dict:
+async def _dashboard_stats(current_user: User, session: AsyncSession,
+                           scope: str = dashboard_domains.MINE) -> dict:
     """Everything the main dashboard shows. The page renders it once and
-    `/dashboard/live` re-serves it as JSON, so the two can never disagree."""
+    `/dashboard/live` re-serves it as JSON, so the two can never disagree.
+
+    scope "all" widens decisions for an admin only — the decisions page shows
+    everyone else just the decisions they are involved in, and this page must
+    not become a way around that. The personal rows (pending approvals, RACI,
+    written) stay personal in both scopes."""
     uid = current_user.id
+    decisions_all = scope == dashboard_domains.ALL and bool(current_user.is_admin)
 
     # Subquery: decisions distributed to this user
     _dist_sent = exists(
@@ -110,7 +118,7 @@ async def _dashboard_stats(current_user: User, session: AsyncSession) -> dict:
             DecisionRaciRole.user_id == uid,
         )
     )
-    _involved = or_(Decision.submitter_id == uid, _dist_sent, _raci_assigned)
+    _involved = true() if decisions_all else or_(Decision.submitter_id == uid, _dist_sent, _raci_assigned)
 
     # --- Counts by type ---
     type_counts_q = await session.execute(
@@ -241,7 +249,9 @@ async def _dashboard_stats(current_user: User, session: AsyncSession) -> dict:
         "raci_counts": raci_counts,
         "written_count": written_count,
         # the other three stations on the page (missions / projects / lessons)
-        "stations": await dashboard_domains.all_domains(session, DASHBOARD_DAYS),
+        "scope": scope,
+        "decisions_all": decisions_all,
+        "stations": await dashboard_domains.all_domains(session, DASHBOARD_DAYS, current_user, scope),
     }
 
 
@@ -250,22 +260,33 @@ async def dashboard(
     request: Request,
     session: AsyncSession = Depends(get_db_session),
     current_user: User = Depends(get_current_user),
+    scope: str | None = None,
 ):
-    stats = await _dashboard_stats(current_user, session)
-    return templates.TemplateResponse("dashboard.html", {
+    scope = dashboard_domains.resolve_scope(scope, request.cookies.get(DASHBOARD_SCOPE_COOKIE),
+                                            bool(current_user.is_admin))
+    stats = await _dashboard_stats(current_user, session, scope)
+    response = templates.TemplateResponse("dashboard.html", {
         "request": request,
         "current_user": current_user,
+        "scope_labels": dashboard_domains.SCOPES,
         **stats,
     })
+    # remembered per browser: the next visit opens on the same switch position
+    response.set_cookie(DASHBOARD_SCOPE_COOKIE, scope, max_age=365 * 86400, samesite="lax", httponly=True)
+    return response
 
 
 @router.get("/live")
 async def dashboard_live(
+    request: Request,
     session: AsyncSession = Depends(get_db_session),
     current_user: User = Depends(get_current_user),
+    scope: str | None = None,
 ):
     """The same numbers as the page, polled by it so the counters move without a reload."""
-    stats = await _dashboard_stats(current_user, session)
+    scope = dashboard_domains.resolve_scope(scope, request.cookies.get(DASHBOARD_SCOPE_COOKIE),
+                                            bool(current_user.is_admin))
+    stats = await _dashboard_stats(current_user, session, scope)
     stats.pop("type_labels_he")
     stats.pop("status_labels_he")
     stats["server_time"] = datetime.utcnow().isoformat(timespec="seconds")

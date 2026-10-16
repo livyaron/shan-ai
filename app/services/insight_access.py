@@ -98,15 +98,24 @@ def summarize(projects: list[dict], as_of: str | None) -> dict:
     }
 
 
+def sees_all(scope: Scope) -> bool:
+    """Admin and the PM department see every project."""
+    return scope.admin or scope.sector == ss.PM_DEPT
+
+
+def sees_project(scope: Scope, sectors, manager: str | None) -> bool:
+    """The one rule for "is this project in the viewer's scope": the patterns
+    page (view_for) and the main dashboard's "שלי" both ask it."""
+    return (sees_all(scope)
+            or bool(scope.sector and scope.sector in sectors)
+            or manager in scope.managers)
+
+
 def view_for(scope: Scope, p: dict) -> dict:
     """What this viewer gets from the engine output `p`."""
     all_projects = p.get("projects", [])
-    full = scope.admin or scope.sector == ss.PM_DEPT
-    if full:
-        projects = all_projects
-    else:
-        projects = [x for x in all_projects
-                    if (scope.sector and scope.sector in x["sectors"]) or x["manager"] in scope.managers]
+    full = sees_all(scope)
+    projects = [x for x in all_projects if sees_project(scope, x["sectors"], x["manager"])]
 
     sections = {"tiles", "projects"}
     if full or scope.managers:
