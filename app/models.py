@@ -567,6 +567,22 @@ class PatternAIAnalysis(Base):
     __table_args__ = (UniqueConstraint("kind", "as_of", name="uq_pattern_ai_kind_as_of"),)
 
 
+class ProjectExecSummary(Base):
+    """The master file's "תקציר הנהלה" sheet, as parsed (app/services/exec_summary.py).
+
+    One row per LIVE master upload; the dashboard shows the newest. Its shape
+    (how many KPIs, which tables) follows the file, so it is stored as JSON.
+    """
+    __tablename__ = "project_exec_summaries"
+
+    id          = Column(Integer, primary_key=True)
+    sheet_name  = Column(String(120), nullable=False)
+    as_of       = Column(Date, nullable=True)          # the date in the sheet name
+    source_file = Column(String(300), nullable=True)
+    payload     = Column(JSON, nullable=False)
+    created_at  = Column(DateTime, default=datetime.utcnow)
+
+
 # =============================================================================
 # Eval & Self-Repair Loop tables
 # =============================================================================

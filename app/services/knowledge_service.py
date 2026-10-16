@@ -815,22 +815,28 @@ async def process_master_file(file_id: int) -> None:
             await session.commit()
             logger.info(f"process_master_file {file_id}: {len(all_chunks)} project-block chunks stored")
 
-            # Sync to Projects table — iterate ALL sheets so every project gets updated
+            # Sync to Projects table — the record sheet ONLY ("דוח שבועי עדכני").
+            # Syncing every sheet turned the workbook's other tabs (כל הפרויקטים
+            # כולל שושים, מנוע חשמולים, סיכוני דחייה…) into ~550 phantom active
+            # projects: 817 on the dashboard against the file's 263.
             # File stays "processing" until sync completes so the progress banner stays visible.
             try:
-                from app.services.project_sync import sync_projects_file
+                from app.services.project_sync import pick_master_sheet, sync_projects_file
                 total = {"processed": 0, "created": 0, "updated": 0, "errors": []}
                 synced_idents: set[str] = set()
-                for sn in xls.sheet_names:
-                    try:
-                        sr = await sync_projects_file(str(path), sheet_name=sn)
-                        total["processed"] += sr["processed"]
-                        total["created"] += sr["created"]
-                        total["updated"] += sr["updated"]
-                        total["errors"].extend(sr["errors"])
-                        synced_idents.update(sr.get("identifiers", []))
-                    except Exception as sheet_err:
-                        logger.warning(f"process_master_file {file_id}: sheet '{sn}' sync failed: {sheet_err}")
+                sn = await asyncio.get_event_loop().run_in_executor(None, pick_master_sheet, str(path))
+                try:
+                    sr = await sync_projects_file(str(path), sheet_name=sn)
+                    total["processed"] += sr["processed"]
+                    total["created"] += sr["created"]
+                    total["updated"] += sr["updated"]
+                    total["errors"].extend(sr["errors"])
+                    synced_idents.update(sr.get("identifiers", []))
+                    if sr.get("processed") and not sr.get("historical"):
+                        from app.services import exec_summary
+                        await exec_summary.save_from_file(str(path), kf.original_name)
+                except Exception as sheet_err:
+                    logger.warning(f"process_master_file {file_id}: sheet '{sn}' sync failed: {sheet_err}")
                 if total["errors"]:
                     logger.warning(
                         f"process_master_file {file_id}: project sync errors: {total['errors'][:5]}"
@@ -847,22 +853,10 @@ async def process_master_file(file_id: int) -> None:
                 # projects that no longer appear in it. Guard: skip when the
                 # parse yields suspiciously few identifiers, so a broken upload
                 # can't wipe the whole projects table.
-                if len(synced_idents) >= 50:
-                    from sqlalchemy import update as _sa_update
-                    from app.models import Project
-                    res = await session.execute(
-                        _sa_update(Project)
-                        .where(Project.is_active.is_(True),
-                               Project.project_identifier.notin_(synced_idents))
-                        .values(is_active=False)
-                        .execution_options(synchronize_session=False)
-                    )
-                    await session.commit()
-                    if res.rowcount:
-                        logger.info(
-                            f"process_master_file {file_id}: deactivated "
-                            f"{res.rowcount} projects absent from master"
-                        )
+                from app.services.project_sync import deactivate_missing
+                gone = await deactivate_missing(session, synced_idents)
+                if gone:
+                    logger.info(f"process_master_file {file_id}: deactivated {gone} projects absent from master")
             except Exception as sync_err:
                 logger.warning(f"process_master_file {file_id}: project sync failed (non-fatal): {sync_err}")
 

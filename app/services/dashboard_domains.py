@@ -27,7 +27,7 @@ from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Mission, MissionStatusEnum, Project, User
-from app.services import insight_access
+from app.services import exec_summary, insight_access
 from app.services import missions_menu_service as oms
 from app.services import stage_sectors
 from app.services import war_room_kpis as kpis
@@ -312,4 +312,21 @@ async def all_domains(session: AsyncSession, n_days: int, user: User | None = No
         except Exception:
             logger.exception("dashboard station %s failed", key)
             out[key] = {"ok": False}
+    # "All" = the division as the PM department itself summarised it: the master
+    # file's "תקציר הנהלה" sheet, shown as written (exec_summary). "Mine" stays
+    # computed — the summary is division-wide and cannot be narrowed to a viewer.
+    if not mine and out["projects"].get("ok"):
+        out["projects"]["exec"] = await _exec_summary(session)
     return out
+
+
+async def _exec_summary(session: AsyncSession) -> dict | None:
+    try:
+        nested = getattr(session, "begin_nested", None)
+        if nested:
+            async with nested():
+                return await exec_summary.latest(session)
+        return await exec_summary.latest(session)
+    except Exception:
+        logger.exception("dashboard: exec summary failed")
+        return None

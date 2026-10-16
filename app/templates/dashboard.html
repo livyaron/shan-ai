@@ -260,6 +260,14 @@
         /* recent decisions */
         .sb-grid2 { display: grid; grid-template-columns: 1fr 2fr; gap: 14px; }
         .sb-scroll { overflow-x: auto; }
+        /* "תקציר הנהלה" — the sheet as written; long cells clamp, the full text is on hover */
+        .ex-head h2 { font-family: var(--display); font-size: 1.6rem; margin: 18px 0 4px; color: var(--t1); }
+        .ex-head p { margin: 0 0 6px; color: var(--t2); font-size: .95rem; }
+        .ex-bays .sb-k-val { font-size: 2.6rem; }
+        .ex-table td { vertical-align: top; }
+        .ex-cell { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; white-space: pre-line; min-width: 8ch; max-width: 46ch; font-size: .86rem; line-height: 1.45; }
+        .ex-id { color: var(--energy); text-decoration: none; white-space: nowrap; }
+        .ex-id:hover { text-decoration: underline; }
         .sb-table { width: 100%; border-collapse: collapse; font-size: .9rem; color: var(--t1); }
         .sb-table th { font-weight: 600; color: var(--t2); text-align: right; padding: 8px 10px; border-bottom: 1px solid var(--line); font-size: .88rem; white-space: nowrap; }
         .sb-table td { padding: 10px; border-bottom: 1px solid #111d2e; text-align: right; vertical-align: middle; }
@@ -511,7 +519,7 @@
     {% for key, label in scope_labels.items() %}<a role="radio" href="?scope={{ key }}" data-scope="{{ key }}" class="{{ 'on' if scope == key else '' }}" aria-checked="{{ 'true' if scope == key else 'false' }}">{{ '👤' if key == 'mine' else '🏢' }} {{ label }}</a>{% endfor %}
     <i class="sc-pill"></i>
 </div>{% endmacro %}
-{% set own_q = ('owner=' ~ current_user.id ~ '&') if scope == 'mine' else '' %}{% set ms = stations.missions %}{% set ps = stations.projects %}{% set ls = stations.lessons %}
+{% set own_q = ('owner=' ~ current_user.id ~ '&') if scope == 'mine' else '' %}{% set ms = stations.missions %}{% set ps = stations.projects %}{% set ex = ps.exec if ps.ok else none %}{% set ls = stations.lessons %}
 <div class="container-fluid py-4 px-4 sb" id="sb">
 
     <!-- Header -->
@@ -569,7 +577,14 @@
         <button type="button" class="st {{ 'alarm' if ps.ok and ps.past_due else '' }}" data-zoom="projects" style="--acc:#8b9cf4" aria-label="פרויקטים — הגדל">
             <canvas class="st-scene" data-scene="xfmr" aria-hidden="true"></canvas>
             <span class="st-hd"><span class="st-ic">▣</span><span class="st-name">פרויקטים · קובץ המאסטר</span><span class="st-led"></span><span class="st-go">⤢</span></span>
-            {% if ps.ok %}
+            {% if ps.ok and ex and ex.kpis %}
+            {# the PM department's own numbers, as written in "תקציר הנהלה" — never recomputed #}
+            <span class="st-hero"><b>{{ ex.kpis[0][1] }}</b><small>{{ ex.kpis[0][0] }}{% if ex.as_of_il %} · תקציר הנהלה {{ ex.as_of_il }}{% endif %}</small></span>
+            <span class="st-kpis">
+                {% for label, value in ex.kpis[1:4] %}<span><b>{{ value }}</b>{{ label }}</span>{% endfor %}
+            </span>
+            <span class="st-strip" data-strip="projects" aria-hidden="true"></span>
+            {% elif ps.ok %}
             <span class="st-hero"><b data-live="p_active">{{ ps.active }}</b><small>{{ 'פרויקטים בתחום שלי' if scope == 'mine' else 'פרויקטים פעילים באגף' }}</small></span>
             <span class="st-kpis">
                 <span class="{{ 'hot' if ps.past_due else '' }}"><b data-live="p_past_due">{{ ps.past_due }}</b>יעד עבר</span>
@@ -805,8 +820,35 @@
     <section class="zv" data-view="projects" data-title="פרויקטים · {{ 'בתחום שלי' if scope == 'mine' else 'כל האגף' }}" hidden>
         <canvas class="zv-scene" data-scene="xfmr" aria-hidden="true"></canvas>
     {% if ps.ok %}
+        {% if ex %}
+        <div class="sb-bus-label"><span>פס צבירה · {{ ex.sheet }}</span><span>{% if ex.loaded_at_il %}נטען {{ ex.loaded_at_il }}{% endif %}</span></div>
+        <div class="sb-busbar zv-bus"></div>
+        {% if ex.title or ex.subtitle %}<div class="ex-head">{% if ex.title %}<h2>{{ ex.title }}</h2>{% endif %}{% if ex.subtitle %}<p>{{ ex.subtitle }}</p>{% endif %}</div>{% endif %}
+        <div class="sb-bays ex-bays">
+        {% for label, value in ex.kpis %}
+            <a class="sb-bay {{ 'c-v' if loop.first else 'c-e' }}" style="--d:{{ (loop.index0 % 5) * 0.4 }}s" href="/dashboard/projects"><div class="sb-breaker"></div><div class="sb-card">
+                <div class="sb-k-label"><span>{{ label }}</span></div>
+                <div class="sb-k-val">{{ value }}</div></div></a>
+        {% endfor %}
+        </div>
+        {% for sec in ex.sections %}
+        {% if sec.title %}<div class="sb-h"><h2>{{ sec.title }}</h2><span>{{ sec.rows | length }} שורות</span></div>{% else %}<div class="sb-h"><span>{{ sec.rows | length }} שורות</span></div>{% endif %}
+        <div class="sb-panel sb-scroll">
+            <table class="sb-table ex-table">
+                {% if sec.header %}<thead><tr>{% for h in sec.header %}<th>{{ h }}</th>{% endfor %}</tr></thead>{% endif %}
+                <tbody>
+                {% for r in sec.rows %}
+                    <tr>{% for c in r %}{% if loop.index0 == sec.id_col and c %}<td class="sb-mono"><a class="ex-id" href="/dashboard/projects/p/{{ c | urlencode }}">{{ c }}</a></td>{% else %}<td><div class="ex-cell" title="{{ c }}">{{ c }}</div></td>{% endif %}{% endfor %}</tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endfor %}
+        <div class="sb-h"><h2>מחושב מגיליון הדוח העדכני</h2><span>מה שהמערכת מחשבת מאותו קובץ — לא חלק מהתקציר</span></div>
+        {% else %}
         <div class="sb-bus-label"><span>פס צבירה · פרויקטים פעילים</span><span><b>{{ ps.watch_total }}</b> פרויקטים ברשימת המעקב</span></div>
         <div class="sb-busbar zv-bus"></div>
+        {% endif %}
         <div class="sb-bays">
             <a class="sb-bay c-v" style="--d:0s" href="/dashboard/projects"><div class="sb-breaker"></div><div class="sb-card">
                 <div class="sb-k-label"><span>פרויקטים פעילים</span><span>🏗</span></div>
