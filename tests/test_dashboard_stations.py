@@ -241,7 +241,7 @@ def test_switch_and_honest_labels_render():
 # ── live station scenes ───────────────────────────────────────────────────
 
 SCENES_JS = Path("static/js/station_scenes.js")
-SCENE_OF = {"decisions": "scope", "missions": "arc", "projects": "line", "lessons": "globe"}
+SCENE_OF = {"decisions": "scope", "missions": "breaker", "projects": "xfmr", "lessons": "globe"}
 
 
 def test_scenes_are_decoration_only():
@@ -259,7 +259,7 @@ def test_every_station_has_its_scene_on_the_tile_and_in_the_zoom():
         tile = re.search(rf'data-zoom="{key}"[^>]*>\s*<canvas class="st-scene" data-scene="{scene}"', TEMPLATE)
         view = re.search(rf'data-view="{key}"[^>]*>\s*<canvas class="zv-scene" data-scene="{scene}"', TEMPLATE)
         assert tile and view, key
-    assert re.search(r"const SCENE_OF = \{ decisions: 'scope', missions: 'arc', projects: 'line', lessons: 'globe' \}", TEMPLATE)
+    assert re.search(r"const SCENE_OF = \{ decisions: 'scope', missions: 'breaker', projects: 'xfmr', lessons: 'globe' \}", TEMPLATE)
 
 
 def test_scope_switch_is_in_the_header_and_the_zoom_bar():
