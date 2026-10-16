@@ -1168,6 +1168,8 @@ def test_responsible_picker_lists_referents_only():
     assert "value={newAssignedTo} onValueChange={setNewAssignedTo}" in lessons
     assert "options={referentOptions(users)}" in lessons
     assert "options={referentOptions(users, lesson.assignedTo)}" in detail
+    # The phone wizard's picker too (PLAN-lessons-mobile.md M1).
+    assert "referentOptions(users, editing?.assignedTo)" in _ui("pages/mobile/LessonWizard.tsx")
     assert 'filter((u) => u.role === "referent")' in _ui("lib/lessonAssignment.ts")
 
 
@@ -1185,9 +1187,15 @@ def test_approval_hands_off_to_the_creators_referent():
 
 
 def test_ai_never_recommends_a_referent_after_approval():
-    lessons = _ui("pages/Lessons.tsx")
-    assert "referents: []," in lessons
-    assert "selectedAIReferents" not in lessons and "recommended_referents.map" not in lessons
+    # Approval + the AI's proposal live in one hook, used by the computer and the phone
+    # (PLAN-lessons-mobile.md M3); neither screen asks the AI for referents or shows any.
+    flow = _ui("hooks/useApproveWithAI.ts")
+    assert "referents: []," in flow
+    lessons, phone = _ui("pages/Lessons.tsx"), _ui("components/mobile/LessonActions.tsx")
+    assert "useApproveWithAI()" in lessons and "useApproveWithAI()" in phone
+    assert 'type: "post_approve"' in flow and 'type: "post_approve"' not in lessons + phone
+    for src in (flow, lessons, phone):
+        assert "selectedAIReferents" not in src and "recommended_referents.map" not in src
 
 
 def test_drafts_stay_with_their_creator():
