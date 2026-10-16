@@ -185,6 +185,11 @@ async def test_precached_shell_is_the_app_never_the_login_page(built):
     assert r.status_code == 200 and r.text == "<html>APP</html>"
 
 
+def test_index_html_as_a_route_is_the_home_screen_not_a_404():
+    app = Path("lessons_ui/src/App.tsx").read_text(encoding="utf-8")
+    assert '<Route path="/index.html" element={<Navigate to="/" replace />} />' in app
+
+
 def test_shell_revision_marker_is_present():
     # Its bump is what evicts a poisoned precache from phones already in the field.
     assert '<meta name="shell-revision"' in Path("lessons_ui/index.html").read_text(encoding="utf-8")

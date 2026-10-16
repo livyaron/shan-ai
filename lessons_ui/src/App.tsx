@@ -46,6 +46,9 @@ const App = () => (
           <Routes>
             <Route path="/login" element={<Login />} />
             <Route path="/install" element={<Install />} />
+            {/* A login that started on the service worker's precache fetch returns
+                here as ?next=/lessons/index.html — the shell, not a page. */}
+            <Route path="/index.html" element={<Navigate to="/" replace />} />
             <Route element={<AppLayout />}>
               <Route path="/" element={<HomeRoute />} />
               <Route path="/projects" element={<Projects />} />
