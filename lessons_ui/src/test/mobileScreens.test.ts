@@ -81,3 +81,12 @@ describe("dates people read", () => {
     expect(ilDate(undefined)).toBe("");
   });
 });
+
+describe("installed app: no pull-to-refresh", () => {
+  it("the root stops overscroll from reaching the browser's reload gesture", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { resolve } = await import("node:path");
+    const css = readFileSync(resolve(process.cwd(), "src/index.css"), "utf8");
+    expect(css).toMatch(/html,\s*body\s*\{\s*overscroll-behavior-y:\s*none;/);
+  });
+});
