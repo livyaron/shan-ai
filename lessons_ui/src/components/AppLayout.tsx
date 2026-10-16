@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { Outlet, useNavigate } from "react-router-dom";
-import { Menu } from "lucide-react";
+import { LogOut, Menu } from "lucide-react";
 import AppSidebar from "./AppSidebar";
 import UserSwitcher from "./UserSwitcher";
 import DarkModeToggle from "./DarkModeToggle";
@@ -8,13 +8,17 @@ import { Button } from "./ui/button";
 import { useUser } from "@/context/UserContext";
 import FeedbackButton from "./FeedbackButton";
 import ShanNavbar from "./ShanNavbar";
+import { isStandalone } from "@/lib/standalone";
 
 // Height of Shan-AI's top bar (set by ShanNavbar); 0 until it loads.
 const NAV_H = "var(--shan-nav-h, 0px)";
 
 const AppLayout = () => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const { isLoggedIn, isLoading, currentUser } = useUser();
+  const { isLoggedIn, isLoading, currentUser, logout } = useUser();
+  // Installed app (PLAN-lessons-mobile.md M0): no Shan-AI top bar — it costs a
+  // phone screen two rows and links to pages outside the app. Logout moves here.
+  const [standalone] = useState(isStandalone);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -33,7 +37,7 @@ const AppLayout = () => {
 
   return (
     <div className="min-h-screen bg-background animate-fade-in">
-      <ShanNavbar />
+      {!standalone && <ShanNavbar />}
       {/* Mobile overlay */}
       {sidebarOpen && (
         <div
@@ -70,6 +74,11 @@ const AppLayout = () => {
             <DarkModeToggle />
             {currentUser.role !== "viewer" && <FeedbackButton />}
             <UserSwitcher />
+            {standalone && (
+              <Button variant="ghost" size="icon" onClick={logout} aria-label="יציאה" title="יציאה">
+                <LogOut className="w-5 h-5" />
+              </Button>
+            )}
           </div>
         </div>
         <div className="p-4 md:p-8 animate-fade-in">

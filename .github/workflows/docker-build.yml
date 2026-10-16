@@ -59,4 +59,5 @@ jobs:
             tests/test_insight_access.py \
             tests/test_insight_ai.py \
             tests/test_lessons_module.py \
+            tests/test_lessons_app_login.py \
             tests/test_login_page.py

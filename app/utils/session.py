@@ -12,13 +12,13 @@ SECRET_KEY = os.getenv("JWT_SECRET_KEY") or secrets.token_hex(32)
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_DAYS = 7
 
-def create_access_token(user_id: int, username: str) -> str:
-    """Create a JWT token for a user."""
+def create_access_token(user_id: int, username: str, days: int = ACCESS_TOKEN_EXPIRE_DAYS) -> str:
+    """Create a JWT token for a user, valid for `days` (the cookie must match)."""
     to_encode = {
         "sub": str(user_id),
         "username": username,
         "iat": datetime.utcnow(),
-        "exp": datetime.utcnow() + timedelta(days=ACCESS_TOKEN_EXPIRE_DAYS)
+        "exp": datetime.utcnow() + timedelta(days=days)
     }
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt

@@ -3,7 +3,7 @@
 from urllib.parse import quote
 
 from fastapi import APIRouter, Form, Depends, HTTPException, status
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -11,7 +11,9 @@ from starlette.requests import Request
 
 from app.database import get_db_session
 from app.models import User
-from app.utils.session import create_access_token
+from pydantic import BaseModel
+
+from app.utils.session import ACCESS_TOKEN_EXPIRE_DAYS, create_access_token
 
 router = APIRouter(tags=["auth"])
 templates = Jinja2Templates(directory="app/templates")
@@ -60,22 +62,69 @@ async def login(
     session: AsyncSession = Depends(get_db_session),
 ):
     """Authenticate user selected from list."""
+    user, error = await _check_credentials(session, user_id, password)
+    if error:
+        return RedirectResponse("/login?error=" + error.replace(" ", "+") + _next_qs(next), status_code=303)
+
+    response = RedirectResponse(url=safe_next(next) or "/dashboard", status_code=303)
+    _set_session(response, user, ACCESS_TOKEN_EXPIRE_DAYS)
+    return response
+
+
+async def _check_credentials(session: AsyncSession, user_id: int, password: str) -> tuple[User | None, str | None]:
+    """The one password check — the HTML form and the app login both use it."""
     from app.utils.auth import verify_password
 
     user = await session.get(User, user_id)
-
     if not user:
-        return RedirectResponse("/login?error=משתמש+לא+נמצא" + _next_qs(next), status_code=303)
-
+        return None, "משתמש לא נמצא"
     if not user.password_hash:
-        return RedirectResponse("/login?error=סיסמה+לא+הוגדרה.+פנה+למנהל" + _next_qs(next), status_code=303)
-
+        return None, "סיסמה לא הוגדרה. פנה למנהל"
     if not verify_password(password, user.password_hash):
-        return RedirectResponse("/login?error=סיסמה+שגויה" + _next_qs(next), status_code=303)
+        return None, "סיסמה שגויה"
+    return user, None
 
-    token = create_access_token(user.id, user.username)
-    response = RedirectResponse(url=safe_next(next) or "/dashboard", status_code=303)
-    response.set_cookie("access_token", token, max_age=7*24*60*60, httponly=True)
+
+def _set_session(response, user: User, days: int) -> None:
+    token = create_access_token(user.id, user.username, days=days)
+    response.set_cookie("access_token", token, max_age=days * 24 * 60 * 60, httponly=True)
+
+
+def remember_days() -> int:
+    """Session length when "השאר אותי מחובר" is ticked (PLAN-lessons-mobile.md M0)."""
+    from app.config import settings
+
+    return max(ACCESS_TOKEN_EXPIRE_DAYS, min(90, settings.LESSONS_REMEMBER_DAYS))
+
+
+# --- The lessons phone app's own login (PLAN-lessons-mobile.md M0) ---------------
+# An installed PWA must not leave its scope (/lessons/) to sign in: on iOS the
+# login page would open outside the app and its cookie may never reach it. The
+# app draws its own form and talks to these two JSON routes. Same user list and
+# the same password check as GET/POST /login — nothing more is exposed.
+
+@router.get("/login/users")
+async def login_users(session: AsyncSession = Depends(get_db_session)) -> JSONResponse:
+    result = await session.execute(select(User).where(User.role.isnot(None)).order_by(User.username))
+    users = [{"id": u.id, "name": u.username, "title": u.job_title or ""} for u in result.scalars().all()]
+    return JSONResponse({"users": users, "remember_days": remember_days()},
+                        headers={"Cache-Control": "no-store"})
+
+
+class AppLogin(BaseModel):
+    user_id: int
+    password: str
+    remember: bool = False
+
+
+@router.post("/login/app")
+async def login_app(body: AppLogin, session: AsyncSession = Depends(get_db_session)) -> JSONResponse:
+    user, error = await _check_credentials(session, body.user_id, body.password)
+    if error:
+        return JSONResponse({"ok": False, "error": error}, status_code=401)
+    days = remember_days() if body.remember else ACCESS_TOKEN_EXPIRE_DAYS
+    response = JSONResponse({"ok": True, "days": days}, headers={"Cache-Control": "no-store"})
+    _set_session(response, user, days)
     return response
 
 @router.get("/logout")

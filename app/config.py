@@ -79,6 +79,10 @@ class Settings(BaseSettings):
     # the key is the public anon key the Lovable site itself ships to browsers.
     LESSONS_SRC_URL: str = os.getenv("LESSONS_SRC_URL", "")
     LESSONS_SRC_KEY: str = os.getenv("LESSONS_SRC_KEY", "")
+    # Session length for "השאר אותי מחובר" in the lessons phone app
+    # (PLAN-lessons-mobile.md M0). 7 = the normal Shan-AI session, i.e. no change;
+    # raise it only after information-security approval. Clamped to 7..90.
+    LESSONS_REMEMBER_DAYS: int = int(os.getenv("LESSONS_REMEMBER_DAYS", "7") or 7)
 
     @property
     def public_base_url(self) -> str:
