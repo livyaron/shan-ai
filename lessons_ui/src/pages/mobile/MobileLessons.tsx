@@ -4,7 +4,8 @@ import { Search, X } from "lucide-react";
 import { useUser } from "@/context/UserContext";
 import { Input } from "@/components/ui/input";
 import LessonCard from "@/components/mobile/LessonCard";
-import { useActionRequired } from "@/hooks/useActionRequired";
+import { useMyTasks } from "@/hooks/useMyTasks";
+import { TASK_LABELS } from "@/lib/lessonActions";
 import { canToggleScope, scopedLessons } from "@/lib/lessonScope";
 import { cn } from "@/lib/utils";
 
@@ -15,8 +16,14 @@ const PAGE = 30;
 
 const MobileLessons = () => {
   const [params, setParams] = useSearchParams();
-  const { currentUser, lessons, implementations, projects, referentReviews } = useUser();
-  const { lessonNeedsAction } = useActionRequired(lessons, implementations, projects, currentUser, referentReviews);
+  const { currentUser, lessons, projects } = useUser();
+  const tasks = useMyTasks();
+  // "Waiting for me" = my tasks (lib/lessonActions.ts) — the same count as the home and the tasks tab.
+  const taskLabel = useMemo(() => {
+    const m = new Map<number, string>();
+    for (const t of tasks) if (!m.has(t.lessonId)) m.set(t.lessonId, TASK_LABELS[t.kind]);
+    return m;
+  }, [tasks]);
 
   const [query, setQuery] = useState(params.get("q") ?? "");
   const projectId = params.get("project") ?? "";
@@ -37,11 +44,11 @@ const MobileLessons = () => {
     return scopedLessons(lessons, currentUser, showAll)
       .filter((l) => !projectId || String(l.projectId) === projectId)
       .filter((l) => !q || l.title.includes(q) || l.project.includes(q) || l.description.includes(q))
-      .map((l) => ({ lesson: l, action: lessonNeedsAction(l.id) }))
-      .filter((x) => !actionOnly || x.action.needed)
+      .map((l) => ({ lesson: l, action: taskLabel.get(l.id) }))
+      .filter((x) => !actionOnly || x.action)
       // Same order as the computer's list: what waits for me first, then newest.
-      .sort((a, b) => Number(b.action.needed) - Number(a.action.needed) || b.lesson.date.localeCompare(a.lesson.date) || b.lesson.id - a.lesson.id);
-  }, [lessons, currentUser, showAll, projectId, query, actionOnly, lessonNeedsAction]);
+      .sort((a, b) => Number(!!b.action) - Number(!!a.action) || b.lesson.date.localeCompare(a.lesson.date) || b.lesson.id - a.lesson.id);
+  }, [lessons, currentUser, showAll, projectId, query, actionOnly, taskLabel]);
 
   const projectOptions = useMemo(() => {
     const ids = new Set(scopedLessons(lessons, currentUser, showAll).map((l) => l.projectId).filter((x): x is number => x != null));
@@ -105,7 +112,7 @@ const MobileLessons = () => {
       <main className="px-4 py-3 space-y-3">
         <p className="text-xs text-muted-foreground" aria-live="polite">{list.length} לקחים</p>
         {list.slice(0, shown).map(({ lesson, action }) => (
-          <LessonCard key={lesson.id} lesson={lesson} action={action.needed ? action.label : undefined} />
+          <LessonCard key={lesson.id} lesson={lesson} action={action} />
         ))}
         {list.length === 0 && <p className="text-center text-muted-foreground py-12">לא נמצאו לקחים.</p>}
         <div ref={sentinel} />

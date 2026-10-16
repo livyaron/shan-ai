@@ -22,6 +22,7 @@ import MyDrafts from "./pages/mobile/MyDrafts";
 import MobileHome from "./pages/mobile/MobileHome";
 import MobileLessons from "./pages/mobile/MobileLessons";
 import MobileLessonView from "./pages/mobile/MobileLessonView";
+import MyTasks from "./pages/mobile/MyTasks";
 import { opensPhoneHome } from "./lib/standalone";
 
 const AdminRoute = () => {
@@ -63,6 +64,7 @@ const App = () => (
               <Route path="/m" element={<MobileHome />} />
               <Route path="/m/lessons" element={<MobileLessons />} />
               <Route path="/m/lessons/:id" element={<MobileLessonView />} />
+              <Route path="/m/tasks" element={<MyTasks />} />
             </Route>
             <Route path="*" element={<NotFound />} />
           </Routes>

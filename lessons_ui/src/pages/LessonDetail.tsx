@@ -19,6 +19,8 @@ import { useActionRequired } from "@/hooks/useActionRequired";
 import { Zap, Send } from "lucide-react";
 import { canSubmitDraft, isDraft, missingForSubmit, referentOptions } from "@/lib/lessonAssignment";
 import { FIELD_NAMES } from "@/lib/lessonDraft";
+import { WF_IN_REFERENT, WF_REJECTED, canAdminFinalize, canCreatorComplete, canReferentDecide } from "@/lib/lessonActions";
+import { useLessonWorkflow } from "@/hooks/useLessonWorkflow";
 import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert";
 import { format, parseISO } from "date-fns";
 import { cn } from "@/lib/utils";
@@ -32,7 +34,8 @@ const LessonDetail = () => {
   const { getLabel } = useFieldLabels("lesson");
   const { id } = useParams();
   const navigate = useNavigate();
-  const { lessons, projects, equipment, users, implementations, referentReviews, respondToImplementation, respondToReferentReview, currentUser, updateLesson, updateLessonAIReview, deleteLesson, updateWorkflowStatus, updateReferentDecision, returnLessonToCreator, submitDraftLesson, lessonCategories: categories } = useUser();
+  const workflow = useLessonWorkflow();
+  const { lessons, projects, equipment, users, implementations, referentReviews, respondToImplementation, respondToReferentReview, currentUser, updateLesson, updateLessonAIReview, deleteLesson, returnLessonToCreator, submitDraftLesson, lessonCategories: categories } = useUser();
   const [feedbackNotes, setFeedbackNotes] = useState<Record<string, string>>({});
   const [isEditing, setIsEditing] = useState(false);
   const [editTitle, setEditTitle] = useState("");
@@ -707,7 +710,7 @@ const LessonDetail = () => {
       )}
 
       {/* Creator Completion Action — when lesson is returned to creator */}
-      {lesson.workflowStatus === "ממתין להשלמת יוצר" && lesson.createdBy === currentUser.id && !isEditing && (
+      {canCreatorComplete(lesson, currentUser) && !isEditing && (
         <Card className="border-0 shadow-sm border-r-4 border-r-accent">
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base font-heading">
@@ -743,16 +746,10 @@ const LessonDetail = () => {
                 size="sm"
                 className="bg-success text-success-foreground hover:bg-success/90 gap-1.5"
                 onClick={async () => {
-                  // Return to whoever requested the completion
-                  const returnTo = lesson.returnedBy === "referent" ? "בטיפול רפרנט" : "ממתין לאישור מנהל מערכת";
-                  await updateWorkflowStatus(
-                    lesson.id,
-                    returnTo,
-                    completionNote.trim() || "היוצר סימן שהשלים את הנדרש",
-                    "creator_completed"
-                  );
+                  // Back to whoever requested the completion (lib/lessonActions.ts).
+                  const returnTo = await workflow.completeAsCreator(lesson, completionNote);
                   setCompletionNote("");
-                  toast({ title: "הלקח הוחזר לטיפול ✓", description: returnTo === "בטיפול רפרנט" ? "הלקח הועבר חזרה לרפרנט" : "הלקח הועבר חזרה למנהל המערכת" });
+                  toast({ title: "הלקח הוחזר לטיפול ✓", description: returnTo === WF_IN_REFERENT ? "הלקח הועבר חזרה לרפרנט" : "הלקח הועבר חזרה למנהל המערכת" });
                 }}
               >
 
@@ -765,7 +762,7 @@ const LessonDetail = () => {
       )}
 
       {/* Referent Workflow Actions */}
-      {(currentUser.role === "referent" || currentUser.id === lesson.assignedTo) && lesson.workflowStatus === "בטיפול רפרנט" && lessonRefReviews.some((r) => r.referentId === currentUser.id) && (
+      {canReferentDecide(lesson, currentUser, referentReviews) && (
         <Card className="border-0 shadow-sm border-r-4 border-r-warning">
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base font-heading">
@@ -799,14 +796,8 @@ const LessonDetail = () => {
                 onClick={async () => {
                   const review = lessonRefReviews.find((r) => r.referentId === currentUser.id && r.lessonId === lesson.id);
                   if (!review) return;
-                  await updateReferentDecision(review.id, referentDecision, referentResponseText);
-                  if (referentDecision === "לא רלוונטי" || referentDecision === "הלקח נדחה") {
-                    await updateWorkflowStatus(lesson.id, "נדחה");
-                    toast({ title: "הלקח נדחה" });
-                  } else {
-                    await updateWorkflowStatus(lesson.id, "ממתין לאישור מנהל מערכת");
-                    toast({ title: "הלקח הועבר לאישור מנהל מערכת ✓" });
-                  }
+                  const next = await workflow.sendReferentDecision(lesson.id, review.id, referentDecision, referentResponseText);
+                  toast({ title: next === WF_REJECTED ? "הלקח נדחה" : "הלקח הועבר לאישור מנהל מערכת ✓" });
                   setReferentDecision("");
                   setReferentResponseText("");
                 }}
@@ -828,7 +819,7 @@ const LessonDetail = () => {
       )}
 
       {/* Admin Workflow Actions */}
-      {currentUser.role === "admin" && lesson.workflowStatus === "ממתין לאישור מנהל מערכת" && (
+      {canAdminFinalize(lesson, currentUser) && (
         <Card className="border-0 shadow-sm border-r-4 border-r-primary">
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base font-heading">
@@ -864,7 +855,7 @@ const LessonDetail = () => {
                 size="sm"
                 className="bg-success text-success-foreground hover:bg-success/90 gap-1.5"
                 onClick={async () => {
-                  await updateWorkflowStatus(lesson.id, "אושר והופץ", adminReturnNotes);
+                  await workflow.finalizeAsAdmin(lesson.id, "approve", adminReturnNotes);
                   toast({ title: "הלקח אושר והופץ ✓" });
                   setAdminReturnNotes("");
                 }}
@@ -876,7 +867,7 @@ const LessonDetail = () => {
                 variant="outline"
                 className="gap-1.5 border-destructive text-destructive"
                 onClick={async () => {
-                  await updateWorkflowStatus(lesson.id, "נדחה", adminReturnNotes);
+                  await workflow.finalizeAsAdmin(lesson.id, "reject", adminReturnNotes);
                   toast({ title: "הלקח נדחה" });
                   setAdminReturnNotes("");
                 }}
@@ -888,7 +879,7 @@ const LessonDetail = () => {
                 variant="outline"
                 className="gap-1.5 border-warning text-warning"
                 onClick={async () => {
-                  await updateWorkflowStatus(lesson.id, "בטיפול רפרנט", adminReturnNotes);
+                  await workflow.finalizeAsAdmin(lesson.id, "toReferent", adminReturnNotes);
                   toast({ title: "הלקח הוחזר לרפרנט" });
                   setAdminReturnNotes("");
                 }}

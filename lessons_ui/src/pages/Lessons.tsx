@@ -31,6 +31,7 @@ import { scopedLessons } from "@/lib/lessonScope";
 import { isPhoneWidth } from "@/lib/standalone";
 import { riskColors, riskLabelsShort as riskLabels, statusColors, statusLabels, PROFESSIONAL_DOMAINS, WORKFLOW_STATUSES, ACTIVE_WORKFLOW_STATUSES, workflowStatusColors, calculateSlaStatus, slaStatusColors, SLA_STATUS } from "@/lib/constants";
 import { useActionRequired } from "@/hooks/useActionRequired";
+import { useApproveWithAI } from "@/hooks/useApproveWithAI";
 import { Zap } from "lucide-react";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
@@ -49,13 +50,6 @@ interface PreSubmitReview {
   summary: string;
 }
 
-interface PostApproveReview {
-  recommended_projects: { project_name: string; reason: string; priority: string }[];
-  recommended_referents: { referent_id: string; referent_name: string; reason: string }[];
-  implementation_steps: string[];
-  attention_points: string[];
-  summary: string;
-}
 
 const Lessons = () => {
   const { getLabel } = useFieldLabels("lesson");
@@ -108,12 +102,10 @@ const Lessons = () => {
   // AI review states
   const [isReviewing, setIsReviewing] = useState(false);
   const [preReview, setPreReview] = useState<PreSubmitReview | null>(null);
-  const [postReviewDialogOpen, setPostReviewDialogOpen] = useState(false);
-  const [postReview, setPostReview] = useState<PostApproveReview | null>(null);
-  const [isPostReviewing, setIsPostReviewing] = useState(false);
-  const [reviewingLessonId, setReviewingLessonId] = useState<number | null>(null);
-  const [selectedAIProjects, setSelectedAIProjects] = useState<number[]>([]);
-  const [filteredOutAIProjects, setFilteredOutAIProjects] = useState<string[]>([]);
+  // Approval + the AI's distribution proposal: one flow with the phone (hooks/useApproveWithAI.ts).
+  const approval = useApproveWithAI();
+  const { open: postReviewDialogOpen, review: postReview, isReviewing: isPostReviewing, lessonId: reviewingLessonId,
+    selected: selectedAIProjects, filteredOut: filteredOutAIProjects, close: closePostReviewDialog } = approval;
 
   // Manual distribution states
   const [manualDistDialogOpen, setManualDistDialogOpen] = useState(false);
@@ -127,7 +119,7 @@ const Lessons = () => {
   const [exportProjectId, setExportProjectId] = useState("");
   const [exportCategory, setExportCategory] = useState("");
 
-  const { currentUser, hasPermission, lessons, addLesson, approveLesson, rejectLesson, closeLesson, deleteLesson, removeLessonFromProject, distributeLesson, updateLessonAIReview, users, projects, equipment, implementations, referentReviews, lessonCategories: categories } = useUser();
+  const { currentUser, hasPermission, lessons, addLesson, rejectLesson, closeLesson, deleteLesson, removeLessonFromProject, distributeLesson, users, projects, equipment, implementations, referentReviews, lessonCategories: categories } = useUser();
   const searchParamsKey = searchParams.toString();
   const routeLessonIdSet = useMemo(() => {
     const idsParam = new URLSearchParams(searchParamsKey).get("ids");
@@ -296,13 +288,6 @@ const Lessons = () => {
     setProjectTypeFilter("all");
   };
 
-  const closePostReviewDialog = () => {
-    setPostReviewDialogOpen(false);
-    setReviewingLessonId(null);
-    setSelectedAIProjects([]);
-    setFilteredOutAIProjects([]);
-  };
-
   const userProjects = selectableProjects(projects, currentUser);
 
   // Pre-submit AI review
@@ -416,89 +401,9 @@ const Lessons = () => {
     }
   };
 
-  // Post-approve AI review — auto-distributes after analysis
   const handleApprove = async (e: React.MouseEvent, id: number) => {
     e.stopPropagation();
-    try {
-      await approveLesson(id);
-    } catch (err) {
-      console.error("Approve error:", err);
-      toast({ title: "האישור נכשל", description: "הלקח לא שונה — נסה שוב", variant: "destructive" });
-      return;
-    }
-
-    // Trigger post-approve AI review
-    setReviewingLessonId(id);
-    setIsPostReviewing(true);
-    setPostReview(null);
-    setPostReviewDialogOpen(true);
-
-    try {
-      const lesson = lessons.find((l) => l.id === id);
-      if (!lesson) return;
-
-      const lessonEquipment = equipment.filter((eq) => lesson.equipmentIds.includes(eq.id));
-      const lessonStageIndex = PROJECT_STAGES.indexOf(lesson.stage);
-      const activeProjects = projects
-        .filter((p) => p.id !== lesson.projectId)
-        .map((p) => ({
-          id: p.id,
-          name: p.name,
-          stage: PROJECT_STAGES[p.stageIndex],
-          type: projectTypeLabels[p.projectType],
-          station: stationTypeLabels[p.stationType],
-          equipment: equipment.filter((eq) => p.equipmentIds.includes(eq.id)).map((eq) => eq.name),
-        }));
-
-      const { data, error } = await supabase.functions.invoke("review-lesson", {
-        body: {
-          type: "post_approve",
-          lesson: {
-            title: lesson.title,
-            description: lesson.description,
-            projectName: lesson.project,
-            stage: lesson.stage,
-            category: lesson.category,
-            risk: lesson.risk,
-            equipmentNames: lessonEquipment.map((eq) => eq.name),
-          },
-          projects: activeProjects,
-          // The referent is the creator's choice alone — the AI recommends projects only.
-          referents: [],
-        },
-      });
-      if (error) throw error;
-      const review = data?.review as PostApproveReview | null;
-      setPostReview(review);
-
-      if (review) {
-        updateLessonAIReview(id, review);
-
-        const validProjectIds: number[] = [];
-        const invalidProjectNames: string[] = [];
-
-        review.recommended_projects.forEach((recommendedProject) => {
-          const foundProject = projects.find((project) => project.name === recommendedProject.project_name);
-          if (foundProject && foundProject.stageIndex === lessonStageIndex) {
-            validProjectIds.push(foundProject.id);
-          } else {
-            invalidProjectNames.push(recommendedProject.project_name);
-          }
-        });
-
-        setSelectedAIProjects(validProjectIds);
-        setFilteredOutAIProjects(invalidProjectNames);
-      } else {
-        setSelectedAIProjects([]);
-        setFilteredOutAIProjects([]);
-      }
-    } catch (e) {
-      console.error("Post-approve AI error:", e);
-      toast({ title: "הלקח אושר", description: "אושר בהצלחה אך ניתוח AI נכשל — ניתן להפיץ ידנית", variant: "destructive" });
-      closePostReviewDialog();
-    } finally {
-      setIsPostReviewing(false);
-    }
+    await approval.approve(id);
   };
 
   const handleReject = (e: React.MouseEvent, id: number) => {
@@ -1068,7 +973,7 @@ const Lessons = () => {
       </div>
 
       {/* Post-approve AI Recommendations Dialog */}
-      <Dialog open={postReviewDialogOpen} onOpenChange={(open) => (open ? setPostReviewDialogOpen(true) : closePostReviewDialog())}>
+      <Dialog open={postReviewDialogOpen} onOpenChange={(open) => { if (!open) closePostReviewDialog(); }}>
         <DialogContent dir="rtl" className="max-w-lg max-h-[85vh] overflow-y-auto">
           <DialogHeader>
              <DialogTitle className="flex items-center gap-2 font-heading">
@@ -1097,10 +1002,7 @@ const Lessons = () => {
                         <Checkbox
                           checked={projId ? selectedAIProjects.includes(projId) : false}
                           onCheckedChange={() => {
-                            if (!projId) return;
-                            setSelectedAIProjects((prev) =>
-                              prev.includes(projId) ? prev.filter((id) => id !== projId) : [...prev, projId]
-                            );
+                            if (projId) approval.toggle(projId);
                           }}
                           className="mt-0.5"
                         />
@@ -1157,14 +1059,7 @@ const Lessons = () => {
                   {autoDistributionTargetCount > 0 && (
                     <Button
                       className="flex-1 gap-2"
-                      onClick={() => {
-                        distributeLesson(reviewingLessonId, selectedAIProjects, [], "ai");
-                        toast({
-                          title: "לקח הופץ בהצלחה ✓",
-                          description: `הופץ ל-${selectedAIProjects.length} פרויקטים`,
-                        });
-                        closePostReviewDialog();
-                      }}
+                      onClick={() => void approval.distribute()}
                     >
                       <Send className="w-4 h-4" />
                       אשר והפץ ({autoDistributionTargetCount})

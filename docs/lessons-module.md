@@ -216,3 +216,23 @@ lessons page (the dialog stays for `md` and up), from `?newLesson=<project>` on 
 - View: read only; an image attachment opens full screen; a draft of mine → "✏️ השלמה בשלבים";
   responding / approving stays on the full page (`/lessons/<id>`) until M3.
 - Dates people read on the phone are DD/MM/YYYY (`lib/ilDate.ts`).
+
+## Phone handling — M3 (PLAN-lessons-mobile.md, 2026-10-16)
+
+`/lessons/m/tasks` ("משימות" tab, with a count) lists what waits for me; the lesson page carries an
+action panel (`components/mobile/LessonActions.tsx`) for exactly those tasks.
+
+- **One rule for "what I must do" and "where it leads"** — `lib/lessonActions.ts`:
+  `pendingTasks` (approve_new · admin_final · referent_decide · referent_feedback · pm_feedback ·
+  creator_complete), `canReferentDecide` / `canAdminFinalize` / `canCreatorComplete` (the computer's
+  cards use them too), `referentDecisionNext` (לא רלוונטי / הלקח נדחה → נדחה, else → ממתין לאישור מנהל
+  מערכת), `creatorCompletionTarget` (back to whoever returned it), `aiDistributionTargets` (AI
+  pre-selects known projects in the lesson's own stage only).
+- `hooks/useLessonWorkflow.ts` — the steps as single calls; `LessonDetail.tsx`'s buttons call them.
+- `hooks/useApproveWithAI.ts` — approve + the AI's distribution proposal (owner decision 2026-10-16:
+  the phone runs the full flow, not approval only); `Lessons.tsx`'s dialog and the phone's full-screen
+  sheet both use it. The sheet lives above the task card: approving ends the task.
+- On the phone, "ממתינים לי" (home counter, list filter, card labels) = `pendingTasks`. The computer's
+  sidebar badge still uses `useActionRequired`, which does not count the admin's final step or a
+  lesson returned to its creator — the two numbers can differ.
+- Still on the full page only: editing a returned lesson, manual distribution, AI re-analysis, history.
