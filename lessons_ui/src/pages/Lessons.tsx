@@ -27,6 +27,7 @@ import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import { isReferent as isReferentUser, referentOptions } from "@/lib/lessonAssignment";
 import { LESSON_STAGES, selectableProjects } from "@/lib/lessonDraft";
+import { scopedLessons } from "@/lib/lessonScope";
 import { isPhoneWidth } from "@/lib/standalone";
 import { riskColors, riskLabelsShort as riskLabels, statusColors, statusLabels, PROFESSIONAL_DOMAINS, WORKFLOW_STATUSES, ACTIVE_WORKFLOW_STATUSES, workflowStatusColors, calculateSlaStatus, slaStatusColors, SLA_STATUS } from "@/lib/constants";
 import { useActionRequired } from "@/hooks/useActionRequired";
@@ -200,22 +201,8 @@ const Lessons = () => {
       ).map((l) => l.id)
     : [];
 
-  const distributedToMe = isReferent
-    ? lessons.filter((l) => l.distributedToReferents?.includes(currentUser.id)).map((l) => l.id)
-    : [];
-
-  // Default scope (when showAll is OFF):
-  // - admin / viewer: full org-wide read access
-  // - referent: only lessons distributed to them
-  // - project_manager: only lessons they created
-  const myScopeLessons = isAdmin || isViewer
-    ? lessons
-    : isReferent
-    ? lessons.filter((l) => distributedToMe.includes(l.id) || l.createdBy === currentUser.id)
-    : lessons.filter((l) => l.createdBy === currentUser.id);
-
-  // viewer never sees the showAll toggle — they always have full access.
-  const userLessons = (showAll && !isViewer) ? lessons : myScopeLessons;
+  // Default scope and "all lessons" — one rule with the phone list (lib/lessonScope.ts).
+  const userLessons = scopedLessons(lessons, currentUser, showAll);
 
   const getLessonOrigin = (lesson: typeof lessons[0]) => {
     if (lesson.createdBy === currentUser.id) return "created";

@@ -1,10 +1,11 @@
 import { useMemo } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { ChevronLeft, Plus, Smartphone } from "lucide-react";
+import { Plus, Smartphone } from "lucide-react";
 import { useUser } from "@/context/UserContext";
 import { Button } from "@/components/ui/button";
 import { isDraft, missingForSubmit } from "@/lib/lessonAssignment";
 import { FIELD_NAMES, hasContent, loadLocalDraft } from "@/lib/lessonDraft";
+import { ilDate } from "@/lib/ilDate";
 
 // הטיוטות שלי (PLAN-lessons-mobile.md M1): the creator's server drafts, plus a
 // lesson typed on this phone that never reached the server. Tap = the wizard.
@@ -25,11 +26,10 @@ const MyDrafts = () => {
   return (
     <div className="min-h-[100dvh] flex flex-col">
       <header className="sticky top-0 z-10 bg-background/95 backdrop-blur border-b border-border px-4 py-3 flex items-center justify-between">
-        <Button variant="ghost" size="sm" className="gap-1" onClick={() => navigate("/lessons")}>
-          <ChevronLeft className="w-4 h-4 rotate-180" /> לקחים
-        </Button>
         <h1 className="font-heading font-bold text-lg">הטיוטות שלי</h1>
-        <span className="w-16" />
+        <Button size="sm" className="gap-1" onClick={() => navigate("/m/new")}>
+          <Plus className="w-4 h-4" /> לקח חדש
+        </Button>
       </header>
 
       <main className="flex-1 px-4 py-4 space-y-3 pb-28">
@@ -48,7 +48,7 @@ const MyDrafts = () => {
           return (
             <Link key={l.id} to={`/m/lessons/${l.id}/edit`} className="block rounded-xl border border-border bg-card p-4 space-y-1 active:bg-muted">
               <p className="font-medium">{l.title || "(ללא כותרת)"}</p>
-              <p className="text-xs text-muted-foreground">{l.project || "ללא פרויקט"} · {l.date}</p>
+              <p className="text-xs text-muted-foreground">{l.project || "ללא פרויקט"} · {ilDate(l.date)}</p>
               <p className={missing.length ? "text-xs text-muted-foreground" : "text-xs text-success font-medium"}>
                 {missing.length ? `חסר לשליחה: ${missing.map((f) => FIELD_NAMES[f]).join(", ")}` : "✓ מוכן לשליחה לאישור"}
               </p>
@@ -61,11 +61,6 @@ const MyDrafts = () => {
         )}
       </main>
 
-      <footer className="fixed bottom-0 inset-x-0 bg-background/95 backdrop-blur border-t border-border px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
-        <Button className="w-full h-12 text-base gap-2" onClick={() => navigate("/m/new")}>
-          <Plus className="w-5 h-5" /> לקח חדש
-        </Button>
-      </footer>
     </div>
   );
 };

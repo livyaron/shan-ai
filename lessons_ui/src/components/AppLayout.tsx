@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { Outlet, useNavigate } from "react-router-dom";
-import { LogOut, Menu } from "lucide-react";
+import { LogOut, Menu, Smartphone } from "lucide-react";
 import AppSidebar from "./AppSidebar";
 import UserSwitcher from "./UserSwitcher";
 import DarkModeToggle from "./DarkModeToggle";
@@ -8,7 +8,7 @@ import { Button } from "./ui/button";
 import { useUser } from "@/context/UserContext";
 import FeedbackButton from "./FeedbackButton";
 import ShanNavbar from "./ShanNavbar";
-import { isStandalone } from "@/lib/standalone";
+import { isStandalone, setPrefersDesktop } from "@/lib/standalone";
 
 // Height of Shan-AI's top bar (set by ShanNavbar); 0 until it loads.
 const NAV_H = "var(--shan-nav-h, 0px)";
@@ -70,6 +70,9 @@ const AppLayout = () => {
             <Menu className="w-5 h-5" />
           </Button>
           <div className="hidden md:block" />
+          <Button variant="ghost" size="sm" className="md:hidden gap-1" onClick={() => { setPrefersDesktop(false); navigate("/m"); }}>
+            <Smartphone className="w-4 h-4" /> תצוגת טלפון
+          </Button>
           <div className="flex items-center gap-2">
             <DarkModeToggle />
             {currentUser.role !== "viewer" && <FeedbackButton />}
