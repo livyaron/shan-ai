@@ -903,7 +903,7 @@
                         <td>{% if p.lost %}<span class="sb-pill p-critical">אין צפי</span>{% else %}<span class="sb-pill {{ 'p-critical' if p.gap_days > 90 else 'p-uncertain' }}"><bdi dir="ltr">+{{ p.gap_days }}</bdi> י׳</span>{% endif %}</td>
                     </tr>
                 {% endfor %}
-                {% if not ps.over_approved_rows %}<tr><td colspan="8" class="sb-empty">{{ 'אין חריגות מהיעד המאושר.' if ps.with_approved else 'בקובץ האחרון שנטען אין עמודת יעד מאושר — טען את הקובץ העדכני.' }}</td></tr>{% endif %}
+                {% if not ps.over_approved_rows %}<tr><td colspan="8" class="sb-empty">{{ 'אין חריגות מהיעד המאושר.' if ps.with_approved else 'עדיין לא נקלטו ערכי ״יעד חשמול מאושר ע״י מנהל האגף״ — הקליטה שלהם נוספה אחרי ההעלאה האחרונה. העלאה חוזרת של קובץ המאסטר תקלוט אותם.' }}</td></tr>{% endif %}
                 </tbody>
             </table>
         </div>
