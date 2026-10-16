@@ -44,6 +44,7 @@ jobs:
             tests/test_dashboard_live.py \
             tests/test_dashboard_stations.py \
             tests/test_exec_summary.py \
+            tests/test_target_reading.py \
             tests/test_llm_fallback.py \
             tests/test_health_provenance.py \
             tests/test_war_room_styles.py \

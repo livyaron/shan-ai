@@ -57,6 +57,12 @@ def triage_project(x: dict, moves: int, as_of: str | None) -> dict:
         hit(WEEK, f"יעד החשמול נדחה {moved} חודשים בסך הכל")
     if x.get("forecast_moved") and x.get("baseline_moved"):
         hit(WEEK, "תכנית הפיתוח זזה יחד עם היעד — האיחור מול התכנית מוסתר")
+    # the approved target is the division manager's own commitment — a forecast
+    # beyond it, or a forecast that lost its date, is his this week
+    if x.get("over_approved"):
+        hit(WEEK, f"היעד המסתמן ({x['fc']}) מאוחר ב-{x['appr_gap_days']} ימים מהיעד שאישר מנהל האגף ({x['appr']})")
+    if x.get("approved_lost"):
+        hit(WEEK, f"יש יעד מאושר ({x['appr']}) אך אין יעד מסתמן: {x.get('fc_label') or 'מלל'}")
     if x.get("escalation") and not x.get("escalation_top"):
         hit(WEEK, f"בקובץ: {x['escalation']}")
     weeks = x.get("weeks_in_stage")
@@ -67,8 +73,10 @@ def triage_project(x: dict, moves: int, as_of: str | None) -> dict:
         hit(FOLLOW, f"{'לפחות ' if x.get('weeks_lower_bound') else ''}{weeks} שבועות בשלב {x['stage']}")
     if x.get("late"):
         hit(FOLLOW, f"מאחר {x.get('slip_months')} חודשים מול תכנית הפיתוח")
-    if x.get("undated"):
-        hit(FOLLOW, "יעד החשמול כתוב כמלל")
+    if x.get("undated") and not x.get("approved_lost"):
+        hit(FOLLOW, "אין יעד חשמול" + (f" — {x['fc_reason']}" if x.get("fc_reason") else f" ({x.get('fc_label') or 'מלל'})"))
+    if x.get("unapproved"):
+        hit(FOLLOW, "היעד המסתמן מסומן בקובץ 'לא מאושר'")
     if x.get("stale"):
         hit(FOLLOW, "דיווח שבועי זהה 4 שבועות")
     if x.get("stage_gap"):

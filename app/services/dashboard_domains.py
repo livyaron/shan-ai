@@ -30,6 +30,7 @@ from app.models import Mission, MissionStatusEnum, Project, User
 from app.services import exec_summary, insight_access
 from app.services import missions_menu_service as oms
 from app.services import stage_sectors
+from app.services import target_reading as tr
 from app.services import war_room_kpis as kpis
 from app.services.pattern_service import LATE_MONTHS, MONTH_DAYS
 
@@ -71,6 +72,10 @@ def _series(rows, days: list[datetime.date]) -> list[int]:
             continue
         by_day[day.date() if isinstance(day, datetime.datetime) else day] = cnt
     return [by_day.get(d, 0) for d in days]
+
+
+def date_or_none(iso: str | None) -> datetime.date | None:
+    return datetime.date.fromisoformat(iso) if iso else None
 
 
 def _fmt(d: datetime.date | None) -> str:
@@ -170,15 +175,16 @@ async def projects_stats(session: AsyncSession, scope: "insight_access.Scope | N
     rows = (await session.execute(
         select(Project.project_identifier, Project.name, Project.stage, Project.manager,
                Project.dev_plan_date, Project.estimated_finish_date,
-               Project.finish_date_text, Project.short_supervisors, Project.short_testers)
+               Project.finish_date_text, Project.short_supervisors, Project.short_testers,
+               Project.approved_date, Project.approved_text)
         .where(Project.is_active)
     )).all()
 
     sectors = {k: 0 for k in stage_sectors.SECTORS}
     stages: dict[str, int] = {}
-    active = past_due = late = undated = short = 0
-    watch = []
-    for ident, name, stage, manager, plan, forecast, ftext, s_sup, s_test in rows:
+    active = past_due = late = undated = short = with_appr = 0
+    watch, over_appr = [], []
+    for ident, name, stage, manager, plan, forecast, ftext, s_sup, s_test, appr, atext in rows:
         stage = stage_sectors.normalize_stage(stage)
         secs = stage_sectors.sectors_for(stage)
         if not secs:                                   # closed
@@ -189,12 +195,30 @@ async def projects_stats(session: AsyncSession, scope: "insight_access.Scope | N
         stages[stage or "ללא סטטוס"] = stages.get(stage or "ללא סטטוס", 0) + 1
         for sec in secs:
             sectors[sec] += 1
+        # prose targets are READ (target_reading): a row synced before the reading
+        # existed gets the same dates a sync would store now
+        appr = tr.effective_date(appr, atext)
+        cmp = tr.compare(plan, forecast, ftext, appr)
+        reading = cmp["reading"]
+        forecast = date_or_none(cmp["forecast"])
+        with_appr += bool(appr)
+        if cmp["over_approved"] or cmp["approved_lost"]:
+            over_appr.append({
+                "id": ident, "name": name or ident, "stage": stage or "—", "manager": manager or "—",
+                "plan": _fmt(plan), "approved": _fmt(appr), "forecast": _fmt(forecast),
+                "forecast_label": (reading["label"] if reading and (reading["kind"] != tr.DATE or not forecast)
+                                   else None if forecast else "התא ריק"),
+                "approx": bool(reading and reading["approx"]),
+                "reason": reading["reason"] if reading else None,
+                "gap_days": cmp["forecast_vs_approved"], "approved_vs_plan": cmp["approved_vs_plan"],
+                "lost": cmp["approved_lost"],
+            })
         is_past = bool(forecast and forecast < today)
         slip = (forecast - plan).days if forecast and plan else None
         is_late = slip is not None and slip > late_days
         past_due += is_past
         late += is_late
-        undated += bool(ftext) and not forecast
+        undated += bool(ftext) and not forecast and not (reading and reading["kind"] == tr.ENERGIZED)
         short += bool(s_sup or s_test)
         if is_past or is_late:
             watch.append({
@@ -203,6 +227,7 @@ async def projects_stats(session: AsyncSession, scope: "insight_access.Scope | N
                 "slip_months": round(slip / MONTH_DAYS, 1) if slip is not None else None,
                 "past_due": is_past, "_sort": slip if slip is not None else -1,
             })
+    over_appr.sort(key=lambda r: (r["lost"], -(r["gap_days"] or 0)))
     watch.sort(key=lambda r: (not r["past_due"], -r["_sort"]))
     for r in watch:
         r.pop("_sort")
@@ -214,6 +239,11 @@ async def projects_stats(session: AsyncSession, scope: "insight_access.Scope | N
         "late": late,
         "undated": undated,
         "short_staff": short,
+        # the approved target (יעד חשמול מאושר ע"י מנהל האגף) vs the forecast
+        "with_approved": with_appr,
+        "over_approved": sum(not r["lost"] for r in over_appr),
+        "approved_lost": sum(r["lost"] for r in over_appr),
+        "over_approved_rows": over_appr,
         # per-sector, never summed: one stage belongs to two sectors
         "sectors": [[k, label, sectors[k]] for k, label in stage_sectors.SECTORS.items() if sectors[k]],
         "stages": sorted(stages.items(), key=lambda kv: -kv[1])[:TOP_BREAKDOWN],

@@ -335,6 +335,8 @@ class Project(Base):
     short_supervisors     = Column(Boolean, nullable=True)      # חוסר במשגיחים
     short_testers         = Column(Boolean, nullable=True)      # חוסר בבודקים
     critical_tier         = Column(String(32), nullable=True)   # פרויקטים קריטים
+    approved_date         = Column(Date, nullable=True)         # יעד חשמול מאושר ע"י מנהל האגף (read from its text if prose)
+    approved_text         = Column(Text, nullable=True)         # …the same cell when it is prose
     last_updated          = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     is_active             = Column(Boolean, default=True, nullable=False)
 
@@ -361,6 +363,8 @@ class ProjectSnapshot(Base):
     short_supervisors     = Column(Boolean, nullable=True)
     short_testers         = Column(Boolean, nullable=True)
     critical_tier         = Column(String(32), nullable=True)
+    approved_date         = Column(Date, nullable=True)
+    approved_text         = Column(Text, nullable=True)
     created_at            = Column(DateTime, default=datetime.utcnow)
 
     project               = relationship("Project", back_populates="snapshots")

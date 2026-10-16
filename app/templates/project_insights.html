@@ -153,6 +153,8 @@
         {% for d in p.report_dates %}<span class="chip">{{ d|il_date }}</span>{% endfor %}
     </div>
 
+    {# the forecast cell as READ (target_reading): a date, plus what the text said about it #}
+    {% macro fcv(x) %}{% if x.fc %}{{ x.fc|il_date }}{% if x.fc_approx %}~{% endif %}{% if x.fc_kind and x.fc_kind != 'date' %}<div class="mix" style="font-family:var(--ui)" title="{{ x.fc_text }}">{{ x.fc_label }}{% if x.fc_missed %} · הוחמץ {{ x.fc_missed|il_date }}{% endif %}</div>{% endif %}{% elif x.fc_kind %}<span title="{{ x.fc_text }}">{{ x.fc_label }}{% if x.fc_reason %} · {{ x.fc_reason }}{% endif %}</span>{% if x.fc_missed %}<div class="mix" style="font-family:var(--ui)">הוחמץ {{ x.fc_missed|il_date }}</div>{% endif %}{% else %}—{% endif %}{% endmacro %}
     {% set sm = view.summary %}
     <div class="tiles">
         <div class="tile" title="{{ m.forecast_drift.caveat|il_dates }}">
@@ -173,7 +175,15 @@
         </div>
         <div class="tile" title="{{ m.undated.caveat|il_dates }}">
             <div class="num"><a class="dn" href="{{ dl('tile', 'undated') }}">{{ sm.undated }}</a></div>
-            <div class="lbl">יעד חשמול כמלל, לא תאריך</div>
+            <div class="lbl">אין יעד חשמול (המלל נקרא ואין בו יעד)</div>
+        </div>
+        <div class="tile" title="{{ m.over_approved.caveat|il_dates if m.over_approved else '' }}">
+            <div class="num"><a class="dn" href="{{ dl('tile', 'over_approved') }}">{{ sm.over_approved }}</a><span class="of"> / {{ sm.with_approved }}</span></div>
+            <div class="lbl">יעד מסתמן חורג מהיעד המאושר ע״י מנהל האגף</div>
+        </div>
+        <div class="tile" title="{{ m.approved_lost.caveat|il_dates if m.approved_lost else '' }}">
+            <div class="num"><a class="dn" href="{{ dl('tile', 'approved_lost') }}">{{ sm.approved_lost }}</a></div>
+            <div class="lbl">יש יעד מאושר — אין יעד מסתמן</div>
         </div>
         <div class="tile" title="{{ m.past_due.caveat|il_dates }}">
             <div class="num"><a class="dn" href="{{ dl('tile', 'past_due') }}">{{ sm.past_due }}</a></div>
@@ -273,7 +283,7 @@
             <tr><th>זיהוי</th><th>פרויקט</th><th>מנה"פ</th><th>שלב</th><th>יעד מסתמן</th><th>ת.פיתוח</th><th>יעד זז (ח')</th><th>בסיס זז (ח')</th><th>שבועות בשלב</th></tr>
             {% for x in drill.rows %}
             <tr><td class="n">{{ plink(x.identifier) }}</td><td>{{ pname(x) }}</td><td>{{ mgr(x) }}</td><td>{{ stg(x) }}</td>
-                <td class="n">{{ x.fc|il_date if x.fc else ('מלל' if x.undated else '—') }}</td><td class="n">{{ x.dev|il_date }}</td>
+                <td class="n">{{ fcv(x) }}</td><td class="n">{{ x.dev|il_date }}</td>
                 <td class="n">{{ num(x.forecast_moved_months) }}</td>
                 <td class="n">{{ num(x.baseline_moved_months) }}</td>
                 <td class="n">{{ weeks(x) }}</td></tr>
@@ -294,7 +304,7 @@
             {% for x in view.projects %}
             <tr>
                 <td class="n">{{ plink(x.identifier) }}</td><td>{{ pname(x) }}</td><td>{{ mgr(x) }}</td><td>{{ stg(x) }}</td>
-                <td class="n">{{ x.fc|il_date if x.fc else ('מלל' if x.undated else '—') }}</td><td class="n">{{ x.dev|il_date }}</td>
+                <td class="n">{{ fcv(x) }}</td><td class="n">{{ x.dev|il_date }}</td>
                 <td class="n">{{ num(x.forecast_moved_months) }}</td>
                 <td class="n">{{ num(x.baseline_moved_months) }}</td>
                 <td class="n">{{ weeks(x) }}</td>
@@ -441,9 +451,23 @@
         {% set lists = [
             ('stuck', '⏸ תקועים', view.projects|selectattr('stuck')|list, m.stuck.caveat),
             ('stale', '🔁 דיווח שבועי זהה', view.projects|selectattr('stale')|list, m.stale_reporting.caveat),
-            ('undated', '📝 יעד חשמול כמלל', view.projects|selectattr('undated')|list, m.undated.caveat),
+            ('undated', '📝 אין יעד חשמול', view.projects|selectattr('undated')|list, m.undated.caveat),
             ('past_due', '⌛ יעד מסתמן שכבר עבר', view.projects|selectattr('fc')|selectattr('fc', 'lt', as_of)|list, m.past_due.caveat),
         ] %}
+        {% set over = (view.projects|selectattr('over_approved')|sort(attribute='appr_gap_days', reverse=true)|list) + view.projects|selectattr('approved_lost')|list %}
+        <details><summary>🎯 חריגה מהיעד המאושר ע״י מנהל האגף ({{ over|length }})</summary>
+            <div class="listhead mt-2"><span class="caveat" style="margin:0">{{ (m.over_approved.caveat if m.over_approved else '')|il_dates }} פער חיובי = מאוחר. מאושר מול תכנית = הדחייה שאושרה; מסתמן מול מאושר = החריגה ממנה.</span>
+                <a class="btn btn-outline-info btn-sm" href="{{ dl('tile', 'over_approved') }}">🔎 פירוט מלא</a></div>
+            <div class="scroll"><table class="t mt-2">
+                <tr><th>זיהוי</th><th>פרויקט</th><th>מנה"פ</th><th>שלב</th><th>תכנית פיתוח</th><th>מאושר</th><th>מסתמן</th><th>מאושר מול תכנית (ימים)</th><th>מסתמן מול מאושר (ימים)</th></tr>
+                {% for x in over %}
+                <tr><td class="n">{{ plink(x.identifier) }}</td><td>{{ pname(x) }}</td><td>{{ mgr(x) }}</td><td>{{ stg(x) }}</td>
+                    <td class="n">{{ x.dev|il_date }}</td><td class="n">{{ x.appr|il_date }}</td><td class="n">{{ fcv(x) }}</td>
+                    <td class="n">{% if x.appr_vs_plan_days is not none %}<bdi class="ltr">{{ '+' if x.appr_vs_plan_days > 0 }}{{ x.appr_vs_plan_days }}</bdi>{% else %}—{% endif %}</td>
+                    <td class="n">{% if x.appr_gap_days is not none %}<bdi class="ltr">+{{ x.appr_gap_days }}</bdi>{% else %}—{% endif %}</td></tr>
+                {% else %}<tr><td colspan="9" class="sub">אין.</td></tr>{% endfor %}
+            </table></div>
+        </details>
         {% for key, label, rows, cav in lists %}
         <details><summary>{{ label }} ({{ rows|length }})</summary>
             <div class="listhead mt-2"><span class="caveat" style="margin:0">{{ cav|il_dates }}</span>
@@ -452,7 +476,7 @@
                 <tr><th>זיהוי</th><th>פרויקט</th><th>מנה"פ</th><th>שלב</th><th>יעד מסתמן</th><th>שבועות בשלב</th></tr>
                 {% for x in rows %}
                 <tr><td class="n">{{ plink(x.identifier) }}</td><td>{{ pname(x) }}</td><td>{{ mgr(x) }}</td><td>{{ stg(x) }}</td>
-                    <td class="n">{{ x.fc|il_date if x.fc else ('מלל' if x.undated else '—') }}</td><td class="n">{{ weeks(x) }}</td></tr>
+                    <td class="n">{{ fcv(x) }}</td><td class="n">{{ weeks(x) }}</td></tr>
                 {% else %}<tr><td colspan="6" class="sub">אין.</td></tr>{% endfor %}
             </table></div>
         </details>

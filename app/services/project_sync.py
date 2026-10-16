@@ -17,7 +17,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.database import async_session_maker
 from app.models import Project, ProjectSnapshot, ProjectWeeklyEntry
-from app.services import memory_service
+from app.services import memory_service, target_reading
 from app.services.llm_router import llm_chat
 from app.services.project_learning_service import save_snapshot
 
@@ -61,6 +61,8 @@ KNOWN_COLUMNS: dict[str, str] = {
     "תאריך סיום משוער":                "estimated_finish_date",
     "תאריך סיום":                      "estimated_finish_date",
     "יעד חשמול מסתמן":                 "estimated_finish_date",
+    'יעד חשמול מאושר ע"י מנהל האגף':   "approved_date",
+    "יעד חשמול מאושר":                 "approved_date",
     "יעד חשמול":                       "estimated_finish_date",
     "חשמול":                           "estimated_finish_date",
     'תו"ב':                            "controller",
@@ -222,12 +224,13 @@ def _parse_date(val: Any):
 
 
 def _split_finish_date(val: Any) -> tuple[Any, str | None]:
-    """יעד חשמול מסתמן → (date | None, prose | None).
+    """A target cell → (date | None, prose | None).
 
-    A cell that is a date stays a date. A cell that is prose — even prose that
-    opens with a date, like "01/07/2026 לא אפשרי, יתקבל יעד חדש" — is kept as
-    text: that date is explicitly NOT the target, and dropping the text made
-    those projects vanish from every date metric.
+    A date stays a date. Prose is kept as-is AND read (target_reading, user
+    decision 2026-10-16): the date it stands for — the last stage of a staged
+    project, a forecast marked "לא מאושר", the NEW date after a missed one — is
+    the date. A date the text calls impossible ("01/07/2026 לא אפשרי…") is never
+    the target, and an energized or undecided cell has no forecast date.
     """
     if val is None or (isinstance(val, float) and pd.isna(val)):
         return None, None
@@ -237,8 +240,11 @@ def _split_finish_date(val: Any) -> tuple[Any, str | None]:
             return None, None
         if re.fullmatch(r"\d{1,4}[./-]\d{1,2}[./-]\d{1,4}", s):
             d = _parse_date(s)
-            return (d, None) if d else (None, s)
-        return None, s
+            if d:
+                return d, None
+        r = target_reading.read_text(s)
+        d = date.fromisoformat(r["date"]) if r and r["kind"] in target_reading.DATED and r["date"] else None
+        return d, s
     return _parse_date(val), None
 
 
@@ -493,6 +499,8 @@ async def sync_projects_file(file_path: str, sheet_name: str | None = None,
                     val = row[actual_col]
                     if model_field == "estimated_finish_date":
                         fields[model_field], fields["finish_date_text"] = _split_finish_date(val)
+                    elif model_field == "approved_date":
+                        fields[model_field], fields["approved_text"] = _split_finish_date(val)
                     elif model_field in DATE_FIELDS:
                         fields[model_field] = _parse_date(val)
                     elif model_field in BOOL_FIELDS:
@@ -656,7 +664,7 @@ _LEGACY_SNAPSHOT_SLACK = timedelta(days=14)
 _SNAPSHOT_SOURCE_FIELDS = (
     "name", "project_type", "stage", "manager", "weekly_report", "risks", "to_handle",
     "dev_plan_date", "estimated_finish_date", "finish_date_text", "controller",
-    "short_supervisors", "short_testers", "critical_tier",
+    "short_supervisors", "short_testers", "critical_tier", "approved_date", "approved_text",
 )
 
 
