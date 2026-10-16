@@ -239,12 +239,13 @@
                     <div><strong>{{ levels[lv].icon }} {{ levels[lv].label }}</strong><div class="mix">{{ levels[lv].owner }} · {{ levels[lv].when }}</div></div>
                     <a class="dn tri-n" href="{{ dl('triage', lv) }}">{{ rows|length }}</a>
                 </div>
-                {% if lv != 'fyi' %}
+                {% if lv == 'fyi' %}<div class="mix mt-1">אף כלל לא הופעל — אין חריגה שדורשת טיפול. מוצגים לידיעה בלבד.</div>{% endif %}
                 {% for x in rows[:6] %}
-                <div class="tri-row">{{ plink(x.identifier) }} {{ pname(x) }}<div class="mix">{{ x.triage.reasons[0].text|il_dates if x.triage.reasons else '' }}{% if x.triage.reasons|length > 1 %} · ועוד {{ x.triage.reasons|length - 1 }}{% endif %}</div></div>
+                <div class="tri-row">{{ plink(x.identifier) }} {{ pname(x) }}<div class="mix">{% if x.triage.reasons %}{{ x.triage.reasons[0].text|il_dates }}{% if x.triage.reasons|length > 1 %} · ועוד {{ x.triage.reasons|length - 1 }}{% endif %}{% else %}{{ x.stage }}{% if x.fc %} · יעד {{ x.fc|il_date }}{% endif %}{% endif %}</div></div>
+                {% else %}
+                <div class="mix mt-1">{{ 'אין — לכל פרויקט פעיל הופעל לפחות כלל אחד.' if lv == 'fyi' else 'אין.' }}</div>
                 {% endfor %}
                 {% if rows|length > 6 %}<a class="mix" href="{{ dl('triage', lv) }}">ועוד {{ rows|length - 6 }} ←</a>{% endif %}
-                {% endif %}
             </div>
             {% endfor %}
         </div>
