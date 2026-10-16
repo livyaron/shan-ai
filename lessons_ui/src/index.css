@@ -105,6 +105,14 @@
     @apply border-border;
   }
 
+  /* No pull-to-refresh: in the installed app a downward swipe at the top of a
+     list reloaded the whole app (Chrome's native gesture). Content still
+     scrolls; only the overscroll chaining to the browser is cut. */
+  html,
+  body {
+    overscroll-behavior-y: none;
+  }
+
   html {
     direction: rtl;
   }
