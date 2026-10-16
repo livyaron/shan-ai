@@ -154,7 +154,7 @@
             --energy: #00d4ff; --energy-dim: rgba(0,212,255,.10); --volt: #8b9cf4;
             --ok: #36e273; --warn: #ffc107; --crit: #ff5f6d; --info: #17d8f5;
             --panel: rgba(12,20,33,.80); --line: #1a2d47; --line-hi: #24507d;
-            --t1: #e6edf7; --t2: #8fa0b8; --t3: #4f6280;
+            --t1: #e6edf7; --t2: #b0bfd2; --t3: #8394ad;
             --display: 'Karantina', 'Heebo', sans-serif;
             position: relative; z-index: 1;
         }
@@ -164,7 +164,7 @@
         .sb-head { display: flex; flex-wrap: wrap; gap: 14px; justify-content: space-between; align-items: flex-end; margin-bottom: 14px; }
         .sb-title { font-family: var(--display); font-weight: 700; font-size: clamp(2.6rem, 5.6vw, 4.4rem); line-height: .9; margin: 0; color: var(--t1); text-wrap: balance; }
         .sb-title .kv { color: var(--energy); text-shadow: 0 0 22px rgba(0,212,255,.55); }
-        .sb-sub { color: var(--t2); font-size: .95rem; margin-top: 6px; }
+        .sb-sub { color: var(--t2); font-size: 1rem; margin-top: 6px; }
         .sb-side { display: grid; gap: 8px; justify-items: end; }
         .sb-live { display: flex; align-items: center; gap: 10px; font-family: var(--mono); font-size: .85rem; color: var(--t2); }
         .sb-led { position: relative; width: 10px; height: 10px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 10px var(--ok); }
@@ -188,7 +188,7 @@
         @keyframes sbTick { to { transform: translateX(50%); } }
 
         /* busbar + bays */
-        .sb-bus-label { display: flex; justify-content: space-between; font-family: var(--mono); font-size: .75rem; color: var(--t2); margin-bottom: 6px; }
+        .sb-bus-label { display: flex; justify-content: space-between; font-family: var(--mono); font-size: .86rem; color: var(--t2); margin-bottom: 6px; }
         .sb-bus-label b { color: var(--energy); font-weight: 600; }
         .sb-busbar { height: 6px; border-radius: 3px; background: linear-gradient(90deg, var(--line-hi), var(--energy), #bff4ff, var(--energy), var(--line-hi)); background-size: 200% 100%; animation: sbFlow var(--flow, 3s) linear infinite; box-shadow: 0 0 16px rgba(0,212,255,.45); transform-origin: right; }
         @keyframes sbFlow { to { background-position: -200% 0; } }
@@ -202,10 +202,10 @@
         .sb-card::before { content: ""; position: absolute; inset: 0; background: radial-gradient(260px circle at var(--mx, 50%) var(--my, 0%), rgba(0,212,255,.14), transparent 60%); opacity: 0; transition: opacity .25s; pointer-events: none; }
         .sb-bay:hover .sb-card { border-color: var(--line-hi); }
         .sb-bay:hover .sb-card::before { opacity: 1; }
-        .sb-k-label { font-size: .8rem; color: var(--t2); letter-spacing: .04em; display: flex; justify-content: space-between; gap: 6px; }
+        .sb-k-label { font-size: .9rem; color: var(--t2); letter-spacing: .04em; display: flex; justify-content: space-between; gap: 6px; }
         .sb-k-val { font-family: var(--display); font-size: 3.3rem; line-height: 1; margin-top: 6px; font-variant-numeric: tabular-nums; }
         .sb-k-val small { font-size: 1.3rem; opacity: .55; }
-        .sb-k-foot { font-family: var(--mono); font-size: .74rem; color: var(--t3); margin-top: 4px; }
+        .sb-k-foot { font-family: var(--mono); font-size: .84rem; color: var(--t2); margin-top: 4px; }
         .sb-meter { height: 4px; background: #0a1320; border-radius: 2px; margin-top: 10px; overflow: hidden; }
         .sb-meter i { display: block; height: 100%; border-radius: 2px; background: currentColor; transform-origin: right; box-shadow: 0 0 8px currentColor; }
         .c-v { color: var(--volt); } .c-ok { color: var(--ok); } .c-e { color: var(--energy); } .c-w { color: var(--warn); } .c-crit { color: var(--crit); }
@@ -222,19 +222,19 @@
 
         .sb-h { display: flex; align-items: baseline; flex-wrap: wrap; gap: 10px; margin: 30px 0 12px; }
         .sb-h h2 { font-family: var(--display); font-size: 2.1rem; font-weight: 700; margin: 0; color: var(--t1); }
-        .sb-h span { font-family: var(--mono); font-size: .75rem; color: var(--t3); }
+        .sb-h span { font-family: var(--mono); font-size: .86rem; color: var(--t2); }
 
         /* RACI relays */
         .sb-relays { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; }
         .sb-relay { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; display: flex; align-items: center; gap: 12px; }
         .sb-relay .code { font-family: var(--mono); font-weight: 600; width: 36px; height: 36px; display: grid; place-items: center; border-radius: 8px; border: 1px solid currentColor; flex: none; box-shadow: inset 0 0 10px currentColor; }
         .sb-relay b { font-family: var(--display); font-size: 2.1rem; font-weight: 700; line-height: 1; }
-        .sb-relay small { display: block; color: var(--t2); font-size: .8rem; }
+        .sb-relay small { display: block; color: var(--t2); font-size: .9rem; }
 
         /* charts */
         .sb-charts { display: grid; grid-template-columns: 1fr 1fr 1.3fr; gap: 14px; }
         .sb-panel { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 16px; min-width: 0; }
-        .sb-panel h3 { margin: 0 0 12px; font-size: 1rem; font-weight: 600; color: var(--t2); }
+        .sb-panel h3 { margin: 0 0 12px; font-size: 1.05rem; font-weight: 600; color: var(--t1); }
         .sb-donut-wrap { display: flex; gap: 16px; align-items: center; }
         .sb-donut { width: 132px; height: 132px; flex: none; overflow: visible; }
         .sb-donut .seg { fill: none; stroke-width: 14; cursor: pointer; transition: stroke-width .2s, filter .2s; }
@@ -247,7 +247,7 @@
         .sb-legend i { width: 10px; height: 10px; border-radius: 2px; flex: none; }
         .sb-legend b { font-family: var(--mono); margin-inline-start: auto; font-variant-numeric: tabular-nums; }
         .sb-spark { width: 100%; height: 160px; display: block; }
-        .sb-spark text { font-family: var(--mono); font-size: 10px; fill: var(--t2); direction: ltr; unicode-bidi: plaintext; }
+        .sb-spark text { font-family: var(--mono); font-size: 12px; fill: var(--t2); direction: ltr; unicode-bidi: plaintext; }
         .sb-empty { color: var(--t2); font-size: .9rem; text-align: center; padding: 30px 0; }
 
         /* roles */
@@ -261,7 +261,7 @@
         .sb-grid2 { display: grid; grid-template-columns: 1fr 2fr; gap: 14px; }
         .sb-scroll { overflow-x: auto; }
         .sb-table { width: 100%; border-collapse: collapse; font-size: .9rem; color: var(--t1); }
-        .sb-table th { font-weight: 600; color: var(--t2); text-align: right; padding: 8px 10px; border-bottom: 1px solid var(--line); font-size: .8rem; white-space: nowrap; }
+        .sb-table th { font-weight: 600; color: var(--t2); text-align: right; padding: 8px 10px; border-bottom: 1px solid var(--line); font-size: .88rem; white-space: nowrap; }
         .sb-table td { padding: 10px; border-bottom: 1px solid #111d2e; text-align: right; vertical-align: middle; }
         .sb-row { cursor: pointer; }
         .sb-row:hover td { background: var(--energy-dim); }
@@ -275,7 +275,7 @@
         .sb-sum { max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .sb-pill { font-size: .75rem; font-weight: 600; padding: 3px 9px; border-radius: 999px; border: 1px solid currentColor; white-space: nowrap; }
         .p-critical, .p-rejected { color: var(--crit); } .p-normal, .p-approved { color: var(--ok); } .p-info, .p-executed { color: var(--info); } .p-uncertain { color: var(--warn); } .p-pending { color: var(--t2); }
-        .sb-mono { font-family: var(--mono); font-size: .78rem; color: var(--t2); white-space: nowrap; }
+        .sb-mono { font-family: var(--mono); font-size: .86rem; color: var(--t2); white-space: nowrap; }
         .sb-detail td { padding: 0; border: 0; }
         .sb-detail .inner { overflow: hidden; height: 0; }
         .sb-detail .box { margin: 4px 10px 12px; padding: 12px 14px; border-inline-start: 3px solid var(--energy); background: rgba(6,12,20,.9); border-radius: 8px; color: var(--t2); font-size: .9rem; line-height: 1.7; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; }
@@ -326,9 +326,9 @@
         .st:hover .st-go { color: var(--acc); border-color: var(--acc); transform: scale(1.15) rotate(-90deg); }
         .st-hero { display: flex; align-items: baseline; gap: 12px; }
         .st-hero b { font-family: var(--display); font-size: clamp(4rem, 7vw, 5.6rem); font-weight: 700; line-height: .85; color: var(--acc); text-shadow: 0 0 26px color-mix(in srgb, var(--acc) 60%, transparent); font-variant-numeric: tabular-nums; }
-        .st-hero small { color: var(--t2); font-size: .95rem; }
+        .st-hero small { color: var(--t2); font-size: 1.02rem; }
         .st-kpis { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
-        .st-kpis > span { background: rgba(6,11,19,.55); border: 1px solid var(--line); border-radius: 12px; padding: 8px 10px; font-size: .8rem; color: var(--t2); }
+        .st-kpis > span { background: rgba(6,11,19,.55); border: 1px solid var(--line); border-radius: 12px; padding: 8px 10px; font-size: .9rem; color: var(--t2); }
         .st-kpis b { display: block; font-family: var(--display); font-size: 2rem; line-height: 1; color: var(--t1); font-weight: 700; font-variant-numeric: tabular-nums; }
         .st-kpis .hot { border-color: rgba(255,95,109,.5); }
         .st-kpis .hot b { color: var(--crit); text-shadow: 0 0 14px var(--crit); }
@@ -339,14 +339,17 @@
         .st.alarm { border-color: rgba(255,95,109,.55); animation: stAlarm 2.4s ease-in-out infinite; }
         @keyframes stAlarm { 50% { box-shadow: 0 0 0 1px rgba(255,95,109,.25), 0 0 40px rgba(255,95,109,.22); } }
         .st.bump { animation: sbBump .9s ease-out; }
-        .st-hint { text-align: center; font-family: var(--mono); font-size: .75rem; color: var(--t3); margin-top: 22px; }
+        .st-hint { text-align: center; font-family: var(--mono); font-size: .86rem; color: var(--t2); margin-top: 22px; }
         .st-hint kbd, .zm kbd { background: #0d1726; border: 1px solid var(--line-hi); color: var(--t2); border-radius: 4px; padding: 0 5px; font-size: .72rem; }
 
         .st > .st-scene { position: absolute; z-index: 0; left: 12px; top: 54px; width: 44%; height: 104px; pointer-events: none;
             -webkit-mask-image: linear-gradient(90deg, #000 70%, transparent); mask-image: linear-gradient(90deg, #000 70%, transparent); }
-        .zv-scene { display: block; width: 100%; height: 130px; margin: -6px 0 10px; pointer-events: none;
+        .zv-scene { display: block; width: 100%; height: 130px; margin: 0 0 10px; pointer-events: none;
+            position: sticky; top: -22px; z-index: 5; background: #070b12; box-shadow: 0 12px 18px -6px #070b12; transition: height .35s cubic-bezier(.16,1,.3,1);
             -webkit-mask-image: linear-gradient(90deg, transparent, #000 8%, #000 92%, transparent); mask-image: linear-gradient(90deg, transparent, #000 8%, #000 92%, transparent); }
         .zm-bar .sc-switch { margin-inline-start: 6px; }
+        .zm.compact .zv-scene { height: 64px; }      /* scrolled: the scene stays, as a strip */
+        .zm-body:focus { outline: none; }
         .st-note { font-size: .78rem; color: var(--warn); background: rgba(255,193,7,.07); border: 1px dashed rgba(255,193,7,.35); border-radius: 8px; padding: 5px 9px; }
 
         /* ── שלי / כל האגף ── */
@@ -376,7 +379,7 @@
         .zm-body { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 22px 24px 40px; }
         .zv[hidden] { display: none; }
         .zv-foot { display: flex; gap: 10px; justify-content: flex-end; margin-top: 18px; flex-wrap: wrap; }
-        .zv-key { font-size: .75rem; color: var(--t3); margin-inline-start: 8px; }
+        .zv-key { font-size: .86rem; color: var(--t2); margin-inline-start: 8px; }
         .zv-key i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin: 0 8px 0 4px; }
         .sb-charts.two { grid-template-columns: 1fr 1.4fr; }
 
@@ -548,7 +551,7 @@
         </button>
 
         <button type="button" class="st {{ 'alarm' if ms.ok and ms.overdue else '' }}" data-zoom="missions" style="--acc:#ff9f43" aria-label="משימות — הגדל">
-            <canvas class="st-scene" data-scene="arc" aria-hidden="true"></canvas>
+            <canvas class="st-scene" data-scene="breaker" aria-hidden="true"></canvas>
             <span class="st-hd"><span class="st-ic">◎</span><span class="st-name">משימות · חדר מבצעים</span><span class="st-led"></span><span class="st-go">⤢</span></span>
             {% if ms.ok %}
             <span class="st-hero"><b data-live="m_open">{{ ms.open }}</b><small>{{ 'משימות פתוחות שלי' if scope == 'mine' else 'משימות פתוחות באגף' }}</small></span>
@@ -562,7 +565,7 @@
         </button>
 
         <button type="button" class="st {{ 'alarm' if ps.ok and ps.past_due else '' }}" data-zoom="projects" style="--acc:#8b9cf4" aria-label="פרויקטים — הגדל">
-            <canvas class="st-scene" data-scene="line" aria-hidden="true"></canvas>
+            <canvas class="st-scene" data-scene="xfmr" aria-hidden="true"></canvas>
             <span class="st-hd"><span class="st-ic">▣</span><span class="st-name">פרויקטים · קובץ המאסטר</span><span class="st-led"></span><span class="st-go">⤢</span></span>
             {% if ps.ok %}
             <span class="st-hero"><b data-live="p_active">{{ ps.active }}</b><small>{{ 'פרויקטים בתחום שלי' if scope == 'mine' else 'פרויקטים פעילים באגף' }}</small></span>
@@ -609,7 +612,7 @@
             <i class="zm-ink" id="zm-ink"></i>
         </nav>
     </div>
-    <div class="zm-body" id="zm-body">
+    <div class="zm-body" id="zm-body" tabindex="-1">
 
     <!-- ── החלטות: the original dashboard, unchanged ── -->
     <section class="zv" data-view="decisions" data-title="החלטות · {{ 'כל האגף' if decisions_all else 'שלי' }}" hidden>
@@ -741,7 +744,7 @@
 
     <!-- ── משימות ── -->
     <section class="zv" data-view="missions" data-title="חדר מבצעים · {{ 'המשימות שלי' if scope == 'mine' else 'כל האגף' }}" hidden>
-        <canvas class="zv-scene" data-scene="arc" aria-hidden="true"></canvas>
+        <canvas class="zv-scene" data-scene="breaker" aria-hidden="true"></canvas>
     {% if ms.ok %}
         <div class="sb-bus-label"><span>פס צבירה · חדר מבצעים</span><span>נפתחו <b>{{ ms.daily_data | sum }}</b> · נסגרו <b>{{ ms.daily_done | sum }}</b> ב-7 ימים</span></div>
         <div class="sb-busbar zv-bus"></div>
@@ -767,7 +770,7 @@
                 <div class="sb-k-val" data-live="m_done_week">{{ ms.done_week }}</div>
                 <div class="sb-k-foot">7 ימים אחרונים</div></div></a>
         </div>
-        <div class="sb-h"><h2>זרמים</h2><span>מטריצת אייזנהאואר · נפתחו מול נסגרו</span></div>
+        <div class="sb-h"><h2>פילוח</h2><span>מטריצת אייזנהאואר · נפתחו מול נסגרו</span></div>
         <div class="sb-charts">
             <div class="sb-panel"><h3>לפי רביע</h3><div class="sb-donut-wrap"><svg class="sb-donut" id="zm-d-quad" viewBox="0 0 132 132" role="img" aria-label="משימות פתוחות לפי רביע"></svg><div class="sb-legend" id="zm-l-quad"></div></div></div>
             <div class="sb-panel"><h3>{{ 'שלי, לפי תאריך יעד' if scope == 'mine' else 'פתוחות לפי אחראי' }}</h3><div id="zm-b-owners"></div></div>
@@ -797,7 +800,7 @@
 
     <!-- ── פרויקטים ── -->
     <section class="zv" data-view="projects" data-title="פרויקטים · {{ 'בתחום שלי' if scope == 'mine' else 'כל האגף' }}" hidden>
-        <canvas class="zv-scene" data-scene="line" aria-hidden="true"></canvas>
+        <canvas class="zv-scene" data-scene="xfmr" aria-hidden="true"></canvas>
     {% if ps.ok %}
         <div class="sb-bus-label"><span>פס צבירה · פרויקטים פעילים</span><span><b>{{ ps.watch_total }}</b> פרויקטים ברשימת המעקב</span></div>
         <div class="sb-busbar zv-bus"></div>
@@ -1457,6 +1460,7 @@ function zmShow(key, animateInk) {
     });
     zmInk(key, animateInk);
     ZM_BODY.scrollTop = 0;
+    ZM.classList.remove('compact');
     return zmView(key);
 }
 function zmSurge() {
@@ -1511,7 +1515,7 @@ async function zmOpenStation(key, opts = {}) {
         document.querySelectorAll('.st-scene').forEach(c => StationScenes.setActive(c, false));   // covered by the shell
         StationScenes.burst(SCENE_OF[key]);
     }
-    document.getElementById('zm-close').focus({ preventScroll: true });
+    ZM_BODY.focus({ preventScroll: true });      // ↓ / PageDown / Space scroll the station at once
     zmBusy = false;
 }
 
@@ -1532,6 +1536,7 @@ async function zmSwitch(key) {
     }
     zvEnter(view, key, SB_GO);
     if (window.StationScenes) StationScenes.burst(SCENE_OF[key]);
+    ZM_BODY.focus({ preventScroll: true });
     zmBusy = false;
 }
 
@@ -1567,6 +1572,7 @@ window.addEventListener('popstate', () => {
     else zmClose();
 });
 document.getElementById('zm-close').addEventListener('click', zmRequestClose);
+ZM_BODY.addEventListener('scroll', () => ZM.classList.toggle('compact', ZM_BODY.scrollTop > 60), { passive: true });
 ZM.querySelectorAll('.zm-tabs button').forEach(b => b.addEventListener('click', () => zmSwitch(b.dataset.tab)));
 ZM.querySelectorAll('.zv-row').forEach(tr => {
     const go = () => { location.href = tr.dataset.href; };
@@ -1625,11 +1631,11 @@ function stFeedScenes(st) {
     const m = (st.stations || {}).missions || {}, p = (st.stations || {}).projects || {}, l = (st.stations || {}).lessons || {};
     const days = st.daily_data || [], max = Math.max(1, ...days);
     StationScenes.set('scope', { load: Math.min(1, (st.week_total || 0) / Math.max(7, max * 4)), alarm: (st.pending_approvals || 0) > 0 });
-    StationScenes.set('arc', { level: m.ok ? Math.min(1, (m.open || 0) / 30) : .2, alarm: !!(m.ok && m.overdue) });
-    StationScenes.set('line', { count: p.ok ? p.active : 12, bad: p.ok && p.active ? (p.past_due || 0) / p.active : 0 });
+    StationScenes.set('breaker', { level: m.ok ? Math.min(1, (m.open || 0) / 30) : .2, alarm: !!(m.ok && m.overdue) });
+    StationScenes.set('xfmr', { count: p.ok ? p.active : 12, bad: p.ok && p.active ? (p.past_due || 0) / p.active : 0 });
     StationScenes.set('globe', { amount: l.ok ? Math.min(1, (l.total || 0) / 200) : .2, charge: l.ok && l.total ? l.approved / l.total : 0 });
 }
-const SCENE_OF = { decisions: 'scope', missions: 'arc', projects: 'line', lessons: 'globe' };
+const SCENE_OF = { decisions: 'scope', missions: 'breaker', projects: 'xfmr', lessons: 'globe' };
 if (window.StationScenes) document.querySelectorAll('canvas[data-scene]').forEach(c => StationScenes.mount(c));
 stFeedScenes(sbState);
 
@@ -1701,8 +1707,8 @@ async function sbPoll() {
         stFeedScenes(sbState);
         if (window.StationScenes) {
             if (vals.total_decisions !== sbPrev.total_decisions || vals.pending_approvals !== sbPrev.pending_approvals) StationScenes.burst('scope');
-            if (vals.m_open !== sbPrev.m_open || vals.m_overdue !== sbPrev.m_overdue) StationScenes.burst('arc');
-            if (vals.p_active !== sbPrev.p_active || vals.p_past_due !== sbPrev.p_past_due) StationScenes.burst('line');
+            if (vals.m_open !== sbPrev.m_open || vals.m_overdue !== sbPrev.m_overdue) StationScenes.burst('breaker');
+            if (vals.p_active !== sbPrev.p_active || vals.p_past_due !== sbPrev.p_past_due) StationScenes.burst('xfmr');
             if (vals.l_total !== sbPrev.l_total || vals.l_approved !== sbPrev.l_approved) StationScenes.burst('globe');
         }
         if (stationsMoved) { stDrawTiles(false); if (zmOpen && zmOpen !== 'decisions') STATION_DRAW[zmOpen](false); }
