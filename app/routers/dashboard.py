@@ -18,6 +18,7 @@ from app.database import get_db_session
 from app.models import Decision, User, DecisionTypeEnum, DecisionStatusEnum, RoleEnum, DecisionDistribution, DistributionTypeEnum, DistributionStatusEnum, DecisionFeedback, DecisionRaciRole, RaciRoleEnum, LessonLearned, Message, KnowledgeFile, QueryLog, RACISuggestion, RACISuggestionStatusEnum, RACIRule, ReportHistory, Mission, MissionUpdate, MissionDueChange
 from app.routers.login import get_current_user
 from app.services import dashboard_domains
+from app.config import settings as _cfg
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +38,10 @@ _ROLE_HIERARCHY = {
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 templates = Jinja2Templates(directory="app/templates")
+# ?v=<commit> on the page's own scripts: a deploy must reach the browser, not a
+# cached copy of last week's file (2026-10-16: new scenes rendered nothing until
+# the old station_scenes.js fell out of the cache).
+templates.env.globals["asset_v"] = (_cfg.RAILWAY_GIT_COMMIT_SHA or _cfg.BUILD_COMMIT_SHA or "dev")[:12]
 
 
 def _can_edit(decision: Decision, user: User) -> bool:

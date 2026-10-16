@@ -12,7 +12,8 @@
  *   scope  החלטות  3-phase oscilloscope; a fault spike while approvals wait
  *   breaker משימות  3-pole circuit breaker opening and closing; trips red when overdue
  *   xfmr    פרויקטים substation power transformer; pulses ride bus → windings → bus, red = late
- *   globe   לקחים   plasma globe; touching the glass gathers the discharge to the finger
+ *   globe   לקחים   one plasma globe fed by streams from outside; touch gathers the discharge
+ *   rail    the feeder down the side of a zoom, so the live picture follows the scroll
  *
  * prefers-reduced-motion: one still frame per resize, no loop.
  */
@@ -27,6 +28,7 @@
         scope: { load: .4, alarm: false },
         breaker: { level: .4, alarm: false },
         xfmr:  { count: 40, bad: 0 },
+        rail:  { color: '#00d4ff', boost: 0 },
         globe: { amount: .5, charge: .5 },
     };
     const mounts = [];
@@ -256,11 +258,12 @@
     // bright channel to your finger, the glass glows where you touch it, and a
     // press sends a pulse through every filament.
     function globe(s, ctx, w, h, dt, p, m) {
-        const count = Math.max(1, Math.round(w / 380));
+        const count = 1;                                       // one globe, in the middle
         s.t = (s.t || 0) + dt; s.kick = Math.max(0, (s.kick || 0) - dt);
         s.f = s.f || []; s.touchA = s.touchA || [];
         for (let gi = 0; gi < count; gi++) {
-            const cx = w * (gi + .5) / count, cy = h * .52, R = Math.min(h * .44, w / count * .4);
+            const cx = w / 2, cy = h * .52, R = Math.min(h * .44, w * .4);
+            inflow(s, ctx, w, h, dt, cx, cy, R, p);
             let target = null, near = 0;
             if (m) {
                 const d = Math.hypot(m.x - cx, m.y - cy);
@@ -327,9 +330,68 @@
         }
     }
     globe.burst = s => { s.kick = 1.2; };
+
+    // Knowledge drawn in from outside: slow, faint streams curve in from both
+    // edges and are absorbed at the glass, each landing a soft flash on the rim.
+    function inflow(s, ctx, w, h, dt, cx, cy, R, p) {
+        s.streams = s.streams || [];
+        const want = Math.round(4 + 6 * clamp(p.amount, 0, 1));
+        while (s.streams.length < want) {
+            const left = Math.random() < .5, sy = rnd(h * .1, h * .9);
+            const a = Math.atan2(sy - cy, (left ? 0 : w) - cx) + rnd(-.35, .35);
+            s.streams.push({ x0: left ? -10 : w + 10, y0: sy, a, bend: rnd(-.5, .5) * h, t: rnd(0, 1), v: rnd(.12, .22), purple: Math.random() < .35 });
+        }
+        if (s.streams.length > want) s.streams.length = want;
+        s.rimFlash = s.rimFlash || [];
+        s.streams.forEach(q => {
+            q.t += q.v * dt;
+            const ex = cx + Math.cos(q.a) * R, ey = cy + Math.sin(q.a) * R;
+            const mx = (q.x0 + ex) / 2, my = (q.y0 + ey) / 2 + q.bend;
+            const P = u => { const b = 1 - u; return [b * b * q.x0 + 2 * b * u * mx + u * u * ex, b * b * q.y0 + 2 * b * u * my + u * u * ey]; };
+            if (q.t >= 1) { s.rimFlash.push({ a: q.a, life: .5 }); q.t = 0; q.y0 = rnd(h * .1, h * .9); q.a = Math.atan2(q.y0 - cy, q.x0 - cx) + rnd(-.35, .35); }
+            // the path: a whisper of a line; the charge: a short glowing tail riding it
+            const col = q.purple ? '192,132,252' : '45,212,191';
+            ctx.strokeStyle = `rgba(${col},.07)`; ctx.lineWidth = 1;
+            ctx.beginPath(); for (let u = 0; u <= 1.001; u += .05) { const [x, y] = P(u); u ? ctx.lineTo(x, y) : ctx.moveTo(x, y); } ctx.stroke();
+            ctx.lineCap = 'round';
+            for (let k = 0; k < 6; k++) {
+                const u = q.t - k * .012; if (u < 0) break;
+                const [x, y] = P(u);
+                ctx.fillStyle = `rgba(${col},${(.55 - k * .08) * Math.min(1, q.t * 4)})`;
+                ctx.beginPath(); ctx.arc(x, y, 2.2 - k * .25, 0, TAU); ctx.fill();
+            }
+        });
+        s.rimFlash = s.rimFlash.filter(f => (f.life -= dt) > 0);
+        s.rimFlash.forEach(f => {
+            const x = cx + Math.cos(f.a) * R, y = cy + Math.sin(f.a) * R, g = ctx.createRadialGradient(x, y, 0, x, y, 12);
+            g.addColorStop(0, `rgba(230,255,251,${f.life})`); g.addColorStop(1, 'rgba(45,212,191,0)');
+            ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, 12, 0, TAU); ctx.fill();
+        });
+    }
+
+    /* ── the feeder: a thin conductor down the side of a zoomed station ── */
+    // Shown once the station's scene has scrolled out of view, so some of the
+    // live picture stays with you further down the page. Current flows up,
+    // toward the station; it quickens a little while you scroll. Quiet on purpose.
+    function rail(s, ctx, w, h, dt, p) {
+        const col = p.color || '#00d4ff', x = w / 2;
+        s.boost = Math.max(0, (s.boost || 0) - dt * 1.5);
+        s.off = ((s.off || 0) + dt * (40 + 160 * Math.min(1, p.boost || 0) + 120 * s.boost)) % 48;
+        ctx.strokeStyle = col; ctx.globalAlpha = .18; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
+        ctx.globalAlpha = .75; ctx.lineWidth = 2; ctx.lineCap = 'round'; glow(ctx, col, 8);
+        // drawn top → bottom: a growing offset slides the dashes back toward the top
+        ctx.setLineDash([10, 38]); ctx.lineDashOffset = s.off;
+        ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
+        ctx.setLineDash([]); ctx.shadowBlur = 0; ctx.globalAlpha = 1;
+        // insulator ticks every so often, like a conductor on its supports
+        ctx.fillStyle = col; ctx.globalAlpha = .3;
+        for (let y = 40; y < h; y += 120) { ctx.fillRect(x - 4, y, 8, 2); }
+        ctx.globalAlpha = 1;
+    }
     scope.burst = s => { s.kick = 1; };
 
-    const SCENES = { scope, breaker, xfmr, globe };
+    const SCENES = { scope, breaker, xfmr, globe, rail };
 
     /* ── mount + loop ────────────────────────────────────────────────── */
     function size(m) {
