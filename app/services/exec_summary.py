@@ -164,6 +164,7 @@ def read_file(file_path: str) -> dict | None:
     try:
         name = pick_sheet(wb.sheetnames)
         if name is None:
+            logger.info(f"exec_summary: no '{SHEET_MARKER}' sheet in {file_path} — dashboard keeps the previous one")
             return None
         rows = [list(r) for r in wb[name].iter_rows(values_only=True)]
     finally:
@@ -185,6 +186,8 @@ async def save(session: AsyncSession, payload: dict, source_file: str | None) ->
             payload=payload,
         ))
         await session.commit()
+        logger.info(f"exec_summary: saved '{payload.get('sheet')}' — {len(payload.get('kpis') or [])} KPIs, "
+                    f"{len(payload.get('sections') or [])} tables")
     except Exception:
         logger.exception("exec_summary: save failed")
         await session.rollback()

@@ -821,6 +821,7 @@ async def deactivate_missing(session, identifiers) -> int:
     replay, which returns no identifiers) — an upload must never wipe the table."""
     idents = set(identifiers or ())
     if len(idents) < MIN_INVENTORY:
+        logger.info(f"deactivate_missing: skipped — {len(idents)} identifiers (< {MIN_INVENTORY}; broken parse or history replay)")
         return 0
     from sqlalchemy import update as sa_update
     res = await session.execute(
@@ -830,6 +831,7 @@ async def deactivate_missing(session, identifiers) -> int:
         .execution_options(synchronize_session=False)
     )
     await session.commit()
+    logger.info(f"deactivate_missing: inventory {len(idents)} projects, deactivated {res.rowcount or 0} absent from it")
     return res.rowcount or 0
 
 
