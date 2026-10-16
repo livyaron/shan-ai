@@ -291,6 +291,88 @@
         }
         @media (prefers-reduced-motion: reduce) { .sb *, .sb *::before, .sb *::after { animation: none !important; } }
 
+        /* ══ Four stations ═══════════════════════════════════════════════
+           Overview = four tiles hung on a cross-shaped busbar; a tile is a
+           button that zooms into its station (#decisions / #missions / …).
+           --acc is the station's identity colour; ok/warn/crit keep meaning
+           state, so an alarm is red on every station. */
+        .st-grid { position: relative; display: grid; grid-template-columns: 1fr 1fr; gap: 30px; margin-top: 8px; }
+        .st-bus { position: absolute; inset: 0; pointer-events: none; z-index: 0; }
+        .st-bus i { position: absolute; background: linear-gradient(90deg, transparent, var(--energy), #bff4ff, var(--energy), transparent); background-size: 200% 100%; animation: sbFlow 3s linear infinite; box-shadow: 0 0 14px rgba(0,212,255,.5); opacity: .75; }
+        .st-bus .h { top: calc(50% - 2px); right: -10px; left: -10px; height: 4px; border-radius: 2px; }
+        .st-bus .v { right: calc(50% - 2px); top: -10px; bottom: -10px; width: 4px; border-radius: 2px; background: linear-gradient(180deg, transparent, var(--energy), #bff4ff, var(--energy), transparent); background-size: 100% 200%; animation-name: sbFlowV; }
+        @keyframes sbFlowV { to { background-position: 0 -200%; } }
+        .st-bus .hub { position: absolute; top: 50%; right: 50%; width: 52px; height: 52px; margin: -26px -26px 0 0; display: grid; place-items: center; border-radius: 50%; background: #070b12; border: 2px solid var(--energy); color: var(--energy); font-size: 1.4rem; box-shadow: 0 0 0 6px rgba(0,212,255,.08), 0 0 28px rgba(0,212,255,.55); z-index: 2; }
+        .st-bus .hub::after { content: ""; position: absolute; inset: -8px; border-radius: 50%; border: 2px solid var(--energy); opacity: 0; animation: sbRing 2.4s ease-out infinite; }
+
+        .st { all: unset; box-sizing: border-box; position: relative; z-index: 1; display: flex; flex-direction: column; gap: 14px; min-height: 260px; padding: 20px 22px 16px; border-radius: 22px; cursor: pointer; color: var(--t1); text-align: right; overflow: hidden; transform-style: preserve-3d; will-change: transform;
+              background: radial-gradient(120% 90% at 100% 0%, color-mix(in srgb, var(--acc) 16%, transparent), transparent 60%), linear-gradient(180deg, rgba(16,28,45,.94), rgba(10,17,29,.9));
+              border: 1px solid color-mix(in srgb, var(--acc) 28%, var(--line)); box-shadow: 0 20px 50px -24px rgba(0,0,0,.8), inset 0 1px 0 rgba(255,255,255,.04); }
+        .st::before { content: ""; position: absolute; inset: 0; background: radial-gradient(340px circle at var(--mx, 50%) var(--my, 0%), color-mix(in srgb, var(--acc) 22%, transparent), transparent 62%); opacity: 0; transition: opacity .3s; pointer-events: none; }
+        .st::after { content: ""; position: absolute; top: 0; right: 0; left: 0; height: 3px; background: linear-gradient(90deg, transparent, var(--acc), transparent); box-shadow: 0 0 18px var(--acc); opacity: .9; }
+        .st:hover::before, .st:focus-visible::before { opacity: 1; }
+        .st:hover { border-color: color-mix(in srgb, var(--acc) 60%, transparent); }
+        .st:focus-visible { outline: 2px solid var(--acc); outline-offset: 4px; }
+        .st > * { position: relative; }
+        .st-hd { display: flex; align-items: center; gap: 10px; }
+        .st-ic { width: 34px; height: 34px; display: grid; place-items: center; border-radius: 10px; color: var(--acc); border: 1px solid color-mix(in srgb, var(--acc) 50%, transparent); box-shadow: inset 0 0 12px color-mix(in srgb, var(--acc) 35%, transparent); font-size: 1rem; }
+        .st-name { font-family: var(--display); font-size: 2rem; font-weight: 700; line-height: 1; }
+        .st-led { width: 8px; height: 8px; border-radius: 50%; background: var(--acc); box-shadow: 0 0 10px var(--acc); animation: blink 2.2s ease-in-out infinite; margin-inline-start: auto; }
+        .st-go { width: 36px; height: 36px; display: grid; place-items: center; border-radius: 10px; border: 1px solid var(--line-hi); color: var(--t2); font-size: 1.1rem; transition: color .2s, border-color .2s, transform .35s cubic-bezier(.16,1,.3,1); }
+        .st:hover .st-go { color: var(--acc); border-color: var(--acc); transform: scale(1.15) rotate(-90deg); }
+        .st-hero { display: flex; align-items: baseline; gap: 12px; }
+        .st-hero b { font-family: var(--display); font-size: clamp(4rem, 7vw, 5.6rem); font-weight: 700; line-height: .85; color: var(--acc); text-shadow: 0 0 26px color-mix(in srgb, var(--acc) 60%, transparent); font-variant-numeric: tabular-nums; }
+        .st-hero small { color: var(--t2); font-size: .95rem; }
+        .st-kpis { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+        .st-kpis > span { background: rgba(6,11,19,.55); border: 1px solid var(--line); border-radius: 12px; padding: 8px 10px; font-size: .8rem; color: var(--t2); }
+        .st-kpis b { display: block; font-family: var(--display); font-size: 2rem; line-height: 1; color: var(--t1); font-weight: 700; font-variant-numeric: tabular-nums; }
+        .st-kpis .hot { border-color: rgba(255,95,109,.5); }
+        .st-kpis .hot b { color: var(--crit); text-shadow: 0 0 14px var(--crit); }
+        .st-spark { width: 100%; height: 54px; display: block; margin-top: auto; overflow: visible; }
+        .st-strip { display: flex; gap: 3px; height: 12px; margin-top: auto; border-radius: 6px; overflow: hidden; }
+        .st-strip i { display: block; height: 100%; border-radius: 3px; transform-origin: right; }
+        .st-off { color: var(--t3); font-size: .95rem; margin: auto 0; }
+        .st.alarm { border-color: rgba(255,95,109,.55); animation: stAlarm 2.4s ease-in-out infinite; }
+        @keyframes stAlarm { 50% { box-shadow: 0 0 0 1px rgba(255,95,109,.25), 0 0 40px rgba(255,95,109,.22); } }
+        .st.bump { animation: sbBump .9s ease-out; }
+        .st-hint { text-align: center; font-family: var(--mono); font-size: .75rem; color: var(--t3); margin-top: 22px; }
+        .st-hint kbd, .zm kbd { background: #0d1726; border: 1px solid var(--line-hi); color: var(--t2); border-radius: 4px; padding: 0 5px; font-size: .72rem; }
+
+        /* ── zoom shell ── */
+        body.zoomed { overflow: hidden; }
+        .zm { position: fixed; inset: 0; z-index: 1040; display: flex; flex-direction: column; color: var(--t1);
+              background: radial-gradient(90% 60% at 100% 0%, color-mix(in srgb, var(--zacc, #00d4ff) 14%, transparent), transparent 60%), radial-gradient(70% 50% at 0% 100%, rgba(139,156,244,.08), transparent 60%), #070b12f2;
+              backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
+        .zm[hidden] { display: none; }
+        .zm-bar { display: flex; align-items: center; gap: 16px; padding: 10px 22px; border-bottom: 1px solid var(--line); background: rgba(7,11,18,.75); flex-wrap: wrap; position: relative; z-index: 2; }
+        .zm-x { all: unset; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; border-radius: 10px; border: 1px solid var(--line-hi); color: var(--t1); font-weight: 600; font-size: .95rem; }
+        .zm-x:hover { border-color: var(--zacc); color: #fff; box-shadow: 0 0 18px color-mix(in srgb, var(--zacc) 35%, transparent); }
+        .zm-x:focus-visible, .zm-tabs button:focus-visible { outline: 2px solid var(--zacc); outline-offset: 2px; }
+        .zm-title { font-family: var(--display); font-size: 2.4rem; font-weight: 700; margin: 0; line-height: 1; color: var(--zacc); text-shadow: 0 0 22px color-mix(in srgb, var(--zacc) 50%, transparent); }
+        .zm-tabs { position: relative; display: flex; gap: 4px; margin-inline-start: auto; padding: 4px; border-radius: 12px; background: rgba(6,11,19,.7); border: 1px solid var(--line); }
+        .zm-tabs button { all: unset; position: relative; z-index: 1; cursor: pointer; padding: 6px 14px; border-radius: 8px; color: var(--t2); font-size: .92rem; font-weight: 600; transition: color .2s; }
+        .zm-tabs button.on { color: #fff; }
+        .zm-ink { position: absolute; top: 4px; bottom: 4px; right: 4px; width: 0; border-radius: 8px; background: color-mix(in srgb, var(--zacc) 28%, #0b1a2c); border: 1px solid var(--zacc); box-shadow: 0 0 16px color-mix(in srgb, var(--zacc) 40%, transparent); }
+        .zm-surge { position: absolute; top: 0; right: 0; left: 0; height: 3px; z-index: 3; background: linear-gradient(90deg, transparent, var(--zacc), #fff, var(--zacc), transparent); box-shadow: 0 0 24px var(--zacc); transform: scaleX(0); pointer-events: none; }
+        .zm-body { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 22px 24px 40px; }
+        .zv[hidden] { display: none; }
+        .zv-foot { display: flex; gap: 10px; justify-content: flex-end; margin-top: 18px; flex-wrap: wrap; }
+        .zv-key { font-size: .75rem; color: var(--t3); margin-inline-start: 8px; }
+        .zv-key i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin: 0 8px 0 4px; }
+        .sb-charts.two { grid-template-columns: 1fr 1.4fr; }
+
+        @media (max-width: 1100px) { .sb-charts.two { grid-template-columns: 1fr; } }
+        @media (max-width: 760px) {
+            .st-grid { grid-template-columns: 1fr; gap: 16px; }
+            .st-bus { display: none; }
+            .st { min-height: 0; }
+            .st-hint { display: none; }
+            .zm-bar { padding: 8px 16px; }
+            .zm-x span { display: none; }
+            .zm-tabs { order: 3; width: 100%; overflow-x: auto; margin: 0; }
+            .zm-body { padding: 16px; }
+        }
+
         /* ── CTA buttons (decisions Bootstrap-primary look) ── */
         .btn-primary {
             background: #5865f2;
@@ -399,13 +481,14 @@
 {% set approved = status_counts.get('approved', 0) %}
 {% set critical = type_counts.get('critical', 0) %}
 {% macro pct(n) %}{{ ((n / total_decisions * 100) | round | int) if total_decisions else 0 }}{% endmacro %}
+{% set ms = stations.missions %}{% set ps = stations.projects %}{% set ls = stations.lessons %}
 <div class="container-fluid py-4 px-4 sb" id="sb">
 
     <!-- Header -->
     <div class="sb-head">
         <div>
-            <h1 class="sb-title">מרכז בקרת החלטות <span class="kv">⚡</span></h1>
-            <div class="sb-sub">כל מדד הוא שדה שמוזן מפס הצבירה · הנתונים מתעדכנים לבד</div>
+            <h1 class="sb-title">מרכז בקרה <span class="kv">⚡</span></h1>
+            <div class="sb-sub">ארבע תחנות על פס צבירה אחד · לחץ על תחנה כדי להיכנס אליה · הנתונים מתעדכנים לבד</div>
         </div>
         <div class="sb-side">
             <div class="sb-live">
@@ -421,6 +504,81 @@
         </div>
     </div>
 
+    <!-- ══ The four stations. Each tile is a button: it zooms into its station. ══ -->
+    <div class="st-grid" id="st-grid">
+        <div class="st-bus" aria-hidden="true"><i class="h"></i><i class="v"></i><b class="hub">⚡</b></div>
+
+        <button type="button" class="st {{ 'alarm' if pending_approvals else '' }}" data-zoom="decisions" style="--acc:#00d4ff" aria-label="החלטות — הגדל">
+            <span class="st-hd"><span class="st-ic">◆</span><span class="st-name">החלטות</span><span class="st-led"></span><span class="st-go">⤢</span></span>
+            <span class="st-hero"><b data-live="total_decisions">{{ total_decisions }}</b><small>החלטות שאני מעורב בהן</small></span>
+            <span class="st-kpis">
+                <span class="{{ 'hot' if pending_approvals else '' }}"><b data-live="pending_approvals">{{ pending_approvals }}</b>ממתינות לי</span>
+                <span><b data-live="critical">{{ critical }}</b>קריטיות</span>
+                <span><b data-live="week_total">{{ week_total }}</b>ב-7 ימים</span>
+            </span>
+            <svg class="st-spark" data-spark="decisions" viewBox="0 0 300 54" preserveAspectRatio="none" aria-hidden="true"></svg>
+        </button>
+
+        <button type="button" class="st {{ 'alarm' if ms.ok and ms.overdue else '' }}" data-zoom="missions" style="--acc:#ff9f43" aria-label="משימות — הגדל">
+            <span class="st-hd"><span class="st-ic">◎</span><span class="st-name">משימות · חדר מבצעים</span><span class="st-led"></span><span class="st-go">⤢</span></span>
+            {% if ms.ok %}
+            <span class="st-hero"><b data-live="m_open">{{ ms.open }}</b><small>משימות פתוחות</small></span>
+            <span class="st-kpis">
+                <span class="{{ 'hot' if ms.overdue else '' }}"><b data-live="m_overdue">{{ ms.overdue }}</b>באיחור</span>
+                <span><b data-live="m_do_now">{{ ms.do_now }}</b>בצע עכשיו</span>
+                <span><b data-live="m_done_week">{{ ms.done_week }}</b>הושלמו השבוע</span>
+            </span>
+            <svg class="st-spark" data-spark="missions" viewBox="0 0 300 54" preserveAspectRatio="none" aria-hidden="true"></svg>
+            {% else %}<span class="st-off">התחנה לא זמינה כרגע</span>{% endif %}
+        </button>
+
+        <button type="button" class="st {{ 'alarm' if ps.ok and ps.past_due else '' }}" data-zoom="projects" style="--acc:#8b9cf4" aria-label="פרויקטים — הגדל">
+            <span class="st-hd"><span class="st-ic">▣</span><span class="st-name">פרויקטים · קובץ המאסטר</span><span class="st-led"></span><span class="st-go">⤢</span></span>
+            {% if ps.ok %}
+            <span class="st-hero"><b data-live="p_active">{{ ps.active }}</b><small>פרויקטים פעילים</small></span>
+            <span class="st-kpis">
+                <span class="{{ 'hot' if ps.past_due else '' }}"><b data-live="p_past_due">{{ ps.past_due }}</b>יעד עבר</span>
+                <span><b data-live="p_late">{{ ps.late }}</b>מאחרים מהתכנון</span>
+                <span><b data-live="p_undated">{{ ps.undated }}</b>יעד כמלל</span>
+            </span>
+            <span class="st-strip" data-strip="projects" aria-hidden="true"></span>
+            {% else %}<span class="st-off">התחנה לא זמינה כרגע</span>{% endif %}
+        </button>
+
+        <button type="button" class="st" data-zoom="lessons" style="--acc:#2dd4bf" aria-label="לקחים — הגדל">
+            <span class="st-hd"><span class="st-ic">✦</span><span class="st-name">לקחים</span><span class="st-led"></span><span class="st-go">⤢</span></span>
+            {% if ls.ok %}
+            <span class="st-hero"><b data-live="l_total">{{ ls.total }}</b><small>לקחים במערכת</small></span>
+            <span class="st-kpis">
+                <span><b data-live="l_approved">{{ ls.approved }}</b>אושרו והופצו</span>
+                <span><b data-live="l_pending">{{ ls.pending }}</b>בתהליך</span>
+                <span><b data-live="l_impl">{{ ls.impl_open }}</b>הטמעות פתוחות</span>
+            </span>
+            <svg class="st-spark" data-spark="lessons" viewBox="0 0 300 54" preserveAspectRatio="none" aria-hidden="true"></svg>
+            {% else %}<span class="st-off">מערכת הלקחים לא זמינה כרגע</span>{% endif %}
+        </button>
+    </div>
+    <div class="st-hint">לחץ על תחנה · <kbd>1</kbd>–<kbd>4</kbd> מהמקלדת · <kbd>Esc</kbd> חוזר</div>
+</div>
+
+<!-- ══ Zoom shell: one station, full screen. The tile it came from is where it grows out of. ══ -->
+<div class="zm sb" id="zm" hidden role="dialog" aria-modal="true" aria-labelledby="zm-title">
+    <div class="zm-surge" id="zm-surge" aria-hidden="true"></div>
+    <div class="zm-bar">
+        <button type="button" class="zm-x" id="zm-close" aria-label="חזרה לארבע התחנות">⤡ <span>כל התחנות</span></button>
+        <h2 class="zm-title" id="zm-title"></h2>
+        <nav class="zm-tabs" id="zm-tabs">
+            <button type="button" data-tab="decisions" style="--acc:#00d4ff">החלטות</button>
+            <button type="button" data-tab="missions" style="--acc:#ff9f43">משימות</button>
+            <button type="button" data-tab="projects" style="--acc:#8b9cf4">פרויקטים</button>
+            <button type="button" data-tab="lessons" style="--acc:#2dd4bf">לקחים</button>
+            <i class="zm-ink" id="zm-ink"></i>
+        </nav>
+    </div>
+    <div class="zm-body" id="zm-body">
+
+    <!-- ── החלטות: the original dashboard, unchanged ── -->
+    <section class="zv" data-view="decisions" data-title="מרכז בקרת החלטות" hidden>
     {% if recent_decisions %}
     <div class="sb-ticker" aria-label="החלטות אחרונות">
         <div class="track">
@@ -544,7 +702,159 @@
             </table>
         </div>
     </div>
+    </section>
 
+    <!-- ── משימות ── -->
+    <section class="zv" data-view="missions" data-title="חדר מבצעים · משימות" hidden>
+    {% if ms.ok %}
+        <div class="sb-bus-label"><span>פס צבירה · חדר מבצעים</span><span>נפתחו <b>{{ ms.daily_data | sum }}</b> · נסגרו <b>{{ ms.daily_done | sum }}</b> ב-7 ימים</span></div>
+        <div class="sb-busbar zv-bus"></div>
+        <div class="sb-bays">
+            <a class="sb-bay c-e" style="--d:0s" href="/dashboard/war-room?kpi=open"><div class="sb-breaker"></div><div class="sb-card">
+                <div class="sb-k-label"><span>משימות פתוחות</span><span>📋</span></div>
+                <div class="sb-k-val" data-live="m_open">{{ ms.open }}</div>
+                <div class="sb-k-foot"><span data-live="m_undated">{{ ms.undated }}</span> בלי תאריך יעד</div></div></a>
+            <a class="sb-bay c-crit" style="--d:.4s" href="/dashboard/war-room?kpi=do"><div class="sb-breaker"></div><div class="sb-card">
+                <div class="sb-k-label"><span>בצע עכשיו</span><span>🔥</span></div>
+                <div class="sb-k-val" data-live="m_do_now">{{ ms.do_now }}</div>
+                <div class="sb-k-foot">דחוף · חשוב</div></div></a>
+            <a class="sb-bay {{ 'alarm' if ms.overdue else 'c-ok' }}" style="--d:.8s" href="/dashboard/war-room?kpi=overdue"><div class="sb-breaker"></div><div class="sb-card">
+                <div class="sb-k-label"><span>באיחור</span><span>⚠️</span></div>
+                <div class="sb-k-val" data-live="m_overdue">{{ ms.overdue }}</div>
+                <div class="sb-k-foot">{{ 'לחץ לטיפול ←' if ms.overdue else 'אין איחורים' }}</div></div></a>
+            <a class="sb-bay c-v" style="--d:1.2s" href="/dashboard/war-room"><div class="sb-breaker"></div><div class="sb-card">
+                <div class="sb-k-label"><span>חדשות (24 שעות)</span><span>✨</span></div>
+                <div class="sb-k-val" data-live="m_new">{{ ms.new_24h }}</div>
+                <div class="sb-k-foot">נפתחו ביממה האחרונה</div></div></a>
+            <a class="sb-bay c-ok" style="--d:1.6s" href="/dashboard/war-room?kpi=done_week"><div class="sb-breaker"></div><div class="sb-card">
+                <div class="sb-k-label"><span>הושלמו השבוע</span><span>✅</span></div>
+                <div class="sb-k-val" data-live="m_done_week">{{ ms.done_week }}</div>
+                <div class="sb-k-foot">7 ימים אחרונים</div></div></a>
+        </div>
+        <div class="sb-h"><h2>זרמים</h2><span>מטריצת אייזנהאואר · נפתחו מול נסגרו</span></div>
+        <div class="sb-charts">
+            <div class="sb-panel"><h3>לפי רביע</h3><div class="sb-donut-wrap"><svg class="sb-donut" id="zm-d-quad" viewBox="0 0 132 132" role="img" aria-label="משימות פתוחות לפי רביע"></svg><div class="sb-legend" id="zm-l-quad"></div></div></div>
+            <div class="sb-panel"><h3>פתוחות לפי אחראי</h3><div id="zm-b-owners"></div></div>
+            <div class="sb-panel"><h3>7 ימים אחרונים <span class="zv-key"><i style="background:var(--energy)"></i>נפתחו <i style="background:var(--ok)"></i>נסגרו</span></h3><svg class="sb-spark" id="zm-s-missions" viewBox="0 0 400 160" role="img" aria-label="משימות שנפתחו ונסגרו ביום"></svg></div>
+        </div>
+        <div class="sb-h"><h2>על השולחן</h2><span>משימות פתוחות לפי תאריך יעד · לחץ על שורה לחדר המבצעים</span></div>
+        <div class="sb-panel sb-scroll">
+            <table class="sb-table">
+                <thead><tr><th>#</th><th>משימה</th><th>רביע</th><th>אחראי</th><th>יעד</th></tr></thead>
+                <tbody>
+                {% for m in ms.recent %}
+                    <tr class="sb-row zv-row" tabindex="0" data-href="/dashboard/war-room?q={{ m.title | urlencode }}" data-type="{{ 'critical' if m.overdue else ('normal' if m.quadrant != 'do' else 'uncertain') }}">
+                        <td class="sb-mono">#{{ m.id }}</td>
+                        <td class="sb-sum">{{ m.title }}{% if m.new %} <span class="sb-pill p-info">חדשה</span>{% endif %}</td>
+                        <td><span class="sb-pill {{ 'p-critical' if m.quadrant == 'do' else 'p-pending' }}">{{ m.quadrant_label }}</span></td>
+                        <td style="color:var(--t2);font-size:.85rem;">{{ m.owner }}</td>
+                        <td class="sb-mono" {% if m.overdue %}style="color:var(--crit)"{% endif %}>{{ m.due }}{% if m.overdue %} ⚠{% endif %}</td>
+                    </tr>
+                {% endfor %}
+                {% if not ms.recent %}<tr><td colspan="5" class="sb-empty">אין משימות פתוחות. שולחן נקי — נדיר, תהנה.</td></tr>{% endif %}
+                </tbody>
+            </table>
+        </div>
+        <div class="zv-foot"><a class="sb-btn primary" href="/dashboard/war-room">לחדר המבצעים ←</a></div>
+    {% else %}<div class="sb-empty">התחנה לא זמינה כרגע</div>{% endif %}
+    </section>
+
+    <!-- ── פרויקטים ── -->
+    <section class="zv" data-view="projects" data-title="פרויקטים · קובץ המאסטר" hidden>
+    {% if ps.ok %}
+        <div class="sb-bus-label"><span>פס צבירה · פרויקטים פעילים</span><span><b>{{ ps.watch_total }}</b> פרויקטים ברשימת המעקב</span></div>
+        <div class="sb-busbar zv-bus"></div>
+        <div class="sb-bays">
+            <a class="sb-bay c-v" style="--d:0s" href="/dashboard/projects"><div class="sb-breaker"></div><div class="sb-card">
+                <div class="sb-k-label"><span>פרויקטים פעילים</span><span>🏗</span></div>
+                <div class="sb-k-val" data-live="p_active">{{ ps.active }}</div>
+                <div class="sb-k-foot">לפי קובץ המאסטר האחרון</div></div></a>
+            <a class="sb-bay {{ 'alarm' if ps.past_due else 'c-ok' }}" style="--d:.4s" href="/dashboard/projects"><div class="sb-breaker"></div><div class="sb-card">
+                <div class="sb-k-label"><span>יעד חשמול עבר</span><span>⏰</span></div>
+                <div class="sb-k-val" data-live="p_past_due">{{ ps.past_due }}</div>
+                <div class="sb-k-foot">הצפי כבר מאחורינו</div></div></a>
+            <a class="sb-bay c-w" style="--d:.8s" href="/dashboard/projects"><div class="sb-breaker"></div><div class="sb-card">
+                <div class="sb-k-label"><span>מאחרים מתכנון הפיתוח</span><span>📉</span></div>
+                <div class="sb-k-val" data-live="p_late">{{ ps.late }}</div>
+                <div class="sb-k-foot">צפי &gt; תכנון + חודש</div></div></a>
+            <a class="sb-bay c-e" style="--d:1.2s" href="/dashboard/projects"><div class="sb-breaker"></div><div class="sb-card">
+                <div class="sb-k-label"><span>יעד כמלל</span><span>✎</span></div>
+                <div class="sb-k-val" data-live="p_undated">{{ ps.undated }}</div>
+                <div class="sb-k-foot">אין תאריך — יש הסבר</div></div></a>
+            <a class="sb-bay c-crit" style="--d:1.6s" href="/dashboard/projects"><div class="sb-breaker"></div><div class="sb-card">
+                <div class="sb-k-label"><span>חוסר כוח אדם</span><span>👷</span></div>
+                <div class="sb-k-val" data-live="p_short">{{ ps.short_staff }}</div>
+                <div class="sb-k-foot">משגיחים או בודקים</div></div></a>
+        </div>
+        <div class="sb-h"><h2>זרמים</h2><span>פרויקט בשלב ״עבודה אזרחית והרכבות״ שייך לשני מגזרים — לכן המגזרים לא מסתכמים לסה״כ</span></div>
+        <div class="sb-charts two">
+            <div class="sb-panel"><h3>לפי מגזר (לפי השלב)</h3><div class="sb-donut-wrap"><svg class="sb-donut" id="zm-d-sector" viewBox="0 0 132 132" role="img" aria-label="פרויקטים לפי מגזר"></svg><div class="sb-legend" id="zm-l-sector"></div></div></div>
+            <div class="sb-panel"><h3>לפי שלב</h3><div id="zm-b-stages"></div></div>
+        </div>
+        <div class="sb-h"><h2>רשימת מעקב</h2><span>יעד שעבר או איחור מול התכנון · לחץ על שורה לדף הפרויקט</span></div>
+        <div class="sb-panel sb-scroll">
+            <table class="sb-table">
+                <thead><tr><th>זיהוי</th><th>פרויקט</th><th>שלב</th><th>מנה״פ</th><th>תכנון</th><th>צפי</th><th>פער</th></tr></thead>
+                <tbody>
+                {% for p in ps.watch %}
+                    <tr class="sb-row zv-row" tabindex="0" data-href="/dashboard/projects/p/{{ p.id | urlencode }}" data-type="{{ 'critical' if p.past_due else 'uncertain' }}">
+                        <td class="sb-mono">{{ p.id }}</td>
+                        <td class="sb-sum">{{ p.name }}</td>
+                        <td style="font-size:.85rem;">{{ p.stage }}</td>
+                        <td style="color:var(--t2);font-size:.85rem;">{{ p.manager }}</td>
+                        <td class="sb-mono">{{ p.plan }}</td>
+                        <td class="sb-mono" {% if p.past_due %}style="color:var(--crit)"{% endif %}>{{ p.forecast }}</td>
+                        <td>{% if p.slip_months is not none %}<span class="sb-pill {{ 'p-critical' if p.slip_months >= 6 else 'p-uncertain' }}">{{ p.slip_months }} ח׳</span>{% else %}<span style="color:var(--t3)">—</span>{% endif %}</td>
+                    </tr>
+                {% endfor %}
+                {% if not ps.watch %}<tr><td colspan="7" class="sb-empty">אין פרויקטים מאחרים. כדאי לבדוק שהקובץ עדכני לפני שפותחים שמפניה.</td></tr>{% endif %}
+                </tbody>
+            </table>
+        </div>
+        <div class="zv-foot"><a class="sb-btn" href="/dashboard/projects/insights">🧠 דפוסים וסיכונים</a><a class="sb-btn primary" href="/dashboard/projects">לכל הפרויקטים ←</a></div>
+    {% else %}<div class="sb-empty">התחנה לא זמינה כרגע</div>{% endif %}
+    </section>
+
+    <!-- ── לקחים ── -->
+    <section class="zv" data-view="lessons" data-title="מערכת לקחים" hidden>
+    {% if ls.ok %}
+        <div class="sb-bus-label"><span>פס צבירה · לקחים</span><span><b>{{ ls.week_activity }}</b> פעולות בתהליך ב-7 ימים</span></div>
+        <div class="sb-busbar zv-bus"></div>
+        <div class="sb-bays">
+            <a class="sb-bay c-e" style="--d:0s" href="/lessons/"><div class="sb-breaker"></div><div class="sb-card">
+                <div class="sb-k-label"><span>סה״כ לקחים</span><span>📚</span></div>
+                <div class="sb-k-val" data-live="l_total">{{ ls.total }}</div>
+                <div class="sb-k-foot">כל המצבים</div></div></a>
+            <a class="sb-bay c-ok" style="--d:.4s" href="/lessons/"><div class="sb-breaker"></div><div class="sb-card">
+                <div class="sb-k-label"><span>אושרו והופצו</span><span>✅</span></div>
+                <div class="sb-k-val" data-live="l_approved">{{ ls.approved }}</div>
+                <div class="sb-k-foot">זמינים לכולם</div></div></a>
+            <a class="sb-bay c-w" style="--d:.8s" href="/lessons/"><div class="sb-breaker"></div><div class="sb-card">
+                <div class="sb-k-label"><span>בתהליך</span><span>⏳</span></div>
+                <div class="sb-k-val" data-live="l_pending">{{ ls.pending }}</div>
+                <div class="sb-k-foot">ממתינים לאישור / רפרנט</div></div></a>
+            <a class="sb-bay c-v" style="--d:1.2s" href="/lessons/"><div class="sb-breaker"></div><div class="sb-card">
+                <div class="sb-k-label"><span>טיוטות</span><span>✎</span></div>
+                <div class="sb-k-val" data-live="l_draft">{{ ls.draft }}</div>
+                <div class="sb-k-foot">הוחזרו להשלמה</div></div></a>
+            <a class="sb-bay c-crit" style="--d:1.6s" href="/lessons/"><div class="sb-breaker"></div><div class="sb-card">
+                <div class="sb-k-label"><span>הטמעות פתוחות</span><span>🔧</span></div>
+                <div class="sb-k-val" data-live="l_impl">{{ ls.impl_open }}</div>
+                <div class="sb-k-foot">לקח ↔ פרויקט, טרם יושם</div></div></a>
+        </div>
+        <div class="sb-h"><h2>זרמים</h2><span>מצב · רמת סיכון · פעילות בתהליך העבודה</span></div>
+        <div class="sb-charts">
+            <div class="sb-panel"><h3>לפי מצב</h3><div class="sb-donut-wrap"><svg class="sb-donut" id="zm-d-lbucket" viewBox="0 0 132 132" role="img" aria-label="לקחים לפי מצב"></svg><div class="sb-legend" id="zm-l-lbucket"></div></div></div>
+            <div class="sb-panel"><h3>לפי סיכון</h3><div class="sb-donut-wrap"><svg class="sb-donut" id="zm-d-lrisk" viewBox="0 0 132 132" role="img" aria-label="לקחים לפי רמת סיכון"></svg><div class="sb-legend" id="zm-l-lrisk"></div></div></div>
+            <div class="sb-panel"><h3>פעילות · 7 ימים</h3><svg class="sb-spark" id="zm-s-lessons" viewBox="0 0 400 160" role="img" aria-label="פעולות בתהליך הלקחים ביום"></svg></div>
+        </div>
+        <div class="sb-h"><h2>קטגוריות</h2><span>איפה נלמדים הכי הרבה לקחים</span></div>
+        <div class="sb-panel"><div id="zm-b-cats"></div></div>
+        <div class="zv-foot"><a class="sb-btn primary" href="/lessons/">למערכת הלקחים ←</a></div>
+    {% else %}<div class="sb-empty">מערכת הלקחים לא זמינה כרגע</div>{% endif %}
+    </section>
+
+    </div>
 </div>
 
 <div class="sb-toast" id="sb-toast" role="status" hidden>
@@ -765,6 +1075,7 @@ let sbState = {
     daily_labels: {{ daily_labels | tojson }},
     daily_data: {{ daily_data | tojson }},
     latest_id: {{ (recent_decisions[0].id if recent_decisions else 0) | tojson }},
+    stations: {{ stations | tojson }},
 };
 
 /* ── clock + "updated N seconds ago" ── */
@@ -787,11 +1098,19 @@ function sbCount(el, to, from = 0, delay = 0) {
 function sbLiveValues(d) {
     const tot = d.total_decisions || 0, pct = n => tot ? Math.round(n / tot * 100) : 0;
     const crit = (d.type_counts || {}).critical || 0, appr = (d.status_counts || {}).approved || 0, raci = d.raci_counts || {};
+    const st = d.stations || {}, ms = st.missions || {}, ps = st.projects || {}, ls = st.lessons || {};
+    const sv = (o, k) => (o.ok ? o[k] : null);      // a station that failed shows "—", never 0
     return {
         total_decisions: tot, week_total: d.week_total, pending_approvals: d.pending_approvals,
         critical: crit, critical_pct: pct(crit), approved: appr, approved_pct: pct(appr),
         avg_feedback: d.avg_feedback, total_users: d.total_users, written_count: d.written_count,
         raci_R: raci.R || 0, raci_A: raci.A || 0, raci_C: raci.C || 0, raci_I: raci.I || 0,
+        m_open: sv(ms, 'open'), m_overdue: sv(ms, 'overdue'), m_do_now: sv(ms, 'do_now'),
+        m_done_week: sv(ms, 'done_week'), m_new: sv(ms, 'new_24h'), m_undated: sv(ms, 'undated'),
+        p_active: sv(ps, 'active'), p_past_due: sv(ps, 'past_due'), p_late: sv(ps, 'late'),
+        p_undated: sv(ps, 'undated'), p_short: sv(ps, 'short_staff'),
+        l_total: sv(ls, 'total'), l_approved: sv(ls, 'approved'), l_pending: sv(ls, 'pending'),
+        l_draft: sv(ls, 'draft'), l_impl: sv(ls, 'impl_open'),
     };
 }
 
@@ -805,7 +1124,7 @@ function sbSyncGrid(d) {
 
 /* ── donuts ── */
 let sbFilter = null;
-function sbDonut(svgId, legendId, data, dict, key, animate) {
+function sbDonut(svgId, legendId, data, dict, key, animate, center) {
     const svg = document.getElementById(svgId), leg = document.getElementById(legendId);
     svg.replaceChildren(); leg.replaceChildren();
     const entries = Object.keys(dict).filter(k => data[k]).map(k => [k, data[k]]);
@@ -817,48 +1136,58 @@ function sbDonut(svgId, legendId, data, dict, key, animate) {
         const seg = svgEl('circle', { cx: 66, cy: 66, r: R, class: 'seg', stroke: color, 'stroke-dasharray': `${len} ${CIRC - len}`, 'stroke-dashoffset': -acc, transform: 'rotate(-90 66 66)' });
         seg.style.color = color;
         const t = svgEl('title', {}); t.textContent = `${dict[k][0]}: ${v}`; seg.appendChild(t);
-        seg.addEventListener('click', () => sbApplyFilter(key, k, dict[k][0]));
+        if (key) seg.addEventListener('click', () => sbApplyFilter(key, k, dict[k][0]));
+        else seg.style.cursor = 'default';
         svg.appendChild(seg);
         if (animate && SB_GO) SB_M.animate(seg, { strokeDasharray: [`0 ${CIRC}`, `${len} ${CIRC - len}`] }, { duration: .9, delay: .35 + i * .12, ease: SB_EASE });
         acc += v / total * CIRC;
-        const b = document.createElement('button'); b.type = 'button'; b.dataset.key = key; b.dataset.val = k;
+        const b = document.createElement('button'); b.type = 'button'; if (key) { b.dataset.key = key; b.dataset.val = k; }
         const sw = document.createElement('i'); sw.style.background = color;
         const nm = document.createElement('span'); nm.textContent = dict[k][0];
         const n = document.createElement('b'); n.textContent = v;
         b.append(sw, nm, n);
-        b.addEventListener('click', () => sbApplyFilter(key, k, dict[k][0]));
+        if (key) b.addEventListener('click', () => sbApplyFilter(key, k, dict[k][0]));
+        else b.style.cursor = 'default';
         leg.appendChild(b);
     });
-    const num = svgEl('text', { x: 66, y: 76, 'text-anchor': 'middle', class: 'num' }); num.textContent = total;
+    const num = svgEl('text', { x: 66, y: 76, 'text-anchor': 'middle', class: 'num' }); num.textContent = center ?? total;
     svg.appendChild(num);
     if (!total) leg.innerHTML = '<div class="sb-empty">אין נתונים עדיין</div>';
     sbMarkFilter();
 }
 
 /* ── 7-day sparkline that draws itself ── */
-function sbSpark(labels, data, animate) {
-    const svg = document.getElementById('sb-spark'), H = 160, P = 24;
+function sbSpark(labels, data, animate, id = 'sb-spark', unit = 'החלטות', data2 = null) {
+    const svg = document.getElementById(id), H = 160, P = 24;
+    if (!svg) return;
     const W = Math.max(240, Math.round(svg.clientWidth || 400));     // draw at the real width: no stretched text
     svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
     svg.replaceChildren();
-    const max = Math.max(1, ...data), e = sbVar('--energy');
+    const max = Math.max(1, ...data, ...(data2 || [])), e = sbVar('--energy'), gid = id + '-g';
     const X = i => W - P - i * (W - 2 * P) / Math.max(1, data.length - 1);   // RTL: oldest on the right
     const Y = v => H - P - (v / max) * (H - 2 * P);
     const pts = data.map((v, i) => [X(i), Y(v)]);
     const line = pts.map((p, i) => (i ? 'L' : 'M') + p[0].toFixed(1) + ' ' + p[1].toFixed(1)).join(' ');
-    const defs = svgEl('defs', {}), g = svgEl('linearGradient', { id: 'sb-g', x1: 0, y1: 0, x2: 0, y2: 1 });
+    const defs = svgEl('defs', {}), g = svgEl('linearGradient', { id: gid, x1: 0, y1: 0, x2: 0, y2: 1 });
     g.append(svgEl('stop', { offset: 0, 'stop-color': e, 'stop-opacity': .35 }), svgEl('stop', { offset: 1, 'stop-color': e, 'stop-opacity': 0 }));
     defs.appendChild(g); svg.appendChild(defs);
     [0, .5, 1].forEach(f => svg.appendChild(svgEl('line', { x1: P, x2: W - P, y1: Y(max * f), y2: Y(max * f), stroke: sbVar('--line'), 'stroke-dasharray': '3 4' })));
     [0, max].forEach(v => { const t = svgEl('text', { x: W - 4, y: Y(v) + 3, 'text-anchor': 'end' }); t.textContent = v; svg.appendChild(t); });
-    const area = svgEl('path', { d: `${line} L${X(data.length - 1)} ${H - P} L${X(0)} ${H - P}Z`, fill: 'url(#sb-g)' });
+    const area = svgEl('path', { d: `${line} L${X(data.length - 1)} ${H - P} L${X(0)} ${H - P}Z`, fill: `url(#${gid})` });
     const path = svgEl('path', { d: line, fill: 'none', stroke: e, 'stroke-width': 2.5, 'stroke-linejoin': 'round', pathLength: 1, 'stroke-dasharray': '1 1' });
     path.style.filter = `drop-shadow(0 0 6px ${e})`;
     svg.append(area, path);
+    let path2 = null;
+    if (data2) {
+        const ok = sbVar('--ok');
+        path2 = svgEl('path', { d: data2.map((v, i) => (i ? 'L' : 'M') + X(i).toFixed(1) + ' ' + Y(v).toFixed(1)).join(' '), fill: 'none', stroke: ok, 'stroke-width': 2, 'stroke-dasharray': '1 1', pathLength: 1 });
+        path2.style.filter = `drop-shadow(0 0 5px ${ok})`;
+        svg.appendChild(path2);
+    }
     const dots = pts.map((p, i) => {
         const last = i === pts.length - 1;
         const c = svgEl('circle', { cx: p[0], cy: p[1], r: last ? 5 : 3, fill: last ? e : '#070b12', stroke: e, 'stroke-width': 2 });
-        const t = svgEl('title', {}); t.textContent = `${labels[i]}: ${data[i]} החלטות`; c.appendChild(t);
+        const t = svgEl('title', {}); t.textContent = `${labels[i]}: ${data[i]} ${unit}` + (data2 ? ` · ${data2[i]} נסגרו` : ''); c.appendChild(t);
         svg.appendChild(c);
         const lb = svgEl('text', { x: p[0], y: H - 5, 'text-anchor': 'middle' }); lb.textContent = labels[i]; svg.appendChild(lb);
         return c;
@@ -868,6 +1197,7 @@ function sbSpark(labels, data, animate) {
     svg.appendChild(endLbl);
     if (animate && SB_GO) {
         SB_M.animate(path, { strokeDashoffset: [1, 0] }, { duration: 1.4, delay: .5, ease: 'easeInOut' });
+        if (path2) SB_M.animate(path2, { strokeDashoffset: [1, 0] }, { duration: 1.4, delay: .75, ease: 'easeInOut' });
         SB_M.animate(area, { opacity: [0, 1] }, { duration: .8, delay: 1.3 });
         SB_M.animate(dots, { scale: [0, 1] }, { delay: SB_M.stagger(.1, { startDelay: .6 }), type: 'spring', stiffness: 400, damping: 12 });
     }
@@ -941,27 +1271,299 @@ document.querySelectorAll('.sb-btn').forEach(b => b.addEventListener('click', e 
     window.addEventListener('load', apply);
 })();
 
-/* ── entrance ── */
+/* ══ Stations: what each zoomed view draws, and the tiles' mini charts ═══ */
+const ZM_KEYS = ['decisions', 'missions', 'projects', 'lessons'];
+const ZM_ACC = { decisions: '#00d4ff', missions: '#ff9f43', projects: '#8b9cf4', lessons: '#2dd4bf' };
+const QUAD_TONE = { do: '--crit', plan: '--info', delegate: '--warn', backlog: '--volt' };
+const SECTOR_TONE = { planning: '--volt', supervision: '--warn', execution: '--energy', pm_dept: '--ok', unknown: '--t3' };
+const LESSON_BUCKETS = { approved: ['אושרו והופצו', '--ok'], pending: ['בתהליך', '--warn'], draft: ['טיוטות', '--t2'] };
+const RISK_TONE = { high: '--crit', medium: '--warn', low: '--ok' };
+const stOf = k => (sbState.stations || {})[k] || {};
+const sbAnim = (els, kf, opt) => { if (SB_GO && els && (els.length === undefined || els.length)) return SB_M.animate(els, kf, opt); };
+const toDict = (rows, tones) => Object.fromEntries(rows.map(r => [r[0], [r[1], tones[r[0]] || '--t2']]));
+const toData = rows => Object.fromEntries(rows.map(r => [r[0], r[2]]));
+
+/* horizontal bars (owners, stages, categories) — text goes in as textContent */
+function stBars(id, rows) {   // the view's entrance grows the bars
+    const box = document.getElementById(id);
+    if (!box) return;
+    box.replaceChildren();
+    if (!rows || !rows.length) { box.innerHTML = '<div class="sb-empty">אין נתונים עדיין</div>'; return; }
+    const max = Math.max(1, ...rows.map(r => r[1]));
+    rows.forEach(([label, n]) => {
+        const row = document.createElement('div'); row.className = 'sb-role';
+        const hd = document.createElement('div'); hd.className = 'sb-role-hd';
+        const nm = document.createElement('span'); nm.textContent = label || '—';
+        const v = document.createElement('b'); v.textContent = n;
+        hd.append(nm, v);
+        const bar = document.createElement('div'); bar.className = 'sb-role-bar';
+        const fill = document.createElement('i'); fill.style.width = (n / max * 100) + '%';
+        bar.appendChild(fill); row.append(hd, bar); box.appendChild(row);
+    });
+}
+
+const STATION_DRAW = {
+    decisions(a) {
+        sbDonut('sb-d-type', 'sb-l-type', sbState.type_counts, SB_TYPES, 'type', a);
+        sbDonut('sb-d-status', 'sb-l-status', sbState.status_counts, SB_STATUS, 'status', a);
+        sbSpark(sbState.daily_labels, sbState.daily_data, a);
+    },
+    missions(a) {
+        const s = stOf('missions'); if (!s.ok) return;
+        sbDonut('zm-d-quad', 'zm-l-quad', toData(s.quadrants), toDict(s.quadrants, QUAD_TONE), null, a);
+        stBars('zm-b-owners', s.owners);
+        sbSpark(sbState.daily_labels, s.daily_data, a, 'zm-s-missions', 'נפתחו', s.daily_done);
+    },
+    projects(a) {
+        const s = stOf('projects'); if (!s.ok) return;
+        // the centre is the active count, never the sector sum (one stage sits in two sectors)
+        sbDonut('zm-d-sector', 'zm-l-sector', toData(s.sectors), toDict(s.sectors, SECTOR_TONE), null, a, s.active);
+        stBars('zm-b-stages', s.stages);
+    },
+    lessons(a) {
+        const s = stOf('lessons'); if (!s.ok) return;
+        sbDonut('zm-d-lbucket', 'zm-l-lbucket', { approved: s.approved, pending: s.pending, draft: s.draft }, LESSON_BUCKETS, null, a);
+        sbDonut('zm-d-lrisk', 'zm-l-lrisk', toData(s.risks), toDict(s.risks, RISK_TONE), null, a);
+        sbSpark(sbState.daily_labels, s.daily_data, a, 'zm-s-lessons', 'פעולות');
+        stBars('zm-b-cats', s.categories);
+    },
+};
+
+/* the tiles' 7-day mini sparkline, drawn at its real width */
+function stMini(svg, data, animate) {
+    if (!svg || !data) return;
+    const tile = svg.closest('.st'), acc = getComputedStyle(tile).getPropertyValue('--acc').trim();
+    const W = Math.max(120, Math.round(svg.clientWidth || 300)), H = 54, P = 4;
+    svg.setAttribute('viewBox', `0 0 ${W} ${H}`); svg.removeAttribute('preserveAspectRatio');
+    svg.replaceChildren();
+    const max = Math.max(1, ...data);
+    const X = i => W - P - i * (W - 2 * P) / Math.max(1, data.length - 1), Y = v => H - P - v / max * (H - 2 * P - 6);
+    const line = data.map((v, i) => (i ? 'L' : 'M') + X(i).toFixed(1) + ' ' + Y(v).toFixed(1)).join(' ');
+    const gid = 'stg-' + tile.dataset.zoom;
+    const defs = svgEl('defs', {}), g = svgEl('linearGradient', { id: gid, x1: 0, y1: 0, x2: 0, y2: 1 });
+    g.append(svgEl('stop', { offset: 0, 'stop-color': acc, 'stop-opacity': .4 }), svgEl('stop', { offset: 1, 'stop-color': acc, 'stop-opacity': 0 }));
+    defs.appendChild(g);
+    const area = svgEl('path', { d: `${line} L${X(data.length - 1)} ${H} L${X(0)} ${H}Z`, fill: `url(#${gid})` });
+    const path = svgEl('path', { d: line, fill: 'none', stroke: acc, 'stroke-width': 2, 'stroke-linejoin': 'round', pathLength: 1, 'stroke-dasharray': '1 1' });
+    path.style.filter = `drop-shadow(0 0 5px ${acc})`;
+    const dot = svgEl('circle', { cx: X(data.length - 1), cy: Y(data[data.length - 1]), r: 4, fill: acc });
+    svg.append(defs, area, path, dot);
+    if (animate && SB_GO) {
+        SB_M.animate(path, { strokeDashoffset: [1, 0] }, { duration: 1.3, delay: .6, ease: 'easeInOut' });
+        SB_M.animate(area, { opacity: [0, 1] }, { duration: .7, delay: 1.2 });
+        SB_M.animate(dot, { scale: [0, 1.6, 1] }, { duration: .6, delay: 1.7 });
+    }
+}
+function stStrip(el, rows, animate) {
+    if (!el || !rows) return;
+    el.replaceChildren();
+    rows.forEach(r => {
+        const i = document.createElement('i');
+        i.style.flex = r[2]; i.style.background = sbVar(SECTOR_TONE[r[0]] || '--t2');
+        i.title = `${r[1]}: ${r[2]}`;
+        el.appendChild(i);
+    });
+    if (animate && SB_GO) sbAnim([...el.children], { scaleX: [0, 1] }, { delay: SB_M.stagger(.08, { startDelay: .7 }), duration: .8, ease: SB_EASE });
+}
+function stDrawTiles(animate) {
+    stMini(document.querySelector('[data-spark="decisions"]'), sbState.daily_data, animate);
+    stMini(document.querySelector('[data-spark="missions"]'), stOf('missions').daily_data, animate);
+    stMini(document.querySelector('[data-spark="lessons"]'), stOf('lessons').daily_data, animate);
+    stStrip(document.querySelector('[data-strip="projects"]'), stOf('projects').sectors, animate);
+}
+
+/* ── tiles: 3D tilt toward the cursor, glow follows it ── */
+document.querySelectorAll('.st').forEach(t => {
+    t.addEventListener('pointermove', e => {
+        if (zmOpen) return;
+        const r = t.getBoundingClientRect(), x = (e.clientX - r.left) / r.width - .5, y = (e.clientY - r.top) / r.height - .5;
+        t.style.setProperty('--mx', (e.clientX - r.left) + 'px'); t.style.setProperty('--my', (e.clientY - r.top) + 'px');
+        if (SB_GO) SB_M.animate(t, { rotateY: -x * 8, rotateX: y * 8, y: -6 }, { duration: .3 });
+    });
+    t.addEventListener('pointerleave', () => !zmOpen && sbAnim(t, { rotateY: 0, rotateX: 0, y: 0 }, { type: 'spring', stiffness: 260, damping: 16 }));
+    t.addEventListener('click', () => zmOpenStation(t.dataset.zoom));
+});
+
+/* ══ Zoom engine ═════════════════════════════════════════════════════════
+   The shell grows out of the tile you clicked (clip-path from the tile's
+   rect to the full screen), the other tiles fall away, a surge runs across
+   the top, and the station's own bays drop off its busbar. Closing reverses
+   it into the same tile. The URL carries #station, so a zoomed station can
+   be linked, reloaded, and left with the browser's Back button. */
+const ZM = document.getElementById('zm'), ZM_BODY = document.getElementById('zm-body');
+const ZM_BAR = ZM.querySelector('.zm-bar');
+const ZM_FULL = 'inset(0px 0px 0px 0px round 0px)';
+const ZM_EASE = [.7, 0, .2, 1];
+let zmOpen = null, zmBusy = false, zmPushed = false;
+const zmTile = k => document.querySelector(`.st[data-zoom="${k}"]`);
+const zmView = k => ZM.querySelector(`.zv[data-view="${k}"]`);
+function zmInset(r) { return `inset(${r.top}px ${innerWidth - r.right}px ${innerHeight - r.bottom}px ${r.left}px round 22px)`; }
+
+function zmInk(key, animate) {
+    const nav = document.getElementById('zm-tabs'), btn = nav.querySelector(`[data-tab="${key}"]`), ink = document.getElementById('zm-ink');
+    const nr = nav.getBoundingClientRect(), br = btn.getBoundingClientRect();
+    const to = { right: (nr.right - br.right) + 'px', width: br.width + 'px' };
+    if (animate && SB_GO) SB_M.animate(ink, to, { type: 'spring', stiffness: 420, damping: 32 });
+    else Object.assign(ink.style, to);
+}
+function zmShow(key, animateInk) {
+    ZM.querySelectorAll('.zv').forEach(v => { v.hidden = v.dataset.view !== key; });
+    ZM.style.setProperty('--zacc', ZM_ACC[key]);
+    document.getElementById('zm-title').textContent = zmView(key).dataset.title;
+    ZM.querySelectorAll('.zm-tabs button').forEach(b => {
+        const on = b.dataset.tab === key;
+        b.classList.toggle('on', on);
+        b.setAttribute('aria-current', on ? 'page' : 'false');
+    });
+    zmInk(key, animateInk);
+    ZM_BODY.scrollTop = 0;
+    return zmView(key);
+}
+function zmSurge() {
+    sbAnim(document.getElementById('zm-surge'), { scaleX: [0, 1, 1], opacity: [1, 1, 0] }, { duration: 1, ease: 'easeOut' });
+    if (window.SubstationBG) SubstationBG.surge();
+}
+/* every view enters the same way: busbar, bays dropping off it, panels, rows */
+function zvEnter(view, key, anim) {
+    STATION_DRAW[key](anim);
+    view.querySelectorAll('[data-live]').forEach((el, i) => sbCount(el, sbPrev[el.dataset.live], 0, anim ? .2 + i * .03 : 0));
+    if (!anim) return;
+    const q = sel => view.querySelectorAll(sel);
+    sbAnim(q('.sb-busbar'), { scaleX: [0, 1] }, { duration: .8, ease: 'easeOut', delay: .1 });
+    sbAnim(q('.sb-ticker'), { opacity: [0, 1], y: [-10, 0] }, { duration: .5 });
+    sbAnim(q('.sb-bay .sb-card'), { y: [-46, 0], opacity: [0, 1], scale: [.9, 1] }, { delay: SB_M.stagger(.07, { startDelay: .2 }), type: 'spring', stiffness: 260, damping: 18 });
+    sbAnim(q('.sb-relay'), { x: [30, 0], opacity: [0, 1] }, { delay: SB_M.stagger(.06, { startDelay: .45 }) });
+    sbAnim(q('.sb-h, .sb-panel, .zv-foot'), { y: [26, 0], opacity: [0, 1] }, { delay: SB_M.stagger(.05, { startDelay: .35 }), duration: .6, ease: SB_EASE });
+    sbAnim(q('.sb-meter i, .sb-role-bar i'), { scaleX: [0, 1] }, { delay: SB_M.stagger(.08, { startDelay: .7 }), duration: 1, ease: SB_EASE });
+    sbAnim(q('.sb-row'), { opacity: [0, 1], x: [-24, 0] }, { delay: SB_M.stagger(.04, { startDelay: .75 }) });
+}
+
+async function zmOpenStation(key, opts = {}) {
+    if (zmBusy || !ZM_KEYS.includes(key)) return;
+    if (zmOpen) return zmSwitch(key);
+    zmBusy = true; zmOpen = key;
+    if (opts.push !== false) { history.pushState({ zoom: key }, '', '#' + key); zmPushed = true; }
+    const tile = zmTile(key), r = tile.getBoundingClientRect();
+    const anim = SB_GO && !opts.instant;
+    if (anim) { ZM.style.clipPath = zmInset(r); ZM_BAR.style.opacity = ZM_BODY.style.opacity = 0; }
+    ZM.hidden = false;
+    document.body.classList.add('zoomed');
+    const view = zmShow(key, false);
+    if (anim) {
+        // the other three fall away from the one you picked
+        const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+        document.querySelectorAll('.st').forEach(t => {
+            if (t === tile) return;
+            const o = t.getBoundingClientRect();
+            SB_M.animate(t, { x: (o.left + o.width / 2 - cx) * .3, y: (o.top + o.height / 2 - cy) * .3, scale: .82, opacity: 0, filter: ['blur(0px)', 'blur(10px)'] }, { duration: .5, ease: SB_EASE });
+        });
+        SB_M.animate(tile, { scale: [1, 1.05], rotateX: 0, rotateY: 0 }, { duration: .3, ease: SB_EASE });
+        SB_M.animate([ZM_BAR, ZM_BODY], { opacity: [0, 1] }, { duration: .35, delay: .28 });
+        SB_M.animate(ZM_BODY, { scale: [.96, 1] }, { duration: .7, delay: .2, ease: SB_EASE });
+        await SB_M.animate(ZM, { clipPath: [zmInset(r), ZM_FULL] }, { duration: .7, ease: ZM_EASE });
+        ZM.style.clipPath = '';
+        zmSurge();
+        zmInk(key, false);
+    }
+    zvEnter(view, key, anim);
+    document.getElementById('zm-close').focus({ preventScroll: true });
+    zmBusy = false;
+}
+
+async function zmSwitch(key) {
+    if (key === zmOpen || zmBusy || !ZM_KEYS.includes(key)) return;
+    zmBusy = true;
+    // RTL: the next station arrives from the left
+    const dir = ZM_KEYS.indexOf(key) > ZM_KEYS.indexOf(zmOpen) ? 1 : -1;
+    history.replaceState({ zoom: key }, '', '#' + key);
+    const old = zmView(zmOpen);
+    if (SB_GO) await SB_M.animate(old, { x: [0, 90 * dir], opacity: [1, 0], filter: ['blur(0px)', 'blur(8px)'] }, { duration: .22, ease: 'easeIn' });
+    Object.assign(old.style, { transform: '', opacity: '', filter: '' });
+    zmOpen = key;
+    const view = zmShow(key, true);
+    if (SB_GO) {
+        SB_M.animate(view, { x: [-90 * dir, 0], opacity: [0, 1], filter: ['blur(8px)', 'blur(0px)'] }, { type: 'spring', stiffness: 240, damping: 26 });
+        zmSurge();
+    }
+    zvEnter(view, key, SB_GO);
+    zmBusy = false;
+}
+
+async function zmClose() {
+    if (!zmOpen || zmBusy) return;
+    zmBusy = true;
+    const tile = zmTile(zmOpen);
+    // the tile never left its slot (only its siblings moved), so shrink back into it
+    const r = tile.getBoundingClientRect();
+    if (SB_GO) {
+        SB_M.animate([ZM_BAR, ZM_BODY], { opacity: [1, 0] }, { duration: .2 });
+        await SB_M.animate(ZM, { clipPath: [ZM_FULL, zmInset(r)] }, { duration: .55, ease: ZM_EASE });
+    }
+    ZM.hidden = true;
+    ZM.style.clipPath = '';
+    [ZM_BAR, ZM_BODY].forEach(el => { el.style.opacity = ''; el.style.transform = ''; });
+    document.body.classList.remove('zoomed');
+    const tiles = document.querySelectorAll('.st');
+    if (SB_GO) SB_M.animate(tiles, { x: 0, y: 0, scale: 1, opacity: 1, filter: 'blur(0px)', rotateX: 0, rotateY: 0 }, { type: 'spring', stiffness: 240, damping: 22, delay: SB_M.stagger(.05) });
+    else tiles.forEach(t => Object.assign(t.style, { transform: '', opacity: '', filter: '' }));
+    tile.focus({ preventScroll: true });
+    zmOpen = null; zmPushed = false; zmBusy = false;
+}
+/* the close button undoes our own history entry, so Back and ⤡ agree */
+function zmRequestClose() {
+    if (zmPushed && history.state && history.state.zoom) history.back();
+    else { history.replaceState(null, '', location.pathname + location.search); zmClose(); }
+}
+window.addEventListener('popstate', () => {
+    const k = location.hash.slice(1);
+    if (ZM_KEYS.includes(k)) zmOpenStation(k, { push: false });
+    else zmClose();
+});
+document.getElementById('zm-close').addEventListener('click', zmRequestClose);
+ZM.querySelectorAll('.zm-tabs button').forEach(b => b.addEventListener('click', () => zmSwitch(b.dataset.tab)));
+ZM.querySelectorAll('.zv-row').forEach(tr => {
+    const go = () => { location.href = tr.dataset.href; };
+    tr.addEventListener('click', go);
+    tr.addEventListener('keydown', e => { if (e.key === 'Enter') go(); });
+});
+document.addEventListener('keydown', e => {
+    if (e.target.closest('input, textarea, select, [contenteditable]') || document.querySelector('.modal.show')) return;
+    if (e.key === 'Escape' && zmOpen) { e.preventDefault(); zmRequestClose(); return; }
+    const n = '1234'.indexOf(e.key);
+    if (n >= 0) { zmOpen ? zmSwitch(ZM_KEYS[n]) : zmOpenStation(ZM_KEYS[n]); return; }
+    if (zmOpen && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+        const i = ZM_KEYS.indexOf(zmOpen) + (e.key === 'ArrowLeft' ? 1 : -1);    // RTL
+        zmSwitch(ZM_KEYS[(i + ZM_KEYS.length) % ZM_KEYS.length]);
+    }
+});
+
+/* ── entrance: busbar cross draws from the hub, tiles fly in from their corners ── */
 if (SB_GO) {
-    SB_M.animate('#sb-busbar', { scaleX: [0, 1] }, { duration: .8, ease: 'easeOut' });
-    SB_M.animate('.sb-bay .sb-card', { y: [-46, 0], opacity: [0, 1], scale: [.9, 1] }, { delay: SB_M.stagger(.08, { startDelay: .25 }), type: 'spring', stiffness: 260, damping: 18 });
-    SB_M.animate('.sb-relay', { x: [30, 0], opacity: [0, 1] }, { delay: SB_M.stagger(.06, { startDelay: .6 }) });
-    SB_M.animate('.sb-meter i, .sb-role-bar i', { scaleX: [0, 1] }, { delay: SB_M.stagger(.08, { startDelay: .7 }), duration: 1, ease: SB_EASE });
-    SB_M.animate('#sb-rows .sb-row', { opacity: [0, 1], x: [-24, 0] }, { delay: SB_M.stagger(.05, { startDelay: .8 }) });
+    SB_M.animate('.st-bus .h', { scaleX: [0, 1] }, { duration: .9, ease: SB_EASE });
+    SB_M.animate('.st-bus .v', { scaleY: [0, 1] }, { duration: .9, ease: SB_EASE });
+    SB_M.animate('.st-bus .hub', { scale: [0, 1], rotate: [-180, 0] }, { type: 'spring', stiffness: 220, damping: 13, delay: .3 });
+    document.querySelectorAll('.st').forEach((t, i) => {
+        const sx = i % 2 ? -1 : 1, sy = i < 2 ? -1 : 1;     // RTL: the first tile sits top-right
+        SB_M.animate(t, { x: [sx * 80, 0], y: [sy * 56, 0], opacity: [0, 1], scale: [.84, 1], rotate: [sx * -3, 0] }, { type: 'spring', stiffness: 160, damping: 18, delay: .15 + i * .09 });
+    });
+    SB_M.animate('.st-kpis > span', { y: [14, 0], opacity: [0, 1] }, { delay: SB_M.stagger(.035, { startDelay: .55 }) });
 }
 const sbInit = sbLiveValues({ ...sbState,
     avg_feedback: {{ avg_feedback | tojson }}, total_users: {{ total_users | tojson }}, written_count: {{ written_count | tojson }},
     raci_counts: {{ raci_counts | tojson }} });
-document.querySelectorAll('[data-live]').forEach((el, i) => sbCount(el, sbInit[el.dataset.live], 0, .3 + i * .04));
-sbDonut('sb-d-type', 'sb-l-type', sbState.type_counts, SB_TYPES, 'type', true);
-sbDonut('sb-d-status', 'sb-l-status', sbState.status_counts, SB_STATUS, 'status', true);
-sbSpark(sbState.daily_labels, sbState.daily_data, true);
+let sbPrev = sbInit;
+document.querySelectorAll('#st-grid [data-live]').forEach((el, i) => sbCount(el, sbInit[el.dataset.live], 0, .4 + i * .04));
+document.querySelectorAll('#zm [data-live]').forEach(el => sbCount(el, sbInit[el.dataset.live]));
+stDrawTiles(true);
 let sbSparkT = 0;
-window.addEventListener('resize', () => { clearTimeout(sbSparkT); sbSparkT = setTimeout(() => sbSpark(sbState.daily_labels, sbState.daily_data, false), 150); });
+window.addEventListener('resize', () => {
+    clearTimeout(sbSparkT);
+    sbSparkT = setTimeout(() => { stDrawTiles(false); if (zmOpen) { STATION_DRAW[zmOpen](false); zmInk(zmOpen, false); } }, 150);
+});
 window.addEventListener('load', () => sbSyncGrid(sbState));
+{ const k = location.hash.slice(1); if (ZM_KEYS.includes(k)) zmOpenStation(k, { instant: true, push: false }); }
 
 /* ── live polling: counters move, a new decision fires a surge ── */
-let sbPrev = sbInit;
 async function sbPoll() {
     if (document.hidden) return;
     try {
@@ -974,7 +1576,7 @@ async function sbPoll() {
             const k = el.dataset.live;
             if (vals[k] !== sbPrev[k]) {
                 sbCount(el, vals[k], +sbPrev[k] || 0);
-                const bay = el.closest('.sb-bay');
+                const bay = el.closest('.sb-bay, .st');
                 if (bay) { bay.classList.remove('bump'); void bay.offsetWidth; bay.classList.add('bump'); }
             }
         });
@@ -994,7 +1596,13 @@ async function sbPoll() {
             if (SB_GO) SB_M.animate(toast, { y: [40, 0], opacity: [0, 1], scale: [.9, 1] }, { type: 'spring', stiffness: 380, damping: 20 });
             if (window.SubstationBG) SubstationBG.surge();
         }
+        const stationsMoved = JSON.stringify(d.stations) !== JSON.stringify(sbState.stations);
         sbState = { ...d, latest_id: Math.max(newest, sbState.latest_id) };
+        const stn = d.stations || {};
+        zmTile('decisions').classList.toggle('alarm', d.pending_approvals > 0);
+        zmTile('missions').classList.toggle('alarm', !!(stn.missions && stn.missions.ok && stn.missions.overdue));
+        zmTile('projects').classList.toggle('alarm', !!(stn.projects && stn.projects.ok && stn.projects.past_due));
+        if (stationsMoved) { stDrawTiles(false); if (zmOpen && zmOpen !== 'decisions') STATION_DRAW[zmOpen](false); }
         sbPrev = vals;
         sbSyncGrid(d);
     } catch (e) { /* the LED turns amber on its own when syncs stop arriving */ }

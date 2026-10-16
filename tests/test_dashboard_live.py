@@ -61,7 +61,8 @@ async def test_live_endpoint_returns_the_page_numbers_zero_filled():
     assert d["daily_labels"][-1] == datetime.utcnow().date().strftime("%d/%m")
     assert d["daily_labels"][0] == (datetime.utcnow().date() - timedelta(days=DASHBOARD_DAYS - 1)).strftime("%d/%m")
     for key in ("total_decisions", "pending_approvals", "week_total", "type_counts",
-                "status_counts", "raci_counts", "written_count", "recent_decisions", "server_time"):
+                "status_counts", "raci_counts", "written_count", "recent_decisions", "server_time",
+                "stations"):
         assert key in d, key
     assert "type_labels_he" not in d        # page-only presentation, not data
 
@@ -74,6 +75,7 @@ def _render(**over):
         daily_labels=["01/01"] * DASHBOARD_DAYS, daily_data=[0] * DASHBOARD_DAYS, week_total=0,
         recent_decisions=[], role_counts={}, pending_approvals=0, raci_counts={}, written_count=0,
         type_labels_he={"critical": "קריטי"}, status_labels_he={"pending": "ממתין"},
+        stations={"missions": {"ok": False}, "projects": {"ok": False}, "lessons": {"ok": False}},
     )
     ctx.update(over)
     return templates.env.get_template("dashboard.html").render(ctx)
