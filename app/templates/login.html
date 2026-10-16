@@ -99,42 +99,6 @@
 
     .hero p { font-size: 13px; color: var(--ink2); line-height: 1.6; max-width: 600px; margin: 0 auto; }
 
-    /* ── RACI ── */
-    .raci-bar {
-      width: 100%; max-width: 820px;
-      padding: 10px 16px;
-      background: var(--panel); border: 1px solid var(--ink4);
-      display: flex; align-items: center; gap: 14px;
-      direction: rtl; margin-bottom: 10px;
-      animation: slideUp 0.6s ease-out 0.3s both;
-    }
-
-    .raci-bar .label {
-      font-size: 10px; font-family: 'JetBrains Mono', monospace;
-      letter-spacing: 3px; color: var(--ink3); white-space: nowrap;
-    }
-
-    .raci { display: flex; gap: 8px; flex-wrap: wrap; flex: 1; justify-content: space-between; }
-
-    .raci-chip {
-      display: flex; align-items: center; gap: 10px; padding: 8px 12px;
-      border: 1px solid color-mix(in oklab, var(--acc) 50%, transparent);
-      border-radius: 4px; font-size: 12px; line-height: 1.2;
-      color: var(--acc); background: transparent;
-      animation: chip 0.5s ease-out both;
-    }
-
-    .raci-chip .k {
-      width: 22px; height: 22px; border-radius: 50%;
-      display: flex; align-items: center; justify-content: center;
-      font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 700;
-      background: var(--acc);
-    }
-
-    .raci-chip .k span { color: var(--panel); }
-    .raci-chip .t { font-weight: 600; color: var(--ink); }
-    .raci-chip .d { opacity: 0.7; color: var(--ink2); font-size: 11px; }
-
     /* ── ERROR ── */
     .alert-err {
       width: 100%; max-width: 820px;
@@ -264,7 +228,6 @@
     @keyframes dashFlow   { to { stroke-dashoffset: -30; } }
     @keyframes flickerDot { 0%,60%,100% { opacity: 1; } 70%,90% { opacity: 0.3; } }
     @keyframes slideUp    { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
-    @keyframes chip       { from { opacity: 0; transform: translateY(8px) scale(0.96); } to { opacity: 1; transform: translateY(0) scale(1); } }
     @keyframes fadeIn     { from { opacity: 0; } to { opacity: 1; } }
     @keyframes vibrate    {
       0%,100% { transform: translate(0,0) rotate(0deg); }
@@ -285,9 +248,6 @@
       .logo-wrap { width: 180px; height: 180px; }
       .ring  { inset: -14px; }
       .ring2 { inset: -26px; }
-      .raci  { gap: 6px; }
-      .raci-chip { padding: 6px 8px; font-size: 11px; }
-      .raci-bar  { flex-direction: column; align-items: flex-start; gap: 8px; }
       .form-panel { flex-direction: column; align-items: stretch; }
       .btn-energize { width: 100%; justify-content: center; }
       .telem > span:nth-child(n+3) { display: none; }
@@ -344,29 +304,6 @@
       <span class="ico">▶</span>
       <span class="label-he">‏צפה בסרטון ההסבר</span>
     </a>
-  </div>
-
-  <!-- RACI bar -->
-  <div class="raci-bar">
-    <div class="label">RACI · תפקידים</div>
-    <div class="raci">
-      <div class="raci-chip" style="animation-delay:0.1s;">
-        <div class="k"><span>R</span></div>
-        <div><div class="t">Responsible</div><div class="d">מבצע בפועל</div></div>
-      </div>
-      <div class="raci-chip" style="animation-delay:0.2s;">
-        <div class="k"><span>A</span></div>
-        <div><div class="t">Accountable</div><div class="d">אחראי — אישור יחיד</div></div>
-      </div>
-      <div class="raci-chip" style="animation-delay:0.3s;">
-        <div class="k"><span>C</span></div>
-        <div><div class="t">Consulted</div><div class="d">מקור ידע · מתייעצים</div></div>
-      </div>
-      <div class="raci-chip" style="animation-delay:0.4s;">
-        <div class="k"><span>I</span></div>
-        <div><div class="t">Informed</div><div class="d">מיודע על התוצאה</div></div>
-      </div>
-    </div>
   </div>
 
   <!-- Error -->
