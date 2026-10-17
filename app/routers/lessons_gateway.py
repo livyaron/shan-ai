@@ -280,7 +280,8 @@ async def ai_functions(name: str, request: Request, identity: la.Identity = Depe
         if name == "summarize-lessons":
             prefs, insights = await _prefs_and_insights(session, _acting_id(body, ("userId",), identity))
             system, user = ai.build_summarize(body, prefs, insights)
-            answer = await ai.ask(system, user, json_mode=False, max_tokens=1800)
+            answer = await ai.ask(system, user, json_mode=False, max_tokens=ai.SUMMARY_MAX_TOKENS,
+                                  reasoning_effort="low")
             return Response(ai.sse_body(answer), media_type="text/event-stream")
 
         if name == "review-lesson":
