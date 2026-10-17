@@ -242,3 +242,75 @@ def test_a_similar_name_alone_is_not_a_recommendation():
 ])
 def test_manager_check(fm, resolved, problem, current, kept, expected):
     assert lpl.manager_check(fm, resolved, problem, current, kept) == expected
+
+
+# ------------------------------------------------------------------ spelling + search
+
+@pytest.mark.parametrize("a,b", [
+    ('תחמ"ש גבעת אורן', "תחמש גבעת אורן"),
+    ("תחמ״ש גבעת אורן", "תחמש גבעת אורן"),
+    ("קריית גליל", "קרית גליל"),
+    ("ק' גליל", "ק גליל"),
+])
+def test_norm_name_reads_both_spellings_as_one(a, b):
+    assert lpl.norm_name(a) == lpl.norm_name(b)
+
+
+def test_gershayim_no_longer_split_a_word():
+    out = lpl.suggest("הוספת שנאי רביעי תחמש גבעת אורן", [
+        {"identifier": "A", "name": 'גבעת אורן - הוספת שנאי 4 בתחמ"ש', "manager": None},
+        {"identifier": "B", "name": 'חיפה מזרח - הוספת שנאי 3 תחמ"ש', "manager": None},
+    ])
+    assert out[0]["identifier"] == "A"
+    out = lpl.suggest("קרית גליל", [
+        {"identifier": "A", "name": "קריית גליל - הקמה", "manager": None},
+        {"identifier": "B", "name": "קרית גת - הקמה", "manager": None},
+    ])
+    assert out[0]["identifier"] == "A" and out[0]["score"] == 100
+
+
+@pytest.mark.parametrize("row,expected", [
+    ({"is_active": False, "linked_to": None}, "inactive"),
+    ({"is_active": False, "linked_to": 4}, "inactive"),
+    ({"is_active": True, "linked_to": 4}, "linked"),
+    ({"is_active": True, "linked_to": None}, "free"),
+])
+def test_search_reason(row, expected):
+    assert lpl.search_reason(row) == expected
+
+
+def test_search_route_is_registered_before_the_gateway():
+    from app.main import app
+    paths = [getattr(r, "path", "") for r in app.routes]
+    gw = next(i for i, p in enumerate(paths) if p.startswith("/lessons/api/{"))
+    assert paths.index("/lessons/api/_project_links/search") < gw
+
+
+# Shaped like the real master file (made-up places — the repo is public and the
+# file is inside information): generic words used to bury the place name
+# (2026-10-17), and a Hebrew prefix letter hid the place ("קרית הגליל").
+REAL = [
+    {"identifier": "WBE-001", "name": 'גבעת אורן - התקנת שנאי 524 161/24 ק"ו, 50 מגוו"א בשדה 10 בתחמ"ש גבעת אורן', "manager": None},
+    {"identifier": "WBE-002", "name": 'נחל צבי-הוספת שנאי רביעי 524 50 מגוו"א ומסדר מ"ג (מכולה)', "manager": None},
+    {"identifier": "WBE-003", "name": 'כפר דגן-החלפת 2 שנאים 33 ל-2 שנאים 50, הוספת שנאי רביעי 50 מגוו"א', "manager": None},
+    {"identifier": "WBE-004", "name": 'רמת אלה-הוספת שנאי רביעי ( 524) 50 מגוו"א', "manager": None},
+    {"identifier": "WBE-005", "name": "עין שקד – הוספת שנאי רביעי  36KV 50 MVA", "manager": None},
+    {"identifier": "WBE-006", "name": "קרית הגליל-הת' 2 שנאים 161/24ק'50 מגוו\"א כ\"א וסוללות קבלים", "manager": None},
+    {"identifier": "WBE-007", "name": 'גליל – התקנת שנאי שישי (525) 50 מגוו"א.', "manager": None},
+    {"identifier": "WBE-008", "name": "גליל-הקמת שני שדות 1 ו-13", "manager": None},
+]
+
+
+@pytest.mark.parametrize("name,expected", [
+    ("הוספת שנאי רביעי תחמש גבעת אורן", "WBE-001"),
+    ("קרית גליל", "WBE-006"),
+])
+def test_the_place_name_outweighs_generic_words(name, expected):
+    out = lpl.suggest(name, REAL)
+    assert out[0]["identifier"] == expected
+    assert out[0]["recommended"]
+
+
+def test_hebrew_prefix_letter_still_matches_the_word():
+    idf = lpl.idf_weights([c["name"] for c in REAL])
+    assert lpl.weighted_score("גליל", "הגליל", idf) > 90

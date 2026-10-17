@@ -99,6 +99,8 @@ MANAGER_BONUS = 20         # ranking only; the shown score stays the name score
 REC_MANAGER_MIN_SCORE = 35
 REC_NAME_MIN_SCORE = 85
 REC_NAME_MARGIN = 15
+REC_LEAD_MIN_SCORE = 60     # …or a fair score far ahead of the rest
+REC_LEAD_MARGIN = 20
 ID_MATCH_MIN_LEN = 5
 
 _TOKEN = re.compile(r"[\w-]+")
@@ -117,19 +119,88 @@ def same_manager(a: str | None, b: str | None) -> bool:
     return len(wa & wb) >= min(2, len(wa), len(wb))
 
 
+_ABBREV = re.compile(r"[\"'״׳]")
+
+
+def norm_name(s: str | None) -> str:
+    """A name as the matcher compares it: gershayim dropped BEFORE punctuation
+    becomes space (תחמ"ש → תחמש, not "תחמ ש"), and double yod/vav collapsed
+    (קריית = קרית, 2026-10-17: the file and the module spell places both ways)."""
+    t = _ABBREV.sub("", s or "")
+    t = t.replace("יי", "י").replace("וו", "ו")
+    return default_process(t)
+
+
+# Hebrew one-letter prefixes (ה/ב/ל/ו/מ/כ/ש): "הגליל" is "גליל", "בתחמש" is "תחמש".
+_PREFIXES = "הבלומכש"
+TOKEN_FUZZ = 88            # one typo in a word of 8+ letters still counts as the word
+IDF_SHARE = 0.75           # the rest of the score is plain token_set_ratio
+
+
+def _variants(tok: str) -> set[str]:
+    out = {tok}
+    if len(tok) >= 4 and tok[0] in _PREFIXES:
+        out.add(tok[1:])
+    return out
+
+
+def _tokens(name: str | None) -> list[str]:
+    return [t for t in norm_name(name).split() if len(t) >= 2]
+
+
+def idf_weights(names: list[str | None]) -> dict[str, float]:
+    """How rare each word is across the file's project names. 'הוספת שנאי'
+    is in dozens of names; '<the place>' in one — the place name is what tells
+    projects apart (2026-10-17: equal weights let 'הוספת שנאי רביעי' in five
+    other projects bury '<the place>')."""
+    import math
+    df: dict[str, int] = {}
+    for n in names:
+        for v in {v for t in _tokens(n) for v in _variants(t)}:
+            df[v] = df.get(v, 0) + 1
+    total = len(names)
+    return {t: math.log((total + 1) / (c + 1)) + 1 for t, c in df.items()} | {"": math.log(total + 1) + 1}
+
+
+def _token_hit(tok: str, cand: set[str]) -> bool:
+    vs = _variants(tok)
+    if vs & cand:
+        return True
+    return len(tok) >= 8 and any(fuzz.ratio(v, c) >= TOKEN_FUZZ for v in vs for c in cand if abs(len(c) - len(v)) <= 2)
+
+
+def weighted_score(name: str | None, cand_name: str | None, idf: dict[str, float]) -> float:
+    """Share of the lessons name's weight (rare words weigh more) found in the
+    file name, blended with token_set_ratio. 0–100."""
+    q = _tokens(name)
+    if not q:
+        return 0.0
+    cand = {v for t in _tokens(cand_name) for v in _variants(t)}
+    default = idf[""]
+
+    def w(t: str) -> float:
+        return max(idf.get(v, default) for v in _variants(t))
+
+    total = sum(w(t) for t in q)
+    hit = sum(w(t) for t in q if _token_hit(t, cand))
+    tsr = fuzz.token_set_ratio(norm_name(name), norm_name(cand_name))
+    return IDF_SHARE * (100 * hit / total) + (1 - IDF_SHARE) * tsr
+
+
 def suggest(name: str, candidates: list[dict[str, Any]], limit: int = SUGGESTIONS,
             manager: str | None = None) -> list[dict[str, Any]]:
     """The file projects most likely to be this lessons project, best first.
     A hint for the admin only — nothing is linked from it. Each carries
-    `score` (name similarity), `id_match`, `manager_match`; at most the first
+    `score` (name similarity, rare words weighted up), `id_match`, `manager_match`; at most the first
     carries `recommended`."""
-    q = default_process(name or "")
+    q = norm_name(name)
     if not q:
         return []
     tokens = {t.lower() for t in _TOKEN.findall(name or "")}
+    idf = idf_weights([c["name"] for c in candidates])
     scored = []
     for c in candidates:
-        score = fuzz.token_set_ratio(q, default_process(c["name"] or ""))
+        score = weighted_score(name, c["name"], idf)
         ident = str(c["identifier"]).lower()
         # Short identifiers would hit numbers in the name ("161" kV); only a real code counts.
         id_match = len(ident) >= ID_MATCH_MIN_LEN and ident in tokens
@@ -146,7 +217,8 @@ def suggest(name: str, candidates: list[dict[str, Any]], limit: int = SUGGESTION
         top["recommended"] = (top["id_match"]
                               or (top["manager_match"] and top["score"] >= REC_MANAGER_MIN_SCORE
                                   and not any(o["manager_match"] for o in out[1:]))
-                              or (top["score"] >= REC_NAME_MIN_SCORE and top["score"] - second >= REC_NAME_MARGIN))
+                              or (top["score"] >= REC_NAME_MIN_SCORE and top["score"] - second >= REC_NAME_MARGIN)
+                              or (top["score"] >= REC_LEAD_MIN_SCORE and top["score"] - second >= REC_LEAD_MARGIN))
     return out
 
 
@@ -375,6 +447,46 @@ async def payload(session) -> dict[str, Any]:
         "can_create": not open_rows and bool(plan["create"]),
         "users": users,
     }
+
+
+SEARCH_LIMIT = 30
+
+
+def search_reason(row: dict[str, Any]) -> str:
+    """Why a file project is or is not offered for linking. Pure."""
+    if not row.get("is_active"):
+        return "inactive"
+    if row.get("linked_to") is not None:
+        return "linked"
+    return "free"
+
+
+async def search_file(session, q: str) -> list[dict[str, Any]]:
+    """Every file project — active AND inactive — whose name, identifier or
+    manager matches `q` (normalized like the suggestions), each with the reason
+    it is or is not offered. The answer to "why isn't X in the list?"."""
+    nq = norm_name(q)
+    if len(nq) < 2:
+        return []
+    rows = [dict(r) for r in (await session.execute(text(
+        "SELECT m.project_identifier AS identifier, m.name, m.manager, m.stage, m.is_active, "
+        "m.last_updated, p.id AS linked_to, p.name AS linked_name "
+        "FROM public.projects m LEFT JOIN lessons.projects p ON p.shan_project_identifier = m.project_identifier"
+    ))).mappings().all()]
+    words = nq.split()
+    out = []
+    for r in rows:
+        hay = " ".join([norm_name(r["name"]), norm_name(r["identifier"]), norm_name(r["manager"])])
+        if all(w in hay for w in words):
+            score = 100
+        else:
+            score = fuzz.token_set_ratio(nq, norm_name(r["name"]))
+            if score < 70:
+                continue
+        out.append({**r, "score": round(score), "reason": search_reason(r),
+                    "last_updated": r["last_updated"].isoformat() if r["last_updated"] else None})
+    out.sort(key=lambda r: (-r["score"], r["reason"] != "free", r["name"] or ""))
+    return out[:SEARCH_LIMIT]
 
 
 # ----------------------------------------------------------------- actions
