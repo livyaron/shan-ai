@@ -14,6 +14,7 @@ import { stationTypeLabels, useUser } from "@/context/UserContext";
 import type { Project, StationType } from "@/context/UserContext";
 import { toast } from "@/hooks/use-toast";
 import { isLinked, missingLabel, projectProblems } from "@/lib/projectProblems";
+import { stationNameFrom } from "@/lib/siteName";
 
 /**
  * השלמת נתוני פרויקטים (PLAN-lessons-projects.md L4): what the master file
@@ -159,7 +160,8 @@ const ProjectDataPanel = () => {
                   value={d.stationType ?? (p.stationTypeSet ? p.stationType : "")}
                   onValueChange={(v) => setDraft(p.id, { stationType: v as StationType })}
                   options={STATION_OPTIONS} placeholder="סוג תחנה…" />
-                <SiteCombobox value={d.site ?? p.site ?? ""} onValueChange={(v) => setDraft(p.id, { site: v })} />
+                <SiteCombobox value={d.site ?? p.site ?? ""} onValueChange={(v) => setDraft(p.id, { site: v })}
+                  allowCreate suggestedNew={stationNameFrom(p.name)} />
                 <SearchableMultiSelect
                   value={(d.equipmentIds ?? p.equipmentIds).map(String)}
                   onChange={(v) => setDraft(p.id, { equipmentIds: v.map(Number) })}
