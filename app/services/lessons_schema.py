@@ -175,6 +175,12 @@ _TABLE_DDL: tuple[str, ...] = (
   profile_id text NOT NULL REFERENCES lessons.profiles(id) ON DELETE CASCADE,
   shan_user_id integer NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
   PRIMARY KEY (profile_id, shan_user_id))""",
+    # The dashboard AI summary, keyed by a hash of the exact prompt: the same
+    # data (and prefs) never asks the model twice. Server-only, like
+    # referent_members — not a module table, never PostgREST's.
+    """CREATE TABLE IF NOT EXISTS lessons.ai_summary_cache (
+  prompt_hash char(64) PRIMARY KEY, answer text NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now())""",
 )
 
 _FUNCTION_DDL: tuple[str, ...] = (
@@ -342,6 +348,7 @@ END$$""",
     f"GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA lessons TO {ANON_ROLE}",
     f"REVOKE UPDATE, DELETE ON lessons.lesson_workflow_events FROM {ANON_ROLE}",
     f"REVOKE ALL ON lessons.referent_members FROM {ANON_ROLE}",
+    f"REVOKE ALL ON lessons.ai_summary_cache FROM {ANON_ROLE}",
     f"GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA lessons TO {ANON_ROLE}",
     f"GRANT EXECUTE ON FUNCTION lessons.apply_lesson_workflow_event(integer,text,text,text,text,text,jsonb,text,text,text) TO {ANON_ROLE}",
     "NOTIFY pgrst, 'reload schema'",
