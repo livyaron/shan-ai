@@ -13,8 +13,16 @@ export interface MasterProject {
 }
 
 export interface Suggestion extends MasterProject {
+  /** Name similarity 0–100 (100 when the file identifier is written in the name). */
   score: number;
+  id_match: boolean;
+  manager_match: boolean;
+  /** At most the first suggestion: the server's rule found a clear signal. */
+  recommended: boolean;
 }
+
+/** The suggestion picked before the admin chooses: the recommended one, else none. */
+export const defaultPick = (r: LinkRow): string => r.suggestions.find((s) => s.recommended)?.identifier ?? "";
 
 export interface LinkRow {
   id: number;

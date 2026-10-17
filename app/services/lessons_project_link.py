@@ -89,15 +89,65 @@ def risk_for(level: str | None) -> str:
     return RISK_BY_LEVEL.get(level or "", DEFAULT_RISK)
 
 
-def suggest(name: str, candidates: list[dict[str, Any]], limit: int = SUGGESTIONS) -> list[dict[str, Any]]:
-    """The file projects whose name is closest to a lessons project's name. A
-    hint for the admin only — nothing is linked from it."""
+# A suggestion is marked "recommended" (and pre-selected — still one click to
+# link) only on a signal stronger than a similar name: the file identifier
+# written in the lessons name, or the same manager (and the only suggestion
+# with that manager) on a similar enough name, or a near-identical name well
+# ahead of the next one. Thresholds set on the real screen (2026-10-17):
+# 'אוניברסיטה' scored 40 against its own project.
+MANAGER_BONUS = 20         # ranking only; the shown score stays the name score
+REC_MANAGER_MIN_SCORE = 35
+REC_NAME_MIN_SCORE = 85
+REC_NAME_MARGIN = 15
+ID_MATCH_MIN_LEN = 5
+
+_TOKEN = re.compile(r"[\w-]+")
+
+
+def _words(s: str | None) -> frozenset[str]:
+    return frozenset(w for w in re.split(r"[\s,]+", (s or "").strip()) if len(w) > 1)
+
+
+def same_manager(a: str | None, b: str | None) -> bool:
+    """'משה כהן' and 'כהן משה' are one person; one shared word is not enough
+    for a two-word name (a common first name), it is for a one-word name."""
+    wa, wb = _words(a), _words(b)
+    if not wa or not wb:
+        return False
+    return len(wa & wb) >= min(2, len(wa), len(wb))
+
+
+def suggest(name: str, candidates: list[dict[str, Any]], limit: int = SUGGESTIONS,
+            manager: str | None = None) -> list[dict[str, Any]]:
+    """The file projects most likely to be this lessons project, best first.
+    A hint for the admin only — nothing is linked from it. Each carries
+    `score` (name similarity), `id_match`, `manager_match`; at most the first
+    carries `recommended`."""
     q = default_process(name or "")
     if not q:
         return []
-    scored = [(fuzz.token_set_ratio(q, default_process(c["name"] or "")), c) for c in candidates]
-    scored.sort(key=lambda sc: (-sc[0], sc[1]["identifier"]))
-    return [{**c, "score": round(s)} for s, c in scored[:limit] if s > 0]
+    tokens = {t.lower() for t in _TOKEN.findall(name or "")}
+    scored = []
+    for c in candidates:
+        score = fuzz.token_set_ratio(q, default_process(c["name"] or ""))
+        ident = str(c["identifier"]).lower()
+        # Short identifiers would hit numbers in the name ("161" kV); only a real code counts.
+        id_match = len(ident) >= ID_MATCH_MIN_LEN and ident in tokens
+        mgr = same_manager(manager, c.get("manager"))
+        if score <= 0 and not id_match:
+            continue
+        rank = (id_match, score + (MANAGER_BONUS if mgr else 0))
+        scored.append((rank, round(score), id_match, mgr, c))
+    scored.sort(key=lambda r: (not r[0][0], -r[0][1], r[4]["identifier"]))
+    out = [{**c, "score": 100 if idm else sc, "id_match": idm, "manager_match": mgr, "recommended": False}
+           for _, sc, idm, mgr, c in scored[:limit]]
+    if out:
+        top, second = out[0], (out[1]["score"] if len(out) > 1 else 0)
+        top["recommended"] = (top["id_match"]
+                              or (top["manager_match"] and top["score"] >= REC_MANAGER_MIN_SCORE
+                                  and not any(o["manager_match"] for o in out[1:]))
+                              or (top["score"] >= REC_NAME_MIN_SCORE and top["score"] - second >= REC_NAME_MARGIN))
+    return out
 
 
 def manager_profile_for(manager: str | None, alias_users: dict[str, int | None],
@@ -260,7 +310,7 @@ async def payload(session) -> dict[str, Any]:
             "linked": by_ident.get(ident) if ident else None,
             "linked_missing": bool(ident and ident not in by_ident),
             "decision": p["shan_link_decision"],
-            "suggestions": [] if ident else suggest(p["name"], free),
+            "suggestions": [] if ident else suggest(p["name"], free, manager=p["manager_name"]),
         })
     open_rows = undecided(projects)
     return {

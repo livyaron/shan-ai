@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { filterLinkRows, freeMasters, masterLabel, rowState, type LinkRow } from "@/lib/projectLinks";
+import { defaultPick, filterLinkRows, freeMasters, masterLabel, rowState, type LinkRow } from "@/lib/projectLinks";
 
 const row = (id: number, name: string, extra: Partial<LinkRow> = {}): LinkRow => ({
   id, name, site: null, lessons_count: 0, manager_name: null, identifier: null, linked: null,
@@ -47,5 +47,18 @@ describe("masterLabel", () => {
     expect(masterLabel({ identifier: "A", name: "חדרה", manager: "דנה", stage: "תכנון", project_type: null }))
       .toBe('חדרה · מנה"פ דנה · תכנון');
     expect(masterLabel({ identifier: "A", name: null, manager: null, stage: null, project_type: null })).toBe("A");
+  });
+});
+
+describe("defaultPick", () => {
+  const sg = (identifier: string, recommended: boolean) => ({
+    identifier, name: identifier, manager: null, stage: null, project_type: null,
+    score: 50, id_match: false, manager_match: false, recommended,
+  });
+
+  it("pre-selects only a recommended suggestion", () => {
+    expect(defaultPick(row(1, "א", { suggestions: [sg("A", true), sg("B", false)] }))).toBe("A");
+    expect(defaultPick(row(2, "ב", { suggestions: [sg("A", false), sg("B", false)] }))).toBe("");
+    expect(defaultPick(row(3, "ג"))).toBe("");
   });
 });
