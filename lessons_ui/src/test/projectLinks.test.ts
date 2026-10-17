@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { defaultPick, filterLinkRows, managerNeedsAnswer, freeMasters, masterLabel, rowState, type LinkRow } from "@/lib/projectLinks";
+import { defaultPick, filterLinkRows, managerNeedsAnswer, heldElsewhere, manualOptions, masterLabel, rowState, type LinkRow } from "@/lib/projectLinks";
 
 const row = (id: number, name: string, extra: Partial<LinkRow> = {}): LinkRow => ({
   id, name, site: null, lessons_count: 0, manager_name: null, identifier: null, linked: null, manager_check: null,
@@ -31,14 +31,19 @@ describe("filterLinkRows", () => {
   });
 });
 
-describe("freeMasters", () => {
-  it("hides file projects linked to another lessons project", () => {
+describe("manualOptions", () => {
+  it("lists every file project and marks the ones another lessons project holds", () => {
     const masters = [
       { identifier: "A", name: "א", manager: null, stage: null, project_type: null, linked_to: null },
-      { identifier: "B", name: "ב", manager: null, stage: null, project_type: null, linked_to: 5 },
-      { identifier: "C", name: "ג", manager: null, stage: null, project_type: null, linked_to: 7 },
+      { identifier: "B", name: "ב", manager: null, stage: null, project_type: null, linked_to: 5, linked_name: "פרויקט ה" },
+      { identifier: "C", name: "ג", manager: null, stage: null, project_type: null, linked_to: 7, linked_name: "פרויקט ז" },
     ];
-    expect(freeMasters(masters, 5).map((m) => m.identifier)).toEqual(["A", "B"]);
+    const opts = manualOptions(masters, 5);
+    expect(opts.map((o) => o.value)).toEqual(["A", "B", "C"]);
+    expect(opts[1].label).toBe("ב");                          // held by this very row
+    expect(opts[2].label).toContain('מקושר ל"פרויקט ז"');
+    expect(heldElsewhere(masters[2], 5)).toBe(true);
+    expect(heldElsewhere(masters[1], 5)).toBe(false);
   });
 });
 

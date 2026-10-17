@@ -9,7 +9,9 @@ export interface MasterProject {
   manager: string | null;
   stage: string | null;
   project_type: string | null;
+  /** The lessons project already linked to this file project, if any. */
   linked_to?: number | null;
+  linked_name?: string | null;
 }
 
 export interface Suggestion extends MasterProject {
@@ -98,9 +100,15 @@ export const filterLinkRows = (rows: LinkRow[], query: string, onlyOpen: boolean
     .sort((a, b) => Number(rowState(b) === "open") - Number(rowState(a) === "open"));
 };
 
-/** File projects still free to link (not linked to another lessons project). */
-export const freeMasters = (masters: MasterProject[], forRow: number): MasterProject[] =>
-  masters.filter((m) => m.linked_to == null || m.linked_to === forRow);
+/** A file project another lessons project already holds: the answer is a merge, not a link. */
+export const heldElsewhere = (m: MasterProject, forRow: number): boolean => m.linked_to != null && m.linked_to !== forRow;
+
+/** The manual list: every active file project, the ones held elsewhere marked. */
+export const manualOptions = (masters: MasterProject[], forRow: number) =>
+  masters.map((m) => ({
+    value: m.identifier,
+    label: heldElsewhere(m, forRow) ? `${masterLabel(m)} · מקושר ל"${(m.linked_name ?? "").trim()}" — בחירה תציע איחוד` : masterLabel(m),
+  }));
 
 export const masterLabel = (m: MasterProject): string =>
   [m.name || m.identifier, m.manager ? `מנה"פ ${m.manager}` : "", m.stage ?? ""].filter(Boolean).join(" · ");
