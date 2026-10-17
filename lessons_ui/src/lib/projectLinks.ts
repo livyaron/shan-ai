@@ -132,3 +132,19 @@ export const SEARCH_REASON_LABELS: Record<SearchReason, string> = {
   linked: "כבר מקושר לפרויקט לקחים",
   inactive: "לא פעיל — לא נמצא בגיליון \"דוח שבועי עדכני\" בהעלאה האחרונה",
 };
+
+export interface ManagerRow {
+  name: string;
+  projects: number;
+  user_id: number | null;
+  username: string | null;
+  profile_id: string | null;
+  problem: ManagerProblem | null;
+  hint_user_id: number | null;
+}
+
+export interface ManagersPayload {
+  rows: ManagerRow[];
+  users: { id: number; username: string }[];
+  open: number;
+}

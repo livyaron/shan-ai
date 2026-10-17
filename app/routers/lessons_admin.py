@@ -520,13 +520,23 @@ async def project_links_search(request: Request, q: str = "", session: AsyncSess
     return JSONResponse({"q": q, "rows": await lpl.search_file(session, q)}, headers={"Cache-Control": "no-store"})
 
 
+@project_links_router.get("/managers")
+async def project_links_managers(request: Request, session: AsyncSession = Depends(get_db_session)) -> Response:
+    """Every מנה"פ name in the active file: who it is, what is missing, a hint."""
+    from app.services import lessons_project_link as lpl
+    if await _shan_admin(request, session) is None:
+        return JSONResponse({"message": "Shan-AI admin only"}, status_code=403)
+    return JSONResponse(await lpl.managers_payload(session), headers={"Cache-Control": "no-store"})
+
+
 @project_links_router.post("")
 async def project_links_act(request: Request, session: AsyncSession = Depends(get_db_session)) -> Response:
     """Body: {"action": "link", "project_id": 3, "identifier": "123" | null}
     · {"action": "local", "project_id": 3, "local": true}
     · {"action": "merge", "source_id": 3, "target_id": 7}
     · {"action": "manager", "project_id": 3, "mode": "file" | "user" | "keep", "user_id": 12}
-    · {"action": "create_missing"}. Answers with the fresh payload."""
+    · {"action": "alias", "alias": "<name as in the file>", "user_id": 12}
+    · {"action": "sync_now"} · {"action": "create_missing"}. Answers with the fresh payload."""
     from app.services import lessons_project_link as lpl
     admin = await _shan_admin(request, session)
     if admin is None:
@@ -546,6 +556,11 @@ async def project_links_act(request: Request, session: AsyncSession = Depends(ge
             raw_uid = body.get("user_id")
             problem = await lpl.set_manager(session, admin, int(body["project_id"]), str(body["mode"]),
                                             None if raw_uid in (None, "") else int(raw_uid))
+        elif action == "alias":
+            problem = await lpl.confirm_alias(session, admin, str(body["alias"]), int(body["user_id"]))
+        elif action == "sync_now":
+            await lpl.sync_from_file(session)
+            problem = None
         elif action == "create_missing":
             _, problem = await lpl.create_missing(session, admin)
         else:

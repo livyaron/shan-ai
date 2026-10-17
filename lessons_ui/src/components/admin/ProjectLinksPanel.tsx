@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AlertTriangle, CheckCircle, FolderPlus, GitMerge, Link2, Link2Off, Loader2, MapPin, Search, Star, UserCheck } from "lucide-react";
+import { AlertTriangle, CheckCircle, FolderPlus, GitMerge, Link2, Link2Off, Loader2, MapPin, RefreshCw, Search, Star, UserCheck, Users } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -23,6 +23,7 @@ import {
   type LinkRow,
   type SearchRow,
   type LinksPayload,
+  type ManagersPayload,
 } from "@/lib/projectLinks";
 
 /**
@@ -45,6 +46,8 @@ const ProjectLinksPanel = () => {
   const [mergeTarget, setMergeTarget] = useState("");
   const [confirmMerge, setConfirmMerge] = useState(false);
   const [confirmCreate, setConfirmCreate] = useState(false);
+  const [managers, setManagers] = useState<ManagersPayload | null>(null);
+  const [mgrPick, setMgrPick] = useState<Record<string, string>>({});
   const [fileQuery, setFileQuery] = useState("");
   const [fileRows, setFileRows] = useState<SearchRow[] | null>(null);
   const [mgrRow, setMgrRow] = useState<number | null>(null);
@@ -65,9 +68,19 @@ const ProjectLinksPanel = () => {
     }
   }, []);
 
+  const loadManagers = useCallback(async () => {
+    try {
+      const r = await fetch(`${SUPABASE_URL}/_project_links/managers`, { credentials: "same-origin" });
+      if (r.ok) setManagers(await r.json());
+    } catch {
+      /* the card stays hidden; the rest of the page works */
+    }
+  }, []);
+
   useEffect(() => {
     load();
-  }, [load]);
+    loadManagers();
+  }, [load, loadManagers]);
 
   const act = async (key: string, body: Record<string, unknown>, done: string, reload = false): Promise<LinksPayload | null> => {
     setBusy(key);
@@ -344,6 +357,72 @@ const ProjectLinksPanel = () => {
           })}
         </CardContent>
       </Card>
+
+      {managers && (
+        <Card className="border-0 shadow-sm">
+          <CardHeader className="space-y-2">
+            <CardTitle className="text-base font-heading flex flex-wrap items-center gap-2">
+              <Users className="w-4 h-4" />
+              שמות מנה״פ בקובץ ({managers.rows.length})
+              {managers.open > 0 ? (
+                <Badge variant="outline" className="bg-warning/10 text-warning border-warning/30">{managers.open} דורשים קישור</Badge>
+              ) : (
+                <Badge variant="outline" className="bg-success/10 text-success border-success/30">כולם מקושרים</Badge>
+              )}
+            </CardTitle>
+            <p className="text-xs text-muted-foreground">
+              כל שם שמופיע בעמודת מנה״פ בקובץ, ומי הוא ב-Shan-AI. ההצעה היא רמז בלבד — שום דבר לא נשמר עד שלוחצים "אשר".
+              הקישור משמש גם בדף הדפוסים; משתמש שאינו מנה״פ במערכת הלקחים יוגדר כמנה״פ. הפרויקטים עוברים אליו בסנכרון הבא,
+              או מיד ב"סנכרן עכשיו".
+            </p>
+            <div>
+              <Button size="sm" variant="outline" className="gap-1.5" disabled={busy !== null}
+                onClick={async () => {
+                  const res = await act("sync", { action: "sync_now" }, "הסנכרון הושלם ✓");
+                  if (res) loadManagers();
+                }}>
+                <RefreshCw className="w-3.5 h-3.5" />
+                סנכרן עכשיו מול הקובץ
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {managers.rows.map((m) => {
+              const pick = mgrPick[m.name] ?? (m.user_id ? String(m.user_id) : m.hint_user_id ? String(m.hint_user_id) : "");
+              return (
+                <div key={m.name}
+                  className={`flex flex-col lg:flex-row lg:items-center justify-between gap-2 p-2.5 rounded-xl text-sm ${m.problem ? "bg-warning/5 ring-1 ring-warning/30" : "bg-muted/50"}`}>
+                  <div className="min-w-0">
+                    <span className="font-medium">{m.name.trim()}</span>
+                    <span className="text-xs text-muted-foreground"> · {m.projects} פרויקטים</span>
+                    <div className="text-xs">
+                      {m.problem ? (
+                        <span className="text-warning">{MANAGER_PROBLEM_LABELS[m.problem]}{m.username ? ` (${m.username})` : ""}</span>
+                      ) : (
+                        <span className="text-success">✓ {m.username}</span>
+                      )}
+                      {!m.user_id && m.hint_user_id && <span className="text-muted-foreground"> · הצעה מסומנת מראש</span>}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <SearchableSelect value={pick} searchable placeholder="בחר משתמש…" className="w-full sm:w-56"
+                      onValueChange={(v) => setMgrPick((p) => ({ ...p, [m.name]: v }))}
+                      options={managers.users.map((u) => ({ value: String(u.id), label: u.username }))} />
+                    <Button size="sm" disabled={!pick || busy !== null || (!m.problem && pick === String(m.user_id))}
+                      onClick={async () => {
+                        const res = await act(`a${m.name}`, { action: "alias", alias: m.name, user_id: Number(pick) },
+                          `${m.name.trim()} קושר ✓`);
+                        if (res) loadManagers();
+                      }}>
+                      אשר
+                    </Button>
+                  </div>
+                </div>
+              );
+            })}
+          </CardContent>
+        </Card>
+      )}
 
       <Card className="border-0 shadow-sm">
         <CardHeader>

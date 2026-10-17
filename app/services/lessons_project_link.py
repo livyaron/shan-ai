@@ -843,3 +843,74 @@ async def sync_after_upload() -> None:
         log.info("lessons project sync: %s", counts)
     except Exception:
         log.exception("lessons project sync failed (the master upload itself is fine)")
+
+
+# ----------------------------------------------------------------- L2: every file manager name at once
+
+UNASSIGNED_NAMES = frozenset({"טרם הוקצאה"})   # PLAN.md §4: a reserved name, never a person
+HINT_MIN = 60
+
+
+def manager_hint(name: str, users: list[dict[str, Any]]) -> int | None:
+    """The Shan-AI user a file name most likely is — a HINT, never applied
+    without an admin's click. The same word set (the file writes 'כהן, משה')
+    wins; else the closest username at ≥ HINT_MIN."""
+    for u in users:
+        if same_manager(name, u["username"]):
+            return u["id"]
+    best = max(((fuzz.token_sort_ratio(norm_name(name), norm_name(u["username"])), u["id"]) for u in users),
+               default=(0, None))
+    return best[1] if best[0] >= HINT_MIN else None
+
+
+def manager_rows(counts: dict[str, int], alias_users: dict[str, int | None],
+                 profile_of_user: dict[int, dict[str, Any]], users: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """One row per מנה"פ name in the active file: who it is (if confirmed), the
+    problem if any, and a hint. Problems first, then by project count. Pure."""
+    names = {u["id"]: u["username"] for u in users}
+    rows = []
+    for name, n in counts.items():
+        if not name.strip() or name.strip() in UNASSIGNED_NAMES:
+            continue
+        pid, problem = manager_profile_for(name, alias_users, profile_of_user)
+        uid = alias_users.get(name.strip())
+        rows.append({
+            "name": name, "projects": n, "user_id": uid, "username": names.get(uid) if uid else None,
+            "profile_id": pid, "problem": problem,
+            "hint_user_id": None if uid else manager_hint(name, users),
+        })
+    rows.sort(key=lambda r: (r["problem"] is None, -r["projects"], r["name"]))
+    return rows
+
+
+async def managers_payload(session) -> dict[str, Any]:
+    counts = {r[0]: r[1] for r in (await session.execute(text(
+        "SELECT manager, count(*) FROM public.projects WHERE is_active AND manager IS NOT NULL GROUP BY manager"
+    ))).all()}
+    alias_users, profile_of_user = await _manager_chain(session)
+    users = [{"id": r[0], "username": (r[1] or "").strip()} for r in (await session.execute(text(
+        "SELECT id, username FROM public.users ORDER BY username"))).all()]
+    rows = manager_rows(counts, alias_users, profile_of_user, users)
+    return {"rows": rows, "users": users, "open": sum(1 for r in rows if r["problem"])}
+
+
+async def confirm_alias(session, admin, alias: str, user_id: int) -> str | None:
+    """An admin confirms that the file's name IS this Shan-AI user: the alias
+    (the same link the patterns page uses, keyed on the name as the file
+    spells it) and a PM profile in the module. Projects follow at the next
+    sync — or at once with sync_now."""
+    exists = (await session.execute(text(
+        "SELECT 1 FROM public.projects WHERE manager = :a AND is_active LIMIT 1"), {"a": alias})).first()
+    if exists is None:
+        return "השם לא נמצא בקובץ"
+    pid, problem = await ensure_pm_profile(session, user_id)
+    if pid is None:
+        return problem
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+    from app.models import ManagerAlias
+    await session.execute(pg_insert(ManagerAlias).values(alias=alias, user_id=user_id)
+                          .on_conflict_do_update(index_elements=["alias"], set_={"user_id": user_id}))
+    await _log(session, admin, "manager_alias_confirmed", "", alias.strip(),
+               f"השם בקובץ '{alias.strip()}' = משתמש {user_id} (פרופיל {pid})")
+    return None

@@ -378,3 +378,30 @@ def test_both_upload_paths_call_the_lessons_sync():
     import pathlib
     for f in ("app/routers/projects.py", "app/services/knowledge_service.py"):
         assert "sync_after_upload()" in pathlib.Path(f).read_text(encoding="utf-8"), f
+
+
+# ------------------------------------------------------------------ L2: every manager name
+
+USERS = [{"id": 7, "username": "משה כהן"}, {"id": 8, "username": "דנה לוי"}, {"id": 9, "username": "גלי ברק"},
+         {"id": 11, "username": "ישראל ישראלי"}]
+
+
+@pytest.mark.parametrize("name,expected", [
+    ("כהן, משה", 7),          # the file writes 'last, first'
+    ("לוי דנה", 8),
+    ("ישראלי ישראל", 11),
+    ("מישהו אחר לגמרי", None),
+])
+def test_manager_hint(name, expected):
+    assert lpl.manager_hint(name, USERS) == expected
+
+
+def test_manager_rows_problems_first_and_reserved_name_skipped():
+    counts = {"משה כהן": 5, "יוסי": 3, "טרם הוקצאה": 9, "דנה לוי": 1, "  ": 2}
+    rows = lpl.manager_rows(counts, ALIASES, PROFILES, USERS)
+    assert [r["name"] for r in rows] == ["יוסי", "דנה לוי", "משה כהן"]
+    by = {r["name"]: r for r in rows}
+    assert by["משה כהן"]["problem"] is None and by["משה כהן"]["username"] == "משה כהן"
+    assert by["משה כהן"]["hint_user_id"] is None           # already confirmed — no hint
+    assert by["יוסי"]["problem"] == "alias_unlinked"
+    assert by["דנה לוי"]["problem"] == "not_pm" and by["דנה לוי"]["user_id"] == 8
