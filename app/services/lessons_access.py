@@ -17,6 +17,7 @@ checked.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -126,16 +127,27 @@ def viewer_profile_row(user_id: int, username: str | None, email: str | None) ->
     }
 
 
+_LOCAL_ID = re.compile(r"^s\d+$")
+
+
+def is_local(profile: dict[str, Any]) -> bool:
+    """The module's own row for a Shan-AI user (`s<user_id>`), not one imported
+    from the old system. Starts as a lazy viewer; an admin may give it a role
+    (ניהול משתמשים) — it is still that user's own row, never a link target."""
+    return bool(_LOCAL_ID.match(str(profile.get("id") or "")))
+
+
 def pick_profile(rows: list[dict[str, Any]]) -> dict[str, Any] | None:
     """Of the login profiles linked to one user, the real one beats a lazy viewer.
 
     An admin linking a real profile to someone who already visited leaves the
-    old `s<id>` viewer row behind; the link must win without anyone deleting it.
+    old `s<id>` row behind; the link must win without anyone deleting it — also
+    when that row was given a role meanwhile (linking = inheriting the old one).
     """
     logins = [r for r in rows if r.get("is_login", True)]
     if not logins:
         return None
-    return min(logins, key=lambda r: (r.get("role") == VIEWER, str(r["id"])))
+    return min(logins, key=lambda r: (r.get("role") == VIEWER, is_local(r), str(r["id"])))
 
 
 def me_payload(identity: Identity) -> dict[str, Any]:

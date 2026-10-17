@@ -68,6 +68,7 @@ app.include_router(war_room_router.router)
 # Before the gateway: its /lessons/api/* catch-all would answer these with 404.
 app.include_router(lessons_admin_router.router)
 app.include_router(lessons_admin_router.links_router)
+app.include_router(lessons_admin_router.people_router)
 app.include_router(lessons_gateway_router.router)
 # After the gateway: its /lessons/api/* catch-all must win over the SPA fallback.
 app.include_router(lessons_spa_router.router)

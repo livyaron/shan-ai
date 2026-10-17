@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link2, Link2Off, Loader2, Pencil, UserPlus } from "lucide-react";
+import { CheckCircle, Link2, Link2Off, Loader2, Pencil, UserPlus } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -17,6 +17,10 @@ import { toast } from "@/hooks/use-toast";
  * Users are created in Shan-AI only (⚙️ מערכת → 👥 משתמשים); the module never
  * creates or deletes people. Links are picked from the Shan-AI list — never
  * matched by name. Server: /lessons/api/_links (Shan-AI admin only).
+ *
+ * A migration tool: someone the old system never had (a new PM) has nothing to
+ * link to — they are set up in ניהול משתמשים (PeoplePanel). Once no person from
+ * the old system is left unlinked the tab says so and moves to the menu's end.
  */
 
 interface LinkProfile {
@@ -55,9 +59,10 @@ interface Props {
   users: MockUser[];
   projects: Project[];
   onEdit: (user: MockUser) => void;
+  migrationDone?: boolean;
 }
 
-const UserLinksPanel = ({ users, projects, onEdit }: Props) => {
+const UserLinksPanel = ({ users, projects, onEdit, migrationDone = false }: Props) => {
   const [data, setData] = useState<Payload | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -135,7 +140,15 @@ const UserLinksPanel = ({ users, projects, onEdit }: Props) => {
 
   return (
     <div className="space-y-6">
-      {waiting.length > 0 && (
+      {migrationDone && (
+        <Card className="border-0 shadow-sm bg-success/5">
+          <CardContent className="py-4 flex items-center gap-2 text-sm">
+            <CheckCircle className="w-4 h-4 text-success" />
+            ההעברה מהמערכת הישנה הסתיימה — כל האנשים ממנה מקושרים. משתמשים חדשים מגדירים בטאב ניהול משתמשים.
+          </CardContent>
+        </Card>
+      )}
+      {waiting.length > 0 && freeProfiles.length > 0 && (
         <Card className="border-0 shadow-sm">
           <CardHeader>
             <CardTitle className="text-base font-heading flex items-center gap-2">
@@ -143,8 +156,8 @@ const UserLinksPanel = ({ users, projects, onEdit }: Props) => {
               משתמשי Shan-AI שעדיין לא מקושרים ({waiting.length})
             </CardTitle>
             <p className="text-xs text-muted-foreground">
-              כל עוד משתמש לא מקושר, הוא נכנס למערכת הלקחים בצפייה בלבד. קשר אותו לשם/תפקיד קיים כדי שיקבל את
-              התפקיד, הפרויקטים וההיסטוריה שלו.
+              קשר משתמש לשם/תפקיד מהמערכת הישנה כדי שיקבל את התפקיד, הפרויקטים וההיסטוריה שלו. מי שלא היה
+              במערכת הישנה (למשל מנהל פרויקט חדש) — אין למה לקשר אותו: מגדירים אותו בטאב ניהול משתמשים.
             </p>
           </CardHeader>
           <CardContent className="space-y-2">
@@ -166,16 +179,6 @@ const UserLinksPanel = ({ users, projects, onEdit }: Props) => {
                   options={freeProfiles.map((p) => ({ value: p.id, label: `${p.name.trim()} (${roleLabels[p.role] ?? p.role})` }))}
                   emptyMessage="אין פרופילים פנויים"
                 />
-                {(() => {
-                  // Someone with no existing profile at all: give the viewer row
-                  // they got on their first visit a role instead.
-                  const own = users.find((x) => x.id === `s${u.id}`);
-                  return own ? (
-                    <Button variant="ghost" size="icon" className="h-8 w-8" title="הגדר תפקיד בלי קישור" onClick={() => onEdit(own)}>
-                      <Pencil className="w-4 h-4" />
-                    </Button>
-                  ) : null;
-                })()}
                 <Button
                   size="sm"
                   disabled={!pick[u.id] || busy !== null}

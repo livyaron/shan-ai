@@ -285,6 +285,8 @@ interface AppContextType {
   logout: () => void;
   hasPermission: (permission: string) => boolean;
   users: MockUser[];
+  /** Re-read every profile — after a server-side change (ניהול משתמשים). */
+  reloadUsers: () => Promise<void>;
   updateUser: (userId: string, updates: Partial<Pick<MockUser, "name" | "email" | "role" | "assignedProjects" | "assignedEquipmentIds" | "assignedStageIndexes">>) => void;
   addUser: (user: Omit<MockUser, "id">) => Promise<void>;
   deleteUser: (userId: string) => Promise<void>;
@@ -1437,6 +1439,11 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
     }
   }, [equipment, projects, logActivity]);
 
+  const reloadUsers = useCallback(async () => {
+    const { data } = await supabase.from("profiles").select("*");
+    if (data) setUsers(data.map(mapDbUser));
+  }, []);
+
   const updateUser = useCallback(async (userId: string, updates: Partial<Pick<MockUser, "name" | "email" | "role" | "assignedProjects" | "assignedEquipmentIds" | "assignedStageIndexes">>) => {
     const dbUpdates: any = {};
     if (updates.name !== undefined) dbUpdates.name = updates.name;
@@ -2040,6 +2047,7 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
         logout,
         hasPermission,
         users,
+        reloadUsers,
         updateUser,
         addUser,
         deleteUser,

@@ -775,7 +775,9 @@ def test_group_admin_writes_only_schema_lessons():
     stmts = re.findall(r'"((?:INSERT|UPDATE|DELETE)[^"]*)', src)
     assert stmts
     for stmt in stmts:
-        assert ("lessons.referent_members" in stmt or "lessons.profiles" in stmt) and "public." not in stmt, stmt
+        # people_set also moves lessons.projects.manager_id (one manager per project).
+        assert re.search(r"(INTO|UPDATE|FROM) lessons\.(referent_members|profiles|projects)\b", stmt) \
+            and "public." not in stmt, stmt
 
 
 def test_group_page_shows_its_login_account_or_a_link_form():
@@ -1118,6 +1120,90 @@ async def test_links_are_shan_admin_only_and_not_swallowed_by_the_gateway(monkey
             assert (await c.get("/lessons/api/_links")).status_code == 403
             r = await c.post("/lessons/api/_links", json={"profile_id": "u1", "shan_user_id": 7})
             assert r.status_code == 403
+    finally:
+        app.dependency_overrides.clear()
+
+
+# ------------------------------------------------------------------ people (ניהול משתמשים)
+
+def test_a_local_row_is_never_a_link_target_even_with_a_role():
+    from app.routers.lessons_admin import is_linkable
+    # A new PM set up in ניהול משתמשים is a Shan-AI user's own row, not an old-system profile.
+    assert not is_linkable({"id": "s41", "name": "לירון גולן", "role": "project_manager"})
+
+
+def test_a_linked_old_profile_beats_a_local_row_that_was_given_a_role():
+    rows = [{"id": "s41", "role": "project_manager", "is_login": True},
+            {"id": "u1773149118417", "role": "project_manager", "is_login": True}]
+    assert la.pick_profile(rows)["id"] == "u1773149118417"
+    # Alone, the set-up local row is who they are.
+    assert la.pick_profile(rows[:1])["id"] == "s41"
+
+
+def test_who_is_not_set_up():
+    from app.routers.lessons_admin import person_problems
+    assert person_problems(None, []) == ["unset"]
+    lazy = {"id": "s41", "role": "viewer", "defined_at": None}
+    assert person_problems(lazy, []) == ["unset"]
+    # An admin's explicit "צפייה בלבד" is a decision, not a gap.
+    assert person_problems({**lazy, "defined_at": "2026-10-17"}, []) == []
+    # A referent-group member acts through the group.
+    assert person_problems(lazy, ["u17"]) == []
+    assert person_problems(None, ["u17"]) == []
+    pm = {"id": "s41", "role": "project_manager", "assigned_projects": [], "defined_at": "x"}
+    assert person_problems(pm, []) == ["pm_no_projects"]
+    assert person_problems({**pm, "assigned_projects": [3]}, []) == []
+    # An old-system viewer that was linked is set up.
+    assert person_problems({"id": "u9", "role": "viewer", "defined_at": None}, []) == []
+
+
+def test_which_referent_groups_are_not_complete():
+    from app.routers.lessons_admin import group_problems
+    g = {"id": "u17", "assigned_stage_indexes": [], "shan_user_id": None}
+    assert group_problems(g, 0) == ["no_members", "no_stages"]
+    assert group_problems({**g, "assigned_stage_indexes": [2]}, 1) == []
+    # A group's own login account answers for it.
+    assert group_problems({**g, "assigned_stage_indexes": [2], "shan_user_id": 40}, 0) == []
+
+
+def test_migration_is_done_when_no_old_person_is_left_unlinked():
+    from app.routers.lessons_admin import migration_left
+    rows = [
+        {"id": "u1", "name": "משה", "role": "project_manager", "shan_user_id": 3},
+        {"id": "u2", "name": "רפרנט מגזר", "role": "referent", "shan_user_id": None},  # a role, not a person
+        {"id": "u9", "name": "צפייה בלבד", "role": "viewer", "shan_user_id": None},  # history
+        {"id": "s41", "name": "לירון", "role": "viewer", "shan_user_id": 41},
+    ]
+    assert migration_left(rows) == 0
+    assert migration_left([*rows, {"id": "u5", "name": "דנה", "role": "viewer", "shan_user_id": None}]) == 1
+
+
+def test_reimport_keeps_what_was_set_up_for_local_rows():
+    from pathlib import Path
+    src = Path("app/services/lessons_import.py").read_text(encoding="utf-8")
+    for col in ("assigned_projects", "assigned_stage_indexes", "is_login", "defined_at"):
+        assert f":{col}" in src
+
+
+@pytest.mark.asyncio
+async def test_people_page_is_shan_admin_only_and_not_swallowed_by_the_gateway(monkeypatch):
+    from app.database import get_db_session
+    from app.routers import lessons_admin
+
+    async def no_db():
+        yield None
+
+    async def not_admin(request, session):
+        return None
+
+    monkeypatch.setattr(lessons_admin, "_shan_admin", not_admin)
+    app.dependency_overrides[get_db_session] = no_db
+    try:
+        async with _client(cookies={"access_token": "t"}) as c:
+            assert (await c.get("/lessons/api/_people")).status_code == 403
+            r = await c.post("/lessons/api/_people", json={"shan_user_id": 7, "role": "admin"})
+            assert r.status_code == 403
+            assert (await c.get("/lessons/api/_links/status")).status_code == 403
     finally:
         app.dependency_overrides.clear()
 

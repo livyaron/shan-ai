@@ -168,8 +168,11 @@ async def run_import(engine, base: str, key: str, *, write: bool) -> dict[str, A
         kept_links = {r[0]: (r[1], r[2]) for r in (await conn.execute(text(
             "SELECT id, shan_user_id, is_login FROM lessons.profiles WHERE shan_user_id IS NOT NULL"
         ))).all()}
+        # Local rows keep what an admin set up in ניהול משתמשים (role, projects…).
         kept_viewers = [dict(r) for r in (await conn.execute(text(
-            "SELECT id, name, email, role, shan_user_id FROM lessons.profiles WHERE NOT (id = ANY(:ids))"
+            "SELECT id, name, email, role, shan_user_id, assigned_projects, assigned_stage_indexes, "
+            "assigned_equipment_ids, CAST(email_preferences AS text) AS email_preferences, is_login, defined_at "
+            "FROM lessons.profiles WHERE NOT (id = ANY(:ids))"
         ), {"ids": list(profiles)})).mappings().all()]
         kept_members = (await conn.execute(text(
             "SELECT profile_id, shan_user_id FROM lessons.referent_members"
@@ -211,8 +214,11 @@ async def run_import(engine, base: str, key: str, *, write: bool) -> dict[str, A
             ), {"u": uid, "l": is_login, "p": pid})
         for v in kept_viewers:
             await conn.execute(text(
-                "INSERT INTO lessons.profiles (id, name, email, role, shan_user_id) "
-                "VALUES (:id, :name, :email, :role, :shan_user_id) ON CONFLICT (id) DO NOTHING"
+                "INSERT INTO lessons.profiles (id, name, email, role, shan_user_id, assigned_projects, "
+                "assigned_stage_indexes, assigned_equipment_ids, email_preferences, is_login, defined_at) "
+                "VALUES (:id, :name, :email, :role, :shan_user_id, :assigned_projects, :assigned_stage_indexes, "
+                ":assigned_equipment_ids, CAST(:email_preferences AS jsonb), :is_login, :defined_at) "
+                "ON CONFLICT (id) DO NOTHING"
             ), v)
         await conn.execute(text(
             # A referent group is not a login — unless an admin gave it a
