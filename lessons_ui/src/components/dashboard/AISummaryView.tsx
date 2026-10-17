@@ -1,5 +1,5 @@
 import { AlertTriangle } from "lucide-react";
-import { bulletText, inlineParts, parseSummary } from "@/lib/aiSummary";
+import { bulletText, groupBlocks, inlineParts, parseSummary } from "@/lib/aiSummary";
 
 // Lays the dashboard AI summary out as one card per section. The whole reply
 // is always shown — nothing here clips, collapses or scrolls inside a box.
@@ -45,7 +45,34 @@ const AISummaryView = ({ text, streaming }: Props) => {
                 </h3>
               )}
               <div className="space-y-1.5 text-sm leading-relaxed text-foreground/85">
-                {s.lines.map((line, j) => {
+                {groupBlocks(s.lines).map((block, j) => {
+                  if (block.kind === "table") {
+                    return (
+                      <div key={j} className="my-2 overflow-x-auto rounded-xl border border-border/60 bg-card/70">
+                        <table className="w-full text-sm">
+                          {block.header.length > 0 && (
+                            <thead>
+                              <tr className="bg-muted/60">
+                                {block.header.map((h, k) => (
+                                  <th key={k} className="px-3 py-2 text-right font-semibold text-foreground whitespace-nowrap"><Inline text={h} /></th>
+                                ))}
+                              </tr>
+                            </thead>
+                          )}
+                          <tbody>
+                            {block.rows.map((row, r) => (
+                              <tr key={r} className="border-t border-border/50">
+                                {row.map((c, k) => (
+                                  <td key={k} className={`px-3 py-1.5 ${k > 0 ? "tabular-nums" : "font-medium"}`}><Inline text={c} /></td>
+                                ))}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    );
+                  }
+                  const line = block.text;
                   const b = bulletText(line);
                   const num = line.match(/^(\d{1,2})[.)]\s/)?.[1];
                   return b !== null ? (
