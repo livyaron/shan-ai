@@ -124,8 +124,10 @@ async def projects_data(
 
 
 async def _sync_and_summarize(file_path: str, original_name: str | None) -> None:
-    """Sync the record sheet, then (live reports only) its "תקציר הנהלה" sheet."""
-    from app.services import exec_summary
+    """Sync the record sheet, then (live reports only) its "תקציר הנהלה" and
+    contracts/tenders sheets."""
+    import datetime as _dt
+    from app.services import contracts_sheet, exec_summary
     from app.database import async_session_maker
     from app.services.project_sync import deactivate_missing, sync_projects_file
     result = await sync_projects_file(file_path)
@@ -133,6 +135,9 @@ async def _sync_and_summarize(file_path: str, original_name: str | None) -> None
         async with async_session_maker() as session:
             await deactivate_missing(session, result.get("identifiers"))
         await exec_summary.save_from_file(file_path, original_name)
+        rd = result.get("report_date")
+        await contracts_sheet.save_from_file(file_path, original_name,
+                                             _dt.date.fromisoformat(rd) if rd else None)
 
 
 @router.post("/upload")
@@ -480,6 +485,47 @@ async def project_kpi_list(
     return templates.TemplateResponse("project_kpi_list.html", {
         "request": request, "current_user": current_user, "label": label, "help": help_,
         "rows": items, "scope": scope_name, "as_of": p.get("as_of"), "table": None,
+    })
+
+
+@router.get("/contracts", response_class=HTMLResponse)
+async def project_contracts_page(
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+    current_user: User = Depends(get_current_user),
+):
+    """The master file's "סטטוס התקשרויות קבלנים ותיחורים" sheet — the whole
+    table plus what the rules read out of it (contracts_sheet.analyse)."""
+    import datetime as _dt
+    from app.services import contracts_sheet, il_format
+    payload = await contracts_sheet.latest(session)
+    analysis = contracts_sheet.analyse(payload) if payload else None
+    if payload:
+        # a row links to its project page when one of its codes is a project in the record sheet
+        codes = {c for r in payload["rows"] for c in r["codes"]}
+        found = {}
+        if codes:
+            res = await session.execute(
+                select(Project.project_identifier, Project.estimated_finish_date)
+                .where(Project.project_identifier.in_(codes)))
+            found = {pid: fc for pid, fc in res.all()}
+        for r in payload["rows"]:
+            pid = next((c for c in r["codes"] if c in found), None)
+            r["link"] = pid
+            rec = found.get(pid) if pid else None
+            r["record_fc"] = rec.isoformat() if rec else None
+            sheet_fc = r["forecast"]["date"]
+            r["record_gap_days"] = ((rec - _dt.date.fromisoformat(sheet_fc)).days
+                                    if rec and sheet_fc else None)
+    return templates.TemplateResponse("project_contracts.html", {
+        "request": request, "current_user": current_user,
+        "p": payload, "a": analysis,
+        "groups": contracts_sheet.GROUPS, "stages": contracts_sheet.LADDER,
+        "topics": contracts_sheet.TOPICS, "soon_days": contracts_sheet.RUNWAY_SOON_DAYS,
+        "phase_of": contracts_sheet.PHASE_OF, "group_labels": contracts_sheet.GROUP_LABELS,
+        "stage_labels": contracts_sheet.STAGE_LABELS,
+        "loaded_at_il": il_format.il_datetime(_dt.datetime.fromisoformat(payload["loaded_at"]))
+        if payload and payload.get("loaded_at") else None,
     })
 
 
