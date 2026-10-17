@@ -161,6 +161,45 @@
         {% endif %}
     </div>
 
+    {# ── Lessons (project_lessons: only through the admin's link in מערכת הלקחים) ── #}
+    {% if lessons %}
+    <div class="card-x" id="lessons">
+        <h2>📚 לקחים{% if lessons.ok and lessons.linked %} ({{ lessons.written|length }} נכתבו · {{ lessons.applied|length }} הופצו לפרויקט){% endif %}</h2>
+        {% if not lessons.ok %}
+        <div class="sub">מערכת הלקחים לא זמינה כרגע.</div>
+        {% elif not lessons.linked %}
+        <div class="sub">הפרויקט עוד לא קושר לפרויקט במערכת הלקחים (קישור נעשה ע"י מנהל, בלשונית "קישור פרויקטים").</div>
+        {% else %}
+        <div class="sub">בפרויקט הלקחים:
+            {% for lp in lessons.projects %}<a href="{{ lp.url }}">{{ lp.name }}</a>{% if not loop.last %} · {% endif %}{% endfor %}</div>
+        <div class="sub mt-3">לקחים שנכתבו בפרויקט</div>
+        {% if lessons.written %}
+        <div class="scroll"><table class="t mt-1">
+            <tr><th>לקח</th><th>שלב</th><th>קטגוריה</th><th>סיכון</th><th>סטטוס</th><th>תאריך</th></tr>
+            {% for l in lessons.written %}
+            <tr><td><a href="{{ l.url }}">{{ l.title }}</a></td><td>{{ l.stage }}</td><td>{{ l.category }}</td>
+                <td>{{ l.risk_label }}</td><td>{{ l.workflow }}</td><td class="n">{{ l.date|il_dates }}</td></tr>
+            {% endfor %}
+        </table></div>
+        {% else %}
+        <div class="sub">אין לקחים שנכתבו בפרויקט.</div>
+        {% endif %}
+        <div class="sub mt-3">לקחים שהופצו לפרויקט ליישום</div>
+        {% if lessons.applied %}
+        <div class="scroll"><table class="t mt-1">
+            <tr><th>לקח</th><th>שלב</th><th>עדיפות</th><th>תשובת הפרויקט</th><th>למה הופץ</th></tr>
+            {% for l in lessons.applied %}
+            <tr><td><a href="{{ l.url }}">{{ l.title }}</a></td><td>{{ l.stage }}</td><td>{{ l.priority }}</td>
+                <td>{{ l.answer }}</td><td>{{ l.reason }}</td></tr>
+            {% endfor %}
+        </table></div>
+        {% else %}
+        <div class="sub">לא הופצו לקחים לפרויקט.</div>
+        {% endif %}
+        {% endif %}
+    </div>
+    {% endif %}
+
     {% if h.topics %}
     <div class="card-x">
         <h2>נושאים שעולים בדיווחים</h2>
