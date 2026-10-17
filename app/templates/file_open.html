@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ file.original_name }} — Shan-AI</title>
+    <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-deep: #070b12; --bg-card: #0f1826; --bg-row: #111c2c;
+            --border: #1a2d47; --border-hi: #27466e;
+            --cyan: #00d4ff; --purple: #8b9cf4; --amber: #f5b301; --red: #ef4444;
+            --text-1: #e2e8f0; --text-2: #94a3b8; --text-3: #5b6b82;
+            --mono: 'IBM Plex Mono', monospace; --ui: 'Heebo', sans-serif;
+        }
+        * { box-sizing: border-box; }
+        body { margin: 0; background: var(--bg-deep); color: var(--text-1); font-family: var(--ui); }
+        .wrap { max-width: 1320px; margin: 0 auto; padding: 18px 20px 40px; }
+        .bar { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; background: var(--bg-card);
+               border: 1px solid var(--border); border-radius: 14px; padding: 12px 16px; margin-bottom: 14px; }
+        .back { color: var(--text-2); text-decoration: none; font-size: 0.9rem; white-space: nowrap; }
+        .back:hover { color: var(--cyan); }
+        .ftype { width: 38px; height: 44px; border-radius: 7px; display: flex; align-items: flex-end; justify-content: center;
+                 padding-bottom: 5px; font-family: var(--mono); font-size: 0.62rem; font-weight: 600; color: #fff; flex: none; }
+        .ftype.pdf  { background: linear-gradient(160deg, #e5484d, #a3262a); }
+        .ftype.docx { background: linear-gradient(160deg, #3b82f6, #1d4ed8); }
+        .ftype.xlsx { background: linear-gradient(160deg, #22a35a, #146c3a); }
+        .title { flex: 1 1 260px; min-width: 0; }
+        .title h1 { font-size: 1.12rem; font-weight: 600; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; unicode-bidi: plaintext; text-align: right; }
+        .title div { color: var(--text-2); font-size: 0.82rem; margin-top: 2px; font-family: var(--mono); }
+        .btns { display: flex; gap: 8px; flex-wrap: wrap; }
+        .btn { display: inline-flex; align-items: center; gap: 6px; text-decoration: none; border-radius: 9px; padding: 7px 14px;
+               font-size: 0.88rem; font-weight: 600; border: 1px solid var(--border-hi); color: var(--text-1); background: transparent; }
+        .btn:hover { background: rgba(255,255,255,0.06); }
+        .btn.pri { background: var(--cyan); color: #04121c; border-color: var(--cyan); }
+        .btn.pri:hover { background: #4fe2ff; }
+
+        .pdf-frame { width: 100%; height: calc(100vh - 170px); min-height: 520px; border: 1px solid var(--border); border-radius: 12px; background: #fff; }
+
+        .doc { background: #fbfcfe; color: #1e293b; border-radius: 12px; padding: 40px 48px; max-width: 900px; margin: 0 auto;
+               line-height: 1.8; font-size: 1rem; box-shadow: 0 10px 40px rgba(0,0,0,0.35); }
+        .doc h2 { font-size: 1.2rem; color: #0f172a; margin: 1.2em 0 .4em; }
+        .doc p { margin: 0 0 .7em; white-space: pre-wrap; unicode-bidi: plaintext; text-align: start; }
+        .doc table { border-collapse: collapse; width: 100%; margin: .6em 0 1.2em; font-size: .92rem; }
+        .doc td { border: 1px solid #cbd5e1; padding: 6px 9px; vertical-align: top; white-space: pre-wrap; }
+        .doc tr:first-child td { background: #eef2f7; font-weight: 600; }
+        @media (max-width: 640px) { .doc { padding: 22px 18px; } }
+
+        .tabs { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 8px; margin-bottom: 8px; }
+        .tab { flex: none; background: transparent; border: 1px solid var(--border); color: var(--text-2); border-radius: 9px;
+               padding: 6px 14px; font-size: 0.86rem; cursor: pointer; font-family: var(--ui); }
+        .tab:hover { color: var(--text-1); border-color: var(--border-hi); }
+        .tab.on { background: rgba(34,163,90,0.16); color: #86efac; border-color: rgba(34,163,90,0.55); }
+        .tab small { color: var(--text-3); font-family: var(--mono); margin-inline-start: 4px; }
+        .sheet { display: none; }
+        .sheet.on { display: block; }
+        .grid-wrap { overflow: auto; max-height: calc(100vh - 230px); min-height: 300px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg-card); }
+        table.grid { border-collapse: separate; border-spacing: 0; font-size: 0.86rem; min-width: 100%; }
+        .grid td, .grid th { border-bottom: 1px solid var(--border); border-left: 1px solid var(--border); padding: 6px 10px;
+                             max-width: 380px; vertical-align: top; text-align: right; white-space: pre-wrap; color: var(--text-1); }
+        .grid th { position: sticky; top: 0; background: #14223a; color: var(--text-3); font-family: var(--mono); font-weight: 500; font-size: 0.74rem; z-index: 2; }
+        .grid td.rn { position: sticky; right: 0; background: #14223a; color: var(--text-3); font-family: var(--mono); font-size: 0.74rem; text-align: center; z-index: 1; }
+        .grid tr:hover td:not(.rn) { background: rgba(0,212,255,0.06); }
+        .note { color: var(--text-2); font-size: 0.84rem; margin-top: 8px; }
+
+        .msg { background: var(--bg-card); border: 1px solid var(--border); border-radius: 14px; padding: 48px 20px; text-align: center; color: var(--text-2); }
+        .msg .ic { font-size: 2.6rem; margin-bottom: 10px; }
+        .msg b { color: var(--text-1); display: block; font-size: 1.05rem; margin-bottom: 6px; }
+        .msg .btns { justify-content: center; margin-top: 16px; }
+    </style>
+</head>
+<body>
+
+{% include "_navbar.html" %}
+
+<div class="wrap">
+    <div class="bar">
+        <a class="back" href="/dashboard/files">→ בסיס הידע</a>
+        <div class="ftype {{ file.file_type }}">{{ file.file_type|upper }}</div>
+        <div class="title">
+            <h1 title="{{ file.original_name }}">{{ file.original_name.rsplit('.', 1)[0] if '.' in file.original_name else file.original_name }}</h1>
+            <div dir="ltr" style="text-align:right">{% if file.file_size %}{% if file.file_size > 1048576 %}{{ (file.file_size / 1048576)|round(1) }} MB{% else %}{{ (file.file_size / 1024)|round(1) }} KB{% endif %} · {% endif %}{{ file.created_at }}</div>
+        </div>
+        <div class="btns">
+            {% if exists %}
+            {% if file.file_type == 'pdf' %}<a class="btn" href="/dashboard/files/{{ file.id }}/view" target="_blank" rel="noopener">↗ לשונית חדשה</a>{% endif %}
+            <a class="btn pri" href="/dashboard/files/{{ file.id }}/view?download=1">⬇️ הורדה</a>
+            {% endif %}
+            <a class="btn" href="/dashboard/files/{{ file.id }}/details">✏️ פרטים וקטעים</a>
+        </div>
+    </div>
+
+    {% if not exists %}
+    <div class="msg">
+        <div class="ic">🗂️</div>
+        <b>הקובץ המקורי לא נמצא בשרת</b>
+        הטקסט שחולץ ממנו עדיין שמור ומשמש את הבוט — אפשר לראות אותו בדף הפרטים, או להעלות את הקובץ מחדש ולהחליף.
+        <div class="btns"><a class="btn pri" href="/dashboard/files/{{ file.id }}/details">✏️ לדף הפרטים</a></div>
+    </div>
+
+    {% elif file.file_type == 'pdf' %}
+    <iframe class="pdf-frame" src="/dashboard/files/{{ file.id }}/view" title="{{ file.original_name }}"></iframe>
+
+    {% elif preview_error %}
+    <div class="msg">
+        <div class="ic">⚠️</div>
+        <b>{{ preview_error }}</b>
+        <div class="btns"><a class="btn pri" href="/dashboard/files/{{ file.id }}/view?download=1">⬇️ הורדה</a></div>
+    </div>
+
+    {% elif file.file_type == 'docx' %}
+    {% if blocks %}
+    <article class="doc" dir="rtl">
+        {% for b in blocks %}
+        {% if b.kind == 'h' %}<h2>{{ b.text }}</h2>
+        {% elif b.kind == 'p' %}<p>{{ b.text }}</p>
+        {% else %}
+        <table>{% for r in b.rows %}<tr>{% for c in r %}<td>{{ c }}</td>{% endfor %}</tr>{% endfor %}</table>
+        {% endif %}
+        {% endfor %}
+    </article>
+    <div class="note" style="text-align:center;">תצוגה מקדימה של הטקסט והטבלאות. לעיצוב המקורי, תמונות וכותרות עמוד — הורד את הקובץ.</div>
+    {% else %}
+    <div class="msg"><div class="ic">📄</div><b>המסמך ריק או שאין בו טקסט</b></div>
+    {% endif %}
+
+    {% elif file.file_type == 'xlsx' %}
+    {% if sheets %}
+    <div class="tabs" role="tablist">
+        {% for s in sheets %}
+        <button type="button" class="tab{% if loop.first %} on{% endif %}" data-sheet="{{ loop.index0 }}" role="tab">{{ s.name }}<small>{{ s.rows|length }}{% if s.truncated_rows %}+{% endif %}</small></button>
+        {% endfor %}
+    </div>
+    {% for s in sheets %}
+    <div class="sheet{% if loop.first %} on{% endif %}" data-sheet="{{ loop.index0 }}">
+        {% if s.rows %}
+        <div class="grid-wrap">
+            <table class="grid">
+                <thead><tr><th></th>{% for c in s.rows[0] %}<th>{{ col_letters[loop.index0] }}</th>{% endfor %}</tr></thead>
+                <tbody>
+                {% for r in s.rows %}
+                <tr><td class="rn">{{ loop.index }}</td>{% for c in r %}<td>{{ c }}</td>{% endfor %}</tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% if s.truncated_rows or s.truncated_cols %}
+        <div class="note">מוצגות עד {{ max_rows }} שורות ו-{{ max_cols }} עמודות בגיליון — לקובץ המלא, הורד אותו.</div>
+        {% endif %}
+        {% else %}
+        <div class="msg"><div class="ic">📄</div><b>הגיליון ריק</b></div>
+        {% endif %}
+    </div>
+    {% endfor %}
+    {% else %}
+    <div class="msg"><div class="ic">📄</div><b>אין גיליונות בקובץ</b></div>
+    {% endif %}
+    {% endif %}
+</div>
+
+<script>
+document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => {
+    const k = t.dataset.sheet;
+    document.querySelectorAll('.tab').forEach(x => x.classList.toggle('on', x === t));
+    document.querySelectorAll('.sheet').forEach(s => s.classList.toggle('on', s.dataset.sheet === k));
+}));
+</script>
+</body>
+</html>

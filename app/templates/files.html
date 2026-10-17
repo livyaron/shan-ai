@@ -7,373 +7,359 @@
     <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
-        /* ── Shared DSS design tokens ── */
         :root {
             --bg-deep:   #070b12;
             --bg-card:   #0f1826;
+            --bg-row:    #111c2c;
+            --bg-row-hi: #16243a;
             --border:    #1a2d47;
-            --border-hi: #1e3a5f;
+            --border-hi: #27466e;
             --cyan:      #00d4ff;
-            --cyan-dim:  rgba(0,212,255,0.09);
             --purple:    #8b9cf4;
             --green:     #10b981;
+            --amber:     #f5b301;
             --red:       #ef4444;
             --text-1:    #e2e8f0;
-            --text-2:    #64748b;
-            --text-3:    #344156;
+            --text-2:    #94a3b8;
+            --text-3:    #5b6b82;
             --mono:      'IBM Plex Mono', monospace;
             --ui:        'Heebo', sans-serif;
         }
+        body { background: var(--bg-deep); color: var(--text-1); font-family: var(--ui); }
+        @keyframes spin { to { transform: rotate(360deg); } }
 
-        @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
+        .kb-wrap { max-width: 1320px; margin: 0 auto; padding: 24px 20px 48px; }
+        .kb-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 18px; }
+        .kb-title { font-size: 1.6rem; font-weight: 700; margin: 0; }
+        .kb-title small { display: block; font-size: 0.92rem; font-weight: 400; color: var(--text-2); margin-top: 2px; }
+        .kb-stats { display: flex; gap: 10px; flex-wrap: wrap; }
+        .kb-stat { background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px; padding: 6px 14px; text-align: center; min-width: 84px; }
+        .kb-stat b { display: block; font-size: 1.25rem; color: var(--text-1); line-height: 1.2; }
+        .kb-stat span { font-size: 0.78rem; color: var(--text-2); }
 
-        /* ── Navbar ── */
-        .navbar {
-            background: rgba(7,11,18,0.96) !important;
-            border-bottom: 1px solid var(--border);
-            backdrop-filter: blur(24px);
-            -webkit-backdrop-filter: blur(24px);
-            padding: 0 1.5rem;
-            height: 50px;
-            position: sticky; top: 0; z-index: 1000;
-            box-shadow: 0 4px 24px rgba(0,0,0,0.4);
-        }
-        .navbar::after {
-            content: '';
-            position: absolute; bottom: 0; left: 0; right: 0; height: 1px;
-            background: linear-gradient(90deg, transparent 0%, var(--cyan) 30%, var(--purple) 70%, transparent 100%);
-            opacity: 0.2;
-        }
-        .navbar-brand {
-            font-family: var(--mono); font-size: 1.02rem; font-weight: 600;
-            color: var(--cyan) !important; letter-spacing: 0.08em;
-            display: flex; align-items: center; gap: 7px; text-decoration: none;
-        }
-        .brand-pulse {
-            width: 5px; height: 5px; background: var(--cyan); border-radius: 50%;
-            box-shadow: 0 0 8px var(--cyan); animation: blink 2.4s ease-in-out infinite;
-        }
-        .nav-link {
-            font-size: 0.95rem; font-weight: 500; color: var(--text-2) !important;
-            padding: 0.22rem 0.6rem !important; border-radius: 4px;
-            transition: all 0.14s; white-space: nowrap;
-        }
-        .nav-link:hover { color: var(--text-1) !important; background: rgba(255,255,255,0.04); }
-        .nav-link.nav-active { color: var(--cyan) !important; background: var(--cyan-dim); }
-        .nav-pending-dot {
-            display: inline-flex; align-items: center; justify-content: center;
-            width: 16px; height: 16px; background: var(--red); color: #fff;
-            font-family: var(--mono); font-size: 0.55rem; border-radius: 50%;
-            margin-right: 3px; box-shadow: 0 0 8px rgba(239,68,68,0.5);
-            animation: blink 1.5s ease-in-out infinite;
-        }
-        .user-chip {
-            display: flex; align-items: center; gap: 6px;
-            padding: 3px 10px; background: var(--bg-card); border: 1px solid var(--border);
-            border-radius: 20px; font-size: 0.92rem; color: var(--text-2);
-        }
-        .user-online { width: 5px; height: 5px; background: var(--green); border-radius: 50%; box-shadow: 0 0 6px var(--green); }
-        .logout-btn {
-            font-family: var(--mono); font-size: 0.88rem; color: var(--text-3) !important;
-            text-decoration: none; padding: 3px 8px; border-radius: 4px; transition: all 0.14s; letter-spacing: 0.04em;
-        }
-        .logout-btn:hover { color: var(--red) !important; background: rgba(239,68,68,0.1); }
+        .kb-alert { border-radius: 10px; padding: 10px 16px; margin-bottom: 14px; display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+        .kb-alert.ok  { background: rgba(16,185,129,0.1); border: 1px solid rgba(16,185,129,0.35); color: #a7f3d0; }
+        .kb-alert.err { background: rgba(239,68,68,0.1);  border: 1px solid rgba(239,68,68,0.35);  color: #fecaca; }
+        .kb-alert button { background: none; border: 0; color: inherit; font-size: 1.1rem; line-height: 1; }
 
-        body { background: #0f1117; color: #e0e0e0; font-family: var(--ui); }
-        .navbar { background: #1a1d2e !important; border-bottom: 1px solid #2d3047; }
-        .card { background: #1a1d2e; border: 1px solid #2d3047; border-radius: 12px; }
-        .table { color: #e0e0e0; }
-        .table th { color: #8b9cf4; border-color: #2d3047; }
-        .table td { border-color: #2d3047; vertical-align: middle; }
-        .table tbody tr:hover { background: #22263a; }
-        .form-control, .form-select {
-            background: #0f1117; border: 1px solid #2d3047;
-            color: #ffffff; border-radius: 8px; font-weight: 500;
-        }
-        .form-control:focus {
-            background: #0f1117; color: #ffffff;
-            border-color: #8b9cf4; box-shadow: 0 0 0 0.2rem rgba(139,156,244,0.25);
-        }
-        .form-control::placeholder {
-            color: #7a7a7a;
-            opacity: 1;
-        }
-        .section-title { color: #8b9cf4; font-size: 1.1rem; font-weight: 600;
-            border-right: 3px solid #8b9cf4; padding-right: 10px; }
-        .nav-link { color: #8b9cf4 !important; }
-        .form-label { color: #d0d8f0; font-size: 0.9rem; font-weight: 500; }
-        .upload-zone { border: 2px dashed #2d3047; border-radius: 12px;
-            padding: 28px; text-align: center; transition: border-color .2s; }
-        .upload-zone:hover { border-color: #8b9cf4; }
-        .badge-ready      { background: #28a745; }
-        .badge-processing { background: #ffc107; color: #000; }
-        .badge-error      { background: #dc3545; }
-        .badge-archived   { background: #475569; color: #e2e8f0; }
-        .file-type-pdf  { background: #dc3545; }
-        .file-type-docx { background: #2b7cd3; }
-        .file-type-xlsx { background: #1d7a3a; }
-        .summary-text { color: #d0d8f0; font-size: 0.85rem; font-style: italic; max-width: 260px;
-            white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .badge-master { background: #ffc107; color: #000; font-weight: 700; }
-        .btn-master   { border-color: #ffc107; color: #ffc107; }
-        .btn-master:hover { background: #ffc107; color: #000; }
-        /* ── Table Container (Glassmorphism) ────────────────────────── */
-        .table-container {
-            background: rgba(12,18,32,0.35);
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(0,212,255,0.1);
-            border-radius: 12px;
-            overflow: hidden;
-            padding: 0;
+        .kb-grid { display: grid; grid-template-columns: 320px minmax(0, 1fr); gap: 20px; align-items: start; }
+        @media (max-width: 992px) { .kb-grid { grid-template-columns: 1fr; } }
+
+        .kb-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 14px; padding: 18px; }
+        .kb-card h2 { font-size: 1.02rem; font-weight: 600; color: var(--purple); margin: 0 0 14px; }
+
+        .drop { border: 2px dashed var(--border-hi); border-radius: 12px; padding: 26px 14px; text-align: center; cursor: pointer; transition: border-color .15s, background .15s; }
+        .drop:hover, .drop.drag { border-color: var(--cyan); background: rgba(0,212,255,0.05); }
+        .drop .ic { font-size: 2.2rem; }
+        .drop .t1 { color: var(--text-1); font-weight: 600; margin-top: 6px; }
+        .drop .t2 { color: var(--text-2); font-size: 0.85rem; margin-top: 2px; }
+        .drop .fn { color: var(--cyan); font-size: 0.9rem; margin-top: 8px; word-break: break-all; }
+        .btn-up { width: 100%; margin-top: 12px; background: var(--cyan); color: #04121c; font-weight: 700; border: 0; border-radius: 10px; padding: 10px; }
+        .btn-up:hover { background: #4fe2ff; color: #04121c; }
+        .how { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--border); font-size: 0.86rem; color: var(--text-2); line-height: 1.75; }
+        .how b { color: var(--purple); font-weight: 600; }
+        .how code { color: var(--cyan); }
+
+        .toolbar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 14px; }
+        .search { flex: 1 1 220px; position: relative; }
+        .search input { width: 100%; background: var(--bg-deep); border: 1px solid var(--border); color: var(--text-1); border-radius: 10px; padding: 8px 36px 8px 12px; outline: none; }
+        .search input:focus { border-color: var(--cyan); }
+        .search input::placeholder { color: var(--text-3); }
+        .search::before { content: '🔎'; position: absolute; right: 11px; top: 50%; transform: translateY(-50%); font-size: 0.9rem; opacity: .7; }
+        .chips { display: flex; gap: 6px; flex-wrap: wrap; }
+        .chip { background: transparent; border: 1px solid var(--border); color: var(--text-2); border-radius: 999px; padding: 5px 12px; font-size: 0.85rem; cursor: pointer; }
+        .chip:hover { color: var(--text-1); border-color: var(--border-hi); }
+        .chip.on { background: rgba(0,212,255,0.12); color: var(--cyan); border-color: rgba(0,212,255,0.45); }
+
+        .flist { display: flex; flex-direction: column; gap: 8px; }
+        .frow { display: grid; grid-template-columns: 48px minmax(0, 1fr) auto; gap: 14px; align-items: center;
+                background: var(--bg-row); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px;
+                cursor: pointer; transition: background .12s, border-color .12s; color: var(--text-1); }
+        .frow:hover, .frow:focus-within { background: var(--bg-row-hi); border-color: var(--border-hi); }
+        .frow.archived { opacity: .72; }
+        .ftype { width: 48px; height: 56px; border-radius: 8px; display: flex; align-items: flex-end; justify-content: center;
+                 padding-bottom: 7px; font-family: var(--mono); font-size: 0.7rem; font-weight: 600; color: #fff; position: relative; }
+        .ftype::before { content: ''; position: absolute; top: 0; left: 0; border-style: solid; border-width: 0 0 12px 12px;
+                         border-color: transparent transparent rgba(255,255,255,0.35) transparent; }
+        .ftype.pdf  { background: linear-gradient(160deg, #e5484d, #a3262a); }
+        .ftype.docx { background: linear-gradient(160deg, #3b82f6, #1d4ed8); }
+        .ftype.xlsx { background: linear-gradient(160deg, #22a35a, #146c3a); }
+        .fmain { min-width: 0; }
+        .fname { color: var(--text-1); font-weight: 600; font-size: 1rem; text-decoration: none; display: inline-block; max-width: 100%;
+                 overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; unicode-bidi: plaintext; }
+        .frow:hover .fname { color: var(--cyan); }
+        .fname:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; border-radius: 4px; }
+        .fmeta { color: var(--text-2); font-size: 0.83rem; margin-top: 3px; display: flex; flex-wrap: wrap; gap: 4px 12px; }
+        .fmeta .num { font-family: var(--mono); }
+        .fsum { color: var(--text-2); font-size: 0.85rem; margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .ftags { display: inline-flex; gap: 6px; margin-inline-start: 8px; vertical-align: middle; }
+        .pill { display: inline-flex; align-items: center; gap: 4px; border-radius: 999px; padding: 1px 9px; font-size: 0.74rem; font-weight: 600; border: 1px solid; white-space: nowrap; }
+        .pill.ready     { color: #6ee7b7; border-color: rgba(16,185,129,.4);  background: rgba(16,185,129,.1); }
+        .pill.processing{ color: #fcd34d; border-color: rgba(245,179,1,.45); background: rgba(245,179,1,.1); }
+        .pill.error     { color: #fca5a5; border-color: rgba(239,68,68,.45); background: rgba(239,68,68,.1); }
+        .pill.archived  { color: #cbd5e1; border-color: rgba(148,163,184,.35); background: rgba(148,163,184,.08); }
+        .pill.master    { color: #fde68a; border-color: rgba(245,179,1,.55); background: rgba(245,179,1,.14); }
+
+        .facts { display: flex; gap: 6px; align-items: center; }
+        .facts form { margin: 0; }
+        .ab { width: 34px; height: 34px; display: inline-flex; align-items: center; justify-content: center; border-radius: 8px;
+              border: 1px solid var(--border); background: transparent; color: var(--text-2); font-size: 0.95rem; text-decoration: none; cursor: pointer; }
+        .ab:hover { background: rgba(255,255,255,0.06); color: var(--text-1); border-color: var(--border-hi); }
+        .ab.del:hover { background: rgba(239,68,68,0.14); border-color: rgba(239,68,68,0.5); }
+        .ab.star { color: var(--amber); }
+        .ab.open { width: auto; padding: 0 12px; gap: 6px; color: var(--cyan); border-color: rgba(0,212,255,0.35); font-weight: 600; font-size: 0.86rem; }
+        .ab.open:hover { background: rgba(0,212,255,0.12); color: var(--cyan); }
+        @media (max-width: 640px) {
+            .frow { grid-template-columns: 40px minmax(0, 1fr); }
+            .ftype { width: 40px; height: 48px; }
+            .facts { grid-column: 1 / -1; justify-content: flex-start; flex-wrap: wrap; }
         }
 
-        .table { background: rgba(12,18,32,0.35) !important; backdrop-filter: blur(10px) !important; }
-        .table thead th {
-            background: rgba(12,18,32,0.6) !important;
-            border-bottom: 1px solid rgba(0,212,255,0.2) !important;
-            position: sticky;
-            top: 0;
-            z-index: 10;
-            text-align: right !important;
-            padding: 0.65rem 0.95rem !important;
-            color: #00d4ff !important;
-            font-size: 0.98rem !important;
-        }
-        .table tbody td {
-            text-align: right !important;
-            padding: 0.65rem 0.95rem !important;
-            border-bottom: 1px solid rgba(26,45,71,0.5) !important;
-        }
-        .table tbody tr:hover td { background: rgba(0,212,255,0.04) !important; }
-        .status-badge {
-            display: inline-block;
-            padding: 8px 14px;
-            border-radius: 8px;
-            font-size: 0.85rem;
-            font-weight: 600;
-            letter-spacing: 0.08em;
-            text-transform: uppercase;
-            backdrop-filter: blur(4px);
-            border: 1px solid;
-        }
+        .empty { text-align: center; color: var(--text-2); padding: 48px 12px; }
+        .empty .ic { font-size: 2.6rem; margin-bottom: 8px; }
+        #noMatch { display: none; }
+
+        #syncBanner { display: none; background: linear-gradient(135deg, rgba(245,179,1,0.1), rgba(139,156,244,0.08));
+                      border: 1px solid rgba(245,179,1,0.3); border-radius: 12px; padding: 14px 20px; margin-bottom: 16px; }
+
+        .modal-content { background: var(--bg-card); border: 1px solid var(--border-hi); color: var(--text-1); border-radius: 14px; }
+        .modal-header, .modal-footer { border-color: var(--border); }
     </style>
 </head>
 <body>
 
 {% include "_navbar.html" %}
 
-
-<div class="container-fluid py-4 px-4">
+<div class="kb-wrap">
 
     {% if msg %}
-    <div class="alert alert-success alert-dismissible fade show" role="alert">
-        ✅ {{ msg }}
-        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-    </div>
+    <div class="kb-alert ok" role="status"><span>✅ {{ msg }}</span><button type="button" onclick="this.parentElement.remove()" aria-label="סגור">×</button></div>
     {% endif %}
     {% if error %}
-    <div class="alert alert-danger alert-dismissible fade show" role="alert">
-        ❌ {{ error }}
-        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-    </div>
+    <div class="kb-alert err" role="alert"><span>❌ {{ error }}</span><button type="button" onclick="this.parentElement.remove()" aria-label="סגור">×</button></div>
     {% endif %}
 
+    {% set n_ready = files | selectattr("status", "equalto", "ready") | list | length %}
+    {% set n_proc  = files | selectattr("status", "equalto", "processing") | list | length %}
+    {% set n_err   = files | selectattr("status", "equalto", "error") | list | length %}
+    <div class="kb-head">
+        <h1 class="kb-title">📁 בסיס הידע
+            <small>לחיצה על קובץ פותחת אותו. הקבצים כאן הם מה שהבוט עונה ממנו.</small>
+        </h1>
+        <div class="kb-stats">
+            <div class="kb-stat"><b>{{ files|length }}</b><span>קבצים</span></div>
+            <div class="kb-stat"><b>{{ n_ready }}</b><span>מוכנים</span></div>
+            {% if n_proc %}<div class="kb-stat"><b>{{ n_proc }}</b><span>בעיבוד</span></div>{% endif %}
+            {% if n_err %}<div class="kb-stat"><b style="color:var(--red)">{{ n_err }}</b><span>שגיאות</span></div>{% endif %}
+        </div>
+    </div>
+
     <!-- Live processing progress banner -->
-    <div id="syncBanner" style="display:none; background:linear-gradient(135deg,rgba(255,193,7,0.12),rgba(139,156,244,0.10)); border:1px solid rgba(255,193,7,0.3); border-radius:12px; padding:16px 24px; margin-bottom:16px;">
+    <div id="syncBanner">
         <div class="d-flex align-items-center justify-content-between flex-wrap gap-2">
             <div class="d-flex align-items-center gap-3">
-                <div id="syncSpinner" style="width:22px;height:22px;border:3px solid rgba(255,193,7,0.3);border-top-color:#ffc107;border-radius:50%;animation:spin 0.8s linear infinite;"></div>
+                <div id="syncSpinner" style="width:22px;height:22px;border:3px solid rgba(245,179,1,0.3);border-top-color:#f5b301;border-radius:50%;animation:spin 0.8s linear infinite;"></div>
                 <div>
-                    <div id="syncTitle" style="color:#ffc107;font-weight:600;font-size:0.95rem;">⏳ מעבד קובץ מאסטר...</div>
-                    <div id="syncDetail" style="color:#d0d8f0;font-size:0.85rem;margin-top:2px;"></div>
+                    <div id="syncTitle" style="color:#fcd34d;font-weight:600;">⏳ מעבד קובץ מאסטר...</div>
+                    <div id="syncDetail" style="color:var(--text-2);font-size:0.85rem;margin-top:2px;"></div>
                 </div>
             </div>
-            <div id="syncStats" class="d-flex gap-3" style="font-family:var(--mono);font-size:0.88rem;">
-                <span style="color:#8b9cf4;">קטעים: <strong id="statChunks">0</strong></span>
-                <span style="color:#10b981;">פרויקטים עודכנו: <strong id="statProjects">0</strong>/<strong id="statTotal">0</strong></span>
+            <div class="d-flex gap-3" style="font-family:var(--mono);font-size:0.86rem;">
+                <span style="color:var(--purple);">קטעים: <strong id="statChunks">0</strong></span>
+                <span style="color:var(--green);">פרויקטים עודכנו: <strong id="statProjects">0</strong>/<strong id="statTotal">0</strong></span>
             </div>
         </div>
         <div style="margin-top:10px;background:rgba(255,255,255,0.08);border-radius:6px;height:6px;overflow:hidden;">
-            <div id="syncBar" style="height:100%;background:linear-gradient(90deg,#ffc107,#10b981);border-radius:6px;width:0%;transition:width 0.5s ease;"></div>
+            <div id="syncBar" style="height:100%;background:linear-gradient(90deg,#f5b301,#10b981);border-radius:6px;width:0%;transition:width 0.5s ease;"></div>
         </div>
     </div>
-    <style>@keyframes spin{to{transform:rotate(360deg)}}</style>
 
-    <div class="row g-4">
+    <div class="kb-grid">
 
-        <!-- Upload Card -->
-        <div class="col-md-4">
-            <div class="card p-4">
-                <div class="section-title mb-3">📤 העלאת קובץ</div>
-                <form id="uploadForm" method="POST" action="/dashboard/files/upload" enctype="multipart/form-data">
-                    <input type="hidden" name="is_master" id="isMasterInput" value="false">
-                    <div class="upload-zone mb-3" onclick="document.getElementById('fileInput').click()" style="cursor:pointer;">
-                        <div style="font-size:2.5rem;">📄</div>
-                        <div class="mt-2" style="color:#8b9cf4; font-weight:600;">לחץ לבחירת קובץ</div>
-                        <div class="text-muted small mt-1">PDF, DOCX, XLSX</div>
-                        <div id="fileNameDisplay" class="mt-2 small" style="color:#e0e0e0;"></div>
+        <!-- Upload -->
+        <aside class="kb-card">
+            <h2>📤 העלאת קובץ</h2>
+            <form id="uploadForm" method="POST" action="/dashboard/files/upload" enctype="multipart/form-data">
+                <input type="hidden" name="is_master" id="isMasterInput" value="false">
+                <div class="drop" id="dropZone" role="button" tabindex="0"
+                     onclick="document.getElementById('fileInput').click()"
+                     onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click();}">
+                    <div class="ic">📄</div>
+                    <div class="t1">גרור קובץ לכאן או לחץ לבחירה</div>
+                    <div class="t2">PDF · DOCX · XLSX</div>
+                    <div id="fileNameDisplay" class="fn"></div>
+                </div>
+                <input type="file" id="fileInput" name="file" accept=".pdf,.docx,.xlsx"
+                       class="d-none" onchange="showFileName(this)" required>
+                <button type="button" class="btn btn-up" onclick="handleUploadClick()">📤 העלה לבסיס הידע</button>
+            </form>
+
+            <div class="how">
+                <b>כיצד זה עובד?</b><br>
+                1. העלה קובץ — המערכת מחלצת את הטקסט<br>
+                2. הטקסט מחולק לקטעים ומוטמע כוקטורים<br>
+                3. מנהלים שולחים לבוט: <code>/ask שאלה</code><br>
+                4. ה-AI עונה מתוך הקבצים ✅<br>
+                <b>גם מטלגרם:</b> שלח קובץ ישירות לבוט כדי להוסיפו לבסיס הידע.
+            </div>
+        </aside>
+
+        <!-- Master file confirmation modal -->
+        <div class="modal fade" id="masterModal" tabindex="-1">
+            <div class="modal-dialog modal-dialog-centered">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title" style="color:#fcd34d;">⭐ קובץ מאסטר?</h5>
                     </div>
-                    <input type="file" id="fileInput" name="file" accept=".pdf,.docx,.xlsx"
-                           class="d-none" onchange="showFileName(this)" required>
-                    <button type="button" class="btn btn-primary w-100" onclick="handleUploadClick()">📤 העלה לבסיס הידע</button>
-                </form>
+                    <div class="modal-body">
+                        <p>האם הקובץ <strong id="modalFileName" style="color:var(--cyan);"></strong> הוא קובץ המאסטר של הפרויקטים?</p>
+                        <p class="small" style="color:var(--text-2);">קובץ מאסטר עובר עיבוד מיוחד לחילוץ נתוני פרויקטים (WBS, סטטוס, מנהל, עדכון שבועי).</p>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-warning" onclick="submitUpload(true)">⭐ כן, קובץ מאסטר</button>
+                        <button type="button" class="btn btn-outline-light" onclick="submitUpload(false)">📄 לא, קובץ רגיל</button>
+                    </div>
+                </div>
+            </div>
+        </div>
 
-                <!-- Master file confirmation modal -->
-                <div class="modal fade" id="masterModal" tabindex="-1">
-                    <div class="modal-dialog modal-dialog-centered">
-                        <div class="modal-content" style="background:#1a1d2e; border:1px solid #2d3047; color:#e0e0e0;">
-                            <div class="modal-header" style="border-color:#2d3047;">
-                                <h5 class="modal-title" style="color:#ffc107;">⭐ קובץ מאסטר?</h5>
-                            </div>
-                            <div class="modal-body">
-                                <p>האם הקובץ <strong id="modalFileName" style="color:#8b9cf4;"></strong> הוא קובץ המאסטר של הפרויקטים?</p>
-                                <p class="small text-muted">קובץ מאסטר עובר עיבוד מיוחד לחילוץ נתוני פרויקטים (WBS, סטטוס, מנהל, עדכון שבועי).</p>
-                            </div>
-                            <div class="modal-footer" style="border-color:#2d3047;">
-                                <button type="button" class="btn btn-warning" onclick="submitUpload(true)">⭐ כן, קובץ מאסטר</button>
-                                <button type="button" class="btn btn-outline-secondary" onclick="submitUpload(false)">📄 לא, קובץ רגיל</button>
-                            </div>
+        <!-- Files -->
+        <section class="kb-card">
+            {% if files %}
+            <div class="toolbar">
+                <div class="search"><input id="q" type="search" placeholder="חיפוש לפי שם, סיכום או מעלה..." autocomplete="off"></div>
+                <div class="chips" id="typeChips">
+                    <button type="button" class="chip on" data-type="">הכל</button>
+                    <button type="button" class="chip" data-type="pdf">PDF</button>
+                    <button type="button" class="chip" data-type="docx">Word</button>
+                    <button type="button" class="chip" data-type="xlsx">Excel</button>
+                </div>
+            </div>
+
+            <div class="flist" id="flist">
+                {% for f in files %}
+                <div class="frow{% if f.status == 'archived' %} archived{% endif %}"
+                     data-open="/dashboard/files/{{ f.id }}/open" data-type="{{ f.file_type }}"
+                     data-search="{{ (f.original_name ~ ' ' ~ f.summary ~ ' ' ~ f.uploader_name)|lower }}">
+                    <div class="ftype {{ f.file_type }}">{{ f.file_type|upper }}</div>
+
+                    <div class="fmain">
+                        <div>
+                            <a class="fname" href="/dashboard/files/{{ f.id }}/open" title="{{ f.original_name }}">{{ f.original_name.rsplit('.', 1)[0] if '.' in f.original_name else f.original_name }}</a>
+                            <span class="ftags">
+                                {% if f.status == 'ready' %}<span class="pill ready">מוכן</span>
+                                {% elif f.status == 'processing' %}<span class="pill processing">⏳ בעיבוד</span>
+                                {% elif f.status == 'archived' %}<span class="pill archived">📦 ארכיון</span>
+                                {% else %}<span class="pill error" title="{{ f.summary }}">שגיאה</span>{% endif %}
+                                {% if f.is_master and f.status == 'archived' %}<span class="pill archived" title="גרסת מאסטר קודמת — נשמרת לדוחות ולעומק">גרסת מאסטר קודמת</span>
+                                {% elif f.is_master %}<span class="pill master">⭐ מאסטר</span>{% endif %}
+                            </span>
                         </div>
+                        <div class="fmeta">
+                            <span class="num" dir="ltr">{% if f.file_size %}{% if f.file_size > 1048576 %}{{ (f.file_size / 1048576)|round(1) }} MB{% else %}{{ (f.file_size / 1024)|round(1) }} KB{% endif %}{% else %}—{% endif %}</span>
+                            <span>👤 {{ f.uploader_name }}</span>
+                            <span>🕒 <span class="num" dir="ltr">{{ f.created_at }}</span></span>
+                            {% if f.chunk_count %}<span>🧩 <span class="num">{{ f.chunk_count }}</span> קטעים</span>{% endif %}
+                        </div>
+                        {% if f.summary and f.status != 'error' %}
+                        <div class="fsum" title="{{ f.summary }}">{{ f.summary }}</div>
+                        {% endif %}
+                    </div>
+
+                    <div class="facts">
+                        <a class="ab open" href="/dashboard/files/{{ f.id }}/open" title="פתח קובץ">👁️ פתח</a>
+                        <a class="ab" href="/dashboard/files/{{ f.id }}/view?download=1" title="הורד">⬇️</a>
+                        <a class="ab" href="/dashboard/files/{{ f.id }}/details" title="פרטים, קטעים ועריכה">✏️</a>
+                        {% if f.is_master and f.status == 'archived' %}
+                        <form method="POST" action="/dashboard/files/{{ f.id }}/set_master"
+                              onsubmit="return confirm('לשחזר גרסה זו כ-Master הפעיל? הגרסה הנוכחית תעבור לארכיון.')">
+                            <button type="submit" class="ab star" title="שחזר כ-Master פעיל">↩</button>
+                        </form>
+                        {% elif f.is_master %}
+                        <form method="POST" action="/dashboard/files/{{ f.id }}/unset_master"
+                              onsubmit="return confirm('להסיר הגדרת Master?')">
+                            <button type="submit" class="ab star" title="הסר הגדרת Master">★</button>
+                        </form>
+                        {% elif f.file_type == 'xlsx' and f.status == 'ready' %}
+                        <form method="POST" action="/dashboard/files/{{ f.id }}/set_master">
+                            <button type="submit" class="ab star" title="הגדר כ-Master">☆</button>
+                        </form>
+                        {% else %}
+                        <span class="ab" style="visibility:hidden" aria-hidden="true"></span>
+                        {% endif %}
+                        <form method="POST" action="/dashboard/files/{{ f.id }}/delete"
+                              onsubmit="return confirm('למחוק את ' + {{ f.original_name|tojson|forceescape }} + '?')">
+                            <button type="submit" class="ab del" title="מחק">🗑️</button>
+                        </form>
                     </div>
                 </div>
-
-                <hr style="border-color:#2d3047; margin: 1.5rem 0;">
-                <div class="small" style="color:#d0d8f0;">
-                    <strong style="color:#8b9cf4;">כיצד זה עובד?</strong><br>
-                    1. העלה קובץ — המערכת מחלצת את הטקסט<br>
-                    2. הטקסט מחולק לקטעים ומוטמע כוקטורים<br>
-                    3. מנהלים יכולים לשלוח לבוט: <code style="color:#8b9cf4;">/ask שאלה</code><br>
-                    4. ה-AI מחזיר תשובה מבוססת הקבצים ✅<br><br>
-                    <strong style="color:#8b9cf4;">גם מטלגרם:</strong> שלח קובץ ישירות לבוט כדי להוסיפו לבסיס הידע.
-                </div>
+                {% endfor %}
             </div>
-        </div>
-
-        <!-- Files Table -->
-        <div class="col-md-8">
-            <div class="card p-3">
-                <div class="section-title mb-3">📁 קבצים בבסיס הידע ({{ files|length }})</div>
-
-                {% if files %}
-                <div class="table-responsive">
-                    <table class="table table-hover mb-0">
-                        <thead>
-                            <tr>
-                                <th>שם קובץ</th>
-                                <th>סוג</th>
-                                <th>סיכום</th>
-                                <th>קטעים</th>
-                                <th>גודל</th>
-                                <th>מעלה</th>
-                                <th>תאריך</th>
-                                <th>סטטוס</th>
-                                <th>Master</th>
-                                <th>פעולות</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {% for f in files %}
-                            <tr>
-                                <td>
-                                    <span class="fw-semibold small">{{ f.original_name }}</span>
-                                </td>
-                                <td>
-                                    <span class="badge file-type-{{ f.file_type }}">{{ f.file_type|upper }}</span>
-                                </td>
-                                <td>
-                                    {% if f.summary %}
-                                    <span class="summary-text" title="{{ f.summary }}">{{ f.summary }}</span>
-                                    {% else %}
-                                    <span class="text-muted small">—</span>
-                                    {% endif %}
-                                </td>
-                                <td>
-                                    {% if f.chunk_count %}
-                                    <span class="badge bg-secondary">{{ f.chunk_count }}</span>
-                                    {% else %}
-                                    <span class="text-muted small">—</span>
-                                    {% endif %}
-                                </td>
-                                <td class="text-muted small">
-                                    {% if f.file_size %}
-                                        {% if f.file_size > 1048576 %}
-                                            {{ (f.file_size / 1048576)|round(1) }} MB
-                                        {% else %}
-                                            {{ (f.file_size / 1024)|round(1) }} KB
-                                        {% endif %}
-                                    {% else %}—{% endif %}
-                                </td>
-                                <td class="small">{{ f.uploader_name }}</td>
-                                <td class="text-muted small">{{ f.created_at }}</td>
-                                <td>
-                                    {% if f.status == 'ready' %}
-                                    <span class="badge badge-ready">✅ מוכן</span>
-                                    {% elif f.status == 'processing' %}
-                                    <span class="badge badge-processing">⏳ מעבד...</span>
-                                    {% elif f.status == 'archived' %}
-                                    <span class="badge badge-archived">📦 ארכיון</span>
-                                    {% else %}
-                                    <span class="badge badge-error" title="{{ f.summary }}">❌ שגיאה</span>
-                                    {% endif %}
-                                </td>
-                                <td>
-                                    {% if f.is_master and f.status == 'archived' %}
-                                    <span class="badge badge-archived" title="גרסת מאסטר קודמת — נשמרת לדוחות ולעומק">📦 גרסה קודמת</span>
-                                    <form method="POST" action="/dashboard/files/{{ f.id }}/set_master" class="d-inline"
-                                          onsubmit="return confirm('לשחזר גרסה זו כ-Master הפעיל? הגרסה הנוכחית תעבור לארכיון.')">
-                                        <button type="submit" class="btn btn-sm btn-master mt-1" title="שחזר כ-Master פעיל">↩ שחזר</button>
-                                    </form>
-                                    {% elif f.is_master %}
-                                    <span class="badge badge-master">⭐ Master</span>
-                                    {% elif f.file_type == 'xlsx' and f.status == 'ready' %}
-                                    <form method="POST" action="/dashboard/files/{{ f.id }}/set_master" class="d-inline">
-                                        <button type="submit" class="btn btn-sm btn-master" title="הגדר כ-Master">☆ Set</button>
-                                    </form>
-                                    {% else %}
-                                    <span class="text-muted small">—</span>
-                                    {% endif %}
-                                </td>
-                                <td>
-                                    <a href="/dashboard/files/{{ f.id }}/details"
-                                       class="btn btn-sm btn-outline-info me-1" title="צפייה ועריכה">✏️</a>
-                                    <a href="/dashboard/files/{{ f.id }}/view" target="_blank"
-                                       class="btn btn-sm btn-outline-secondary me-1" title="פתח קובץ">👁️</a>
-                                    {% if f.is_master %}
-                                    <form method="POST" action="/dashboard/files/{{ f.id }}/unset_master"
-                                          onsubmit="return confirm('להסיר הגדרת Master?')" class="d-inline">
-                                        <button type="submit" class="btn btn-sm btn-outline-warning me-1" title="הסר Master">⭐</button>
-                                    </form>
-                                    {% endif %}
-                                    <form method="POST" action="/dashboard/files/{{ f.id }}/delete"
-                                          onsubmit="return confirm('למחוק את {{ f.original_name }}?')" class="d-inline">
-                                        <button type="submit" class="btn btn-sm btn-outline-danger">🗑️</button>
-                                    </form>
-                                </td>
-                            </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
-                </div>
-                {% else %}
-                <div class="text-center text-muted py-5">
-                    <div style="font-size:3rem; margin-bottom:12px;">📂</div>
-                    <div>אין קבצים בבסיס הידע עדיין</div>
-                    <div class="small mt-1">העלה קובץ PDF, DOCX או XLSX להתחלה</div>
-                </div>
-                {% endif %}
+            <div class="empty" id="noMatch"><div class="ic">🔍</div><div>אין קבצים שמתאימים לחיפוש</div></div>
+            {% else %}
+            <div class="empty">
+                <div class="ic">📂</div>
+                <div>אין קבצים בבסיס הידע עדיין</div>
+                <div class="small mt-1">העלה קובץ PDF, DOCX או XLSX להתחלה</div>
             </div>
-        </div>
+            {% endif %}
+        </section>
     </div>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 <script>
+// ── Click anywhere on a row opens the file (buttons/forms keep their own action) ──
+document.querySelectorAll('.frow').forEach(row => {
+    row.addEventListener('click', e => {
+        if (e.target.closest('a, button, form, input')) return;
+        if (window.getSelection && String(window.getSelection()).length) return;  // selecting text, not opening
+        if (e.ctrlKey || e.metaKey) window.open(row.dataset.open, '_blank');
+        else window.location.href = row.dataset.open;
+    });
+});
+
+// ── Search + type filter ──
+(function () {
+    const q = document.getElementById('q');
+    if (!q) return;
+    let type = '';
+    const rows = [...document.querySelectorAll('.frow')];
+    const none = document.getElementById('noMatch');
+    function apply() {
+        const term = q.value.trim().toLowerCase();
+        let shown = 0;
+        rows.forEach(r => {
+            const ok = (!type || r.dataset.type === type) && (!term || r.dataset.search.includes(term));
+            r.style.display = ok ? '' : 'none';
+            if (ok) shown++;
+        });
+        none.style.display = shown ? 'none' : 'block';
+    }
+    q.addEventListener('input', apply);
+    document.querySelectorAll('#typeChips .chip').forEach(c => c.addEventListener('click', () => {
+        document.querySelectorAll('#typeChips .chip').forEach(x => x.classList.toggle('on', x === c));
+        type = c.dataset.type;
+        apply();
+    }));
+})();
+
+// ── Upload: picker + drag & drop ──
 function showFileName(input) {
     const display = document.getElementById('fileNameDisplay');
-    if (input.files && input.files[0]) {
-        display.textContent = '📄 ' + input.files[0].name;
-    }
+    if (input.files && input.files[0]) display.textContent = '📄 ' + input.files[0].name;
 }
+(function () {
+    const zone = document.getElementById('dropZone');
+    const input = document.getElementById('fileInput');
+    ['dragenter', 'dragover'].forEach(ev => zone.addEventListener(ev, e => { e.preventDefault(); zone.classList.add('drag'); }));
+    ['dragleave', 'drop'].forEach(ev => zone.addEventListener(ev, e => { e.preventDefault(); zone.classList.remove('drag'); }));
+    zone.addEventListener('drop', e => {
+        if (!e.dataTransfer.files.length) return;
+        input.files = e.dataTransfer.files;
+        showFileName(input);
+    });
+})();
 
 function handleUploadClick() {
     const fileInput = document.getElementById('fileInput');
@@ -384,11 +370,9 @@ function handleUploadClick() {
     const filename = fileInput.files[0].name;
     const ext = filename.split('.').pop().toLowerCase();
     if (ext === 'xlsx') {
-        // Ask if this is the master file
         document.getElementById('modalFileName').textContent = filename;
         new bootstrap.Modal(document.getElementById('masterModal')).show();
     } else {
-        // PDF/DOCX — upload directly without asking
         document.getElementById('isMasterInput').value = 'false';
         document.getElementById('uploadForm').submit();
     }
@@ -417,8 +401,7 @@ function pollSyncStatus() {
                     ? Math.min(95, Math.round((d.projects_updated / d.projects_total) * 100))
                     : 10;
                 document.getElementById('syncBar').style.width = pct + '%';
-                document.getElementById('syncDetail').textContent =
-                    'שלב: חילוץ וסנכרון פרויקטים...';
+                document.getElementById('syncDetail').textContent = 'שלב: חילוץ וסנכרון פרויקטים...';
                 if (!syncPollTimer) syncPollTimer = setInterval(pollSyncStatus, 3000);
             } else {
                 if (syncPollTimer) { clearInterval(syncPollTimer); syncPollTimer = null; }
@@ -435,8 +418,7 @@ function pollSyncStatus() {
         })
         .catch(() => {});
 }
-// Start polling if any file is processing, or check once on load
-{% if files | selectattr("status", "equalto", "processing") | list | length > 0 %}
+{% if n_proc > 0 %}
 document.getElementById('syncBanner').style.display = 'block';
 pollSyncStatus();
 syncPollTimer = setInterval(pollSyncStatus, 3000);

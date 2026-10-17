@@ -229,6 +229,7 @@ _MIME = {
 @router.get("/{file_id}/view")
 async def view_file(
     file_id: int,
+    download: bool = False,
     session: AsyncSession = Depends(get_db_session),
     current_user: User = Depends(get_current_user),
 ):
@@ -237,13 +238,66 @@ async def view_file(
         raise HTTPException(status_code=404, detail="קובץ לא נמצא")
 
     mime = _MIME.get(kf.file_type, "application/octet-stream")
-    disposition = "inline" if kf.file_type == "pdf" else "attachment"
+    disposition = "inline" if kf.file_type == "pdf" and not download else "attachment"
     return FileResponse(
         path=kf.file_path,
         media_type=mime,
         filename=kf.original_name,
         content_disposition_type=disposition,
     )
+
+
+@router.get("/{file_id}/open", response_class=HTMLResponse)
+async def open_file(
+    file_id: int,
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+    current_user: User = Depends(get_current_user),
+):
+    """Open a file on screen: PDF in the browser's viewer, DOCX/XLSX as a read-only preview."""
+    import asyncio
+    import logging
+    from app.services import file_preview
+
+    kf = await session.get(KnowledgeFile, file_id)
+    if not kf:
+        raise HTTPException(status_code=404, detail="קובץ לא נמצא")
+
+    exists = bool(kf.file_path) and Path(kf.file_path).exists()
+    blocks, sheets, preview_error = [], [], None
+    if exists and kf.file_type == "docx":
+        try:
+            blocks = await asyncio.to_thread(file_preview.preview_docx, kf.file_path)
+        except Exception as e:
+            logging.getLogger(__name__).warning("docx preview failed for %s: %s", file_id, e)
+            preview_error = "לא ניתן להציג את המסמך בדפדפן — אפשר להוריד אותו."
+    elif exists and kf.file_type == "xlsx":
+        try:
+            sheets = await asyncio.to_thread(file_preview.preview_xlsx, kf.file_path)
+        except Exception as e:
+            logging.getLogger(__name__).warning("xlsx preview failed for %s: %s", file_id, e)
+            preview_error = "לא ניתן להציג את הגיליון בדפדפן — אפשר להוריד אותו."
+
+    pending_approvals = await _pending_approvals_count(current_user.id, session)
+    return templates.TemplateResponse("file_open.html", {
+        "request": request,
+        "current_user": current_user,
+        "pending_approvals": pending_approvals,
+        "file": {
+            "id": kf.id,
+            "original_name": kf.original_name,
+            "file_type": kf.file_type,
+            "file_size": kf.file_size,
+            "created_at": kf.created_at.strftime("%d/%m/%Y %H:%M") if kf.created_at else "—",
+        },
+        "exists": exists,
+        "blocks": blocks,
+        "sheets": sheets,
+        "preview_error": preview_error,
+        "max_rows": file_preview.MAX_ROWS,
+        "max_cols": file_preview.MAX_COLS,
+        "col_letters": file_preview.COL_LETTERS,
+    })
 
 
 @router.get("/{file_id}/details", response_class=HTMLResponse)
