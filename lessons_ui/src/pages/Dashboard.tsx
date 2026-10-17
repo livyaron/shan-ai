@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useEffect, useMemo } from "react";
 import { SUPABASE_URL } from "@/integrations/supabase/client";
 import { useNavigate } from "react-router-dom";
 import SearchableSelect from "@/components/ui/searchable-select";
@@ -46,9 +46,12 @@ import AdminAnalyticsTabs from "@/components/admin/AdminAnalyticsTabs";
 import AIFeedbackDialog from "@/components/AIFeedbackDialog";
 import AISummaryView from "@/components/dashboard/AISummaryView";
 import RankedBars from "@/components/dashboard/RankedBars";
+import AIThinking from "@/components/dashboard/AIThinking";
+import { ilDateTime } from "@/lib/ilDate";
 import postcardImg from "@/assets/dashboard-postcard.jpg";
 import { useDashboardData } from "@/hooks/useDashboardData";
 import { buildLessonDrilldownPath } from "@/lib/drilldown";
+import { awaitsAdminApproval } from "@/lib/lessonActions";
 import { distinctImplementedLessonIds, distinctNotRelevantLessonIds } from "@/lib/adminAnalytics";
 import {
   Collapsible,
@@ -108,6 +111,7 @@ const Dashboard = () => {
 
   const [aiSummary, setAiSummary] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
+  const [aiMeta, setAiMeta] = useState<{ createdAt: string | null; cached: boolean } | null>(null);
   const [filtersOpen, setFiltersOpen] = useState(false);
 
   // Dashboard filters
@@ -167,7 +171,7 @@ const Dashboard = () => {
   // Operational KPIs for admin
   const inTreatmentLessonIds = visibleLessons.filter((l) => ACTIVE_WORKFLOW_STATUSES.includes(l.workflowStatus)).map((l) => l.id);
   const inTreatment = inTreatmentLessonIds.length;
-  const pendingAdminApprovalLessonIds = visibleLessons.filter((l) => l.workflowStatus === "ממתין לאישור מנהל מערכת").map((l) => l.id);
+  const pendingAdminApprovalLessonIds = visibleLessons.filter(awaitsAdminApproval).map((l) => l.id);
   const pendingAdminApproval = pendingAdminApprovalLessonIds.length;
   const returnedToCreatorLessonIds = visibleLessons.filter((l) => l.workflowStatus === "ממתין להשלמת יוצר").map((l) => l.id);
   const returnedToCreator = returnedToCreatorLessonIds.length;
@@ -265,136 +269,76 @@ const Dashboard = () => {
 
   const stats = getStatCards();
 
+  // What the model reads. The server keys its saved analysis on exactly this, so
+  // the same data never costs tokens twice — and opening the page shows the last
+  // analysis for this data instead of an empty card.
+  const summaryPayload = useMemo(() => {
+    const describe = (p: (typeof projects)[number]) => ({
+      name: p.name,
+      stage: PROJECT_STAGES[p.stageIndex],
+      type: projectTypeLabels[p.projectType],
+      equipment: equipment.filter((eq) => p.equipmentIds.includes(eq.id)).map((eq) => eq.name),
+    });
+    return JSON.stringify({
+      lessons: visibleLessons.map((l) => ({
+        title: l.title, project: l.project, stage: l.stage, category: l.category, risk: l.risk, status: l.status,
+      })),
+      projects: projects.map(describe),
+      role: currentUser.role,
+      userProjects: visibleProjects.map(describe),
+      userName: currentUser.name,
+      userId: currentUser.id,
+    });
+  }, [visibleLessons, projects, visibleProjects, equipment, currentUser]);
+
+  /** POST the payload; null = nothing saved (cacheOnly) or a handled error. */
+  const requestSummary = useCallback(async (cacheOnly: boolean) => {
+    const body = cacheOnly ? JSON.stringify({ ...JSON.parse(summaryPayload), cacheOnly: true }) : summaryPayload;
+    const resp = await fetch(`${SUPABASE_URL}/functions/v1/summarize-lessons`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body,
+    });
+    if (resp.status === 204) return null;
+    if (!resp.ok) {
+      if (cacheOnly) return null;
+      const busy = resp.status === 503 || resp.status === 429;
+      toast({ title: busy ? "שירות ה-AI עמוס כרגע" : "שגיאה ביצירת סיכום AI", description: busy ? "נסה שוב בעוד דקה" : undefined, variant: "destructive" });
+      return null;
+    }
+    // The server sends the whole answer as OpenAI-style SSE chunks + [DONE].
+    let text = "";
+    for (const line of (await resp.text()).split("\n")) {
+      if (!line.startsWith("data: ") || line.includes("[DONE]")) continue;
+      try { text += JSON.parse(line.slice(6)).choices?.[0]?.delta?.content ?? ""; } catch { /* skip */ }
+    }
+    return { text, createdAt: resp.headers.get("X-Summary-Created"), cached: resp.headers.get("X-Summary-Cache") === "hit" };
+  }, [summaryPayload]);
+
+  // On open, and whenever the filters change the data: the saved analysis for
+  // THIS data, or nothing — never an older analysis of different data.
+  useEffect(() => {
+    if (visibleLessons.length === 0) return;
+    let live = true;
+    setAiSummary("");
+    setAiMeta(null);
+    requestSummary(true).then((r) => {
+      if (live && r) { setAiSummary(r.text); setAiMeta({ createdAt: r.createdAt, cached: true }); }
+    }).catch(() => { /* a missing cache is just an empty card */ });
+    return () => { live = false; };
+  }, [requestSummary, visibleLessons.length]);
+
   const generateAISummary = useCallback(async () => {
     if (visibleLessons.length === 0) {
       toast({ title: "אין לקחים לניתוח", variant: "destructive" });
       return;
     }
-
     setIsStreaming(true);
-    setAiSummary("");
-
     try {
-      const projectsData = projects.map((p) => ({
-        name: p.name,
-        stage: PROJECT_STAGES[p.stageIndex],
-        type: projectTypeLabels[p.projectType],
-        equipment: equipment.filter((eq) => p.equipmentIds.includes(eq.id)).map((eq) => eq.name),
-      }));
-
-      const userProjectsData = visibleProjects.map((p) => ({
-        name: p.name,
-        stage: PROJECT_STAGES[p.stageIndex],
-        type: projectTypeLabels[p.projectType],
-        equipment: equipment.filter((eq) => p.equipmentIds.includes(eq.id)).map((eq) => eq.name),
-      }));
-
-      const lessonsData = visibleLessons.map((l) => ({
-        title: l.title,
-        project: l.project,
-        stage: l.stage,
-        category: l.category,
-        risk: l.risk,
-        status: l.status,
-      }));
-
-      const CHAT_URL = `${SUPABASE_URL}/functions/v1/summarize-lessons`;
-
-      const resp = await fetch(CHAT_URL, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          lessons: lessonsData,
-          projects: projectsData,
-          equipment,
-          role: currentUser.role,
-          userProjects: userProjectsData,
-          userName: currentUser.name,
-          userId: currentUser.id,
-        }),
-      });
-
-      if (!resp.ok) {
-        if (resp.status === 503) {
-          toast({ title: "שירות ה-AI עמוס כרגע", description: "נסה שוב בעוד דקה", variant: "destructive" });
-          setIsStreaming(false);
-          return;
-        }
-        if (resp.status === 429) {
-          toast({ title: "חריגה ממגבלת בקשות", description: "נסה שוב בעוד דקה", variant: "destructive" });
-          setIsStreaming(false);
-          return;
-        }
-        if (resp.status === 402) {
-          toast({ title: "נדרש תשלום", description: "הוסף קרדיטים לחשבון", variant: "destructive" });
-          setIsStreaming(false);
-          return;
-        }
-        throw new Error("Failed to start stream");
-      }
-
-      if (!resp.body) throw new Error("No response body");
-
-      const reader = resp.body.getReader();
-      const decoder = new TextDecoder();
-      let textBuffer = "";
-      let accumulated = "";
-      let streamDone = false;
-
-      while (!streamDone) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        textBuffer += decoder.decode(value, { stream: true });
-
-        let newlineIndex: number;
-        while ((newlineIndex = textBuffer.indexOf("\n")) !== -1) {
-          let line = textBuffer.slice(0, newlineIndex);
-          textBuffer = textBuffer.slice(newlineIndex + 1);
-
-          if (line.endsWith("\r")) line = line.slice(0, -1);
-          if (line.startsWith(":") || line.trim() === "") continue;
-          if (!line.startsWith("data: ")) continue;
-
-          const jsonStr = line.slice(6).trim();
-          if (jsonStr === "[DONE]") {
-            streamDone = true;
-            break;
-          }
-
-          try {
-            const parsed = JSON.parse(jsonStr);
-            const content = parsed.choices?.[0]?.delta?.content as string | undefined;
-            if (content) {
-              accumulated += content;
-              setAiSummary(accumulated);
-            }
-          } catch {
-            textBuffer = line + "\n" + textBuffer;
-            break;
-          }
-        }
-      }
-
-      // Final flush
-      if (textBuffer.trim()) {
-        for (let raw of textBuffer.split("\n")) {
-          if (!raw) continue;
-          if (raw.endsWith("\r")) raw = raw.slice(0, -1);
-          if (raw.startsWith(":") || raw.trim() === "") continue;
-          if (!raw.startsWith("data: ")) continue;
-          const jsonStr = raw.slice(6).trim();
-          if (jsonStr === "[DONE]") continue;
-          try {
-            const parsed = JSON.parse(jsonStr);
-            const content = parsed.choices?.[0]?.delta?.content as string | undefined;
-            if (content) {
-              accumulated += content;
-              setAiSummary(accumulated);
-            }
-          } catch { /* ignore */ }
-        }
+      const r = await requestSummary(false);
+      if (r) {
+        setAiSummary(r.text);
+        setAiMeta({ createdAt: r.createdAt, cached: r.cached });
       }
     } catch (e) {
       console.error("AI summary error:", e);
@@ -402,7 +346,7 @@ const Dashboard = () => {
     } finally {
       setIsStreaming(false);
     }
-  }, [visibleLessons, projects, equipment]);
+  }, [visibleLessons.length, requestSummary]);
 
   // Unique professional domains in the data
   const availableDomains = useMemo(() => {
@@ -582,25 +526,34 @@ const Dashboard = () => {
               </span>
               תובנות AI
             </CardTitle>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={generateAISummary}
-              disabled={isStreaming}
-              className="gap-1.5 rounded-xl"
-            >
-              {isStreaming ? (
-                <>
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  מנתח...
-                </>
-              ) : (
-                <>
-                  {aiSummary ? <RefreshCw className="w-3.5 h-3.5" /> : <Brain className="w-3.5 h-3.5" />}
-                  {aiSummary ? "רענן ניתוח" : "צור ניתוח AI"}
-                </>
-              )}
-            </Button>
+            {/* A saved analysis of THIS data is final: asking again would spend
+                tokens on the same answer. It reopens itself once the data changes. */}
+            {aiSummary && aiMeta?.createdAt && !isStreaming ? (
+              <span className="inline-flex items-center gap-1.5 rounded-xl bg-success/10 px-3 py-1.5 text-xs font-medium text-success">
+                <CheckCircle2 className="w-3.5 h-3.5" />
+                הניתוח מעודכן לנתונים
+              </span>
+            ) : (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={generateAISummary}
+                disabled={isStreaming}
+                className="gap-1.5 rounded-xl"
+              >
+                {isStreaming ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    מנתח...
+                  </>
+                ) : (
+                  <>
+                    {aiSummary ? <RefreshCw className="w-3.5 h-3.5" /> : <Brain className="w-3.5 h-3.5" />}
+                    {aiSummary ? "רענן ניתוח" : "צור ניתוח AI"}
+                  </>
+                )}
+              </Button>
+            )}
           </div>
         </CardHeader>
         <CardContent className="p-5">
@@ -610,25 +563,18 @@ const Dashboard = () => {
               <p className="text-sm">לחץ על "צור ניתוח AI" לקבלת סיכום תובנות על כל הלקחים</p>
             </div>
           )}
-          {isStreaming && !aiSummary && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {[0, 1, 2, 3].map((i) => (
-                <div key={i} className="rounded-2xl border border-border/60 p-4 space-y-2">
-                  <div className="h-4 w-1/3 rounded bg-muted animate-pulse" />
-                  <div className="h-3 w-full rounded bg-muted animate-pulse" />
-                  <div className="h-3 w-4/5 rounded bg-muted animate-pulse" />
-                </div>
-              ))}
-            </div>
-          )}
-          {aiSummary && (
+          {isStreaming && <AIThinking lessonCount={visibleLessons.length} />}
+          {aiSummary && !isStreaming && (
             <div className="space-y-3">
               <AISummaryView text={aiSummary} streaming={isStreaming} />
-              {!isStreaming && (
-                <div className="flex justify-end">
-                  <AIFeedbackDialog contextType="dashboard" />
-                </div>
-              )}
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-xs text-muted-foreground">
+                  {aiMeta?.createdAt
+                    ? <>נוצר ב-<span dir="ltr">{ilDateTime(aiMeta.createdAt)}</span> · נשמר ויתעדכן רק כשהנתונים ישתנו</>
+                    : "הניתוח לא נשמר כי לא הושלם — אפשר לנסות שוב"}
+                </p>
+                <AIFeedbackDialog contextType="dashboard" />
+              </div>
             </div>
           )}
         </CardContent>

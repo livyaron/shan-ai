@@ -17,6 +17,7 @@ Pure builders (`build_*`) are tested without a model or a database.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import re
@@ -161,8 +162,27 @@ SUMMARY_FORMAT = """
 ציון ביטחון: X% (0-100)"""
 
 
+_CONFIDENCE = re.compile(r"ציון\s*ביטחון\s*[:：]?\s*\**\s*\d{1,3}\s*%")
+
+
+def summary_complete(answer: str) -> bool:
+    """The reply reached its closing confidence line — only such a reply is cached."""
+    return bool(_CONFIDENCE.search(answer or ""))
+
+
+def prompt_key(system: str, user: str) -> str:
+    """Cache key of a summary: the exact prompt. Same data + prefs = same key."""
+    return hashlib.sha256(f"{system}\0{user}".encode()).hexdigest()
+
+
+def _by_name(items: Any) -> list:
+    # Projects come from `select *` with no ORDER BY: heap order moves after an
+    # update, and a reordered list must not read as new data to the cache.
+    return sorted(_list(items), key=lambda p: _str(p.get("name")) if isinstance(p, dict) else "")
+
+
 def _project_line(p: dict) -> str:
-    return f"- {p.get('name')} (שלב: {p.get('stage')}, סוג: {p.get('type')}, ציוד: {', '.join(_list(p.get('equipment')))})"
+    return f"- {p.get('name')} (שלב: {p.get('stage')}, סוג: {p.get('type')}, ציוד: {', '.join(sorted(map(str, _list(p.get('equipment')))))})"
 
 
 def build_summarize(body: dict, prefs: list[dict], insights: list[dict]) -> tuple[str, str]:
@@ -179,14 +199,14 @@ def build_summarize(body: dict, prefs: list[dict], insights: list[dict]) -> tupl
                   f"היה ביקורתי, מקצועי וישיר. כל המלצה חייבת להיות ניתנת לביצוע.{extra}{SUMMARY_FORMAT}")
     lessons = [f'- "{l.get("title")}" (פרויקט: {l.get("project")}, שלב: {l.get("stage")}, קטגוריה: {l.get("category")}, סיכון: {l.get("risk")}, סטטוס: {l.get("status")})'
                for l in _list(body.get("lessons"))]
-    projects = [_project_line(p) for p in _list(body.get("projects"))]
+    projects = [_project_line(p) for p in _by_name(body.get("projects"))]
     lessons_text = clip_lines(lessons, SUMMARY_CONTEXT_CHARS * 2 // 3)
     projects_text = clip_lines(projects, SUMMARY_CONTEXT_CHARS // 4)
     if is_admin:
         user = (f"להלן רשימת כל הלקחים במערכת:\n{lessons_text}\n\nכל הפרויקטים הפעילים:\n{projects_text}\n\n"
                 "אנא ספק סיכום תובנות כללי על כל הפרויקטים.")
     else:
-        mine = _list(body.get("userProjects"))
+        mine = _by_name(body.get("userProjects"))
         user = (f"להלן רשימת כל הלקחים במערכת (לצורך השוואה והפקת תובנות חוצות-פרויקטים):\n{lessons_text}\n\n"
                 f"הפרויקטים שאני ({body.get('userName')}) מנהל:\n{clip_lines([_project_line(p) for p in mine], SUMMARY_CONTEXT_CHARS // 8)}\n\n"
                 f"כל הפרויקטים הפעילים (לרקע):\n{projects_text}\n\n"

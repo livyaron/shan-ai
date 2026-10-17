@@ -5,6 +5,7 @@ import {
   WF_IN_REFERENT,
   WF_REJECTED,
   aiDistributionTargets,
+  awaitsAdminApproval,
   canAdminFinalize,
   canCreatorComplete,
   canReferentDecide,
@@ -80,6 +81,12 @@ describe("my tasks", () => {
 
   it("admin: approve the new one, finalize the handled one", () => {
     expect(kinds(admin)).toEqual(["approve_new:1:", "admin_final:2:"]);
+  });
+
+  it("the dashboard's 'waiting for approval' card counts exactly the admin's approval tasks", () => {
+    const fromTasks = [...new Set(pendingTasks(admin, lessons, reviews, impls)
+      .filter((t) => t.kind === "approve_new" || t.kind === "admin_final").map((t) => t.lessonId))];
+    expect(lessons.filter(awaitsAdminApproval).map((l) => l.id)).toEqual(fromTasks);
   });
 
   it("referent: decide in the referent step, feedback on a distributed lesson — never both for one row", () => {

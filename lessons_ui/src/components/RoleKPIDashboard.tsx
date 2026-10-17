@@ -14,6 +14,7 @@ import {
 import type { Lesson, Project, LessonImplementation, ReferentReview, MockUser } from "@/context/UserContext";
 import { buildLessonDrilldownPath } from "@/lib/drilldown";
 import { ACTIVE_WORKFLOW_STATUSES } from "@/lib/constants";
+import { awaitsAdminApproval } from "@/lib/lessonActions";
 
 interface Props {
   currentUser: MockUser;
@@ -161,7 +162,7 @@ const RoleKPIDashboard = ({ currentUser, lessons, projects, implementations, ref
     if (currentUser.role !== "admin") return null;
 
     const inTreatmentIds = lessons.filter((l) => ACTIVE_WORKFLOW_STATUSES.includes(l.workflowStatus)).map((l) => l.id);
-    const pendingApprovalIds = lessons.filter((l) => l.workflowStatus === "ממתין לאישור מנהל מערכת").map((l) => l.id);
+    const pendingApprovalIds = lessons.filter(awaitsAdminApproval).map((l) => l.id);
     const overdueIds = lessons.filter((l) => {
       if (!l.referentStartDate) return false;
       if (["אושר והופץ", "נדחה"].includes(l.workflowStatus)) return false;

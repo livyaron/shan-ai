@@ -1327,3 +1327,55 @@ def test_linked_project_fields_are_locked_for_postgrest_only():
         assert f"NEW.{col}" not in fn            # the module's own fields stay editable
     assert "SECURITY DEFINER" not in fn          # current_user must stay the caller
     assert any("projects_lock_master_fields BEFORE UPDATE ON lessons.projects" in s for s in ls.SCHEMA_STATEMENTS)
+
+
+# ------------------------------------------------------------------ summary cache (2026-10-17)
+
+def test_summary_cache_is_server_only():
+    sql = "\n".join(ls.SCHEMA_STATEMENTS)
+    assert "CREATE TABLE IF NOT EXISTS lessons.ai_summary_cache (" in sql
+    assert "ai_summary_cache" not in ls.TABLES and "ai_summary_cache" not in la.EXPOSED_TABLES
+    assert f"REVOKE ALL ON lessons.ai_summary_cache FROM {ls.ANON_ROLE}" in ls.ROLE_STATEMENTS
+
+
+def test_summary_key_ignores_project_order_and_only_complete_replies_count():
+    base = {"role": "admin", "lessons": [{"title": "t", "project": "p"}],
+            "projects": [{"name": "ב", "equipment": ["y", "x"]}, {"name": "א", "equipment": []}]}
+    flipped = {**base, "projects": [{"name": "א", "equipment": []}, {"name": "ב", "equipment": ["x", "y"]}]}
+    assert ai.prompt_key(*ai.build_summarize(base, [], [])) == ai.prompt_key(*ai.build_summarize(flipped, [], []))
+    changed = {**base, "lessons": [{"title": "t2", "project": "p"}]}
+    assert ai.prompt_key(*ai.build_summarize(base, [], [])) != ai.prompt_key(*ai.build_summarize(changed, [], []))
+    assert ai.summary_complete("...\nציון ביטחון: 78%") and not ai.summary_complete("📈 **מגמות**\n- נקטע")
+
+
+@pytest.mark.asyncio
+async def test_summary_reads_the_cache_before_the_model(as_user, ai_stub, no_db_session, monkeypatch):
+    stored = {}
+
+    async def read(session, key):
+        return stored.get(key)
+
+    async def write(session, key, answer):
+        stored[key] = (answer, "2026-10-17T10:00:00+00:00")
+        return stored[key][1]
+
+    monkeypatch.setattr(gw, "_cached_summary", read)
+    monkeypatch.setattr(gw, "_store_summary", write)
+    as_user(_ident())
+    body = {"role": "admin", "lessons": [{"title": "t"}], "projects": []}
+    async with _client() as c:
+        cold = await c.post("/lessons/api/functions/v1/summarize-lessons", json={**body, "cacheOnly": True})
+        assert cold.status_code == 204                       # page open: nothing saved, no model call
+        asked = len([x for x in ai_stub if "json_mode" in x])
+        assert asked == 0
+        monkeypatch.setattr(ai, "ask", _complete_ask)
+        first = await c.post("/lessons/api/functions/v1/summarize-lessons", json=body)
+        assert first.headers["x-summary-cache"] == "miss" and len(stored) == 1
+        again = await c.post("/lessons/api/functions/v1/summarize-lessons", json={**body, "cacheOnly": True})
+        assert again.status_code == 200 and again.headers["x-summary-cache"] == "hit"
+        assert again.headers["x-summary-created"] == "2026-10-17T10:00:00+00:00"
+        assert "ציון ביטחון" in again.text
+
+
+async def _complete_ask(system, user, *, json_mode, max_tokens=1500, reasoning_effort=None):
+    return "📈 **מגמות מפתח**\n- א\nציון ביטחון: 80%"

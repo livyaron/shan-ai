@@ -256,6 +256,44 @@ async def _prefs_and_insights(session: AsyncSession, user_id: str) -> tuple[list
     return prefs, insights
 
 
+def _summary_response(answer: str, created: str | None, *, hit: bool) -> Response:
+    from app.services import lessons_ai as ai
+
+    headers = {"X-Summary-Cache": "hit" if hit else "miss"}
+    if created:
+        headers["X-Summary-Created"] = created
+    return Response(ai.sse_body(answer), media_type="text/event-stream", headers=headers)
+
+
+async def _cached_summary(session: AsyncSession, key: str) -> tuple[str, str] | None:
+    """(answer, created_at ISO) for this exact prompt, or None. Best-effort: a
+    cache that cannot be read is a miss, never an error."""
+    try:
+        async with session.begin_nested():
+            row = (await session.execute(text(
+                "SELECT answer, created_at FROM lessons.ai_summary_cache WHERE prompt_hash = :k"
+            ), {"k": key})).first()
+    except Exception as e:  # noqa: BLE001
+        logger.warning("lessons summary cache read failed: %s", type(e).__name__)
+        return None
+    return (row[0], row[1].isoformat()) if row else None
+
+
+async def _store_summary(session: AsyncSession, key: str, answer: str) -> str | None:
+    """Keep a complete answer for its prompt; returns its timestamp. Best-effort."""
+    try:
+        async with session.begin_nested():
+            created = (await session.execute(text(
+                "INSERT INTO lessons.ai_summary_cache (prompt_hash, answer) VALUES (:k, :a) "
+                "ON CONFLICT (prompt_hash) DO UPDATE SET answer = EXCLUDED.answer, created_at = now() "
+                "RETURNING created_at"), {"k": key, "a": answer})).scalar_one()
+        await session.commit()
+        return created.isoformat()
+    except Exception as e:  # noqa: BLE001
+        logger.warning("lessons summary cache write failed: %s", type(e).__name__)
+        return None
+
+
 @router.api_route("/functions/v1/{name:path}", methods=["GET", "POST"])
 async def ai_functions(name: str, request: Request, identity: la.Identity = Depends(current_identity),
                        session: AsyncSession = Depends(get_db_session)):
@@ -265,24 +303,35 @@ async def ai_functions(name: str, request: Request, identity: la.Identity = Depe
         return _json({"error": "Not found"}, 404)
     if request.method != "POST":
         return _json({"error": "Use POST"}, 405)
-    hits = _ai_hits[identity.shan_user_id]
-    now = time.monotonic()
-    while hits and now - hits[0] > 60:
-        hits.popleft()
-    if len(hits) >= AI_PER_MINUTE:
-        return _json({"error": "חריגה ממגבלת בקשות AI, נסה שוב בעוד דקה"}, 429)
-    hits.append(now)
     body, err = la.parse_json_body(await request.body())
     if err or not isinstance(body, dict):
         return _json({"error": "Expected a JSON object"}, 400)
+    # Opening the dashboard only reads the saved summary — it never reaches the
+    # model, so it is not counted against the per-minute limit.
+    cache_only = name == "summarize-lessons" and body.get("cacheOnly") is True
+    if not cache_only:
+        hits = _ai_hits[identity.shan_user_id]
+        now = time.monotonic()
+        while hits and now - hits[0] > 60:
+            hits.popleft()
+        if len(hits) >= AI_PER_MINUTE:
+            return _json({"error": "חריגה ממגבלת בקשות AI, נסה שוב בעוד דקה"}, 429)
+        hits.append(now)
 
     try:
         if name == "summarize-lessons":
             prefs, insights = await _prefs_and_insights(session, _acting_id(body, ("userId",), identity))
             system, user = ai.build_summarize(body, prefs, insights)
+            key = ai.prompt_key(system, user)
+            cached = await _cached_summary(session, key)
+            if cached:
+                return _summary_response(*cached, hit=True)
+            if cache_only:
+                return Response(status_code=204)
             answer = await ai.ask(system, user, json_mode=False, max_tokens=ai.SUMMARY_MAX_TOKENS,
                                   reasoning_effort="low")
-            return Response(ai.sse_body(answer), media_type="text/event-stream")
+            created = await _store_summary(session, key, answer) if ai.summary_complete(answer) else None
+            return _summary_response(answer, created, hit=False)
 
         if name == "review-lesson":
             built = ai.build_review(body)

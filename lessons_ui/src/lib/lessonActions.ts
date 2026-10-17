@@ -126,6 +126,13 @@ export const canAdminFinalize = (lesson: LessonLike, user: UserLike): boolean =>
 export const canCreatorComplete = (lesson: LessonLike, user: UserLike): boolean =>
   lesson.workflowStatus === WF_AWAITING_CREATOR && lesson.createdBy === user.id;
 
+/** A lesson waiting for the admin's approval: a new one (approve_new) or one the
+ *  referent finished (admin_final). The dashboard card, its banner and the KPI tab
+ *  count this — the same lessons pendingTasks gives the admin, so the card and the
+ *  sidebar badge can never disagree again (user report 2026-10-17: 0 vs 2). */
+export const awaitsAdminApproval = (l: Pick<LessonLike, "status" | "workflowStatus">): boolean =>
+  l.status === "new" || l.workflowStatus === WF_AWAITING_ADMIN;
+
 /** Everything waiting for this user, one entry per thing to do. */
 export const pendingTasks = (
   user: UserLike,
