@@ -16,7 +16,6 @@ would otherwise answer these paths with a 404.
 from __future__ import annotations
 
 import html
-import re
 from typing import Any
 
 from fastapi import APIRouter, Depends, Form, Request
@@ -26,6 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db_session
 from app.routers.lessons_gateway import _shan_admin, login_redirect
+from app.services import lessons_access as la
 
 # Historical role accounts — history only, never a login.
 from app.services.lessons_import import NO_LOGIN_NAMES
@@ -204,16 +204,14 @@ async def group_login(request: Request, profile_id: str = Form(...), action: str
 
 links_router = APIRouter(prefix="/lessons/api/_links", tags=["lessons"])
 
-_LAZY_VIEWER = re.compile(r"^s\d+$")
-
-
 def is_linkable(profile: dict[str, Any]) -> bool:
     """An existing module entity a Shan-AI user can take over.
 
-    Not a lazy `s<id>` viewer row (that row IS a Shan-AI user, created on first
-    visit) and not a historical name kept only for the record.
+    Not a local `s<id>` row (that row IS a Shan-AI user — a lazy viewer, or one
+    an admin set up in ניהול משתמשים) and not a historical name kept only for
+    the record.
     """
-    if _LAZY_VIEWER.match(str(profile.get("id") or "")) and profile.get("role") == "viewer":
+    if la.is_local(profile):
         return False
     return str(profile.get("name") or "").strip() not in NO_LOGIN_NAMES
 
@@ -308,3 +306,189 @@ async def links_set(request: Request, session: AsyncSession = Depends(get_db_ses
         {"u": shan_user_id, "p": profile_id})
     await session.commit()
     return JSONResponse(await _links_payload(session))
+
+
+def migration_left(profiles: list[dict[str, Any]]) -> int:
+    """People from the old system nobody has linked yet. Referent groups are
+    roles, not people (their login account is optional), so they never hold
+    the migration open. 0 = the move from Lovable is done."""
+    return sum(1 for p in profiles
+               if is_linkable(p) and p.get("role") != "referent" and p.get("shan_user_id") is None)
+
+
+@links_router.get("/status")
+async def links_status(request: Request, session: AsyncSession = Depends(get_db_session)) -> Response:
+    if await _shan_admin(request, session) is None:
+        return JSONResponse({"message": "Shan-AI admin only"}, status_code=403)
+    rows = [dict(r) for r in (await session.execute(text(
+        "SELECT id, name, role, shan_user_id FROM lessons.profiles"))).mappings().all()]
+    left = migration_left(rows)
+    return JSONResponse({"left": left, "done": left == 0}, headers={"Cache-Control": "no-store"})
+
+
+# ------------------------------------------------------------------ people (ניהול משתמשים)
+# Every Shan-AI user, with what the lessons module knows about them — also
+# people the old system never had (a new PM): an admin sets them up BEFORE
+# their first visit, so nobody's first look at the module is an empty viewer.
+# People are created in Shan-AI only; this page only sets module fields.
+
+people_router = APIRouter(prefix="/lessons/api/_people", tags=["lessons"])
+
+PERSON_ROLES: frozenset[str] = frozenset({"admin", "project_manager", "viewer"})
+
+
+def person_problems(profile: dict[str, Any] | None, groups: list[str]) -> list[str]:
+    """Why a person is not set up yet (owner decision 2026-10-17). Pure.
+
+    `unset`: never set up — no module row, or still the automatic viewer
+    (an admin's explicit "צפייה בלבד" is set up; so is a referent-group member,
+    who acts through the group). `pm_no_projects`: a PM who sees nothing.
+    """
+    if profile is None:
+        return [] if groups else ["unset"]
+    role = profile.get("role")
+    if (la.is_local(profile) and role == "viewer" and profile.get("defined_at") is None
+            and not groups):
+        return ["unset"]
+    if role == "project_manager" and not (profile.get("assigned_projects") or []):
+        return ["pm_no_projects"]
+    return []
+
+
+def group_problems(group: dict[str, Any], member_count: int) -> list[str]:
+    """A referent group a lesson can reach but nobody can answer for. Pure."""
+    out = []
+    if member_count == 0 and group.get("shan_user_id") is None:
+        out.append("no_members")
+    if not (group.get("assigned_stage_indexes") or []):
+        out.append("no_stages")
+    return out
+
+
+_PROFILE_COLS = ("id, name, email, role, assigned_projects, assigned_stage_indexes, "
+                 "shan_user_id, is_login, defined_at")
+
+
+async def _people_payload(session: AsyncSession) -> dict[str, Any]:
+    profiles = [dict(r) for r in (await session.execute(text(
+        f"SELECT {_PROFILE_COLS} FROM lessons.profiles ORDER BY name"))).mappings().all()]
+    members: dict[str, list[int]] = {}
+    for pid, uid in (await session.execute(text(
+            "SELECT profile_id, shan_user_id FROM lessons.referent_members"))).all():
+        members.setdefault(pid, []).append(uid)
+    users = [dict(r) for r in (await session.execute(text(
+        "SELECT id, username, job_title, email FROM public.users ORDER BY username"))).mappings().all()]
+    names = {u["id"]: (u["username"] or "").strip() for u in users}
+    by_user: dict[int, list[dict[str, Any]]] = {}
+    for p in profiles:
+        if p["shan_user_id"] is not None:
+            by_user.setdefault(p["shan_user_id"], []).append(p)
+    group_rows = [p for p in profiles if p["role"] == "referent"]
+    people = []
+    for u in users:
+        profile = la.pick_profile(by_user.get(u["id"], []))
+        groups = [g["id"] for g in group_rows if u["id"] in members.get(g["id"], [])]
+        people.append({
+            "id": u["id"], "username": (u["username"] or "").strip(), "job_title": u["job_title"],
+            "email": u["email"] or "",
+            "profile": None if profile is None else {
+                "id": profile["id"], "name": profile["name"], "role": profile["role"],
+                "assigned_projects": list(profile["assigned_projects"] or []),
+                "source": "local" if la.is_local(profile) else "imported",
+            },
+            "groups": groups,
+            "problems": person_problems(profile, groups),
+        })
+    return {
+        "people": people,
+        "groups": [{
+            "id": g["id"], "name": g["name"],
+            "assigned_stage_indexes": list(g["assigned_stage_indexes"] or []),
+            "members": [{"id": uid, "username": names.get(uid, str(uid))} for uid in members.get(g["id"], [])],
+            "login_username": names.get(g["shan_user_id"]) if g["shan_user_id"] else None,
+            "problems": group_problems(g, len(members.get(g["id"], []))),
+        } for g in group_rows],
+        "migration_left": migration_left(profiles),
+    }
+
+
+@people_router.get("")
+async def people_list(request: Request, session: AsyncSession = Depends(get_db_session)) -> Response:
+    if await _shan_admin(request, session) is None:
+        return JSONResponse({"message": "Shan-AI admin only"}, status_code=403)
+    return JSONResponse(await _people_payload(session), headers={"Cache-Control": "no-store"})
+
+
+@people_router.post("")
+async def people_set(request: Request, session: AsyncSession = Depends(get_db_session)) -> Response:
+    """Body: {"shan_user_id": 12, "role": "project_manager", "assigned_projects": [3, 7],
+    "groups": ["u17…"]}. Creates the person's local `s<id>` row when they have
+    none yet (first visit not needed); edits their effective profile otherwise."""
+    if await _shan_admin(request, session) is None:
+        return JSONResponse({"message": "Shan-AI admin only"}, status_code=403)
+    try:
+        body = await request.json()
+        uid = int(body["shan_user_id"])
+        role = str(body["role"])
+        projects = sorted({int(x) for x in body.get("assigned_projects") or []})
+        group_ids = sorted({str(x) for x in body.get("groups") or []})
+    except (ValueError, TypeError, KeyError):
+        return JSONResponse({"message": "בקשה לא תקינה"}, status_code=400)
+    if role not in PERSON_ROLES:
+        return JSONResponse({"message": "תפקיד לא תקין"}, status_code=400)
+    user = (await session.execute(text(
+        "SELECT id, username, email FROM public.users WHERE id = :u"), {"u": uid})).mappings().first()
+    if user is None:
+        return JSONResponse({"message": "משתמש Shan-AI לא קיים"}, status_code=404)
+    rows = [dict(r) for r in (await session.execute(text(
+        f"SELECT {_PROFILE_COLS} FROM lessons.profiles WHERE shan_user_id = :u"), {"u": uid})).mappings().all()]
+    profile = la.pick_profile(rows)
+    if profile is not None and profile["role"] == "referent":
+        # A group's own login account: the group is set up, not the account.
+        return JSONResponse({"message": "זה חשבון כניסה של קבוצת רפרנט — מגדירים את הקבוצה עצמה"}, status_code=409)
+    all_projects = [r[0] for r in (await session.execute(text(
+        "SELECT id FROM lessons.projects ORDER BY id"))).all()]
+    if set(projects) - set(all_projects):
+        return JSONResponse({"message": "פרויקט לא קיים"}, status_code=400)
+    known_groups = {r[0] for r in (await session.execute(text(
+        "SELECT id FROM lessons.profiles WHERE role = 'referent'"))).all()}
+    if set(group_ids) - known_groups:
+        return JSONResponse({"message": "קבוצת רפרנט לא קיימת"}, status_code=400)
+    # The edit dialog's rule: an admin holds every project, a viewer none.
+    projects = all_projects if role == "admin" else projects if role == "project_manager" else []
+    if profile is None:
+        row = la.viewer_profile_row(uid, user["username"], user["email"])
+        await session.execute(text(
+            "INSERT INTO lessons.profiles (id, name, email, role, shan_user_id) "
+            "VALUES (:id, :name, :email, :role, :shan_user_id) ON CONFLICT (id) DO NOTHING"), row)
+        # ON CONFLICT: an `s<id>` row unlinked earlier is this user's own row.
+        await session.execute(text(
+            "UPDATE lessons.profiles SET shan_user_id = :u, is_login = true WHERE id = :id"),
+            {"u": uid, "id": row["id"]})
+        profile_id = row["id"]
+    else:
+        profile_id = profile["id"]
+    await session.execute(text(
+        "UPDATE lessons.profiles SET role = :r, assigned_projects = :ap, defined_at = now() WHERE id = :id"),
+        {"r": role, "ap": projects, "id": profile_id})
+    before = set((profile["assigned_projects"] or []) if profile else [])
+    added = sorted(set(projects) - before)
+    if role == "project_manager" and added:
+        # The edit dialog's rule (UserContext.updateUser): a project has ONE
+        # manager — taking it moves manager_id and drops it from the others.
+        await session.execute(text(
+            "UPDATE lessons.projects SET manager_id = :id WHERE id = ANY(:a)"), {"id": profile_id, "a": added})
+        await session.execute(text(
+            "UPDATE lessons.profiles SET assigned_projects = "
+            "ARRAY(SELECT x FROM unnest(assigned_projects) AS x WHERE NOT (x = ANY(:a))) "
+            "WHERE role = 'project_manager' AND id <> :id AND assigned_projects && CAST(:a AS integer[])"),
+            {"id": profile_id, "a": added})
+    await session.execute(text(
+        "DELETE FROM lessons.referent_members WHERE shan_user_id = :u AND NOT (profile_id = ANY(:g))"),
+        {"u": uid, "g": group_ids})
+    for g in group_ids:
+        await session.execute(text(
+            "INSERT INTO lessons.referent_members (profile_id, shan_user_id) VALUES (:p, :u) "
+            "ON CONFLICT DO NOTHING"), {"p": g, "u": uid})
+    await session.commit()
+    return JSONResponse(await _people_payload(session))

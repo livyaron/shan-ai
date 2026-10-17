@@ -139,6 +139,30 @@ projects and history. Picked from the Shan-AI users list only, never matched by 
 user may hold one login profile (409 otherwise). Lazy `s<id>` viewer rows and the historical
 names (`NO_LOGIN_NAMES`) are not link targets. Users are created only in Shan-AI — the tab no
 longer adds or deletes people; ✏️ still sets module role / projects / stages. Shan-AI admin only.
+Someone the old system never had is set up in ניהול משתמשים (below), not here.
+
+## People — ניהול מערכת → ניהול משתמשים (`/lessons/api/_people`, 2026-10-17)
+
+The module admin's default tab. EVERY Shan-AI user, with their module role, projects and
+referent groups — also people the old system never had (a new PM: nothing to link them to).
+An admin sets them up **before** their first visit: saving creates the user's own local row
+`s<user_id>` (the same row a first visit would create lazily) or edits their effective profile.
+
+- **Not set up** (owner decision 2026-10-17; `person_problems`, pure): `unset` = no module row,
+  or still the automatic viewer (`s<id>`, role viewer, `defined_at` NULL, in no referent group);
+  `pm_no_projects`. A missing e-mail is NOT flagged (owner's choice). An explicit "צפייה בלבד"
+  saved here stamps `profiles.defined_at` and is set up.
+- **Referent groups** (`group_problems`): `no_members` (no member and no login account),
+  `no_stages`. Members are edited per person here or on `_groups`; stages via ✏️.
+- Projects follow the edit dialog's rule: one manager per project — taking one moves
+  `projects.manager_id` and drops it from the other PMs. Admin = every project, viewer = none.
+- A local `s<id>` row is never a link target, even with a role (`la.is_local`); a linked
+  old-system profile beats it in `pick_profile` (linking = inheriting the old profile).
+- Re-import keeps local rows with their role, projects, stages, preferences and `defined_at`.
+- **The links tab is a migration tool.** `GET /lessons/api/_links/status` → `{left, done}`:
+  people from the old system still unlinked (referent groups and `NO_LOGIN_NAMES` don't count).
+  At 0 the tab says "ההעברה הסתיימה ✓" and moves to the end of the menu — it never disappears
+  (owner decision 2026-10-17).
 
 ## Top bar — `/lessons/api/_navbar`
 

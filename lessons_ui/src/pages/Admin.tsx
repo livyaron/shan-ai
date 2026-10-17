@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
+import { SUPABASE_URL } from "@/integrations/supabase/client";
 
-import { Users, FolderKanban, Pencil, Trash2, Wrench, BookOpen, Plus, Brain, Loader2, Tag, MessageSquare, CheckCircle, History, Settings, Lightbulb, Newspaper } from "lucide-react";
+import { UserCog, Link2, FolderKanban, Pencil, Trash2, Wrench, BookOpen, Plus, Brain, Loader2, Tag, MessageSquare, CheckCircle, History, Settings, Lightbulb, Newspaper } from "lucide-react";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -23,6 +24,7 @@ import AdminAIInsightsTab from "@/components/AdminAIInsightsTab";
 import AdminLessonQualityTab from "@/components/AdminLessonQualityTab";
 import NewsletterPanel from "@/components/admin/NewsletterPanel";
 import UserLinksPanel from "@/components/admin/UserLinksPanel";
+import PeoplePanel from "@/components/admin/PeoplePanel";
 import SiteCombobox from "@/components/SiteCombobox";
 import SearchableSelect from "@/components/ui/searchable-select";
 
@@ -37,9 +39,18 @@ const Admin = () => {
   const [searchParams] = useSearchParams();
   const feedbackIdFromQuery = Number(searchParams.get("feedbackId"));
   const highlightedFeedbackId = Number.isInteger(feedbackIdFromQuery) ? feedbackIdFromQuery : null;
-  const requestedTab = searchParams.get("tab") === "feedback" || highlightedFeedbackId ? "feedback" : "users";
+  const requestedTab = searchParams.get("tab") === "feedback" || highlightedFeedbackId ? "feedback" : searchParams.get("tab") === "users" ? "users" : "people";
   const { currentUser, projects, equipment, addEquipment, updateEquipment, removeEquipment, renameCategory, deleteCategory, lessons, users, updateUser, addUser, deleteUser, deleteProject, addProject, updateProject, updateProjectEquipment, lessonCategories, addLessonCategory, renameLessonCategory, deleteLessonCategory, feedbacks, updateFeedbackStatus, deleteFeedback } = useUser();
   const [activeTab, setActiveTab] = useState(requestedTab);
+  // The move from the old system: done once no person from it is left unlinked.
+  // The links tab stays, marked, at the end of the menu (owner decision 2026-10-17).
+  const [migrationDone, setMigrationDone] = useState(false);
+  useEffect(() => {
+    fetch(`${SUPABASE_URL}/_links/status`, { credentials: "same-origin" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((b) => setMigrationDone(!!b?.done))
+      .catch(() => undefined);
+  }, []);
   const [newEqName, setNewEqName] = useState("");
   const [newEqCategory, setNewEqCategory] = useState("");
   const [newEqProjects, setNewEqProjects] = useState<number[]>([]);
@@ -347,6 +358,13 @@ const Admin = () => {
     }
   };
 
+  const linksTab = (
+    <TabsTrigger value="users" className="gap-1.5 text-xs sm:text-sm">
+      <Link2 className="w-4 h-4" />
+      <span className="hidden sm:inline">קישור משתמשים{migrationDone && " · ההעברה הסתיימה ✓"}</span>
+    </TabsTrigger>
+  );
+
   return (
     <div className="space-y-6">
       <div>
@@ -356,10 +374,11 @@ const Admin = () => {
 
       <Tabs value={activeTab} onValueChange={setActiveTab} dir="rtl">
         <TabsList className="bg-muted flex flex-wrap h-auto gap-1 p-1">
-          <TabsTrigger value="users" className="gap-1.5 text-xs sm:text-sm">
-            <Users className="w-4 h-4" />
-            <span className="hidden sm:inline">קישור משתמשים</span>
+          <TabsTrigger value="people" className="gap-1.5 text-xs sm:text-sm">
+            <UserCog className="w-4 h-4" />
+            <span className="hidden sm:inline">ניהול משתמשים</span>
           </TabsTrigger>
+          {!migrationDone && linksTab}
           <TabsTrigger value="projects" className="gap-1.5 text-xs sm:text-sm">
             <FolderKanban className="w-4 h-4" />
             <span className="hidden sm:inline">פרויקטים</span>
@@ -411,10 +430,15 @@ const Admin = () => {
               </TabsTrigger>
             </>
           )}
+          {migrationDone && linksTab}
         </TabsList>
 
+        <TabsContent value="people" className="mt-6">
+          <PeoplePanel users={users} projects={projects} onEditGroup={openEditUser} />
+        </TabsContent>
+
         <TabsContent value="users" className="mt-6">
-          <UserLinksPanel users={users} projects={projects} onEdit={openEditUser} />
+          <UserLinksPanel users={users} projects={projects} onEdit={openEditUser} migrationDone={migrationDone} />
         </TabsContent>
 
         <TabsContent value="projects" className="mt-6">

@@ -275,6 +275,9 @@ SCHEMA_STATEMENTS: tuple[str, ...] = (
     "ALTER TABLE lessons.profiles ADD COLUMN IF NOT EXISTS shan_user_id integer REFERENCES public.users(id) ON DELETE SET NULL",
     "ALTER TABLE lessons.profiles ADD COLUMN IF NOT EXISTS is_login boolean NOT NULL DEFAULT true",
     "ALTER TABLE lessons.profiles DROP COLUMN IF EXISTS password",
+    # When an admin last set this person up in ניהול משתמשים. NULL on a lazy
+    # `s<id>` viewer = nobody decided yet (an explicit "צפייה בלבד" is not).
+    "ALTER TABLE lessons.profiles ADD COLUMN IF NOT EXISTS defined_at timestamptz",
     "ALTER TABLE lessons.projects ADD COLUMN IF NOT EXISTS shan_project_identifier varchar(100)",
     # Sequences must be OWNED BY their column, or pg_get_serial_sequence returns
     # NULL and the import's setval silently does nothing (found in testing).
