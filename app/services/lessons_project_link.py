@@ -174,6 +174,28 @@ def manager_profile_for(manager: str | None, alias_users: dict[str, int | None],
     return str(prof["id"]), None
 
 
+MANAGER_PROBLEMS = ("alias_unlinked", "no_profile", "not_pm")
+
+
+def manager_check(file_manager: str | None, resolved: str | None, problem: str | None,
+                  current_id: str | None, kept: str | None) -> str:
+    """Does a linked project's lessons manager agree with the file? Pure.
+
+    `match` · `differs` (the file's name resolves to another profile) ·
+    `unresolved` (the file's name is not a confirmed user with a PM profile) ·
+    `kept` (an admin chose to keep the lessons manager against THIS file name —
+    asked again once the file names someone else) · `no_name` (empty cell).
+    """
+    name = (file_manager or "").strip()
+    if not name:
+        return "no_name"
+    if resolved is not None and resolved == current_id:
+        return "match"
+    if kept is not None and kept.strip() == name:
+        return "kept"
+    return "differs" if resolved is not None else "unresolved"
+
+
 def fields_for(master: dict[str, Any], level: str | None, manager_pid: str | None) -> dict[str, Any] | None:
     """The file-owned fields of the lessons project for one master project, or
     None when the stage is unknown (a project is never created on a guessed stage)."""
@@ -260,7 +282,7 @@ async def _masters(session) -> list[dict[str, Any]]:
 async def _lessons_projects(session) -> list[dict[str, Any]]:
     return [dict(r) for r in (await session.execute(text(
         "SELECT p.id, p.name, p.site, p.lessons_count, p.manager_id, m.name AS manager_name, "
-        "p.shan_project_identifier, p.shan_link_decision "
+        "m.shan_user_id AS manager_user_id, p.shan_project_identifier, p.shan_link_decision, p.shan_manager_kept "
         "FROM lessons.projects p LEFT JOIN lessons.profiles m ON m.id = p.manager_id ORDER BY p.name"
     ))).mappings().all()]
 
@@ -301,10 +323,29 @@ async def payload(session) -> dict[str, Any]:
     free = [m for m in masters if m["identifier"] not in linked]
     alias_users, profile_of_user = await _manager_chain(session)
     plan = creation_plan(masters, set(linked), await _levels(session), alias_users, profile_of_user)
+    profile_names = {r[0]: r[1] for r in (await session.execute(text(
+        "SELECT id, name FROM lessons.profiles"))).all()}
+    users = [{"id": r[0], "username": (r[1] or "").strip()} for r in (await session.execute(text(
+        "SELECT id, username FROM public.users ORDER BY username"))).all()]
     rows = []
     for p in projects:
         ident = p["shan_project_identifier"]
+        mcheck = None
+        if ident and ident in by_ident:
+            fm = by_ident[ident].get("manager")
+            pid, problem = manager_profile_for(fm, alias_users, profile_of_user)
+            mcheck = {
+                "status": manager_check(fm, pid, problem, p["manager_id"], p["shan_manager_kept"]),
+                "file_manager": (fm or "").strip() or None,
+                "problem": problem,
+                "file_profile": {"id": pid, "name": profile_names.get(pid)} if pid else None,
+                "current": {"id": p["manager_id"], "name": p["manager_name"]},
+                # The likeliest person behind the file's name: the alias if one is
+                # confirmed, else the lessons manager's own user. A hint only.
+                "suggest_user_id": alias_users.get((fm or "").strip()) or p["manager_user_id"],
+            }
         rows.append({
+            "manager_check": mcheck,
             "id": p["id"], "name": p["name"], "site": p["site"], "lessons_count": p["lessons_count"],
             "manager_name": p["manager_name"], "identifier": ident,
             "linked": by_ident.get(ident) if ident else None,
@@ -326,10 +367,13 @@ async def payload(session) -> dict[str, Any]:
             "to_create": len(plan["create"]),
             "unknown_stage": plan["unknown_stage"],
             "managers_unlinked": plan["managers_unlinked"],
+            "manager_open": sum(1 for r in rows if r["manager_check"]
+                                and r["manager_check"]["status"] in ("differs", "unresolved")),
             "no_manager": plan["no_manager"],
             "type_unknown": plan["type_unknown"],
         },
         "can_create": not open_rows and bool(plan["create"]),
+        "users": users,
     }
 
 
@@ -441,6 +485,103 @@ async def merge(session, admin, source_id: int, target_id: int) -> str | None:
         raise MergeAbort(f"אי-התאמה בספירות אחרי מיזוג (לפני {tuple(before)}, אחרי {tuple(after)})")
     await _log(session, admin, "project_merged", target_id, target["name"],
                f"מוזג לתוכו '{source['name']}' (#{source_id}): {before[0]} לקחים, {before[1]} המלצות יישום")
+    return None
+
+
+async def apply_manager(session, project_id: int, profile_id: str) -> None:
+    """The lessons manager of one project, by the edit dialog's rule
+    (UserContext.updateUser): ONE manager per project — the new one holds it
+    in assigned_projects, every other PM (and the placeholder) loses it."""
+    p = {"p": project_id, "m": profile_id}
+    await session.execute(text(
+        "UPDATE lessons.projects SET manager_id = :m, shan_manager_kept = NULL WHERE id = :p"), p)
+    await session.execute(text(
+        "UPDATE lessons.profiles SET assigned_projects = array_append(assigned_projects, CAST(:p AS integer)) "
+        "WHERE id = :m AND NOT (CAST(:p AS integer) = ANY(assigned_projects))"), p)
+    await session.execute(text(
+        "UPDATE lessons.profiles SET assigned_projects = array_remove(assigned_projects, CAST(:p AS integer)) "
+        "WHERE role = 'project_manager' AND id <> :m AND CAST(:p AS integer) = ANY(assigned_projects)"), p)
+
+
+async def ensure_pm_profile(session, user_id: int) -> tuple[str | None, str | None]:
+    """(lessons profile id, problem) for a Shan-AI user picked as a project's
+    manager: their profile as is when PM/admin; a viewer (or someone never set
+    up) becomes a PM — picking them as the manager says so; a referent group's
+    login account is refused."""
+    from app.services import lessons_access as la
+    user = (await session.execute(text(
+        "SELECT id, username, email FROM public.users WHERE id = :u"), {"u": user_id})).mappings().first()
+    if user is None:
+        return None, "משתמש Shan-AI לא קיים"
+    rows = [dict(r) for r in (await session.execute(text(
+        "SELECT id, role, shan_user_id, is_login FROM lessons.profiles WHERE shan_user_id = :u"),
+        {"u": user_id})).mappings().all()]
+    prof = la.pick_profile(rows)
+    if prof is not None and prof["role"] == "referent":
+        return None, "זה חשבון כניסה של קבוצת רפרנט — לא מנהל פרויקט"
+    if prof is None:
+        row = la.viewer_profile_row(user_id, user["username"], user["email"])
+        await session.execute(text(
+            "INSERT INTO lessons.profiles (id, name, email, role, shan_user_id) "
+            "VALUES (:id, :name, :email, :role, :shan_user_id) ON CONFLICT (id) DO NOTHING"), row)
+        await session.execute(text(
+            "UPDATE lessons.profiles SET shan_user_id = :u, is_login = true WHERE id = :id"),
+            {"u": user_id, "id": row["id"]})
+        prof = {"id": row["id"], "role": "viewer"}
+    if prof["role"] not in ("project_manager", "admin"):
+        await session.execute(text(
+            "UPDATE lessons.profiles SET role = 'project_manager', defined_at = now() WHERE id = :id"),
+            {"id": prof["id"]})
+    return str(prof["id"]), None
+
+
+async def set_manager(session, admin, project_id: int, mode: str, user_id: int | None = None) -> str | None:
+    """The admin's answer to a linked project's manager check.
+
+    `file`: apply the profile the file's name resolves to. `user`: the file's
+    name IS this Shan-AI user — confirm that in manager_aliases (the same link
+    the patterns page uses, keyed on the name exactly as the file spells it),
+    make sure they are a PM in the module, apply. `keep`: keep the lessons
+    manager against this file name (asked again if the file names someone else).
+    """
+    row = (await session.execute(text(
+        "SELECT p.id, p.name, p.manager_id, p.shan_project_identifier, m.manager AS file_manager "
+        "FROM lessons.projects p JOIN public.projects m ON m.project_identifier = p.shan_project_identifier "
+        "WHERE p.id = :p AND m.is_active"), {"p": project_id})).mappings().first()
+    if row is None:
+        return "הפרויקט לא מקושר לפרויקט פעיל בקובץ"
+    raw = row["file_manager"] or ""
+    name = raw.strip()
+    if mode == "keep":
+        if not name:
+            return "אין מנה״פ בקובץ"
+        await session.execute(text(
+            "UPDATE lessons.projects SET shan_manager_kept = :n WHERE id = :p"), {"n": name, "p": project_id})
+        await _log(session, admin, "project_manager_kept", project_id, row["name"],
+                   f"מנה״פ בלקחים נשאר, למרות שבקובץ: {name}")
+        return None
+    if mode == "file":
+        alias_users, profile_of_user = await _manager_chain(session)
+        pid, problem = manager_profile_for(raw, alias_users, profile_of_user)
+        if pid is None:
+            return "השם בקובץ עדיין לא מקושר למנהל פרויקט — בחר משתמש"
+    elif mode == "user":
+        if user_id is None:
+            return "לא נבחר משתמש"
+        pid, problem = await ensure_pm_profile(session, user_id)
+        if pid is None:
+            return problem
+        if name:
+            from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+            from app.models import ManagerAlias
+            await session.execute(pg_insert(ManagerAlias).values(alias=raw, user_id=user_id)
+                                  .on_conflict_do_update(index_elements=["alias"], set_={"user_id": user_id}))
+    else:
+        return "פעולה לא מוכרת"
+    await apply_manager(session, project_id, pid)
+    await _log(session, admin, "project_manager_set", project_id, row["name"],
+               f"מנה״פ הוגדר לפי הקובץ ({name or '—'}) → פרופיל {pid}")
     return None
 
 

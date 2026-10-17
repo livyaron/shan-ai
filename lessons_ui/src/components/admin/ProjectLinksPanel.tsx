@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AlertTriangle, CheckCircle, FolderPlus, GitMerge, Link2, Link2Off, Loader2, MapPin, Star } from "lucide-react";
+import { AlertTriangle, CheckCircle, FolderPlus, GitMerge, Link2, Link2Off, Loader2, MapPin, Star, UserCheck } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -15,6 +15,7 @@ import {
   filterLinkRows,
   freeMasters,
   MANAGER_PROBLEM_LABELS,
+  managerNeedsAnswer,
   masterLabel,
   rowState,
   type LinkRow,
@@ -41,6 +42,8 @@ const ProjectLinksPanel = () => {
   const [mergeTarget, setMergeTarget] = useState("");
   const [confirmMerge, setConfirmMerge] = useState(false);
   const [confirmCreate, setConfirmCreate] = useState(false);
+  const [mgrRow, setMgrRow] = useState<number | null>(null);
+  const [mgrUser, setMgrUser] = useState("");
 
   const load = useCallback(async () => {
     try {
@@ -61,7 +64,7 @@ const ProjectLinksPanel = () => {
     load();
   }, [load]);
 
-  const act = async (key: string, body: Record<string, unknown>, done: string, reload = false) => {
+  const act = async (key: string, body: Record<string, unknown>, done: string, reload = false): Promise<LinksPayload | null> => {
     setBusy(key);
     try {
       const r = await fetch(`${SUPABASE_URL}/_project_links`, {
@@ -73,19 +76,31 @@ const ProjectLinksPanel = () => {
       const res = await r.json().catch(() => ({}));
       if (!r.ok) {
         toast({ title: res.message || "הפעולה נכשלה", variant: "destructive" });
-        return false;
+        return null;
       }
       setData(res);
       toast({ title: done });
       // Merge deletes a project and create adds many: the module's own lists must reload.
       if (reload) window.setTimeout(() => window.location.reload(), 800);
-      return true;
+      return res as LinksPayload;
     } catch {
       toast({ title: "הפעולה נכשלה", variant: "destructive" });
-      return false;
+      return null;
     } finally {
       setBusy(null);
     }
+  };
+
+  const openManager = (row: LinkRow) => {
+    setMgrRow(row.id);
+    setMgrUser(row.manager_check?.suggest_user_id ? String(row.manager_check.suggest_user_id) : "");
+  };
+
+  /** Link, then ask about the manager at once when the file and the module disagree. */
+  const linkTo = async (r: LinkRow, identifier: string) => {
+    const res = await act(`l${r.id}`, { action: "link", project_id: r.id, identifier }, `${r.name} קושר ✓`);
+    const fresh = res?.projects.find((p) => p.id === r.id);
+    if (fresh && managerNeedsAnswer(fresh)) openManager(fresh);
   };
 
   const visible = useMemo(() => (data ? filterLinkRows(data.projects, query, onlyOpen) : []), [data, query, onlyOpen]);
@@ -132,6 +147,12 @@ const ProjectLinksPanel = () => {
               </Badge>
             )}
           </CardTitle>
+          {s.manager_open > 0 && (
+            <div className="text-xs text-warning flex items-center gap-1">
+              <AlertTriangle className="w-3 h-3" />
+              {s.manager_open} פרויקטים מקושרים שהמנה״פ שלהם לא תואם לקובץ — לחץ "בדוק" בכרטיס.
+            </div>
+          )}
           <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-center">
             {[
               ["פרויקטים בלקחים", s.lessons_total],
@@ -178,6 +199,25 @@ const ProjectLinksPanel = () => {
                       {r.linked ? masterLabel(r.linked) : r.identifier}
                     </Badge>
                   )}
+                  {state === "linked" && r.manager_check && (() => {
+                    const mc = r.manager_check;
+                    if (mc.status === "match") {
+                      return <Badge variant="outline" className="text-success border-success/40 gap-1"><UserCheck className="w-3 h-3" />מנה״פ תואם לקובץ</Badge>;
+                    }
+                    if (mc.status === "kept") {
+                      return <Badge variant="outline" className="text-muted-foreground">מנה״פ נשמר ידנית (בקובץ: {mc.file_manager})</Badge>;
+                    }
+                    if (mc.status === "no_name") {
+                      return <Badge variant="outline" className="text-muted-foreground">אין מנה״פ בקובץ</Badge>;
+                    }
+                    return (
+                      <button type="button" onClick={() => openManager(r)}
+                        className="inline-flex items-center gap-1 rounded-full border border-warning/40 bg-warning/10 px-2 py-0.5 text-xs text-warning hover:bg-warning/20">
+                        <AlertTriangle className="w-3 h-3" />
+                        {mc.status === "differs" ? "מנה״פ שונה מהקובץ — בדוק" : "מנה״פ הקובץ לא מזוהה — בדוק"}
+                      </button>
+                    );
+                  })()}
                   {r.linked_missing && (
                     <Badge variant="outline" className="bg-destructive/10 text-destructive border-destructive/30">
                       הפרויקט לא פעיל יותר בקובץ
@@ -214,7 +254,7 @@ const ProjectLinksPanel = () => {
                         );
                       })}
                       <Button size="sm" className="gap-1" disabled={!choice || busy !== null}
-                        onClick={() => act(`l${r.id}`, { action: "link", project_id: r.id, identifier: choice }, `${r.name} קושר ✓`)}>
+                        onClick={() => linkTo(r, choice)}>
                         <Link2 className="w-3.5 h-3.5" />
                         קשר
                       </Button>
@@ -227,7 +267,7 @@ const ProjectLinksPanel = () => {
                     <>
                       <SearchableSelect
                         value=""
-                        onValueChange={(v) => act(`l${r.id}`, { action: "link", project_id: r.id, identifier: v }, `${r.name} קושר ✓`)}
+                        onValueChange={(v) => linkTo(r, v)}
                         options={options}
                         placeholder="אף הצעה לא נכונה? בחר ידנית מהקובץ…"
                         searchable
@@ -346,6 +386,67 @@ const ProjectLinksPanel = () => {
           )}
         </CardContent>
       </Card>
+
+      {(() => {
+        const r = data.projects.find((p) => p.id === mgrRow);
+        const mc = r?.manager_check;
+        if (!r || !mc) return null;
+        const close = () => setMgrRow(null);
+        const answer = async (mode: "file" | "user" | "keep") => {
+          const body: Record<string, unknown> = { action: "manager", project_id: r.id, mode };
+          if (mode === "user") body.user_id = Number(mgrUser);
+          const ok = await act(`g${r.id}`, body, mode === "keep" ? "המנה״פ נשאר כמו שהוא" : "המנה״פ עודכן ✓");
+          if (ok) close();
+        };
+        return (
+          <Dialog open onOpenChange={(o) => !o && close()}>
+            <DialogContent dir="rtl">
+              <DialogHeader>
+                <DialogTitle>מנה״פ של "{r.name}"</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-3 text-sm">
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="rounded-lg bg-muted/50 p-2">
+                    <div className="text-xs text-muted-foreground">בקובץ המאסטר</div>
+                    <div className="font-medium">{mc.file_manager ?? "—"}</div>
+                  </div>
+                  <div className="rounded-lg bg-muted/50 p-2">
+                    <div className="text-xs text-muted-foreground">כרגע במערכת הלקחים</div>
+                    <div className="font-medium">{mc.current.name?.trim() || mc.current.id}</div>
+                  </div>
+                </div>
+                {mc.status === "differs" && mc.file_profile && (
+                  <Button className="w-full gap-1.5" disabled={busy !== null} onClick={() => answer("file")}>
+                    <UserCheck className="w-4 h-4" />
+                    העבר ל-{mc.file_profile.name?.trim() || mc.file_profile.id} (לפי הקובץ)
+                  </Button>
+                )}
+                <div className="space-y-1.5 rounded-lg border p-3">
+                  <div className="text-xs">
+                    {mc.status === "unresolved"
+                      ? `מי זה "${mc.file_manager}"? ${mc.problem && mc.problem !== "no_name" ? `(${MANAGER_PROBLEM_LABELS[mc.problem]})` : ""}`
+                      : `"${mc.file_manager}" מקושר לאדם הלא נכון? בחר את הנכון:`}
+                  </div>
+                  <SearchableSelect value={mgrUser} onValueChange={setMgrUser} searchable placeholder="בחר משתמש Shan-AI…"
+                    options={data.users.map((u) => ({ value: String(u.id), label: u.username }))} />
+                  <Button variant={mc.status === "unresolved" ? "default" : "outline"} className="w-full" disabled={!mgrUser || busy !== null}
+                    onClick={() => answer("user")}>
+                    זה הוא — קבע כמנה״פ של הפרויקט
+                  </Button>
+                  <p className="text-[11px] text-muted-foreground">
+                    הקישור "{mc.file_manager}" ← המשתמש נשמר גם לדף הדפוסים. משתמש שאינו מנה״פ במערכת הלקחים יוגדר כמנה״פ.
+                  </p>
+                </div>
+              </div>
+              <DialogFooter>
+                <Button variant="ghost" disabled={busy !== null} onClick={() => answer("keep")}>
+                  השאר את {mc.current.name?.trim() || "המנה״פ הנוכחי"}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        );
+      })()}
 
       <Dialog open={confirmMerge} onOpenChange={setConfirmMerge}>
         <DialogContent dir="rtl">

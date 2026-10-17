@@ -516,6 +516,7 @@ async def project_links_act(request: Request, session: AsyncSession = Depends(ge
     """Body: {"action": "link", "project_id": 3, "identifier": "123" | null}
     · {"action": "local", "project_id": 3, "local": true}
     · {"action": "merge", "source_id": 3, "target_id": 7}
+    · {"action": "manager", "project_id": 3, "mode": "file" | "user" | "keep", "user_id": 12}
     · {"action": "create_missing"}. Answers with the fresh payload."""
     from app.services import lessons_project_link as lpl
     admin = await _shan_admin(request, session)
@@ -532,6 +533,10 @@ async def project_links_act(request: Request, session: AsyncSession = Depends(ge
             problem = await lpl.keep_local(session, admin, int(body["project_id"]), bool(body.get("local", True)))
         elif action == "merge":
             problem = await lpl.merge(session, admin, int(body["source_id"]), int(body["target_id"]))
+        elif action == "manager":
+            raw_uid = body.get("user_id")
+            problem = await lpl.set_manager(session, admin, int(body["project_id"]), str(body["mode"]),
+                                            None if raw_uid in (None, "") else int(raw_uid))
         elif action == "create_missing":
             _, problem = await lpl.create_missing(session, admin)
         else:

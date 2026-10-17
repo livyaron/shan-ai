@@ -197,9 +197,9 @@ async def run_import(engine, base: str, key: str, *, write: bool) -> dict[str, A
             "SELECT profile_id, shan_user_id FROM lessons.referent_members"
         ))).all()
         kept_projects = (await conn.execute(text(
-            "SELECT id, shan_project_identifier, shan_active, shan_synced_at, station_type_set, shan_link_decision "
-            "FROM lessons.projects WHERE shan_project_identifier IS NOT NULL OR NOT station_type_set "
-            "OR shan_link_decision IS NOT NULL"
+            "SELECT id, shan_project_identifier, shan_active, shan_synced_at, station_type_set, shan_link_decision, "
+            "shan_manager_kept FROM lessons.projects WHERE shan_project_identifier IS NOT NULL "
+            "OR NOT station_type_set OR shan_link_decision IS NOT NULL"
         ))).mappings().all()
 
         # Triggers off while loading: the source's own lessons_count/stage_index
@@ -262,7 +262,8 @@ async def run_import(engine, base: str, key: str, *, write: bool) -> dict[str, A
             await conn.execute(text(
                 "UPDATE lessons.projects SET shan_project_identifier = :shan_project_identifier, "
                 "shan_active = :shan_active, shan_synced_at = :shan_synced_at, "
-                "station_type_set = :station_type_set, shan_link_decision = :shan_link_decision WHERE id = :id"
+                "station_type_set = :station_type_set, shan_link_decision = :shan_link_decision, "
+                "shan_manager_kept = :shan_manager_kept WHERE id = :id"
             ), dict(kp))
         for t in (*TABLES, "referent_members"):
             await conn.execute(text(f"ALTER TABLE lessons.{t} ENABLE TRIGGER USER"))

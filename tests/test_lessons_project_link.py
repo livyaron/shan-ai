@@ -224,3 +224,21 @@ def test_a_similar_name_alone_is_not_a_recommendation():
     out = lpl.suggest("חדרה מזרח", cands)
     assert out[0]["score"] == out[1]["score"] == 100      # token_set: both contain the name
     assert not out[0]["recommended"]                      # no margin → no recommendation
+
+
+# ------------------------------------------------------------------ manager check
+
+@pytest.mark.parametrize("fm,resolved,problem,current,kept,expected", [
+    ("משה כהן", "u17", None, "u17", None, "match"),
+    ("משה כהן", "u17", None, "u3", None, "differs"),
+    ("משה כהן", None, "alias_unlinked", "u3", None, "unresolved"),
+    ("משה כהן", None, "not_pm", "u3", None, "unresolved"),
+    ("משה כהן", "u17", None, "u3", "משה כהן", "kept"),
+    (" משה כהן ", None, "alias_unlinked", "u3", "משה כהן", "kept"),
+    ("דנה לוי", "u9", None, "u3", "משה כהן", "differs"),   # the file named someone else → ask again
+    ("", None, "no_name", "u3", None, "no_name"),
+    (None, None, "no_name", "u3", "משה כהן", "no_name"),
+    ("משה כהן", "u17", None, "u17", "משה כהן", "match"),   # match wins over a stale keep
+])
+def test_manager_check(fm, resolved, problem, current, kept, expected):
+    assert lpl.manager_check(fm, resolved, problem, current, kept) == expected
