@@ -857,6 +857,9 @@ async def process_master_file(file_id: int) -> None:
                 gone = await deactivate_missing(session, synced_idents)
                 if gone:
                     logger.info(f"process_master_file {file_id}: deactivated {gone} projects absent from master")
+                if synced_idents:   # a live sync (a history replay returns no identifiers)
+                    from app.services.lessons_project_link import sync_after_upload
+                    await sync_after_upload()
             except Exception as sync_err:
                 logger.warning(f"process_master_file {file_id}: project sync failed (non-fatal): {sync_err}")
 

@@ -134,6 +134,8 @@ async def _sync_and_summarize(file_path: str, original_name: str | None) -> None
     if result.get("processed") and not result.get("historical"):
         async with async_session_maker() as session:
             await deactivate_missing(session, result.get("identifiers"))
+        from app.services.lessons_project_link import sync_after_upload
+        await sync_after_upload()
         await exec_summary.save_from_file(file_path, original_name)
         rd = result.get("report_date")
         await contracts_sheet.save_from_file(file_path, original_name,

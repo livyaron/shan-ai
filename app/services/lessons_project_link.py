@@ -503,7 +503,9 @@ async def _log(session, admin, action: str, entity_id: Any, label: str, descript
         "INSERT INTO lessons.activity_logs (user_id, user_name, user_email, user_role, action_type, "
         "entity_type, entity_id, object_label, description) "
         "VALUES (:uid, :name, :email, 'admin', :action, 'project', :eid, :label, :desc)"), {
-        "uid": f"s{admin.id}", "name": (admin.username or "").strip(), "email": getattr(admin, "email", None) or "",
+        "uid": f"s{admin.id}" if admin else "system",
+        "name": (admin.username or "").strip() if admin else SYNC_ACTOR,
+        "email": (getattr(admin, "email", None) or "") if admin else "",
         "action": action, "eid": str(entity_id), "label": label or "", "desc": description})
 
 
@@ -721,6 +723,15 @@ async def create_missing(session, admin) -> tuple[int, str | None]:
     plan = creation_plan(masters, linked, await _levels(session), alias_users, profile_of_user)
     if not plan["create"]:
         return 0, "אין פרויקטים חדשים ליצירה"
+    await _insert_created(session, plan)
+    await _log(session, admin, "projects_created_from_master", "", "קובץ המאסטר",
+               f"נוצרו {len(plan['create'])} פרויקטים מקובץ המאסטר "
+               f"({plan['no_manager']} עם מנה\"פ '{PLACEHOLDER_PM_NAME}')")
+    return len(plan["create"]), None
+
+
+async def _insert_created(session, plan: dict[str, Any]) -> None:
+    """Insert creation_plan's projects (admin's "create" and the upload sync)."""
     if plan["no_manager"]:
         await session.execute(text(
             "INSERT INTO lessons.profiles (id, name, email, role, is_login) "
@@ -737,7 +748,98 @@ async def create_missing(session, admin) -> tuple[int, str | None]:
             "UPDATE lessons.profiles SET assigned_projects = array_append(assigned_projects, CAST(:p AS integer)) "
             "WHERE (id = :m OR role = 'admin') AND NOT (CAST(:p AS integer) = ANY(assigned_projects))"),
             {"p": new_id, "m": c["manager_id"]})
-    await _log(session, admin, "projects_created_from_master", "", "קובץ המאסטר",
-               f"נוצרו {len(plan['create'])} פרויקטים מקובץ המאסטר "
-               f"({plan['no_manager']} עם מנה\"פ '{PLACEHOLDER_PM_NAME}')")
-    return len(plan["create"]), None
+
+
+# ----------------------------------------------------------------- L3: every live upload
+
+SYNC_ACTOR = "סנכרון קובץ המאסטר"
+FILE_FIELDS = ("name", "stage_indexes", "project_type", "risk")
+
+
+def sync_plan(linked: list[dict[str, Any]], masters: dict[str, dict[str, Any]], levels: dict[str, str],
+              alias_users: dict[str, int | None], profile_of_user: dict[int, dict[str, Any]]) -> list[dict[str, Any]]:
+    """What a live upload changes on each LINKED lessons project. Pure.
+
+    The file owns name / stage / type / risk (LP-D3/D5/D6). An unknown stage or
+    type leaves the module's value. The manager moves only to a profile the
+    confirmed chain resolves to, and never against a name an admin chose to
+    keep (LP-D12); an unresolved name changes nothing (the manager check asks).
+    A project gone from the active file is marked shan_active=false — never
+    deleted, its lessons stay.
+    """
+    out = []
+    for p in linked:
+        m = masters.get(p["shan_project_identifier"])
+        if m is None:
+            if p.get("shan_active") is not False:
+                out.append({"id": p["id"], "fields": {}, "manager": None, "active": False})
+            continue
+        pid, _ = manager_profile_for(m.get("manager"), alias_users, profile_of_user)
+        f = fields_for(m, levels.get(m["identifier"]), pid) or {
+            "name": (m.get("name") or m["identifier"]).strip(), "risk": risk_for(levels.get(m["identifier"]))}
+        if project_type_for(m.get("project_type")) is None:
+            f.pop("project_type", None)
+        changed = {k: f[k] for k in FILE_FIELDS if k in f and f[k] != p.get(k)}
+        status = manager_check(m.get("manager"), pid, None, p.get("manager_id"), p.get("shan_manager_kept"))
+        manager = pid if status == "differs" else None
+        if changed or manager or p.get("shan_active") is not True:
+            out.append({"id": p["id"], "fields": changed, "manager": manager, "active": True})
+    return out
+
+
+async def sync_from_file(session) -> dict[str, int]:
+    """Bring the lessons module up to date with the file just synced LIVE
+    (never a history replay — the caller checks). Updates linked projects,
+    marks the vanished inactive, and creates the file's new projects — the
+    last only once the initial linking is done (no undecided lessons project),
+    or a project not linked yet would be created twice."""
+    masters = {m["identifier"]: m for m in await _masters(session)}
+    linked = [dict(r) for r in (await session.execute(text(
+        "SELECT id, name, stage_indexes, project_type, risk, manager_id, shan_project_identifier, "
+        "shan_manager_kept, shan_active FROM lessons.projects WHERE shan_project_identifier IS NOT NULL"
+    ))).mappings().all()]
+    for p in linked:
+        p["stage_indexes"] = list(p["stage_indexes"] or [])
+    alias_users, profile_of_user = await _manager_chain(session)
+    levels = await _levels(session)
+    counts = {"updated": 0, "managers": 0, "inactive": 0, "created": 0}
+    for ch in sync_plan(linked, masters, levels, alias_users, profile_of_user):
+        sets = ", ".join(f"{k} = :{k}" for k in ch["fields"])
+        await session.execute(text(
+            f"UPDATE lessons.projects SET {sets + ', ' if sets else ''}shan_active = :active, "
+            "shan_synced_at = now() WHERE id = :id"), {**ch["fields"], "active": ch["active"], "id": ch["id"]})
+        if ch["manager"]:
+            await apply_manager(session, ch["id"], ch["manager"])
+            counts["managers"] += 1
+        counts["updated" if ch["active"] else "inactive"] += 1
+    undecided_n = (await session.execute(text(
+        "SELECT count(*) FROM lessons.projects WHERE shan_project_identifier IS NULL "
+        "AND shan_link_decision IS DISTINCT FROM :l"), {"l": LOCAL})).scalar_one()
+    if undecided_n == 0:
+        plan = creation_plan(list(masters.values()), {p["shan_project_identifier"] for p in linked},
+                             levels, alias_users, profile_of_user)
+        if plan["create"]:
+            await _insert_created(session, plan)
+            counts["created"] = len(plan["create"])
+    if any(counts.values()):
+        await _log(session, None, "projects_synced_from_master", "", "קובץ המאסטר",
+                   f"עודכנו {counts['updated']} פרויקטים (מנה\"פ: {counts['managers']}), "
+                   f"{counts['inactive']} יצאו מהקובץ, נוצרו {counts['created']}"
+                   + ("" if undecided_n == 0 else f" — יצירה מושהית: {undecided_n} פרויקטי לקחים עוד לא קושרו"))
+    return {**counts, "undecided": undecided_n}
+
+
+async def sync_after_upload() -> None:
+    """The upload paths' hook: own session, own transaction, never raises —
+    a lessons failure must not fail the master upload."""
+    import logging
+
+    from app.database import async_session_maker
+    log = logging.getLogger(__name__)
+    try:
+        async with async_session_maker() as session:
+            counts = await sync_from_file(session)
+            await session.commit()
+        log.info("lessons project sync: %s", counts)
+    except Exception:
+        log.exception("lessons project sync failed (the master upload itself is fine)")
