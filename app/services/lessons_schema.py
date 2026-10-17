@@ -289,6 +289,9 @@ SCHEMA_STATEMENTS: tuple[str, ...] = (
     "ALTER TABLE lessons.projects ADD COLUMN IF NOT EXISTS station_type_set boolean NOT NULL DEFAULT true",
     # An admin's decision in קישור פרויקטים: 'local' = a module-only project, not in the file (L1).
     "ALTER TABLE lessons.projects ADD COLUMN IF NOT EXISTS shan_link_decision text",
+    # The file's מנה"פ name an admin chose to keep the lessons manager against
+    # (manager check). Asked again once the file names someone else.
+    "ALTER TABLE lessons.projects ADD COLUMN IF NOT EXISTS shan_manager_kept text",
     # One file project ↔ at most one lessons project.
     ("CREATE UNIQUE INDEX IF NOT EXISTS uq_lessons_projects_shan_identifier "
      "ON lessons.projects (shan_project_identifier) WHERE shan_project_identifier IS NOT NULL"),

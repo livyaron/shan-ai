@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { defaultPick, filterLinkRows, freeMasters, masterLabel, rowState, type LinkRow } from "@/lib/projectLinks";
+import { defaultPick, filterLinkRows, managerNeedsAnswer, freeMasters, masterLabel, rowState, type LinkRow } from "@/lib/projectLinks";
 
 const row = (id: number, name: string, extra: Partial<LinkRow> = {}): LinkRow => ({
-  id, name, site: null, lessons_count: 0, manager_name: null, identifier: null, linked: null,
+  id, name, site: null, lessons_count: 0, manager_name: null, identifier: null, linked: null, manager_check: null,
   linked_missing: false, decision: null, suggestions: [], ...extra,
 });
 
@@ -60,5 +60,20 @@ describe("defaultPick", () => {
     expect(defaultPick(row(1, "א", { suggestions: [sg("A", true), sg("B", false)] }))).toBe("A");
     expect(defaultPick(row(2, "ב", { suggestions: [sg("A", false), sg("B", false)] }))).toBe("");
     expect(defaultPick(row(3, "ג"))).toBe("");
+  });
+});
+
+describe("managerNeedsAnswer", () => {
+  const mc = (status: "match" | "differs" | "unresolved" | "kept" | "no_name") => ({
+    status, file_manager: "משה", problem: null, file_profile: null, current: { id: "u1", name: "דנה" }, suggest_user_id: null,
+  });
+
+  it("asks only when the file and the module disagree or the file's name is unknown", () => {
+    expect(managerNeedsAnswer(row(1, "א", { manager_check: mc("differs") }))).toBe(true);
+    expect(managerNeedsAnswer(row(2, "ב", { manager_check: mc("unresolved") }))).toBe(true);
+    for (const st of ["match", "kept", "no_name"] as const) {
+      expect(managerNeedsAnswer(row(3, "ג", { manager_check: mc(st) }))).toBe(false);
+    }
+    expect(managerNeedsAnswer(row(4, "ד"))).toBe(false);
   });
 });

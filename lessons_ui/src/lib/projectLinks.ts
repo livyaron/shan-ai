@@ -24,7 +24,23 @@ export interface Suggestion extends MasterProject {
 /** The suggestion picked before the admin chooses: the recommended one, else none. */
 export const defaultPick = (r: LinkRow): string => r.suggestions.find((s) => s.recommended)?.identifier ?? "";
 
+export type ManagerStatus = "match" | "differs" | "unresolved" | "kept" | "no_name";
+
+export interface ManagerCheck {
+  status: ManagerStatus;
+  file_manager: string | null;
+  problem: ManagerProblem | "no_name" | null;
+  file_profile: { id: string; name: string | null } | null;
+  current: { id: string; name: string | null };
+  suggest_user_id: number | null;
+}
+
+/** A linked project whose manager needs the admin's answer. */
+export const managerNeedsAnswer = (r: LinkRow): boolean =>
+  r.manager_check?.status === "differs" || r.manager_check?.status === "unresolved";
+
 export interface LinkRow {
+  manager_check: ManagerCheck | null;
   id: number;
   name: string;
   site: string | null;
@@ -56,6 +72,7 @@ export interface LinkSummary {
   unknown_stage: { identifier: string; name: string | null; stage: string | null }[];
   managers_unlinked: { name: string; problem: ManagerProblem; projects: number }[];
   no_manager: number;
+  manager_open: number;
   type_unknown: string[];
 }
 
@@ -64,6 +81,7 @@ export interface LinksPayload {
   masters: MasterProject[];
   summary: LinkSummary;
   can_create: boolean;
+  users: { id: number; username: string }[];
 }
 
 export type RowState = "linked" | "local" | "open";
