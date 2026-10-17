@@ -73,3 +73,35 @@ export function bulletText(line: string): string | null {
   const m = line.match(/^(?:[-•*▪◦]|\d{1,2}[.)])\s+(.*)$/u);
   return m ? m[1] : null;
 }
+
+export type SummaryBlock =
+  | { kind: "line"; text: string }
+  | { kind: "table"; header: string[]; rows: string[][] };
+
+const TABLE_ROW = /^\|.*\|$/;
+const TABLE_RULE = /^\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?$/;
+
+const cells = (row: string): string[] => row.replace(/^\||\|$/g, "").split("|").map((c) => c.trim());
+
+/** Consecutive "| a | b |" lines become one table (the "|---|" rule is
+ *  dropped); every other line stays a line. The model writes tables
+ *  unprompted (user screenshot 2026-10-17: the risk split as raw pipes). */
+export function groupBlocks(lines: string[]): SummaryBlock[] {
+  const out: SummaryBlock[] = [];
+  let i = 0;
+  while (i < lines.length) {
+    if (!TABLE_ROW.test(lines[i])) {
+      out.push({ kind: "line", text: lines[i] });
+      i += 1;
+      continue;
+    }
+    const run: string[] = [];
+    while (i < lines.length && TABLE_ROW.test(lines[i])) {
+      if (!TABLE_RULE.test(lines[i])) run.push(lines[i]);
+      i += 1;
+    }
+    const [head, ...body] = run.map(cells);
+    out.push({ kind: "table", header: head || [], rows: body });
+  }
+  return out;
+}

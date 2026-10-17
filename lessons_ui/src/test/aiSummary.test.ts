@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { bulletText, inlineParts, parseSummary } from "@/lib/aiSummary";
+import { bulletText, groupBlocks, inlineParts, parseSummary } from "@/lib/aiSummary";
 
 const FULL = `📈 **מגמות מפתח**
 - רוב הלקחים בשלב **תכנון**
@@ -50,5 +50,25 @@ describe("inline helpers", () => {
     expect(bulletText("- x")).toBe("x");
     expect(bulletText("2. y")).toBe("y");
     expect(bulletText("רגיל")).toBeNull();
+  });
+});
+
+describe("groupBlocks", () => {
+  it("turns a markdown table (with blank lines between rows) into one table", () => {
+    const text = `⚠️ **סיכונים**
+| רמת סיכון | מספר לקחים | אחוז מהסך |
+
+|-----------|------------|-----------|
+
+| גבוה | 13 | 29 % |
+
+| נמוך | 7 | 16 % |
+
+הסיכון הגבוה מרוכז בעיקר בתכנון חפירות.`;
+    const blocks = groupBlocks(parseSummary(text).sections[0].lines);
+    expect(blocks).toEqual([
+      { kind: "table", header: ["רמת סיכון", "מספר לקחים", "אחוז מהסך"], rows: [["גבוה", "13", "29 %"], ["נמוך", "7", "16 %"]] },
+      { kind: "line", text: "הסיכון הגבוה מרוכז בעיקר בתכנון חפירות." },
+    ]);
   });
 });
