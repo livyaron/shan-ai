@@ -492,3 +492,58 @@ async def people_set(request: Request, session: AsyncSession = Depends(get_db_se
             "ON CONFLICT DO NOTHING"), {"p": g, "u": uid})
     await session.commit()
     return JSONResponse(await _people_payload(session))
+
+
+# ------------------------------------------------------------------ projects (קישור פרויקטים)
+# Each lessons project ↔ the master file's project (PLAN-lessons-projects.md
+# L1). The admin links from rapidfuzz suggestions, merges duplicates, or keeps
+# a project local; then creates the file's remaining projects. The rules live
+# in app/services/lessons_project_link.py.
+
+project_links_router = APIRouter(prefix="/lessons/api/_project_links", tags=["lessons"])
+
+
+@project_links_router.get("")
+async def project_links_list(request: Request, session: AsyncSession = Depends(get_db_session)) -> Response:
+    from app.services import lessons_project_link as lpl
+    if await _shan_admin(request, session) is None:
+        return JSONResponse({"message": "Shan-AI admin only"}, status_code=403)
+    return JSONResponse(await lpl.payload(session), headers={"Cache-Control": "no-store"})
+
+
+@project_links_router.post("")
+async def project_links_act(request: Request, session: AsyncSession = Depends(get_db_session)) -> Response:
+    """Body: {"action": "link", "project_id": 3, "identifier": "123" | null}
+    · {"action": "local", "project_id": 3, "local": true}
+    · {"action": "merge", "source_id": 3, "target_id": 7}
+    · {"action": "create_missing"}. Answers with the fresh payload."""
+    from app.services import lessons_project_link as lpl
+    admin = await _shan_admin(request, session)
+    if admin is None:
+        return JSONResponse({"message": "Shan-AI admin only"}, status_code=403)
+    try:
+        body = await request.json()
+        action = str(body["action"])
+        if action == "link":
+            raw = body.get("identifier")
+            problem = await lpl.link(session, admin, int(body["project_id"]),
+                                     None if raw in (None, "") else str(raw))
+        elif action == "local":
+            problem = await lpl.keep_local(session, admin, int(body["project_id"]), bool(body.get("local", True)))
+        elif action == "merge":
+            problem = await lpl.merge(session, admin, int(body["source_id"]), int(body["target_id"]))
+        elif action == "create_missing":
+            _, problem = await lpl.create_missing(session, admin)
+        else:
+            return JSONResponse({"message": "פעולה לא מוכרת"}, status_code=400)
+    except (ValueError, TypeError, KeyError):
+        await session.rollback()
+        return JSONResponse({"message": "בקשה לא תקינה"}, status_code=400)
+    except lpl.MergeAbort as e:
+        await session.rollback()
+        return JSONResponse({"message": f"{e} — המיזוג בוטל"}, status_code=409)
+    if problem is not None:
+        await session.rollback()
+        return JSONResponse({"message": problem}, status_code=409)
+    await session.commit()
+    return JSONResponse(await lpl.payload(session))

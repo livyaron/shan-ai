@@ -45,7 +45,9 @@ LINKS: tuple[tuple[str, int], ...] = (
     ("u1773127270329", 15),
 )
 # Role accounts that stay entities but are never a login (PLAN §1.1).
-NO_LOGIN_NAMES: frozenset[str] = frozenset({"מנהל פרויקט - עבר", "צפייה בלבד"})
+# "טרם שויך" = lessons_project_link.PLACEHOLDER_PM_NAME, the manager of a
+# project whose file name is not linked yet (PLAN-lessons-projects.md LP-D9).
+NO_LOGIN_NAMES: frozenset[str] = frozenset({"מנהל פרויקט - עבר", "צפייה בלבד", "טרם שויך"})
 _IMPORT_LOCK = 7_340_518_202
 
 
@@ -195,8 +197,9 @@ async def run_import(engine, base: str, key: str, *, write: bool) -> dict[str, A
             "SELECT profile_id, shan_user_id FROM lessons.referent_members"
         ))).all()
         kept_projects = (await conn.execute(text(
-            "SELECT id, shan_project_identifier, shan_active, shan_synced_at, station_type_set "
-            "FROM lessons.projects WHERE shan_project_identifier IS NOT NULL OR NOT station_type_set"
+            "SELECT id, shan_project_identifier, shan_active, shan_synced_at, station_type_set, shan_link_decision "
+            "FROM lessons.projects WHERE shan_project_identifier IS NOT NULL OR NOT station_type_set "
+            "OR shan_link_decision IS NOT NULL"
         ))).mappings().all()
 
         # Triggers off while loading: the source's own lessons_count/stage_index
@@ -259,7 +262,7 @@ async def run_import(engine, base: str, key: str, *, write: bool) -> dict[str, A
             await conn.execute(text(
                 "UPDATE lessons.projects SET shan_project_identifier = :shan_project_identifier, "
                 "shan_active = :shan_active, shan_synced_at = :shan_synced_at, "
-                "station_type_set = :station_type_set WHERE id = :id"
+                "station_type_set = :station_type_set, shan_link_decision = :shan_link_decision WHERE id = :id"
             ), dict(kp))
         for t in (*TABLES, "referent_members"):
             await conn.execute(text(f"ALTER TABLE lessons.{t} ENABLE TRIGGER USER"))

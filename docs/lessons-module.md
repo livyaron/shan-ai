@@ -96,6 +96,14 @@ App service variables:
   never override a link an admin set.
 - Referent profiles, `מנהל פרויקט - עבר` and `צפייה בלבד` get `is_login = false`.
 
+## Project links — `/lessons/api/_project_links` (PLAN-lessons-projects.md L1)
+
+Admin tab "קישור פרויקטים" (`/lessons/admin?tab=project_links`, Shan-AI admin only). Each lessons
+project is linked to an ACTIVE master-file project (rapidfuzz suggestions, nothing applied until
+clicked), merged into another lessons project (lessons + implementations move, the duplicate is
+deleted, counts checked), or kept local. Then "צור N פרויקטים" creates every remaining active file
+project. Rules: `app/services/lessons_project_link.py`. Every action writes `activity_logs`.
+
 ## Referent groups — `/lessons/api/_groups` (`app/routers/lessons_admin.py`)
 
 Shan-AI admin page: pick members from the Shan-AI users list per referent group (add / remove).
