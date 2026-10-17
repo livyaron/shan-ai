@@ -23,6 +23,7 @@ import SiteCombobox from "@/components/SiteCombobox";
 import { supabase } from "@/integrations/supabase/client";
 import MultiStageSelect from "@/components/MultiStageSelect";
 import SearchableSelect from "@/components/ui/searchable-select";
+import { isLinked, missingLabel, projectProblems } from "@/lib/projectProblems";
 
 const ProjectDetail = () => {
   const { id } = useParams();
@@ -92,7 +93,10 @@ const ProjectDetail = () => {
     );
   }
 
-  const canChangeStage = hasPermission("change_stage") &&
+  // A project linked to the master file takes its stage from the file (L3).
+  const linked = isLinked(project);
+  const problems = projectProblems(project);
+  const canChangeStage = hasPermission("change_stage") && !linked &&
     (currentUser.role === "admin" || project.managerId === currentUser.id);
 
   const currentStage = PROJECT_STAGES[project.stageIndex];
@@ -106,7 +110,8 @@ const ProjectDetail = () => {
     const newIds = project.equipmentIds.includes(eqId)
       ? project.equipmentIds.filter((id) => id !== eqId)
       : [...project.equipmentIds, eqId];
-    updateProjectEquipment(project.id, newIds);
+    updateProjectEquipment(project.id, newIds).catch((e) =>
+      toast({ title: "עדכון הציוד נכשל", description: e instanceof Error ? e.message : String(e), variant: "destructive" }));
   };
 
   const toggleEditEquipment = (eqId: number) => {
@@ -224,24 +229,25 @@ const ProjectDetail = () => {
       toast({ title: "שגיאה", description: "חובה לבחור לפחות שלב אחד", variant: "destructive" });
       return;
     }
-    updateProject(project.id, {
-      name: editName.trim(),
-      risk: editRisk,
-      projectType: editProjectType,
-      stationType: editStationType,
-      managerId: editManagerId,
-      site: editSite || undefined,
-    });
-    updateProjectEquipment(project.id, editEquipmentIds);
-    // Update stages if changed
-    const currentSorted = [...(project.stageIndexes || [project.stageIndex])].sort((a, b) => a - b).join(",");
-    const newSorted = [...editStageIndexes].sort((a, b) => a - b).join(",");
-    if (currentSorted !== newSorted) {
-      try {
-        await updateProjectStages(project.id, editStageIndexes);
-      } catch (e) {
-        console.error("Stage update failed:", e);
-      }
+    try {
+      // Linked: the file owns name / type / risk / manager / stages — send only the module's fields.
+      await updateProject(project.id, linked
+        ? { stationType: editStationType, site: editSite || undefined }
+        : {
+            name: editName.trim(),
+            risk: editRisk,
+            projectType: editProjectType,
+            stationType: editStationType,
+            managerId: editManagerId,
+            site: editSite || undefined,
+          });
+      await updateProjectEquipment(project.id, editEquipmentIds);
+      const currentSorted = [...(project.stageIndexes || [project.stageIndex])].sort((a, b) => a - b).join(",");
+      const newSorted = [...editStageIndexes].sort((a, b) => a - b).join(",");
+      if (!linked && currentSorted !== newSorted) await updateProjectStages(project.id, editStageIndexes);
+    } catch (e) {
+      toast({ title: "השמירה נכשלה", description: e instanceof Error ? e.message : String(e), variant: "destructive" });
+      return;
     }
     setEditDialogOpen(false);
     toast({ title: "פרטי הפרויקט עודכנו ✓" });
@@ -275,6 +281,11 @@ const ProjectDetail = () => {
               {pm && <><span>·</span><span>מנהל: {pm.name}</span></>}
               {project.site && <><span>·</span><span>אתר: {project.site}</span></>}
               <Badge variant="outline" className={riskColors[project.risk]}>{riskLabels[project.risk]}</Badge>
+              {linked && <Badge variant="outline" title={project.shanIdentifier}>🔗 מקושר לקובץ המאסטר</Badge>}
+              {linked && project.shanActive === false && <Badge variant="outline" className="text-muted-foreground">לא פעיל בקובץ</Badge>}
+              {problems.length > 0 && (
+                <Badge variant="outline" className="bg-warning/10 text-warning border-warning/30">{missingLabel(problems)}</Badge>
+              )}
             </div>
           </div>
         </div>
@@ -337,13 +348,19 @@ const ProjectDetail = () => {
              <DialogDescription>עדכן שם, סוג, סיכון ופרטים נוספים</DialogDescription>
           </DialogHeader>
           <div className="space-y-4 pt-2">
+            {linked && (
+              <p className="rounded-lg bg-muted/60 p-2 text-xs text-muted-foreground">
+                🔗 מקושר לקובץ המאסטר ({project.shanIdentifier}): שם, סוג, מנה״פ, סיכון ושלבים מתעדכנים מהקובץ בכל העלאה.
+                כאן משלימים סוג תחנה, אתר וציוד.
+              </p>
+            )}
             <div>
               <Label>שם הפרויקט</Label>
-              <Input value={editName} onChange={(e) => setEditName(e.target.value)} className="mt-1.5" />
+              <Input value={editName} onChange={(e) => setEditName(e.target.value)} className="mt-1.5" disabled={linked} />
             </div>
             <div>
               <Label>סוג פרויקט</Label>
-              <SearchableSelect value={editProjectType} onValueChange={(v) => setEditProjectType(v as ProjectType)} className="mt-1.5"
+              <SearchableSelect value={editProjectType} onValueChange={(v) => setEditProjectType(v as ProjectType)} className="mt-1.5" disabled={linked}
                 options={[
                   { value: "new_build", label: "הקמה" },
                   { value: "expansion", label: "הרחבה" },
@@ -370,6 +387,7 @@ const ProjectDetail = () => {
                 value={editManagerId}
                 onValueChange={setEditManagerId}
                 className="mt-1.5"
+                disabled={linked}
                 options={users.map((u) => ({
                   value: u.id,
                   label: `${u.name} (${u.role === "admin" ? "מנהל מערכת" : "מנהל פרויקט"})`,
@@ -378,7 +396,7 @@ const ProjectDetail = () => {
             </div>
             <div>
               <Label>רמת סיכון</Label>
-              <SearchableSelect value={editRisk} onValueChange={(v) => setEditRisk(v as "high" | "medium" | "low")} className="mt-1.5"
+              <SearchableSelect value={editRisk} onValueChange={(v) => setEditRisk(v as "high" | "medium" | "low")} className="mt-1.5" disabled={linked}
                 options={[
                   { value: "high", label: "סיכון גבוה" },
                   { value: "medium", label: "סיכון בינוני" },
@@ -395,7 +413,7 @@ const ProjectDetail = () => {
             <div>
               <Label>שלבי הפרויקט *</Label>
               <div className="mt-1.5">
-                <MultiStageSelect value={editStageIndexes} onChange={setEditStageIndexes} />
+                <MultiStageSelect value={editStageIndexes} onChange={setEditStageIndexes} disabled={linked} />
               </div>
               <p className="text-[11px] text-muted-foreground mt-1">ניתן לבחור מספר שלבים פעילים במקביל. ספירות בדשבורד נעשות לפי השלב הגבוה ביותר.</p>
             </div>

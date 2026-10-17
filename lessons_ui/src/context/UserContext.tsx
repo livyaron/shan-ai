@@ -118,6 +118,12 @@ export interface Project {
   stationType: StationType;
   managerId: string;
   site?: string;
+  /** False on a project the master-file sync created until someone picks a station type. */
+  stationTypeSet: boolean;
+  /** Linked to the weekly master file (PLAN-lessons-projects.md): name / stage / type / risk come from there. */
+  shanIdentifier?: string;
+  /** False once the project left the active master file (never deleted). */
+  shanActive?: boolean | null;
 }
 
 export interface LessonAIReview {
@@ -293,12 +299,12 @@ interface AppContextType {
   deleteUser: (userId: string) => Promise<void>;
   updateEmailPreferences: (userId: string, prefs: EmailPreferences) => Promise<void>;
   projects: Project[];
-  addProject: (project: Omit<Project, "id" | "lessonsCount">) => void;
+  addProject: (project: Omit<Project, "id" | "lessonsCount" | "stationTypeSet" | "shanIdentifier" | "shanActive">) => void;
   deleteProject: (projectId: number) => Promise<void>;
-  updateProject: (projectId: number, updates: Partial<Pick<Project, "name" | "risk" | "projectType" | "stationType" | "managerId" | "site">>) => void;
+  updateProject: (projectId: number, updates: Partial<Pick<Project, "name" | "risk" | "projectType" | "stationType" | "managerId" | "site">>) => Promise<void>;
   updateProjectStage: (projectId: number, newStageIndex: number) => Promise<void>;
   updateProjectStages: (projectId: number, newStageIndexes: number[]) => Promise<void>;
-  updateProjectEquipment: (projectId: number, equipmentIds: number[]) => void;
+  updateProjectEquipment: (projectId: number, equipmentIds: number[]) => Promise<void>;
   equipment: Equipment[];
   addEquipment: (eq: Omit<Equipment, "id">, projectIds?: number[]) => Promise<Equipment | undefined>;
   updateEquipment: (eqId: number, updates: Partial<Pick<Equipment, "name" | "category">>) => Promise<void>;
@@ -375,6 +381,9 @@ const mapDbProject = (row: any): Project => {
     stationType: row.station_type as StationType,
     managerId: row.manager_id,
     site: row.site || undefined,
+    stationTypeSet: row.station_type_set !== false,
+    shanIdentifier: row.shan_project_identifier || undefined,
+    shanActive: row.shan_active ?? null,
   };
 };
 
@@ -951,7 +960,8 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
   const updateProjectStage = useCallback(async (projectId: number, newStageIndex: number) => {
     // Backward-compat single-stage update: replace stage_indexes with [newStageIndex]
     const newStageIndexes = [newStageIndex];
-    await supabase.from("projects").update({ stage_index: newStageIndex, stage_indexes: newStageIndexes }).eq("id", projectId);
+    const { error } = await supabase.from("projects").update({ stage_index: newStageIndex, stage_indexes: newStageIndexes }).eq("id", projectId);
+    if (error) throw new Error(error.message);
     setProjects((prev) => prev.map((p) => (p.id === projectId ? { ...p, stageIndex: newStageIndex, stageIndexes: newStageIndexes } : p)));
 
     const project = projects.find((p) => p.id === projectId);
@@ -973,7 +983,8 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
     const previousStages = new Set(project?.stageIndexes || []);
     const addedStages = sorted.filter((s) => !previousStages.has(s));
 
-    await supabase.from("projects").update({ stage_index: derivedStageIndex, stage_indexes: sorted }).eq("id", projectId);
+    const { error } = await supabase.from("projects").update({ stage_index: derivedStageIndex, stage_indexes: sorted }).eq("id", projectId);
+    if (error) throw new Error(error.message);
     setProjects((prev) => prev.map((p) => (p.id === projectId ? { ...p, stageIndex: derivedStageIndex, stageIndexes: sorted } : p)));
 
     if (project && addedStages.length > 0) {
@@ -1317,7 +1328,8 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
   const unreadCount = notifications.filter((n) => n.userId === currentUser.id && !n.read).length;
 
   const updateProjectEquipment = useCallback(async (projectId: number, equipmentIds: number[]) => {
-    await supabase.from("projects").update({ equipment_ids: equipmentIds }).eq("id", projectId);
+    const { error } = await supabase.from("projects").update({ equipment_ids: equipmentIds }).eq("id", projectId);
+    if (error) throw new Error(error.message);
     setProjects((prev) => prev.map((p) => (p.id === projectId ? { ...p, equipmentIds } : p)));
 
     const project = projects.find((p) => p.id === projectId);
@@ -1585,13 +1597,18 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
     if (updates.name !== undefined) dbUpdates.name = updates.name;
     if (updates.risk !== undefined) dbUpdates.risk = updates.risk;
     if (updates.projectType !== undefined) dbUpdates.project_type = updates.projectType;
-    if (updates.stationType !== undefined) dbUpdates.station_type = updates.stationType;
+    // Saving a station type is a person choosing it — the "missing" flag (L4) clears.
+    if (updates.stationType !== undefined) { dbUpdates.station_type = updates.stationType; dbUpdates.station_type_set = true; }
     if (updates.managerId !== undefined) dbUpdates.manager_id = updates.managerId;
     if (updates.site !== undefined) dbUpdates.site = updates.site || null;
 
     const project = projects.find((p) => p.id === projectId);
-    await supabase.from("projects").update(dbUpdates).eq("id", projectId);
-    setProjects((prev) => prev.map((p) => (p.id === projectId ? { ...p, ...updates } : p)));
+    // The DB refuses master-file fields on a linked project (lessons.lock_master_fields):
+    // never show a change the server did not keep.
+    const { error } = await supabase.from("projects").update(dbUpdates).eq("id", projectId);
+    if (error) throw new Error(error.message);
+    setProjects((prev) => prev.map((p) => (p.id === projectId
+      ? { ...p, ...updates, ...(updates.stationType !== undefined ? { stationTypeSet: true } : {}) } : p)));
 
     if (updates.name !== undefined) {
       await supabase.from("lessons").update({ project_name: updates.name }).eq("project_id", projectId);
@@ -1658,7 +1675,7 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
     }
   }, [projects, users, currentUser.id, addNotification, describeChangedFields, logActivity]);
 
-  const addProject = useCallback(async (project: Omit<Project, "id" | "lessonsCount">) => {
+  const addProject = useCallback(async (project: Omit<Project, "id" | "lessonsCount" | "stationTypeSet" | "shanIdentifier" | "shanActive">) => {
     const stageIndexes = project.stageIndexes && project.stageIndexes.length > 0
       ? project.stageIndexes
       : [project.stageIndex ?? 0];
