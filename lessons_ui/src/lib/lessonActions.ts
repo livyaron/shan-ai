@@ -150,7 +150,10 @@ export const pendingTasks = (
     if (!l || r.referentId !== user.id || r.respondedAt || !actionable(l) || canReferentDecide(l, user, reviews)) continue;
     if (l.distributedToReferents?.includes(user.id)) tasks.push({ kind: "referent_feedback", lessonId: l.id, rowId: r.id });
   }
+  // A project's response is its PROJECT MANAGER's task — the same rule as the computer's
+  // useActionRequired. An admin linked to every project is not waiting on 200 of them.
   for (const i of impls) {
+    if (user.role !== "project_manager") break;
     const l = byId.get(i.lessonId);
     if (!l || i.respondedBy || !actionable(l) || !user.assignedProjects.includes(i.projectId)) continue;
     tasks.push({ kind: "pm_feedback", lessonId: l.id, rowId: i.id, projectId: i.projectId });

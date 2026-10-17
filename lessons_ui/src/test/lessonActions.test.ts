@@ -91,6 +91,13 @@ describe("my tasks", () => {
     expect(kinds(pm)).toEqual(["creator_complete:5:", "pm_feedback:4:70"]);
   });
 
+  it("project responses are a project manager's task only — never an admin's (bug 2026-10-17: 209)", () => {
+    const linkedAdmin = { ...admin, assignedProjects: [7, 8] };
+    expect(kinds(linkedAdmin)).toEqual(["approve_new:1:", "admin_final:2:"]);
+    const linkedRef = { ...ref, assignedProjects: [7] };
+    expect(kinds(linkedRef)).not.toContain("pm_feedback:4:70");
+  });
+
   it("answered rows are not tasks", () => {
     const done = pendingTasks(ref, lessons, reviews.map((r) => ({ ...r, respondedAt: "t" })), []);
     expect(done.map((t) => t.kind)).toEqual(["referent_decide"]);
