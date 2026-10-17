@@ -46,6 +46,7 @@ import AdminAnalyticsTabs from "@/components/admin/AdminAnalyticsTabs";
 import AIFeedbackDialog from "@/components/AIFeedbackDialog";
 import AISummaryView from "@/components/dashboard/AISummaryView";
 import RankedBars from "@/components/dashboard/RankedBars";
+import postcardImg from "@/assets/dashboard-postcard.jpg";
 import { useDashboardData } from "@/hooks/useDashboardData";
 import { buildLessonDrilldownPath } from "@/lib/drilldown";
 import { distinctImplementedLessonIds, distinctNotRelevantLessonIds } from "@/lib/adminAnalytics";
@@ -429,40 +430,65 @@ const Dashboard = () => {
 
   return (
     <div className="space-y-6">
-      {/* Hero */}
-      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-l from-primary via-[hsl(225,55%,22%)] to-sidebar p-6 sm:p-8 text-primary-foreground shadow-lg">
-        <div
-          aria-hidden
-          className="pointer-events-none absolute inset-0 opacity-[0.12]"
-          style={{ backgroundImage: "radial-gradient(circle at 1px 1px, white 1px, transparent 0)", backgroundSize: "22px 22px" }}
-        />
-        <div aria-hidden className="pointer-events-none absolute -top-24 -left-16 h-64 w-64 rounded-full bg-accent/40 blur-3xl" />
-        <div className="relative flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
+      <Tabs defaultValue="overview" dir="rtl" className="space-y-6">
+      {/* Hero — the postcard (user's own photo, 2026-10-17): sky above the
+          horizon, the photo's sand below it; the stat cards sit on the line. */}
+      <div className="relative flex flex-col overflow-hidden rounded-3xl shadow-lg text-[#16223b] lg:min-h-[324px]">
+        <div className="flex items-start justify-between gap-4 bg-gradient-to-b from-[#9db3c9] to-[#c3cdd3] pt-5 pb-12 px-5 sm:px-7 lg:pl-[280px]">
           <div>
-            <p className="text-xs font-medium uppercase tracking-wider text-primary-foreground/60">{todayLabel}</p>
-            <h1 className="mt-1 text-2xl sm:text-3xl font-heading font-bold">שלום, {currentUser.name} 👋</h1>
-            <p className="mt-1 text-sm text-primary-foreground/75">
-              {roleLabels[currentUser.role]} · {currentUser.role === "admin" ? "סקירה כללית של כל המערכת" : `${projectCount} פרויקטים שהוקצו לך`}
-            </p>
+          <p className="text-xs font-medium text-[#2c3d5c]">{todayLabel}</p>
+          <h1 className="mt-1 text-2xl sm:text-3xl font-heading font-bold">שלום, {currentUser.name} 👋</h1>
+          <p className="mt-1 text-sm text-[#2c3d5c]">
+            {roleLabels[currentUser.role]} · {currentUser.role === "admin" ? "סקירה כללית של כל המערכת" : `${projectCount} פרויקטים שהוקצו לך`}
+          </p>
           </div>
-          <div className="flex items-center gap-2">
-            <div className="rounded-2xl bg-white/10 px-4 py-2 backdrop-blur-sm text-center">
-              <p className="text-2xl font-bold tabular-nums leading-none">{totalLessons}</p>
-              <p className="mt-1 text-[11px] text-primary-foreground/70">לקחים בתצוגה</p>
+          <figure className="lg:hidden m-0 w-[84px] shrink-0 rotate-[-3.5deg] rounded bg-[#fbf6ea] p-1 pb-3 shadow-[0_14px_24px_-12px_rgba(50,32,8,0.65)]">
+            <img src={postcardImg} alt="" aria-hidden className="block w-full aspect-[4/5] rounded-sm object-cover object-top" />
+          </figure>
+        </div>
+        <div className="flex-1 bg-gradient-to-b from-[#c9ae7c] to-[#b8955f] px-5 pb-4 sm:px-7 lg:pl-[280px]">
+          <div className={`-mt-8 grid grid-cols-2 sm:grid-cols-4 ${currentUser.role === "admin" ? "lg:grid-cols-4 xl:grid-cols-7" : ""} gap-2`}>
+            {stats.map((stat) => (
+              <button
+                key={stat.label}
+                type="button"
+                onClick={stat.onClick}
+                className="group relative overflow-hidden rounded-xl bg-[#fcf7ec] px-3 py-2.5 text-right shadow-[0_10px_22px_-12px_rgba(60,40,10,0.75)] transition-transform duration-300 hover:-translate-y-1"
+              >
+                <span aria-hidden className={`absolute inset-y-2 right-0 w-1 rounded-l-full ${stat.color}`} />
+                <p className="text-2xl font-bold font-heading tabular-nums leading-none">{stat.value}</p>
+                <p className="mt-1 text-[11px] leading-tight text-[#6b5a3d]">{stat.label}</p>
+              </button>
+            ))}
+          </div>
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+            <TabsList className="h-auto flex-wrap rounded-xl bg-white/25 p-1">
+              <TabsTrigger value="overview" className="rounded-lg text-[#16223b] data-[state=active]:bg-[#fcf7ec] data-[state=active]:text-[#16223b]">סקירה כללית</TabsTrigger>
+              <TabsTrigger value="kpi" className="rounded-lg text-[#16223b] data-[state=active]:bg-[#fcf7ec] data-[state=active]:text-[#16223b]">מדדי ביצוע (KPIs)</TabsTrigger>
+              {currentUser.role === "admin" && (
+                <TabsTrigger value="analytics" className="rounded-lg text-[#16223b] data-[state=active]:bg-[#fcf7ec] data-[state=active]:text-[#16223b]">ניתוח ניהולי</TabsTrigger>
+              )}
+            </TabsList>
+            <div className="flex items-center gap-2">
+              <span className="rounded-xl bg-[#fcf7ec]/85 px-3 py-1.5 text-xs text-[#4a5872]">
+                <strong className="text-base tabular-nums text-[#16223b]">{totalLessons}</strong> לקחים בתצוגה
+              </span>
+              <Button
+                size="sm"
+                onClick={() => setFiltersOpen((v) => !v)}
+                className="gap-2 rounded-xl border-0 bg-[#16223b] text-[#f4e7c5] hover:bg-[#22325a]"
+              >
+                <Filter className="w-4 h-4" />
+                סינון
+                {hasActiveFilters && <Badge className="bg-accent text-accent-foreground text-[10px] px-1.5 py-0">{activeFilterCount}</Badge>}
+                {filtersOpen ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+              </Button>
             </div>
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => setFiltersOpen((v) => !v)}
-              className="gap-2 rounded-xl bg-white/15 text-primary-foreground hover:bg-white/25 border-0 backdrop-blur-sm"
-            >
-              <Filter className="w-4 h-4" />
-              סינון
-              {hasActiveFilters && <Badge className="bg-accent text-accent-foreground text-[10px] px-1.5 py-0">{activeFilterCount}</Badge>}
-              {filtersOpen ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-            </Button>
           </div>
         </div>
+        <figure className="hidden lg:block absolute left-7 top-4 m-0 w-[220px] rotate-[-3.5deg] rounded-md bg-[#fbf6ea] p-2.5 pb-7 shadow-[0_24px_40px_-18px_rgba(50,32,8,0.65)] transition-transform duration-500 hover:rotate-0 hover:scale-[1.03]">
+          <img src={postcardImg} alt="קפיצה במדבר תחת סמל האינסוף" className="block w-full aspect-[4/5] rounded-sm object-cover object-top" />
+        </figure>
       </div>
 
       {/* Filters */}
@@ -529,14 +555,6 @@ const Dashboard = () => {
         </CollapsibleContent>
       </Collapsible>
 
-      <Tabs defaultValue="overview" dir="rtl">
-        <TabsList className="mb-6 rounded-xl bg-muted/70 p-1">
-          <TabsTrigger value="overview" className="rounded-lg">סקירה כללית</TabsTrigger>
-          <TabsTrigger value="kpi" className="rounded-lg">מדדי ביצוע (KPIs)</TabsTrigger>
-          {currentUser.role === "admin" && (
-            <TabsTrigger value="analytics" className="rounded-lg">ניתוח ניהולי</TabsTrigger>
-          )}
-        </TabsList>
 
         <TabsContent value="overview" className="space-y-6">
 
@@ -553,26 +571,6 @@ const Dashboard = () => {
           יש <strong>{pendingAdminApproval}</strong> לקחים הממתינים לאישור שלך
         </button>
       )}
-
-      {/* Stat cards - clickable for drill-down */}
-      <div className={`grid grid-cols-2 ${currentUser.role === "admin" ? "lg:grid-cols-4 xl:grid-cols-7" : "lg:grid-cols-4"} gap-3 sm:gap-4`}>
-        {stats.map((stat) => (
-          <button
-            key={stat.label}
-            type="button"
-            onClick={stat.onClick}
-            className="group relative overflow-hidden rounded-2xl border border-border/60 bg-card p-4 sm:p-5 text-right shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg"
-          >
-            <span aria-hidden className={`absolute inset-x-0 top-0 h-1 ${stat.color}`} />
-            <span aria-hidden className={`absolute -bottom-10 -left-10 h-28 w-28 rounded-full ${stat.color} opacity-[0.07] transition-transform duration-500 group-hover:scale-125`} />
-            <div className={`mb-3 inline-flex w-10 h-10 rounded-xl ${stat.color} items-center justify-center shadow-sm`}>
-              <stat.icon className="w-5 h-5 text-primary-foreground" />
-            </div>
-            <p className="text-3xl font-bold font-heading tabular-nums leading-none">{stat.value}</p>
-            <p className="mt-1.5 text-xs sm:text-sm text-muted-foreground">{stat.label}</p>
-          </button>
-        ))}
-      </div>
 
       {/* AI Insights Card */}
       <Card className="border-0 shadow-sm overflow-hidden rounded-2xl">
