@@ -1,6 +1,6 @@
 # PLAN — קישור פרויקטים: קובץ המאסטר ↔ מערכת לקחים
 
-**סטטוס:** תוכנית מאושרת (2026-10-17). שום שלב לא נבנה.
+**סטטוס:** L0 נבנה (2026-10-17). L1–L4 לא התחילו.
 **מטרה:** כל פרויקט בקובץ המאסטר קיים גם ברשימת הפרויקטים של מודול הלקחים, מקושר, עם מנה"פ, שלב, סוג וסיכון שנקבעים מהקובץ. פרויקט חדש בקובץ מתווסף ללקחים מעצמו.
 
 ## 1. החלטות הבעלים (2026-10-17)
@@ -17,6 +17,7 @@
 | LP-D8 | "לקראת ביצוע" → בחירת קבלן [4]. "הסכם- אגירת אנרגיה" = פרויקט בביצוע → [5, 6]. |
 | LP-D9 | מנה"פ לא מקושר בפרויקט חדש → פרופיל placeholder "טרם שויך" (`is_login=false`). |
 | LP-D10 | שינוי שם בקובץ מעדכן את `lessons.projects.name` בלבד; `lessons.project_name` של לקחים קיימים לא נוגעים. |
+| LP-D11 | "הסכם- אגירת אנרגיה" עובר גם בדפוסים: מגזר ניהול פרויקטים → **מגזר ביצוע** (`stage_sectors.py`). |
 
 ## 2. מה קיים היום (נבדק בקוד)
 
@@ -90,7 +91,9 @@ flowchart TD
 ## 6. שלבי ביצוע
 
 ### L0 — סכמה (S)
-- `lessons.projects`: `ADD COLUMN IF NOT EXISTS shan_active boolean`, `shan_synced_at timestamptz`, `station_type_set boolean NOT NULL DEFAULT false`. הכול ב-`lessons_schema.py` (schema `lessons` בלבד).
+- `lessons.projects`: `ADD COLUMN IF NOT EXISTS shan_active boolean`, `shan_synced_at timestamptz`, `station_type_set boolean NOT NULL DEFAULT true`. הכול ב-`lessons_schema.py` (schema `lessons` בלבד).
+
+**L0 כפי שנבנה:** `DEFAULT true`, כי כל פרויקט קיים או ידני הוגדר ע"י אדם. הסנכרון (L1/L3) כותב `false` במפורש בפרויקטים שהוא יוצר. הייבוא החוזר משחזר את שלוש העמודות, ו**נעצר לפני כתיבה** אם יש פרויקט שקיים רק במודול (`local_only_projects`; בבדיקה היבשה הוא מדווח ב-`local_projects`). "הסכם- אגירת אנרגיה" עבר למגזר ביצוע ב-`stage_sectors.py` (LP-D11).
 - `UNIQUE` חלקי על `shan_project_identifier WHERE NOT NULL`, כדי שפרויקט קובץ אחד לא יקושר לשני פרויקטי לקחים.
 - `mobility` ב-`ProjectType` + label "ניידות" ב-UI. צריך לבדוק כל `switch`/`Record` על `ProjectType`, וגם את פרומפט ה-AI של הלקחים.
 
@@ -124,6 +127,6 @@ flowchart TD
 - ה-DDL לא נוגע ב-`public` (הטסט הקיים).
 
 ## 8. פתוח / סיכונים
-1. **`stage_sectors.py` לא משתנה:** שם "הסכם- אגירת אנרגיה" שייך היום למגזר ניהול פרויקטים. LP-D8 חל רק על מפת הלקחים. העברתו לביצוע בדפוסים תעביר פרויקטים בין מגזרים, וזו החלטה נפרדת.
-2. **ייבוא חוזר מהמערכת הישנה** (`lessons_import`) עושה TRUNCATE ל-`projects` ומשחזר רק את `shan_project_identifier`. צריך להרחיב את השחזור לשדות החדשים (`shan_active`, `station_type_set`) ולפרויקטים שנוצרו מהקובץ ואינם במקור, אחרת הם נמחקים.
+1. ~~`stage_sectors.py`~~ — הוחלט (LP-D11).
+2. ~~ייבוא חוזר מוחק פרויקטים מקומיים~~ — נחסם ב-L0. **שים לב:** הייבוא מחליף גם את `lessons.lessons`, כך שלקח שנכתב במודול אחרי ההגירה נמחק בייבוא חוזר. זה היה נכון גם לפני התוכנית הזו. אם יש פרויקטים מקומיים, החסימה תופעל כבר היום.
 3. המודול עובר PR עם merge אוטומטי ב-CI ירוק (CLAUDE.md), ואחריו בדיקת deploy.

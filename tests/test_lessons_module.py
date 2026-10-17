@@ -1289,3 +1289,20 @@ def test_drafts_stay_with_their_creator():
     assert "initialLessonState(users, lesson.assignedTo)" in ctx
     assert "lessons: visibleLessons," in ctx
     assert "isVisibleLesson(l, currentUser.id)" in ctx
+
+
+def test_projects_master_link_columns_and_unique_identifier():
+    """PLAN-lessons-projects.md L0: link state columns + one lessons project per file project."""
+    stmts = ls.SCHEMA_STATEMENTS
+    for col in ("shan_active boolean", "shan_synced_at timestamptz",
+                "station_type_set boolean NOT NULL DEFAULT true"):
+        assert f"ALTER TABLE lessons.projects ADD COLUMN IF NOT EXISTS {col}" in stmts
+    uq = next(s for s in stmts if "uq_lessons_projects_shan_identifier" in s)
+    assert uq.startswith("CREATE UNIQUE INDEX IF NOT EXISTS")
+    assert "WHERE shan_project_identifier IS NOT NULL" in uq
+
+
+def test_import_finds_projects_only_the_module_has():
+    assert li.local_only_projects([1, 2, 3], [1, 2, 3]) == []
+    assert li.local_only_projects([1, 2], [5, 1, 4, 2]) == [4, 5]
+    assert li.local_only_projects([], []) == []
