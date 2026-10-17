@@ -12,6 +12,7 @@ import { riskColors, riskLabels } from "@/lib/constants";
 import { useActionRequired } from "@/hooks/useActionRequired";
 import { supabase } from "@/integrations/supabase/client";
 import SearchableSelect from "@/components/ui/searchable-select";
+import { isLinked, missingLabel, projectProblems } from "@/lib/projectProblems";
 
 interface SiteOption {
   label: string;
@@ -30,6 +31,7 @@ const Projects = () => {
   const [stationFilter, setStationFilter] = useState<string>("all");
   const [stageFilter, setStageFilter] = useState<string>("all");
   const [siteFilter, setSiteFilter] = useState<string>("all");
+  const [dataFilter, setDataFilter] = useState<string>("all");
   const [sortOrder, setSortOrder] = useState<string>("asc");
   const [siteOptions, setSiteOptions] = useState<SiteOption[]>([]);
 
@@ -84,6 +86,7 @@ const Projects = () => {
           if (!activeStages.includes(Number(stageFilter))) return false;
         }
         if (siteFilter !== "all" && p.site !== siteFilter) return false;
+        if (dataFilter === "missing" && projectProblems(p).length === 0) return false;
         return true;
       })
       .sort((a, b) => {
@@ -95,9 +98,9 @@ const Projects = () => {
         const direction = sortOrder === "asc" ? 1 : -1;
         return direction * a.name.localeCompare(b.name, "he");
       });
-  }, [baseProjects, searchTerm, riskFilter, typeFilter, stationFilter, stageFilter, siteFilter, sortOrder, projectNeedsAction]);
+  }, [baseProjects, searchTerm, riskFilter, typeFilter, stationFilter, stageFilter, siteFilter, dataFilter, sortOrder, projectNeedsAction]);
 
-  const hasActiveFilters = searchTerm.trim() !== "" || riskFilter !== "all" || typeFilter !== "all" || stationFilter !== "all" || stageFilter !== "all" || siteFilter !== "all";
+  const hasActiveFilters = searchTerm.trim() !== "" || riskFilter !== "all" || typeFilter !== "all" || stationFilter !== "all" || stageFilter !== "all" || siteFilter !== "all" || dataFilter !== "all";
 
   const clearFilters = () => {
     setSearchTerm("");
@@ -106,6 +109,7 @@ const Projects = () => {
     setStationFilter("all");
     setStageFilter("all");
     setSiteFilter("all");
+    setDataFilter("all");
   };
 
   const getManagerName = (managerId: string) => {
@@ -193,6 +197,13 @@ const Projects = () => {
           ]}
         />
 
+        <SearchableSelect value={dataFilter} onValueChange={setDataFilter} className="w-[150px] h-9 text-sm" placeholder="נתונים"
+          options={[
+            { value: "all", label: "כל הנתונים" },
+            { value: "missing", label: `חסרי נתונים (${baseProjects.filter((p) => projectProblems(p).length > 0).length})` },
+          ]}
+        />
+
         <SearchableSelect value={siteFilter} onValueChange={setSiteFilter} className="w-[160px] h-9 text-sm" placeholder="אתר"
           options={[
             { value: "all", label: "כל האתרים" },
@@ -257,7 +268,13 @@ const Projects = () => {
                             +{hiddenStages.length}
                           </Badge>
                         )}
-                        <span className="text-xs text-muted-foreground">· {projectTypeLabels[project.projectType]} · {stationTypeLabels[project.stationType]}</span>
+                        <span className="text-xs text-muted-foreground">· {projectTypeLabels[project.projectType]} · {project.stationTypeSet ? stationTypeLabels[project.stationType] : "סוג תחנה לא נבחר"}</span>
+                        {isLinked(project) && <span className="text-[11px]" title="מקושר לקובץ המאסטר">🔗</span>}
+                        {projectProblems(project).length > 0 && (
+                          <Badge variant="outline" className="bg-warning/10 text-warning border-warning/30 text-[11px] py-0 px-1.5">
+                            {missingLabel(projectProblems(project))}
+                          </Badge>
+                        )}
                       </div>
                     </div>
                   </div>

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { SUPABASE_URL } from "@/integrations/supabase/client";
 
-import { UserCog, Link2, FolderKanban, Pencil, Trash2, Wrench, BookOpen, Plus, Brain, Loader2, Tag, MessageSquare, CheckCircle, History, Settings, Lightbulb, Newspaper } from "lucide-react";
+import { UserCog, Link2, FolderKanban, Pencil, Trash2, Wrench, BookOpen, Plus, Brain, Loader2, Tag, MessageSquare, CheckCircle, History, Settings, Lightbulb, Newspaper, ClipboardList } from "lucide-react";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -26,6 +26,8 @@ import NewsletterPanel from "@/components/admin/NewsletterPanel";
 import UserLinksPanel from "@/components/admin/UserLinksPanel";
 import PeoplePanel from "@/components/admin/PeoplePanel";
 import ProjectLinksPanel from "@/components/admin/ProjectLinksPanel";
+import ProjectDataPanel from "@/components/admin/ProjectDataPanel";
+import { isLinked } from "@/lib/projectProblems";
 import SiteCombobox from "@/components/SiteCombobox";
 import SearchableSelect from "@/components/ui/searchable-select";
 
@@ -40,7 +42,7 @@ const Admin = () => {
   const [searchParams] = useSearchParams();
   const feedbackIdFromQuery = Number(searchParams.get("feedbackId"));
   const highlightedFeedbackId = Number.isInteger(feedbackIdFromQuery) ? feedbackIdFromQuery : null;
-  const requestedTab = searchParams.get("tab") === "feedback" || highlightedFeedbackId ? "feedback" : searchParams.get("tab") === "users" ? "users" : searchParams.get("tab") === "project_links" ? "project_links" : "people";
+  const requestedTab = searchParams.get("tab") === "feedback" || highlightedFeedbackId ? "feedback" : searchParams.get("tab") === "users" ? "users" : searchParams.get("tab") === "project_links" ? "project_links" : searchParams.get("tab") === "project_data" ? "project_data" : "people";
   const { currentUser, projects, equipment, addEquipment, updateEquipment, removeEquipment, renameCategory, deleteCategory, lessons, users, updateUser, addUser, deleteUser, deleteProject, addProject, updateProject, updateProjectEquipment, lessonCategories, addLessonCategory, renameLessonCategory, deleteLessonCategory, feedbacks, updateFeedbackStatus, deleteFeedback } = useUser();
   const [activeTab, setActiveTab] = useState(requestedTab);
   // The move from the old system: done once no person from it is left unlinked.
@@ -208,19 +210,28 @@ const Admin = () => {
     setProjectDialogOpen(true);
   };
 
-  const saveProject = () => {
+  const saveProject = async () => {
     if (!projName.trim() || !projManager) return;
     if (editingProjectId !== null) {
-      updateProject(editingProjectId, {
-        name: projName.trim(),
-        projectType: projType,
-        stationType: projStation,
-        risk: projRisk,
-        managerId: projManager,
-        site: projSite || undefined,
-      });
-      updateProjectEquipment(editingProjectId, projEquipment);
-      toast({ title: "הפרויקט עודכן ✓" });
+      // Linked to the master file: name / type / risk / manager come from the file (L3).
+      const linked = isLinked(projects.find((p) => p.id === editingProjectId) ?? {});
+      try {
+        await updateProject(editingProjectId, linked
+          ? { stationType: projStation, site: projSite || undefined }
+          : {
+              name: projName.trim(),
+              projectType: projType,
+              stationType: projStation,
+              risk: projRisk,
+              managerId: projManager,
+              site: projSite || undefined,
+            });
+        await updateProjectEquipment(editingProjectId, projEquipment);
+      } catch (e) {
+        toast({ title: "השמירה נכשלה", description: e instanceof Error ? e.message : String(e), variant: "destructive" });
+        return;
+      }
+      toast({ title: linked ? "הפרויקט עודכן ✓ (שם, סוג, סיכון ומנה״פ נקבעים מקובץ המאסטר)" : "הפרויקט עודכן ✓" });
     } else {
       addProject({
         name: projName.trim(),
@@ -390,6 +401,12 @@ const Admin = () => {
               <span className="hidden sm:inline">קישור פרויקטים</span>
             </TabsTrigger>
           )}
+          {currentUser.role === "admin" && (
+            <TabsTrigger value="project_data" className="gap-1.5 text-xs sm:text-sm">
+              <ClipboardList className="w-4 h-4" />
+              <span className="hidden sm:inline">השלמת נתונים</span>
+            </TabsTrigger>
+          )}
           <TabsTrigger value="equipment" className="gap-1.5 text-xs sm:text-sm">
             <Wrench className="w-4 h-4" />
             <span className="hidden sm:inline">ציוד ונושאים</span>
@@ -447,6 +464,12 @@ const Admin = () => {
         <TabsContent value="users" className="mt-6">
           <UserLinksPanel users={users} projects={projects} onEdit={openEditUser} migrationDone={migrationDone} />
         </TabsContent>
+
+        {currentUser.role === "admin" && (
+          <TabsContent value="project_data" className="mt-6">
+            <ProjectDataPanel />
+          </TabsContent>
+        )}
 
         {currentUser.role === "admin" && (
           <TabsContent value="project_links" className="mt-6">
