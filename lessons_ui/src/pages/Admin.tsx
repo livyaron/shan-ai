@@ -25,6 +25,7 @@ import AdminLessonQualityTab from "@/components/AdminLessonQualityTab";
 import NewsletterPanel from "@/components/admin/NewsletterPanel";
 import UserLinksPanel from "@/components/admin/UserLinksPanel";
 import PeoplePanel from "@/components/admin/PeoplePanel";
+import ProjectLinksPanel from "@/components/admin/ProjectLinksPanel";
 import SiteCombobox from "@/components/SiteCombobox";
 import SearchableSelect from "@/components/ui/searchable-select";
 
@@ -39,7 +40,7 @@ const Admin = () => {
   const [searchParams] = useSearchParams();
   const feedbackIdFromQuery = Number(searchParams.get("feedbackId"));
   const highlightedFeedbackId = Number.isInteger(feedbackIdFromQuery) ? feedbackIdFromQuery : null;
-  const requestedTab = searchParams.get("tab") === "feedback" || highlightedFeedbackId ? "feedback" : searchParams.get("tab") === "users" ? "users" : "people";
+  const requestedTab = searchParams.get("tab") === "feedback" || highlightedFeedbackId ? "feedback" : searchParams.get("tab") === "users" ? "users" : searchParams.get("tab") === "project_links" ? "project_links" : "people";
   const { currentUser, projects, equipment, addEquipment, updateEquipment, removeEquipment, renameCategory, deleteCategory, lessons, users, updateUser, addUser, deleteUser, deleteProject, addProject, updateProject, updateProjectEquipment, lessonCategories, addLessonCategory, renameLessonCategory, deleteLessonCategory, feedbacks, updateFeedbackStatus, deleteFeedback } = useUser();
   const [activeTab, setActiveTab] = useState(requestedTab);
   // The move from the old system: done once no person from it is left unlinked.
@@ -383,6 +384,12 @@ const Admin = () => {
             <FolderKanban className="w-4 h-4" />
             <span className="hidden sm:inline">פרויקטים</span>
           </TabsTrigger>
+          {currentUser.role === "admin" && (
+            <TabsTrigger value="project_links" className="gap-1.5 text-xs sm:text-sm">
+              <Link2 className="w-4 h-4" />
+              <span className="hidden sm:inline">קישור פרויקטים</span>
+            </TabsTrigger>
+          )}
           <TabsTrigger value="equipment" className="gap-1.5 text-xs sm:text-sm">
             <Wrench className="w-4 h-4" />
             <span className="hidden sm:inline">ציוד ונושאים</span>
@@ -440,6 +447,12 @@ const Admin = () => {
         <TabsContent value="users" className="mt-6">
           <UserLinksPanel users={users} projects={projects} onEdit={openEditUser} migrationDone={migrationDone} />
         </TabsContent>
+
+        {currentUser.role === "admin" && (
+          <TabsContent value="project_links" className="mt-6">
+            <ProjectLinksPanel />
+          </TabsContent>
+        )}
 
         <TabsContent value="projects" className="mt-6">
           <Card className="border-0 shadow-sm">
