@@ -314,3 +314,13 @@ def test_the_place_name_outweighs_generic_words(name, expected):
 def test_hebrew_prefix_letter_still_matches_the_word():
     idf = lpl.idf_weights([c["name"] for c in REAL])
     assert lpl.weighted_score("גליל", "הגליל", idf) > 90
+
+
+def test_a_project_linked_elsewhere_is_shown_but_never_recommended():
+    """2026-10-17: the right file project was hidden because another lessons
+    project (a duplicate) held it — show it, offer a merge, never recommend a link."""
+    cands = [{**REAL[0], "linked_to": 7, "linked_name": "תחמש גבעת אורן"}, *REAL[1:]]
+    out = lpl.suggest("הוספת שנאי רביעי תחמש גבעת אורן", cands)
+    assert out[0]["identifier"] == "WBE-001" and out[0]["linked_to"] == 7
+    assert not out[0]["recommended"]
+    assert not any(o["recommended"] for o in out)

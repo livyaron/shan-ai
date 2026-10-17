@@ -214,7 +214,10 @@ def suggest(name: str, candidates: list[dict[str, Any]], limit: int = SUGGESTION
            for _, sc, idm, mgr, c in scored[:limit]]
     if out:
         top, second = out[0], (out[1]["score"] if len(out) > 1 else 0)
-        top["recommended"] = (top["id_match"]
+        # A file project already linked to ANOTHER lessons project is shown (so a
+        # duplicate is visible — 2026-10-17) but is never the recommendation:
+        # the answer there is a merge, not a link.
+        top["recommended"] = not top.get("linked_to") and (top["id_match"]
                               or (top["manager_match"] and top["score"] >= REC_MANAGER_MIN_SCORE
                                   and not any(o["manager_match"] for o in out[1:]))
                               or (top["score"] >= REC_NAME_MIN_SCORE and top["score"] - second >= REC_NAME_MARGIN)
@@ -392,7 +395,12 @@ async def payload(session) -> dict[str, Any]:
     projects = await _lessons_projects(session)
     by_ident = {m["identifier"]: m for m in masters}
     linked = {p["shan_project_identifier"]: p for p in projects if p["shan_project_identifier"]}
-    free = [m for m in masters if m["identifier"] not in linked]
+    names_by_id = {p["id"]: p["name"] for p in projects}
+    # Suggestions run over EVERY active file project; one linked elsewhere carries
+    # who holds it, and the panel offers a merge instead of a link.
+    pool = [{**m, "linked_to": linked[m["identifier"]]["id"] if m["identifier"] in linked else None,
+             "linked_name": names_by_id.get(linked[m["identifier"]]["id"]) if m["identifier"] in linked else None}
+            for m in masters]
     alias_users, profile_of_user = await _manager_chain(session)
     plan = creation_plan(masters, set(linked), await _levels(session), alias_users, profile_of_user)
     profile_names = {r[0]: r[1] for r in (await session.execute(text(
@@ -423,13 +431,12 @@ async def payload(session) -> dict[str, Any]:
             "linked": by_ident.get(ident) if ident else None,
             "linked_missing": bool(ident and ident not in by_ident),
             "decision": p["shan_link_decision"],
-            "suggestions": [] if ident else suggest(p["name"], free, manager=p["manager_name"]),
+            "suggestions": [] if ident else suggest(p["name"], pool, manager=p["manager_name"]),
         })
     open_rows = undecided(projects)
     return {
         "projects": rows,
-        "masters": [{**m, "linked_to": linked[m["identifier"]]["id"] if m["identifier"] in linked else None}
-                    for m in masters],
+        "masters": pool,
         "summary": {
             "lessons_total": len(projects),
             "linked": len(linked),

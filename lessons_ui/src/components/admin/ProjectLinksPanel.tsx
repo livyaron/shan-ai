@@ -13,9 +13,10 @@ import { toast } from "@/hooks/use-toast";
 import {
   defaultPick,
   filterLinkRows,
-  freeMasters,
+  heldElsewhere,
   MANAGER_PROBLEM_LABELS,
   managerNeedsAnswer,
+  manualOptions,
   masterLabel,
   rowState,
   SEARCH_REASON_LABELS,
@@ -112,6 +113,13 @@ const ProjectLinksPanel = () => {
     setMgrUser(row.manager_check?.suggest_user_id ? String(row.manager_check.suggest_user_id) : "");
   };
 
+  /** The file project is held by another lessons project: offer to merge this one into it. */
+  const startMerge = (r: LinkRow, target: number) => {
+    setMergeSource(String(r.id));
+    setMergeTarget(String(target));
+    setConfirmMerge(true);
+  };
+
   /** Link, then ask about the manager at once when the file and the module disagree. */
   const linkTo = async (r: LinkRow, identifier: string) => {
     const res = await act(`l${r.id}`, { action: "link", project_id: r.id, identifier }, `${r.name} קושר ✓`);
@@ -200,7 +208,7 @@ const ProjectLinksPanel = () => {
           {visible.length === 0 && <p className="text-sm text-muted-foreground text-center py-6">אין פרויקטים להצגה</p>}
           {visible.map((r) => {
             const state = rowState(r);
-            const options = freeMasters(data.masters, r.id).map((m) => ({ value: m.identifier, label: masterLabel(m) }));
+            const options = manualOptions(data.masters, r.id);
             return (
               <div key={r.id}
                 className={`flex flex-col gap-2 p-3 rounded-xl ${state === "open" ? "bg-warning/5 ring-1 ring-warning/30" : "bg-muted/50"}`}>
@@ -251,6 +259,21 @@ const ProjectLinksPanel = () => {
                       <div className="text-xs text-muted-foreground">הצעות מקובץ המאסטר — בחר אחת ולחץ "קשר":</div>
                       {r.suggestions.map((sg) => {
                         const on = choice === sg.identifier;
+                        if (heldElsewhere(sg, r.id) && sg.linked_to != null) {
+                          const holder = sg.linked_to;
+                          return (
+                            <button key={sg.identifier} type="button" disabled={busy !== null}
+                              onClick={() => startMerge(r, holder)}
+                              className="w-full text-start flex flex-wrap items-center gap-2 rounded-lg border border-dashed border-muted-foreground/40 bg-muted/40 px-3 py-1.5 text-xs text-muted-foreground hover:bg-muted">
+                              <GitMerge className="w-3.5 h-3.5" />
+                              <span className="font-medium">{masterLabel(sg)}</span>
+                              <span>({sg.score}%)</span>
+                              <Badge variant="outline" className="h-5 px-1.5">
+                                כבר מקושר ל"{(sg.linked_name ?? "").trim()}" — כפילות? לחץ לאיחוד
+                              </Badge>
+                            </button>
+                          );
+                        }
                         return (
                           <button key={sg.identifier} type="button" disabled={busy !== null}
                             onClick={() => setPicked((m) => ({ ...m, [r.id]: on ? "" : sg.identifier }))}
@@ -283,7 +306,11 @@ const ProjectLinksPanel = () => {
                     <>
                       <SearchableSelect
                         value=""
-                        onValueChange={(v) => linkTo(r, v)}
+                        onValueChange={(v) => {
+                          const m = data.masters.find((x) => x.identifier === v);
+                          if (m && heldElsewhere(m, r.id) && m.linked_to != null) startMerge(r, m.linked_to);
+                          else linkTo(r, v);
+                        }}
                         options={options}
                         placeholder="אף הצעה לא נכונה? בחר ידנית מהקובץ…"
                         searchable
