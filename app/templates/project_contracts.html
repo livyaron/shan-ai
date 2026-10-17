@@ -151,7 +151,6 @@
         .dots.done i.on { background: var(--st-good); }
         .dots.stop i.on { background: var(--ph-stopped); }
         .stg { font-size: .8rem; color: var(--text-1); white-space: nowrap; }
-        .money { font-family: var(--num); font-variant-numeric: tabular-nums; font-weight: 700; white-space: nowrap; }
 
         /* detail */
         .det { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 1.2rem; padding-top: .7rem; }
@@ -221,7 +220,7 @@
         <button class="kpi" data-filter="group:signed" style="--edge: var(--st-good)"><div class="v">{{ c.signed }}</div><div class="l">הזמנה חתומה</div><div class="s">ההליך הסתיים</div></button>
         <button class="kpi" data-filter="group:frozen" style="--edge: var(--ph-stopped)"><div class="v">{{ c.frozen }}</div><div class="l">מוקפאות</div><div class="s">יומן או מקרא הצבעים</div></button>
         <button class="kpi" data-filter="risk" style="--edge: var(--st-critical)"><div class="v">{{ a.at_risk | length }}</div><div class="l">בסיכון לוח זמנים</div><div class="s">{{ a.overdue | length }} כבר עברו את יעד העלייה לקרקע</div></button>
-        <button class="kpi" data-filter="phase:contracted" style="--edge: var(--purple)"><div class="v">{{ '%.1f' | format(a.awarded_total / 1000000) }}<small> מ׳ ₪</small></div><div class="l">סכום הזכיות ביומן</div><div class="s">{{ a.awarded_n }} עבודות עם סכום · חציון {{ a.median_days_to_award if a.median_days_to_award is not none else '—' }} י׳ לזכייה</div></button>
+        <button class="kpi" data-filter="" style="--edge: var(--purple)"><div class="v">{{ a.median_days_to_award if a.median_days_to_award is not none else '—' }}<small> ימים</small></div><div class="l">חציון מרכש ועד זכייה</div><div class="s">n={{ a.n_days_to_award }}{{ ' · מדגם קטן' if a.n_days_to_award < 5 }}</div></button>
     </div>
 
     <div class="grid g2">
@@ -370,7 +369,7 @@
                 <th>הצעד הבא</th>
                 <th><button data-sort="runway">היתר / עלייה לקרקע</button></th>
                 <th><button data-sort="slip">יעד חשמול</button></th>
-                <th><button data-sort="amount">זוכה · סכום</button></th>
+                <th>זוכה</th>
             </tr></thead>
             {% for r in rows %}
             {% set risk = 'overdue' if r.runway_days is not none and r.runway_days < 0 else ('soon' if r.runway_days is not none and r.runway_days <= soon_days else '') %}
@@ -378,7 +377,7 @@
                    data-stage="{{ r.stage }}" data-stage-i="{{ r.stage_index }}" data-topics="{{ r.topics | join(' ') }}" data-risk="{{ risk }}"
                    data-slip="{{ '1' if r.slip_months is not none and r.slip_months > 0.5 else '' }}"
                    data-transfer="{{ r.transfer or '' }}" data-runway="{{ r.runway_days if r.runway_days is not none else '' }}"
-                   data-slipv="{{ r.slip_months if r.slip_months is not none else '' }}" data-amount="{{ r.award_amount or '' }}"
+                   data-slipv="{{ r.slip_months if r.slip_months is not none else '' }}"
                    data-q="{{ [r.name, r.ident, r.manager, r.procedure, r.status, r.contractor or '', r.codes | join(' ')] | join(' ') | lower }}">
             <tr>
                 <td class="mono muted">{{ r.n }}</td>
@@ -422,8 +421,7 @@
                     {% if r.record_gap_days is not none and (r.record_gap_days | abs) > 15 %}<div class="sub1" title="יעד מסתמן בדוח השבועי: {{ r.record_fc | il_date }}">≠ בדוח השבועי: {{ r.record_fc | il_date }}</div>{% endif %}
                 </td>
                 <td>{% if r.contractor %}<div>{{ r.contractor }}</div>{% endif %}
-                    {% if r.award_amount %}<div class="money">{{ '{:,}'.format(r.award_amount) }} ₪</div>{% elif r.package_amount %}<div class="muted" title="סכום חבילת המסירה / הדרישה — אומדן, לא זכייה">אומדן {{ '{:,}'.format(r.package_amount) }} ₪</div>{% endif %}
-                    {% if not r.contractor and not r.award_amount and not r.package_amount %}<span class="muted">—</span>{% endif %}</td>
+                    {% if not r.contractor %}<span class="muted">—</span>{% endif %}</td>
             </tr>
             <tr class="detail" hidden><td colspan="10">
                 <div class="det">
@@ -449,7 +447,6 @@
                             <dt>{{ p.columns.forecast or 'חשמול מסתמן' }}</dt><dd>{{ r.forecast.text or '—' }}</dd>
                             {% if r.record_fc %}<dt>מסתמן בדוח השבועי</dt><dd>{{ r.record_fc | il_date }}</dd>{% endif %}
                             {% if r.order_no %}<dt>מס׳ הזמנה</dt><dd class="mono">{{ r.order_no }}</dd>{% endif %}
-                            {% if r.package_amount %}<dt>חבילת מסירה / דרישה</dt><dd>{{ '{:,}'.format(r.package_amount) }} ₪</dd>{% endif %}
                             <dt>שלבים שהיומן מוכיח</dt><dd>{% for k in r.proved %}{{ stage_labels[k] }}{{ ' · ' if not loop.last }}{% else %}—{% endfor %}</dd>
                         </dl>
                     </div>
@@ -527,7 +524,7 @@
     });
 
     var keys = { n: ["n", true], name: ["name", false], family: ["family", false], transfer: ["transfer", false],
-                 stage: ["stageI", true], runway: ["runway", true], slip: ["slipv", true], amount: ["amount", true] };
+                 stage: ["stageI", true], runway: ["runway", true], slip: ["slipv", true] };
     tbl.querySelectorAll("th button[data-sort]").forEach(function (btn) {
         btn.addEventListener("click", function () {
             var spec = keys[btn.dataset.sort], dir = btn.dataset.dir === "asc" ? "desc" : "asc";

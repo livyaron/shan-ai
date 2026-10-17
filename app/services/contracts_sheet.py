@@ -9,8 +9,9 @@ no model, no number invented:
     events      the diary split at each "ב<DD.MM>" → dated steps
     milestones  `LADDER` — the furthest step the text says already HAPPENED
                 (a "צפי ל…" / "נקבע ל…" phrase is a plan, never a step reached)
-    money       an amount after a received award = the award; after
-                "חבילת מסירה" / "דרישה" = the package estimate
+    no money    every amount in the sheet (award, package, threshold) is redacted
+                as it is read — and again on every read of a stored payload —
+                so no financial figure is stored or shown (user, 2026-10-17)
     runway      days from the report date to the ground-entry target, for a
                 work that has no signed order yet — the page's headline risk
 
@@ -92,12 +93,13 @@ _FROZEN = re.compile(r"מוקפא|להקפיא|בהקפאה|הקפאת\s+הטי�
 _CANCELLED = re.compile(r"בוטל\S*\s+ה(?:הליך|מכרז)|ביטול\s+ה(?:הליך|מכרז)")
 _POSTPONED = re.compile(r"נדח\S*|לדחות|דחיית|ביקש\S*\s+לדחות")
 _EVENT = re.compile(r"(?<![\u0590-\u05FF\w])ב\s?(\d{1,2})\.(\d{1,2})(?:\.(\d{2,4}))?(?![\d/])")
-_AMOUNT = re.compile(r"(?:(?:בסך|סך|בסכום)\s*(?:של\s*)?(?P<a>\d{1,3}(?:,\d{3})+|\d{4,}))"
-                     r"|(?:(?P<b>\d{1,3}(?:,\d{3})+)\s*(?:₪|ש\S?ח))")
-_AWARD_AT = re.compile(r"(?:מכתב|הודעת)\s+זכי\S*")
-_PACKAGE_AT = re.compile(r"חבילת\s+(?:ה)?מסירה|דרישה")
+_CURRENCY = r"(?:₪|ש\S?ח|אש\S?ח|מלש\S?ח|מיליון|מליון|אלף\s*(?:₪|ש\S?ח))"
+_MONEY = re.compile(
+    r"(?:בסך|סך|בסכום|בעלות|בהיקף)\s*(?:של\s*)?(?:כ-?\s*)?\d[\d,.]*\s*" + _CURRENCY + r"?"
+    r"|\d[\d,.]*\s*" + _CURRENCY + r"|₪\s*\d[\d,.]*")
+REDACTED = "[סכום הוסר]"
 _CONTRACTOR = re.compile(r"(?:ע\S?ש|לקבלן|לחתימת\s+(?:ה)?קבלן)\s+[\"״]?(?P<n>[^\"״,;()]{2,40})")
-_NAME_END = re.compile(r"\s+(?:בסך|מס|הזמנה|שהחזיר|ב?\d)|\.(?=\s|[\u0590-\u05FF]{2})|\s*$")
+_NAME_END = re.compile(r"\s*\[|\s+(?:בסך|מס|הזמנה|שהחזיר|ב?\d)|\.(?=\s|[\u0590-\u05FF]{2})|\s*$")
 _ORDER_NO = re.compile(r"(?<!\d)(4\d{9})(?!\d)")
 _CODE = re.compile(r"\bW[A-Z]{2}-\d[\d-]*\d")
 _SHEET_DATE = re.compile(r"^\s*(\d{1,2})[./](\d{1,2})[./](\d{2,4})\s*$")
@@ -127,8 +129,28 @@ def _clean(v: Any) -> str:
         return v.strftime("%d/%m/%Y")
     if isinstance(v, float) and v.is_integer():
         v = int(v)
-    s = " ".join(str(v).replace("\u200b", "").split())
+    s = redact(" ".join(str(v).replace("\u200b", "").split()))
     return s if len(s) <= CELL_CHARS else s[:CELL_CHARS - 1] + "…"
+
+
+def redact(text: str) -> str:
+    """Every money figure in a cell → REDACTED. Amounts never leave the parser."""
+    return _MONEY.sub(REDACTED, text) if text else text
+
+
+_MONEY_KEYS = ("award_amount", "package_amount", "awarded_total", "awarded_n")
+
+
+def redact_payload(v: Any) -> Any:
+    """A stored payload with every amount removed — payloads saved before the
+    redaction rule (2026-10-17) still carry them, so every read goes through this."""
+    if isinstance(v, dict):
+        return {k: redact_payload(x) for k, x in v.items() if k not in _MONEY_KEYS}
+    if isinstance(v, list):
+        return [redact_payload(x) for x in v]
+    if isinstance(v, str):
+        return redact(v)
+    return v
 
 
 def _as_date(v: Any) -> datetime.date | None:
@@ -256,19 +278,6 @@ def _next_planned(text: str, as_of: datetime.date, stage: str) -> dict | None:
         return None
     d, what = min(found)
     return {"what": what, "date": d.isoformat()}
-
-
-def _money(text: str) -> tuple[int | None, int | None]:
-    """(award amount, package estimate) — by what the amount follows."""
-    award = package = None
-    for m in _AMOUNT.finditer(text):
-        value = int((m.group("a") or m.group("b")).replace(",", ""))
-        before = text[max(0, m.start() - 90): m.start()]
-        if award is None and _AWARD_AT.search(before):
-            award = value
-        elif package is None and _PACKAGE_AT.search(before):
-            package = value
-    return award, package
 
 
 def _contractor(text: str) -> str | None:
@@ -427,7 +436,6 @@ def parse_rows(rows: list[list], fills: list[list] | None = None, sheet: str = "
         stage, proved = _reached(status, as_of, transfer)
         marks = sorted({legend[c] for c in f if c and c in legend})
         frozen = bool(_FROZEN.search(status)) or any("הקפא" in m for m in marks)
-        award, package = _money(status + " " + it["name"])
         g = _ground(cell(r, "ground"), as_of)
         plan, fc = _target(cell(r, "plan")), _target(cell(r, "forecast"))
         # the newest step already behind the writer (a dated plan ahead is not an update)
@@ -489,8 +497,6 @@ def parse_rows(rows: list[list], fills: list[list] | None = None, sheet: str = "
             "frozen": frozen,
             "marks": marks,
             "postponed": bool(_POSTPONED.search(status)),
-            "award_amount": award,
-            "package_amount": package,
             "contractor": _contractor(status) if stage in (AWARD, ORDER) else None,
             "order_no": (_ORDER_NO.findall(status) or [None])[-1],
             "ground": g,
@@ -567,7 +573,6 @@ def analyse(payload: dict) -> dict:
             topics.append({"key": key, "label": label, "count": len(hit)})
     topics.sort(key=lambda t: -t["count"])
     slips = [r for r in rows if r["slip_months"] is not None and r["slip_months"] > 0.5]
-    awarded_total = sum(r["award_amount"] or 0 for r in rows if r["stage"] in (AWARD, ORDER))
     not_sent = [r for r in live if not r["transfer"] and not r["outside_procurement"]]
 
     # findings — each one a rule over the rows above, with the filter that shows its rows
@@ -630,8 +635,6 @@ def analyse(payload: dict) -> dict:
         "families": sorted(families.values(), key=lambda f: -f["total"]),
         "topics": topics,
         "slips": sorted(slips, key=lambda r: -r["slip_months"]),
-        "awarded_total": awarded_total,
-        "awarded_n": sum(1 for r in rows if r["award_amount"] and r["stage"] in (AWARD, ORDER)),
         "postponed": sum(1 for r in live if r["postponed"]),
         "outside": sum(1 for r in rows if r["outside_procurement"]),
         "converted": sum(1 for r in rows if r["family"] == "פומבי (הוסב)"),
@@ -736,4 +739,4 @@ async def latest(session: AsyncSession) -> dict | None:
     if not row:
         return None
     payload, created = row
-    return {**payload, "loaded_at": created.isoformat() if created else None}
+    return {**redact_payload(payload), "loaded_at": created.isoformat() if created else None}
