@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AlertTriangle, CheckCircle, FolderPlus, GitMerge, Link2, Link2Off, Loader2, MapPin } from "lucide-react";
+import { AlertTriangle, CheckCircle, FolderPlus, GitMerge, Link2, Link2Off, Loader2, MapPin, Star } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -11,6 +11,7 @@ import SearchableSelect from "@/components/ui/searchable-select";
 import { SUPABASE_URL } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 import {
+  defaultPick,
   filterLinkRows,
   freeMasters,
   MANAGER_PROBLEM_LABELS,
@@ -35,8 +36,10 @@ const ProjectLinksPanel = () => {
   const [query, setQuery] = useState("");
   const [onlyOpen, setOnlyOpen] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
-  const [merging, setMerging] = useState<LinkRow | null>(null);
+  const [picked, setPicked] = useState<Record<number, string>>({});
+  const [mergeSource, setMergeSource] = useState("");
   const [mergeTarget, setMergeTarget] = useState("");
+  const [confirmMerge, setConfirmMerge] = useState(false);
   const [confirmCreate, setConfirmCreate] = useState(false);
 
   const load = useCallback(async () => {
@@ -103,12 +106,12 @@ const ProjectLinksPanel = () => {
   }
 
   const s = data.summary;
-  const mergeOptions = merging
-    ? data.projects.filter((p) => p.id !== merging.id).map((p) => ({
-        value: String(p.id),
-        label: `${p.name}${p.identifier ? " · מקושר לקובץ" : ""} (${p.lessons_count} לקחים)`,
-      }))
-    : [];
+  const projectOption = (p: LinkRow) => ({
+    value: String(p.id),
+    label: `${p.name}${p.identifier ? " · מקושר לקובץ" : ""} (${p.lessons_count} לקחים)`,
+  });
+  const source = data.projects.find((p) => String(p.id) === mergeSource);
+  const target = data.projects.find((p) => String(p.id) === mergeTarget);
 
   return (
     <div className="space-y-6">
@@ -144,8 +147,8 @@ const ProjectLinksPanel = () => {
             ))}
           </div>
           <p className="text-xs text-muted-foreground">
-            ההצעות מבוססות על דמיון שמות בלבד — שום דבר לא מקושר עד שלוחצים. "מזג" מעביר את הלקחים והמלצות היישום
-            לפרויקט אחר ומוחק את הכפול. "מקומי" = פרויקט שלא קיים בקובץ.
+            לכל פרויקט לקחים מוצגות עד 3 הצעות מקובץ המאסטר. ⭐ = המלצה ברורה (מזהה זהה בשם, או אותו מנה״פ) והיא
+            מסומנת מראש — שום דבר לא מקושר עד שלוחצים "קשר". אחוז = דמיון שמות בלבד. "מקומי" = פרויקט שלא קיים בקובץ.
           </p>
           <div className="flex flex-col sm:flex-row sm:items-center gap-3">
             <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="חיפוש לפי שם או מנה״פ"
@@ -185,19 +188,39 @@ const ProjectLinksPanel = () => {
                   )}
                 </div>
 
-                {state === "open" && r.suggestions.length > 0 && (
-                  <div className="flex flex-wrap gap-2">
-                    {r.suggestions.map((sg) => (
-                      <Button key={sg.identifier} size="sm" variant="outline" className="h-auto py-1 text-xs gap-1"
-                        disabled={busy !== null}
-                        onClick={() => act(`l${r.id}`, { action: "link", project_id: r.id, identifier: sg.identifier },
-                          `${r.name} קושר ✓`)}>
-                        <Link2 className="w-3 h-3" />
-                        {masterLabel(sg)} <span className="text-muted-foreground">({sg.score}%)</span>
+                {state === "open" && r.suggestions.length > 0 && (() => {
+                  const choice = picked[r.id] ?? defaultPick(r);
+                  return (
+                    <div className="space-y-1.5">
+                      <div className="text-xs text-muted-foreground">הצעות מקובץ המאסטר — בחר אחת ולחץ "קשר":</div>
+                      {r.suggestions.map((sg) => {
+                        const on = choice === sg.identifier;
+                        return (
+                          <button key={sg.identifier} type="button" disabled={busy !== null}
+                            onClick={() => setPicked((m) => ({ ...m, [r.id]: on ? "" : sg.identifier }))}
+                            className={`w-full text-start flex flex-wrap items-center gap-2 rounded-lg border px-3 py-1.5 text-xs transition-colors ${on ? "border-primary bg-primary/10 ring-1 ring-primary" : "border-border bg-background hover:bg-muted"}`}>
+                            <span className={`w-3.5 h-3.5 rounded-full border ${on ? "border-primary bg-primary" : "border-muted-foreground/50"}`} />
+                            {sg.recommended && (
+                              <Badge className="bg-success text-success-foreground gap-1 h-5 px-1.5">
+                                <Star className="w-3 h-3" />
+                                ההמלצה
+                              </Badge>
+                            )}
+                            <span className="font-medium">{masterLabel(sg)}</span>
+                            <span className="text-muted-foreground">({sg.score}%)</span>
+                            {sg.id_match && <Badge variant="outline" className="h-5 px-1.5 text-success border-success/40">✓ מזהה זהה</Badge>}
+                            {sg.manager_match && <Badge variant="outline" className="h-5 px-1.5 text-success border-success/40">✓ אותו מנה״פ</Badge>}
+                          </button>
+                        );
+                      })}
+                      <Button size="sm" className="gap-1" disabled={!choice || busy !== null}
+                        onClick={() => act(`l${r.id}`, { action: "link", project_id: r.id, identifier: choice }, `${r.name} קושר ✓`)}>
+                        <Link2 className="w-3.5 h-3.5" />
+                        קשר
                       </Button>
-                    ))}
-                  </div>
-                )}
+                    </div>
+                  );
+                })()}
 
                 <div className="flex flex-wrap items-center gap-2">
                   {state === "open" && (
@@ -206,7 +229,7 @@ const ProjectLinksPanel = () => {
                         value=""
                         onValueChange={(v) => act(`l${r.id}`, { action: "link", project_id: r.id, identifier: v }, `${r.name} קושר ✓`)}
                         options={options}
-                        placeholder="קישור לפרויקט אחר מהקובץ…"
+                        placeholder="אף הצעה לא נכונה? בחר ידנית מהקובץ…"
                         searchable
                         disabled={busy !== null}
                         className="w-full sm:w-80"
@@ -231,16 +254,43 @@ const ProjectLinksPanel = () => {
                       בטל "מקומי"
                     </Button>
                   )}
-                  <Button size="sm" variant="ghost" className="gap-1" disabled={busy !== null}
-                    onClick={() => { setMerging(r); setMergeTarget(""); }}>
-                    <GitMerge className="w-3.5 h-3.5" />
-                    מזג לתוך…
-                  </Button>
                   {busy !== null && busy.slice(1) === String(r.id) && <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />}
                 </div>
               </div>
             );
           })}
+        </CardContent>
+      </Card>
+
+      <Card className="border-0 shadow-sm">
+        <CardHeader>
+          <CardTitle className="text-base font-heading flex items-center gap-2">
+            <GitMerge className="w-4 h-4" />
+            איחוד כפילויות בתוך מערכת הלקחים
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3 text-sm">
+          <p className="text-muted-foreground">
+            לא קשור לקובץ המאסטר. רק כשאותו פרויקט נרשם פעמיים במערכת הלקחים בשמות שונים: הלקחים והמלצות היישום של
+            הכפול עוברים לפרויקט שנשאר, והכפול נמחק. לא ניתן לבטל.
+          </p>
+          <div className="grid sm:grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <Label className="text-xs">הפרויקט הכפול (יימחק)</Label>
+              <SearchableSelect value={mergeSource} onValueChange={setMergeSource} searchable
+                options={data.projects.filter((p) => String(p.id) !== mergeTarget).map(projectOption)} placeholder="בחר…" />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">הפרויקט שנשאר</Label>
+              <SearchableSelect value={mergeTarget} onValueChange={setMergeTarget} searchable
+                options={data.projects.filter((p) => String(p.id) !== mergeSource).map(projectOption)} placeholder="בחר…" />
+            </div>
+          </div>
+          <Button variant="outline" className="gap-1.5" disabled={!source || !target || busy !== null}
+            onClick={() => setConfirmMerge(true)}>
+            <GitMerge className="w-4 h-4" />
+            אחד
+          </Button>
         </CardContent>
       </Card>
 
@@ -297,26 +347,24 @@ const ProjectLinksPanel = () => {
         </CardContent>
       </Card>
 
-      <Dialog open={merging !== null} onOpenChange={(o) => !o && setMerging(null)}>
+      <Dialog open={confirmMerge} onOpenChange={setConfirmMerge}>
         <DialogContent dir="rtl">
           <DialogHeader>
-            <DialogTitle>מיזוג "{merging?.name}"</DialogTitle>
+            <DialogTitle>לאחד את "{source?.name}" לתוך "{target?.name}"?</DialogTitle>
           </DialogHeader>
           <p className="text-sm text-muted-foreground">
-            {merging?.lessons_count ?? 0} הלקחים והמלצות היישום של הפרויקט יעברו לפרויקט שתבחר, והפרויקט הזה יימחק. לא
-            ניתן לבטל.
+            {source?.lessons_count ?? 0} הלקחים והמלצות היישום של "{source?.name}" יעברו ל-"{target?.name}", ו-"{source?.name}"
+            יימחק. לא ניתן לבטל.
           </p>
-          <SearchableSelect value={mergeTarget} onValueChange={setMergeTarget} options={mergeOptions}
-            placeholder="לתוך איזה פרויקט?" searchable />
           <DialogFooter>
-            <Button variant="destructive" disabled={!mergeTarget || busy !== null}
+            <Button variant="destructive" disabled={!source || !target || busy !== null}
               onClick={async () => {
-                if (!merging) return;
-                const ok = await act(`m${merging.id}`, { action: "merge", source_id: merging.id, target_id: Number(mergeTarget) },
-                  "המיזוג הושלם ✓", true);
-                if (ok) setMerging(null);
+                if (!source || !target) return;
+                const ok = await act(`m${source.id}`, { action: "merge", source_id: source.id, target_id: target.id },
+                  "האיחוד הושלם ✓", true);
+                if (ok) setConfirmMerge(false);
               }}>
-              מזג ומחק את הכפול
+              אחד ומחק את הכפול
             </Button>
           </DialogFooter>
         </DialogContent>

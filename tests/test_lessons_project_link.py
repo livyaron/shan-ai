@@ -173,3 +173,54 @@ def test_project_links_route_is_registered_before_the_gateway():
     assert "/lessons/api/_project_links" in paths
     gw = next(i for i, p in enumerate(paths) if p.startswith("/lessons/api/{"))
     assert paths.index("/lessons/api/_project_links") < gw
+
+
+@pytest.mark.parametrize("a,b,expected", [
+    ("משה כהן", "כהן משה", True),
+    ("משה כהן", "משה לוי", False),          # a shared first name is not the same person
+    ("סולי", "סולי מזרחי", True),             # a one-word name
+    ("", "משה", False), (None, None, False),
+])
+def test_same_manager(a, b, expected):
+    assert lpl.same_manager(a, b) is expected
+
+
+def test_identifier_in_the_name_is_first_and_recommended():
+    cands = [*CANDIDATES, {"identifier": "WBM-00986", "name": "איתן - הקמה", "manager": None}]
+    out = lpl.suggest("WBM-00986", cands)
+    assert out[0]["identifier"] == "WBM-00986" and out[0]["id_match"] and out[0]["recommended"]
+    assert out[0]["score"] == 100
+
+
+def test_short_identifier_never_matches_a_number_in_the_name():
+    out = lpl.suggest("תחנה 161", [{"identifier": "161", "name": "משהו אחר", "manager": None}])
+    assert not out or not out[0]["id_match"]
+
+
+def test_same_manager_ranks_up_and_recommends():
+    """The real screen (2026-10-17): 'אוניברסיטה' scored 40 against its own project."""
+    cands = [
+        {"identifier": "A", "name": "אוניברסיטת תל אביב-הקמת תחמ״ש פנימית 161", "manager": "סולי מזרחי"},
+        {"identifier": "B", "name": "בשור - התקנת מתקן אגירת אנרגיה", "manager": "דנה לוי"},
+        {"identifier": "C", "name": "תל אור - 2 מתקני אגירה", "manager": "לופטון כהן"},
+    ]
+    out = lpl.suggest("אוניברסיטה", cands, manager="סולי מזרחי")
+    assert out[0]["identifier"] == "A" and out[0]["manager_match"] and out[0]["recommended"]
+    assert not any(o["recommended"] for o in out[1:])
+
+
+def test_two_projects_of_the_same_manager_are_not_a_recommendation():
+    cands = [
+        {"identifier": "A", "name": "אוניברסיטת תל אביב-הקמה", "manager": "סולי מזרחי"},
+        {"identifier": "B", "name": "אוניברסיטת חיפה-הרחבה", "manager": "סולי מזרחי"},
+    ]
+    out = lpl.suggest("אוניברסיטה", cands, manager="סולי מזרחי")
+    assert not out[0]["recommended"]
+
+
+def test_a_similar_name_alone_is_not_a_recommendation():
+    cands = [{"identifier": "A", "name": "חדרה מזרח", "manager": None},
+             {"identifier": "B", "name": "חדרה מזרח הרחבה", "manager": None}]
+    out = lpl.suggest("חדרה מזרח", cands)
+    assert out[0]["score"] == out[1]["score"] == 100      # token_set: both contain the name
+    assert not out[0]["recommended"]                      # no margin → no recommendation
