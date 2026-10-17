@@ -1,11 +1,12 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+  Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell,
 } from "recharts";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import RankedBars from "@/components/dashboard/RankedBars";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import {
   CheckCircle2, Clock, RefreshCw, AlertTriangle, Target, Layers, Hourglass, XCircle, FolderKanban, Wrench,
@@ -224,32 +225,13 @@ const RoleKPIDashboard = ({ currentUser, lessons, projects, implementations, ref
         </CardTitle>
       </CardHeader>
       <CardContent>
-        {data.length === 0 ? (
-          <p className="text-sm text-muted-foreground text-center py-8">אין נתונים</p>
-        ) : (
-          <ResponsiveContainer width="100%" height={280}>
-            <BarChart
-              data={data}
-              margin={{ top: 5, right: 20, bottom: 60, left: 10 }}
-              onClick={(state: any) => {
-                const ids = state?.activePayload?.[0]?.payload?.lessonIds;
-                if (ids) goto(ids, "repository");
-              }}
-              style={{ cursor: "pointer" }}
-            >
-              <CartesianGrid strokeDasharray="3 3" stroke="hsl(220, 15%, 88%)" />
-              <XAxis dataKey="name" tick={{ fontSize: 11 }} angle={-45} textAnchor="end" interval={0} height={80} />
-              <YAxis tick={{ fontSize: 12 }} allowDecimals={false} />
-              <Tooltip
-                labelFormatter={(label) => {
-                  const item = data.find((d: any) => d.name === label);
-                  return item?.fullName || label;
-                }}
-              />
-              <Bar dataKey={dataKey} fill={color} radius={[6, 6, 0, 0]} barSize={28} />
-            </BarChart>
-          </ResponsiveContainer>
-        )}
+        <RankedBars
+          color={color}
+          onPick={(ids) => goto(ids, "repository")}
+          items={[...data]
+            .sort((x: any, y: any) => y[dataKey] - x[dataKey])
+            .map((d: any, i: number) => ({ key: `${i}-${d.fullName || d.name}`, label: d.fullName || d.name, value: d[dataKey], lessonIds: d.lessonIds }))}
+        />
       </CardContent>
     </Card>
   );

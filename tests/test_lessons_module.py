@@ -931,9 +931,12 @@ def test_contexts_stay_inside_the_groq_minute_budget():
     s2, u2 = ai.build_analyze({"allLessons": lessons, "projectLessons": lessons[:50], "referents": []}, [], [],
                               ai.quality_scores([l["id"] for l in lessons], []))
     s3, u3 = ai.build_review({"type": "pre_submit", "lesson": {}, "existingLessons": lessons})
-    for system, user in ((s1, u1), (s2, u2), (s3, u3)):
+    pm_body = {"role": "project_manager", "userName": "מ", "lessons": lessons, "projects": projects, "userProjects": projects}
+    s4, u4 = ai.build_summarize(pm_body, [], [])
+    for (system, user), out in (((s1, u1), ai.SUMMARY_MAX_TOKENS), ((s4, u4), ai.SUMMARY_MAX_TOKENS),
+                                ((s2, u2), 1800), ((s3, u3), 1800)):
         # 2 chars/token, conservative (insight_ai); + max_tokens must fit 8,000/min.
-        assert (len(system) + len(user)) / 2 + 1800 < 8000, len(system) + len(user)
+        assert (len(system) + len(user)) / 2 + out < 8000, len(system) + len(user)
 
 
 def test_review_types_and_normalised_shapes():
@@ -976,8 +979,9 @@ def test_sse_body_is_what_the_dashboard_parses():
 def ai_stub(monkeypatch):
     calls = []
 
-    async def fake_ask(system, user, *, json_mode, max_tokens=1500):
-        calls.append({"system": system, "user": user, "json_mode": json_mode})
+    async def fake_ask(system, user, *, json_mode, max_tokens=1500, reasoning_effort=None):
+        calls.append({"system": system, "user": user, "json_mode": json_mode,
+                      "max_tokens": max_tokens, "reasoning_effort": reasoning_effort})
         return calls[-1].get("reply") or ('{"suggestions": [{"name": "בטיחות", "description": "d"}]}' if json_mode else "סיכום")
 
     async def no_prefs(session, user_id):
@@ -1017,6 +1021,9 @@ async def test_summary_streams_sse_and_reads_only_own_prefs(as_user, ai_stub, no
                          json={"role": "project_manager", "userId": "u1", "lessons": [], "projects": []})
     assert r.status_code == 200 and r.headers["content-type"].startswith("text/event-stream")
     assert "data: [DONE]" in r.text
+    # Reasoning out of the same budget cut the summary mid-section (2026-10-17).
+    asked = [c for c in ai_stub if "json_mode" in c][-1]
+    assert asked["reasoning_effort"] == "low" and asked["max_tokens"] == ai.SUMMARY_MAX_TOKENS
     # u1 is someone else: the caller's own preferences are used instead.
     assert {"prefs_for": "u2"} in ai_stub
 

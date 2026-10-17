@@ -29,6 +29,13 @@ USAGE = "lessons_ai"
 # context + system prompt + MAX_TOKENS stays under Groq's 8,000 TPM.
 CONTEXT_CHARS = 9000
 MAX_TOKENS = 1500
+# The dashboard summary is six sections of Hebrew prose. At 1,800 tokens, with
+# gpt-oss reasoning at its default effort out of the same budget, the answer
+# stopped mid-section (user report 2026-10-17). Reasoning goes "low" and the
+# answer gets room; the summary's context shrinks to keep prompt + max_tokens
+# inside Groq's 8,000 tokens/minute.
+SUMMARY_MAX_TOKENS = 2800
+SUMMARY_CONTEXT_CHARS = 7000
 
 JSON_ONLY = "\n\nהחזר JSON תקין בלבד, בלי טקסט לפניו או אחריו, במבנה הבא:\n"
 
@@ -173,17 +180,17 @@ def build_summarize(body: dict, prefs: list[dict], insights: list[dict]) -> tupl
     lessons = [f'- "{l.get("title")}" (פרויקט: {l.get("project")}, שלב: {l.get("stage")}, קטגוריה: {l.get("category")}, סיכון: {l.get("risk")}, סטטוס: {l.get("status")})'
                for l in _list(body.get("lessons"))]
     projects = [_project_line(p) for p in _list(body.get("projects"))]
-    lessons_text = clip_lines(lessons, CONTEXT_CHARS * 2 // 3)
-    projects_text = clip_lines(projects, CONTEXT_CHARS // 3)
+    lessons_text = clip_lines(lessons, SUMMARY_CONTEXT_CHARS * 2 // 3)
+    projects_text = clip_lines(projects, SUMMARY_CONTEXT_CHARS // 4)
     if is_admin:
         user = (f"להלן רשימת כל הלקחים במערכת:\n{lessons_text}\n\nכל הפרויקטים הפעילים:\n{projects_text}\n\n"
                 "אנא ספק סיכום תובנות כללי על כל הפרויקטים.")
     else:
         mine = _list(body.get("userProjects"))
         user = (f"להלן רשימת כל הלקחים במערכת (לצורך השוואה והפקת תובנות חוצות-פרויקטים):\n{lessons_text}\n\n"
-                f"הפרויקטים שאני ({body.get('userName')}) מנהל:\n{clip_lines([_project_line(p) for p in mine], 1500)}\n\n"
+                f"הפרויקטים שאני ({body.get('userName')}) מנהל:\n{clip_lines([_project_line(p) for p in mine], SUMMARY_CONTEXT_CHARS // 8)}\n\n"
                 f"כל הפרויקטים הפעילים (לרקע):\n{projects_text}\n\n"
-                f"אנא ספק סיכום תובנות הממוקד בפרויקטים שלי: {', '.join(_str(p.get('name')) for p in mine)}. "
+                f"אנא ספק סיכום תובנות הממוקד בפרויקטים שלי: {', '.join(_str(p.get('name')) for p in mine)[:SUMMARY_CONTEXT_CHARS // 8]}. "
                 "ציין גם לקחים רלוונטיים מפרויקטים אחרים שכדאי שאשים לב אליהם.")
     return system, user
 
@@ -454,11 +461,13 @@ def build_admin_insights(body: dict) -> tuple[str, str]:
 
 # --------------------------------------------------------------------- model call
 
-async def ask(system: str, user: str, *, json_mode: bool, max_tokens: int = MAX_TOKENS) -> str:
+async def ask(system: str, user: str, *, json_mode: bool, max_tokens: int = MAX_TOKENS,
+              reasoning_effort: str | None = None) -> str:
     from app.services.llm_router import llm_chat
     messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
     try:
-        return await llm_chat(USAGE, messages, max_tokens=max_tokens, temperature=0.3, json_mode=json_mode)
+        return await llm_chat(USAGE, messages, max_tokens=max_tokens, temperature=0.3, json_mode=json_mode,
+                              reasoning_effort=reasoning_effort)
     except Exception as e:
         if not json_mode:  # both providers failed; the caller answers 503
             logger.warning("lessons AI unavailable: %s", type(e).__name__)
@@ -468,7 +477,8 @@ async def ask(system: str, user: str, *, json_mode: bool, max_tokens: int = MAX_
         # parse_json reads it out of plain text, so one retry without the mode.
         logger.warning("lessons AI JSON mode failed (%s); retrying as plain text", type(e).__name__)
     try:
-        return await llm_chat(USAGE, messages, max_tokens=max_tokens, temperature=0.3, json_mode=False)
+        return await llm_chat(USAGE, messages, max_tokens=max_tokens, temperature=0.3, json_mode=False,
+                              reasoning_effort=reasoning_effort)
     except Exception as e:
         logger.warning("lessons AI unavailable: %s", type(e).__name__)
         raise AIUnavailable(str(e)) from e
