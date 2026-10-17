@@ -7,7 +7,6 @@ import LessonCard from "@/components/mobile/LessonCard";
 import { useMyTasks } from "@/hooks/useMyTasks";
 import { isDraft } from "@/lib/lessonAssignment";
 import { hasContent, loadLocalDraft } from "@/lib/lessonDraft";
-import { myScope } from "@/lib/lessonScope";
 import { setPrefersDesktop } from "@/lib/standalone";
 
 const RECENT = 5;
@@ -26,7 +25,9 @@ const MobileHome = () => {
   }, [lessons, currentUser.id]);
 
   const recent = useMemo(
-    () => myScope(lessons, currentUser).filter((l) => !isDraft(l)).sort((a, b) => b.id - a.id).slice(0, RECENT),
+    // "Mine" = lessons I created. myScope is everything for an admin, which made this list
+    // show other people's lessons under a "mine" title.
+    () => lessons.filter((l) => l.createdBy === currentUser.id && !isDraft(l)).sort((a, b) => b.id - a.id).slice(0, RECENT),
     [lessons, currentUser],
   );
 
