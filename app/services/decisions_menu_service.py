@@ -214,6 +214,10 @@ def format_decision_card(d: Decision, raci_badge: str = "") -> str:
         lines.append(f"\n<b>סיכום:</b>\n{_html.escape(d.summary)}")
     if d.recommended_action:
         lines.append(f"\n<b>פעולה מומלצת:</b>\n{_html.escape(d.recommended_action)}")
+    proj = getattr(d, "project", None)   # optional master-file project (project_links)
+    if proj:
+        lines.append(f"\n🏗 <b>פרויקט:</b> {_html.escape(proj.project_identifier)}"
+                     f"{' — ' + _html.escape(proj.name) if proj.name else ''}")
     if not getattr(d, "is_relevant", True):
         irrel_line = "\n⛔ <i>לא רלוונטי</i>"
         if d.irrelevant_reason:
@@ -224,17 +228,19 @@ def format_decision_card(d: Decision, raci_badge: str = "") -> str:
     return "\n".join(lines)
 
 
-def build_decision_card_keyboard(d: Decision, back_shortcut: str, back_page: int) -> InlineKeyboardMarkup:
+def build_decision_card_keyboard(d: Decision, back_shortcut: str, back_page: int,
+                                 can_link: bool = False) -> InlineKeyboardMarkup:
     back_cb = f"dm:{back_shortcut}:{back_page}" if back_shortcut != "cf" else "dm:menu"
     toggle_btn = (
         InlineKeyboardButton("⛔ סמן כלא רלוונטי", callback_data=f"dec_irrel:{d.id}")
         if getattr(d, "is_relevant", True)
         else InlineKeyboardButton("♻️ שחזר כרלוונטי", callback_data=f"dec_rel:{d.id}")
     )
-    return InlineKeyboardMarkup([
-        [toggle_btn],
-        [InlineKeyboardButton("🔙 חזרה", callback_data=back_cb)],
-    ])
+    rows = [[toggle_btn]]
+    if can_link:   # optional project link (project_links) — admin or submitter only
+        rows.append([InlineKeyboardButton("🏗 פרויקט", callback_data=f"pl:o:d:{d.id}:{back_shortcut}:{back_page}")])
+    rows.append([InlineKeyboardButton("🔙 חזרה", callback_data=back_cb)])
+    return InlineKeyboardMarkup(rows)
 
 
 def build_custom_filter_message() -> str:

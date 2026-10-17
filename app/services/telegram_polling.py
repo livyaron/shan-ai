@@ -790,6 +790,18 @@ class TelegramPollingBot:
                 await update.message.reply_text("‏✅ תשובת הזהב נשמרה. שלח /gold להמשך.")
                 return
 
+            # Optional project link — a typed project search
+            from app.services.telegram_state import _project_link_state
+            if (_project_link_state.get(telegram_id) or {}).get("mode") == "search":
+                # A reply-keyboard tap or a command ends the search instead of being searched.
+                _menu_labels = {label for row in _main_reply_keyboard(user).keyboard for label in
+                                (getattr(b, "text", b) for b in row)}
+                if text.strip() in _menu_labels or text.strip().startswith("/"):
+                    _project_link_state.pop(telegram_id, None)
+                else:
+                    await self._handle_project_link_text(update, telegram_id, user, text)
+                    return
+
             # Operations room — mission wizard / edit flows awaiting text
             from app.services.telegram_state import _missions_create_state, _missions_edit_state
             if telegram_id in _missions_create_state or telegram_id in _missions_edit_state:
@@ -1229,6 +1241,19 @@ class TelegramPollingBot:
 
         data = query.data  # "approve:{id}" or "reject:{id}"
         telegram_id = update.effective_user.id
+
+        # Optional mission/decision → project link (project_links). Any other
+        # button ends a pending typed search, so a later message is never
+        # swallowed as a project search.
+        if not data.startswith("pl:"):
+            from app.services.telegram_state import _project_link_state
+            _project_link_state.pop(telegram_id, None)
+        if data.startswith("pl:"):
+            async with async_session_maker() as _pl_session:
+                _pl_user = await _pl_session.scalar(select(User).where(User.telegram_id == telegram_id))
+            if _pl_user and _pl_user.role:
+                await self._handle_project_link(query, data, telegram_id, _pl_user)
+            return
 
         # Decisions menu — handle before int-based action parsing
         if data.startswith("dm:") or data.startswith("dm_cf:"):
@@ -2289,7 +2314,9 @@ class TelegramPollingBot:
             await query.edit_message_text(
                 format_decision_card(card_dec, raci_badge),
                 parse_mode="HTML",
-                reply_markup=build_decision_card_keyboard(card_dec, back_shortcut, back_page),
+                reply_markup=build_decision_card_keyboard(
+                    card_dec, back_shortcut, back_page,
+                    can_link=user.is_admin or card_dec.submitter_id == user.id),
             )
             return
 
@@ -2557,6 +2584,94 @@ class TelegramPollingBot:
                 origin, page, total, missions, with_done_shortcut=(origin == "my"),
             ),
         )
+
+    # ── Optional mission/decision → project link (project_links) ──────────
+    @staticmethod
+    async def _project_link_target(session, kind: str, obj_id: int, user):
+        """(object, problem) — a mission for any non-viewer, a decision for its
+        submitter or an admin (the web rule)."""
+        from app.models import Decision, Mission, RoleEnum
+        if kind == "m":
+            if user.role == RoleEnum.VIEWER:
+                return None, "‏🔒 משתמשי צפייה אינם יכולים לשנות משימות."
+            obj = await session.get(Mission, obj_id)
+        elif kind == "d":
+            obj = await session.get(Decision, obj_id)
+            if obj and not (user.is_admin or obj.submitter_id == user.id):
+                return None, "‏🔒 רק מגיש ההחלטה או מנהל יכולים לקשר אותה לפרויקט."
+        else:
+            return None, None
+        return (obj, None) if obj else (None, "‏❌ הפריט לא נמצא.")
+
+    async def _handle_project_link(self, query, data: str, telegram_id: int, user) -> None:
+        from app.services import project_link_telegram as plt
+        from app.services import project_links
+        from app.services.telegram_state import _project_link_state
+        parts = data.split(":")
+        try:
+            op, kind, obj_id = parts[1], parts[2], int(parts[3])
+        except (IndexError, ValueError):
+            return
+        state = _project_link_state.get(telegram_id) or {}
+        back = state.get("back") if state.get("kind") == kind and state.get("id") == obj_id else None
+        async with async_session_maker() as session:
+            obj, problem = await self._project_link_target(session, kind, obj_id, user)
+            if obj is None:
+                if problem:
+                    await query.edit_message_text(problem)
+                return
+            if op == "o":
+                origin = parts[4] if len(parts) > 4 else "my"
+                page = parts[5] if len(parts) > 5 else 0
+                back = plt.back_cb(kind, obj_id, origin, page)
+                text = project_links.mission_text(obj) if kind == "m" else project_links.decision_text(obj)
+                owner = obj.owner_id if kind == "m" else obj.submitter_id
+                sugg = await project_links.suggest_for(session, text, owner)
+                _project_link_state[telegram_id] = {"kind": kind, "id": obj_id, "back": back, "mode": "pick"}
+                await query.edit_message_text(
+                    plt.picker_text(kind, obj_id, project_links.label(obj.project), sugg), parse_mode="HTML",
+                    reply_markup=plt.picker_keyboard(kind, obj_id, sugg, obj.project_id is not None, back))
+                return
+            back = back or plt.back_cb(kind, obj_id)
+            if op == "q":
+                _project_link_state[telegram_id] = {"kind": kind, "id": obj_id, "back": back, "mode": "search"}
+                await query.edit_message_text(
+                    "‏🔎 שלח עכשיו מזהה פרויקט (למשל WBE-087) או מילה משם התחנה:",
+                    reply_markup=plt.back_keyboard(back))
+                return
+            if op == "s":
+                try:
+                    pid = int(parts[4])
+                except (IndexError, ValueError):
+                    return
+                project = await project_links.resolve(session, pid)
+                if pid and project is None:
+                    await query.edit_message_text("‏❌ הפרויקט לא נמצא.", reply_markup=plt.back_keyboard(back))
+                    return
+                obj.project_id = project.id if project else None
+                await session.commit()
+                _project_link_state.pop(telegram_id, None)
+                await query.edit_message_text(
+                    plt.done_text(kind, obj_id, project_links.label(project)), parse_mode="HTML",
+                    reply_markup=plt.back_keyboard(back))
+
+    async def _handle_project_link_text(self, update, telegram_id: int, user, text: str) -> None:
+        from app.services import project_link_telegram as plt
+        from app.services import project_links
+        from app.services.telegram_state import _project_link_state
+        state = _project_link_state.get(telegram_id) or {}
+        kind, obj_id, back = state.get("kind"), state.get("id"), state.get("back")
+        async with async_session_maker() as session:
+            obj, problem = await self._project_link_target(session, kind, obj_id, user)
+            if obj is None:
+                _project_link_state.pop(telegram_id, None)
+                await update.message.reply_text(problem or "‏❌ הפריט לא נמצא.")
+                return
+            hits = project_links.search(text, await project_links.options(session))
+        state["mode"] = "pick"
+        await update.message.reply_text(
+            plt.search_text(text.strip(), len(hits)), parse_mode="HTML",
+            reply_markup=plt.picker_keyboard(kind, obj_id, hits, obj.project_id is not None, back))
 
     async def _render_mission_card(
         self, query, mission_id: int, origin: str, page: int, show_all: bool = False,

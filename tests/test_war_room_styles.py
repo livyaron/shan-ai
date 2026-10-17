@@ -171,6 +171,7 @@ def _context(style, is_viewer=False):
              "done": False, "cancelled": False, "range": "01/09/2026–היום"},
         ]},
         "child_counts": {1: 1},
+        "project_labels": {},
         "postpone_label": oms.postpone_label,
         "fmt_due": oms.format_due,
         "is_viewer": is_viewer,

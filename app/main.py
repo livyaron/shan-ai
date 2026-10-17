@@ -343,6 +343,17 @@ async def startup():
                     "CREATE INDEX IF NOT EXISTS ix_missions_parent_id ON missions (parent_id)"
                 ))
 
+                # Optional project link on a mission / decision (project_links).
+                # SET NULL: a project row going away never deletes the work.
+                for _tbl in ("missions", "decisions"):
+                    await conn.execute(_text(
+                        f"ALTER TABLE {_tbl} ADD COLUMN IF NOT EXISTS project_id INTEGER "
+                        "REFERENCES projects(id) ON DELETE SET NULL"
+                    ))
+                    await conn.execute(_text(
+                        f"CREATE INDEX IF NOT EXISTS ix_{_tbl}_project_id ON {_tbl} (project_id)"
+                    ))
+
                 # חדר מבצעים: per-user board layout. NULL means "the default
                 # style", so existing users keep exactly the screen they know.
                 await conn.execute(_text(

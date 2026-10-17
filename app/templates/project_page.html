@@ -200,6 +200,42 @@
     </div>
     {% endif %}
 
+    {# ── Missions + decisions linked to this project (project_links; optional link set on each item) ── #}
+    {% if links %}
+    <div class="card-x" id="linked">
+        <h2>🔗 משימות והחלטות מקושרות{% if links.ok %} ({{ links.missions|length }} משימות · {{ links.decisions|length }} החלטות){% endif %}</h2>
+        {% if not links.ok %}
+        <div class="sub">לא ניתן לטעון את הקישורים כרגע.</div>
+        {% else %}
+        <div class="sub">קישור נעשה ידנית מכל משימה בחדר המבצעים ומכל החלטה (🏗), באתר או בטלגרם. החלטות מוצגות רק אם הן גלויות לך בדף ההחלטות.</div>
+        <div class="sub mt-3">🎯 משימות בחדר המבצעים</div>
+        {% if links.missions %}
+        <div class="scroll"><table class="t mt-1">
+            <tr><th>משימה</th><th>אחראי</th><th>סטטוס</th><th>יעד</th></tr>
+            {% for m in links.missions %}
+            <tr><td><a href="/dashboard/war-room?q={{ m.title|urlencode }}&status=all">{{ m.title }}</a></td><td>{{ m.owner }}</td>
+                <td>{{ m.status }}</td><td class="n">{{ m.due|il_date if m.due else '—' }}{% if m.overdue %} ⚠️{% endif %}</td></tr>
+            {% endfor %}
+        </table></div>
+        {% else %}
+        <div class="sub">אין משימות מקושרות.</div>
+        {% endif %}
+        <div class="sub mt-3">📋 החלטות</div>
+        {% if links.decisions %}
+        <div class="scroll"><table class="t mt-1">
+            <tr><th>החלטה</th><th>מגיש</th><th>סוג</th><th>סטטוס</th><th>תאריך</th></tr>
+            {% for d in links.decisions %}
+            <tr><td><a href="/dashboard/decisions?filter_relevant=all">#{{ d.id }}</a> {{ d.summary }}{% if not d.relevant %} <span class="sub">(לא רלוונטית)</span>{% endif %}</td>
+                <td>{{ d.submitter }}</td><td>{{ d.type }}</td><td>{{ d.status }}</td><td class="n">{{ d.date|il_date }}</td></tr>
+            {% endfor %}
+        </table></div>
+        {% else %}
+        <div class="sub">אין החלטות מקושרות.</div>
+        {% endif %}
+        {% endif %}
+    </div>
+    {% endif %}
+
     {% if h.topics %}
     <div class="card-x">
         <h2>נושאים שעולים בדיווחים</h2>

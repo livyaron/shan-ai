@@ -1,0 +1,8 @@
+{# Optional project on a new mission (project_links) — inside every layout's create form. #}
+<label>פרויקט (לא חובה)</label>
+<input type="hidden" name="project_id" id="createProject" value="">
+<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+  <span id="createProjectLabel" dir="auto" style="font-size:.85rem;opacity:.8">ללא</span>
+  <button type="button" onclick="pickCreateProject(this.form)"
+          style="border:1px solid rgba(128,128,128,.45);background:transparent;color:inherit;border-radius:7px;padding:4px 10px;font-family:inherit;font-size:.82rem;cursor:pointer">🏗 הצע / בחר פרויקט</button>
+</div>

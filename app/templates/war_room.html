@@ -73,6 +73,7 @@ a.wr-stat.on{border-color:var(--cyan);box-shadow:inset 0 0 0 1px var(--cyan)}
 .wr-card .m-desc{color:var(--text-2);font-size:.85rem;margin-top:4px;unicode-bidi:isolate}
 .wr-card .m-meta{display:flex;flex-wrap:wrap;gap:10px;margin-top:8px;font-size:.8rem;color:var(--text-2);font-family:var(--mono)}
 .wr-card .m-meta .late{color:var(--red);font-weight:600}
+.wr-card .m-meta a.m-proj{color:inherit;text-decoration:underline dotted}
 .wr-chip{display:inline-block;border:1px solid var(--border-hi);border-radius:20px;padding:1px 10px;font-size:.75rem}
 .wr-chip.st-open{color:var(--text-1)}
 .wr-chip.st-done{color:var(--green);border-color:var(--green)} .wr-chip.st-cancelled{color:var(--text-2)}
@@ -225,6 +226,7 @@ dialog.wr-dlg::backdrop{background:rgba(3,6,12,.75)}
         {% for m in quadrants[qkey] %}
         {% set late = m.due_date and m.status in active_statuses and m.due_date < today %}
         {% set fresh = is_new(m) %}
+        {% set pl = project_labels.get(m.project_id) %}
         <div class="wr-card{% if late %} overdue{% endif %}{% if fresh %} fresh{% endif %}">
           <div class="m-title" dir="auto">{% if fresh %}<span class="wr-chip m-new">🆕 חדשה</span> {% endif %}{{ m.title }}</div>
           {% if m.description %}<div class="m-desc" dir="auto">{{ m.description }}</div>{% endif %}
@@ -266,6 +268,7 @@ dialog.wr-dlg::backdrop{background:rgba(3,6,12,.75)}
             {% endif %}
             <span{% if fresh %} class="m-new"{% endif %}>🕒 נוצרה {{ fmt_created(m.created_at) }}</span>
             <span>נפתחה ע"י {{ m.created_by.username if m.created_by else '—' }}</span>
+            {% if pl %}<a class="m-proj" href="/dashboard/projects/p/{{ pl.identifier|urlencode }}" title="{{ pl.label }}" dir="auto">🏗 {{ pl.identifier }}</a>{% endif %}
           </div>
           {% set moves = m.due_changes %}
           {% if moves %}
@@ -298,6 +301,9 @@ dialog.wr-dlg::backdrop{background:rgba(3,6,12,.75)}
             <button class="wr-btn" data-child="{{ m.id }}" data-child-title="{{ m.title }}"
                     data-child-owner="{{ m.owner_id }}" data-child-quad="{{ qkey }}"
                     title="פתיחת משימה חדשה שנגזרת מהמשימה הזו">➕ משימת המשך</button>
+            <button type="button" class="wr-btn" data-proj="{{ m.id }}" data-proj-cur="{{ m.project_id or '' }}"
+                    data-proj-label="{{ pl.label if pl else '' }}" data-proj-user="{{ m.owner_id }}"
+                    data-proj-text="{{ m.title }} {{ m.description or '' }}" title="קישור המשימה לפרויקט (לא חובה)">🏗 פרויקט</button>
           </div>
           {% if m.status in active_statuses %}
           <div class="m-notebox" id="notebox-{{ m.id }}">
@@ -382,6 +388,7 @@ dialog.wr-dlg::backdrop{background:rgba(3,6,12,.75)}
     </select>
     <label>תאריך יעד</label>
     <input type="date" name="due_date">
+    {% include "_war_room_project_field.html" %}
     <div class="dlg-actions">
       <button class="wr-btn primary" type="submit">✅ שמור</button>
       <button class="wr-btn" type="button" onclick="document.getElementById('createDlg').close()">ביטול</button>
