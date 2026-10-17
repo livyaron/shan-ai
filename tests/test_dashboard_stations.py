@@ -333,3 +333,11 @@ def test_projects_view_is_cards_that_link_to_lists(engine):
     for c in ps["cards"]:
         assert f'href="/dashboard/projects/kpi/{c["key"]}"' in view
     assert 'href="/dashboard/projects/kpi/active"' in view
+
+
+def test_zoom_shell_never_covers_the_navbar():
+    """The station zoom was `inset: 0` over the navbar — opened from #hash, the page had no navbar."""
+    html = _render({"missions": {"ok": False}, "projects": {"ok": False}, "lessons": {"ok": False}})
+    assert "inset: var(--nav-h, 50px) 0 0 0" in html
+    assert "--nav-h" in html and "zmNavH()" in html
+    assert "body.zoomed .shan-nav { z-index: 1050; }" in html

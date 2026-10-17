@@ -375,10 +375,13 @@
 
         /* ── zoom shell ── */
         body.zoomed { overflow: hidden; }
-        .zm { position: fixed; inset: 0; z-index: 1040; display: flex; flex-direction: column; color: var(--t1);
+        /* the shell starts under the navbar (--nav-h, measured below): it used to cover it,
+           so a station opened from #hash showed no navbar until it was closed */
+        .zm { position: fixed; inset: var(--nav-h, 50px) 0 0 0; z-index: 1040; display: flex; flex-direction: column; color: var(--t1);
               background: radial-gradient(90% 60% at 100% 0%, color-mix(in srgb, var(--zacc, #00d4ff) 14%, transparent), transparent 60%), radial-gradient(70% 50% at 0% 100%, rgba(139,156,244,.08), transparent 60%), #070b12f2;
               backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
         .zm[hidden] { display: none; }
+        body.zoomed .shan-nav { z-index: 1050; }   /* its dropdowns open over the shell */
         .zm-bar { display: flex; align-items: center; gap: 16px; padding: 10px 22px; border-bottom: 1px solid var(--line); background: rgba(7,11,18,.75); flex-wrap: wrap; position: relative; z-index: 2; }
         .zm-x { all: unset; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; border-radius: 10px; border: 1px solid var(--line-hi); color: var(--t1); font-weight: 600; font-size: .95rem; }
         .zm-x:hover { border-color: var(--zacc); color: #fff; box-shadow: 0 0 18px color-mix(in srgb, var(--zacc) 35%, transparent); }
@@ -1446,7 +1449,14 @@ const ZM_EASE = [.7, 0, .2, 1];
 let zmOpen = null, zmBusy = false, zmPushed = false;
 const zmTile = k => document.querySelector(`.st[data-zoom="${k}"]`);
 const zmView = k => ZM.querySelector(`.zv[data-view="${k}"]`);
-function zmInset(r) { return `inset(${r.top}px ${innerWidth - r.right}px ${innerHeight - r.bottom}px ${r.left}px round 22px)`; }
+const SHAN_NAV = document.querySelector('.shan-nav');
+function zmNavH() { return SHAN_NAV ? Math.max(0, SHAN_NAV.getBoundingClientRect().bottom) : 0; }
+function zmSyncNav() { document.documentElement.style.setProperty('--nav-h', zmNavH() + 'px'); }
+zmSyncNav();
+if (SHAN_NAV && window.ResizeObserver) new ResizeObserver(zmSyncNav).observe(SHAN_NAV);
+addEventListener('resize', zmSyncNav);
+// clip-path is relative to the shell, which starts under the navbar
+function zmInset(r) { return `inset(${r.top - zmNavH()}px ${innerWidth - r.right}px ${innerHeight - r.bottom}px ${r.left}px round 22px)`; }
 
 function zmInk(key, animate) {
     const nav = document.getElementById('zm-tabs'), btn = nav.querySelector(`[data-tab="${key}"]`), ink = document.getElementById('zm-ink');
@@ -1497,6 +1507,7 @@ async function zmOpenStation(key, opts = {}) {
     const tile = zmTile(key), r = tile.getBoundingClientRect();
     const anim = SB_GO && !opts.instant;
     if (anim) { ZM.style.clipPath = zmInset(r); ZM_BAR.style.opacity = ZM_BODY.style.opacity = 0; }
+    zmSyncNav();
     ZM.hidden = false;
     document.body.classList.add('zoomed');
     const view = zmShow(key, false);
