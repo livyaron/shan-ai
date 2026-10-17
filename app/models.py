@@ -587,6 +587,21 @@ class ProjectExecSummary(Base):
     created_at  = Column(DateTime, default=datetime.utcnow)
 
 
+class ProjectContractSheet(Base):
+    """The master file's "סטטוס התקשרויות קבלנים ותיחורים" sheet, as parsed
+    (app/services/contracts_sheet.py). One row per LIVE master upload; the page
+    shows the newest. The diary prose is read by rules, so it is stored as JSON."""
+    __tablename__ = "project_contract_sheets"
+
+    id          = Column(Integer, primary_key=True)
+    sheet_name  = Column(String(120), nullable=False)
+    as_of       = Column(Date, nullable=True)          # the sheet's own date
+    report_date = Column(Date, nullable=True)          # the master file's report date
+    source_file = Column(String(300), nullable=True)
+    payload     = Column(JSON, nullable=False)
+    created_at  = Column(DateTime, default=datetime.utcnow)
+
+
 # =============================================================================
 # Eval & Self-Repair Loop tables
 # =============================================================================
