@@ -6,10 +6,10 @@ import type { MockUser } from "@/context/UserContext";
 
 // Timeline steps in order
 const TIMELINE_STEPS = [
-  { key: "חדש", label: "נוצר" },
+  { key: "חדש", label: "נוצר · אישור ראשון" },
   { key: "בטיפול רפרנט", label: "הועבר לרפרנט" },
   { key: "ממתין להשלמת יוצר", label: "ממתין להשלמת יוצר" },
-  { key: "ממתין לאישור מנהל מערכת", label: "ממתין לאישור מנהל מערכת" },
+  { key: "ממתין לאישור מנהל מערכת", label: "אישור סופי של מנהל מערכת" },
   { key: "אושר והופץ", label: "אושר והופץ" },
   { key: "נדחה", label: "נדחה" },
 ];
@@ -108,7 +108,8 @@ const LessonTimeline = ({ lesson, users }: LessonTimelineProps) => {
         <div>
           <span className="text-muted-foreground text-xs">נמצא אצל</span>
           <p className="font-medium">
-            {currentStatus === "חדש" && "ממתין לשיוך"}
+            {/* A new lesson already carries the referent its creator picked; it waits for the admin's first approval. */}
+            {currentStatus === "חדש" && "מנהל מערכת (אישור ראשון)"}
             {currentStatus === "בטיפול רפרנט" && (assignedUser?.name || "רפרנט")}
             {currentStatus === "ממתין להשלמת יוצר" && (creatorUser?.name || "יוצר הלקח")}
             {currentStatus === "ממתין לאישור מנהל מערכת" && "מנהל מערכת"}
@@ -116,6 +117,12 @@ const LessonTimeline = ({ lesson, users }: LessonTimelineProps) => {
             {currentStatus === "נדחה" && "נדחה"}
           </p>
         </div>
+        {currentStatus === "חדש" && (
+          <div>
+            <span className="text-muted-foreground text-xs">אחרי האישור יעבור אל</span>
+            <p className="font-medium">{assignedUser?.name || "טרם נבחר רפרנט"}</p>
+          </div>
+        )}
         {lesson.referentStartDate && !isFinal && (
           <div>
             <span className="text-muted-foreground text-xs">ימים בטיפול</span>

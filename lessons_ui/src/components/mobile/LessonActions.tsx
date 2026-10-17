@@ -63,7 +63,7 @@ const TaskBody = ({ task, lesson, approval }: { task: LessonTask; lesson: Lesson
 
 // ---------------------------------------------------------------- admin: a new lesson
 
-const ApproveNew = ({ lesson, approval }: { lesson: Lesson; approval: Approval }) => {
+export const ApproveNew = ({ lesson, approval }: { lesson: Lesson; approval: Approval }) => {
   const { rejectLesson } = useUser();
   const [busy, setBusy] = useState(false);
   const [confirmReject, setConfirmReject] = useState(false);
@@ -106,11 +106,11 @@ const ApproveNew = ({ lesson, approval }: { lesson: Lesson; approval: Approval }
   );
 };
 
-/** The AI's distribution proposal after approval — full screen on the phone. */
-const DistributionSheet = ({ lesson, approval }: { lesson: Lesson; approval: Approval }) => {
+/** The AI's distribution proposal after approval — full screen on the phone, a centred panel on the computer. */
+export const DistributionSheet = ({ lesson, approval }: { lesson: Lesson; approval: Approval }) => {
   const { projects } = useUser();
   return (
-    <div role="dialog" aria-label="המלצות הפצה" className="fixed inset-0 z-50 bg-background flex flex-col">
+    <div role="dialog" aria-label="המלצות הפצה" className="fixed inset-0 z-50 bg-background flex flex-col md:inset-x-0 md:inset-y-8 md:mx-auto md:max-w-2xl md:rounded-xl md:border md:border-border md:shadow-2xl">
       <header className="px-4 py-3 border-b border-border">
         <h2 className="font-heading font-bold text-lg">המלצות AI להפצה</h2>
         <p className="text-xs text-muted-foreground truncate">{lesson.title}</p>
