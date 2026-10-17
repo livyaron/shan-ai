@@ -66,12 +66,12 @@ def test_projects_carry_optional_shan_identifier_without_fk():
 
 def test_every_function_pins_search_path_and_is_schema_qualified():
     fns = [s for s in ls.SCHEMA_STATEMENTS if s.startswith("CREATE OR REPLACE FUNCTION")]
-    assert len(fns) == 5
+    assert len(fns) == 6
     for f in fns:
         assert f.startswith("CREATE OR REPLACE FUNCTION lessons.")
         assert "SET search_path TO 'lessons'" in f
     triggers = [s for s in ls.SCHEMA_STATEMENTS if s.startswith("CREATE OR REPLACE TRIGGER")]
-    assert len(triggers) == 4
+    assert len(triggers) == 5
     for t in triggers:
         assert re.search(r" ON lessons\.\w+ ", t) and "EXECUTE FUNCTION lessons." in t
 
@@ -1306,3 +1306,17 @@ def test_import_finds_projects_only_the_module_has():
     assert li.local_only_projects([1, 2, 3], [1, 2, 3]) == []
     assert li.local_only_projects([1, 2], [5, 1, 4, 2]) == [4, 5]
     assert li.local_only_projects([], []) == []
+
+
+def test_linked_project_fields_are_locked_for_postgrest_only():
+    """PLAN-lessons-projects.md L3: the UI (PostgREST's role) cannot change what
+    the master file owns on a linked project; the upload sync (app role) can."""
+    fn = next(s for s in ls.SCHEMA_STATEMENTS if "FUNCTION lessons.lock_master_fields" in s)
+    assert f"current_user = '{ls.ANON_ROLE}'" in fn
+    assert "OLD.shan_project_identifier IS NOT NULL" in fn
+    for col in ("name", "stage_indexes", "project_type", "risk", "shan_project_identifier"):
+        assert f"NEW.{col} IS DISTINCT FROM OLD.{col}" in fn
+    for col in ("station_type", "site", "equipment_ids", "manager_id"):
+        assert f"NEW.{col}" not in fn            # the module's own fields stay editable
+    assert "SECURITY DEFINER" not in fn          # current_user must stay the caller
+    assert any("projects_lock_master_fields BEFORE UPDATE ON lessons.projects" in s for s in ls.SCHEMA_STATEMENTS)

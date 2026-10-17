@@ -324,3 +324,57 @@ def test_a_project_linked_elsewhere_is_shown_but_never_recommended():
     assert out[0]["identifier"] == "WBE-001" and out[0]["linked_to"] == 7
     assert not out[0]["recommended"]
     assert not any(o["recommended"] for o in out)
+
+
+# ------------------------------------------------------------------ L3 sync plan
+
+def _linked(**kw):
+    base = {"id": 1, "name": "תחנה א", "stage_indexes": [2], "project_type": "expansion", "risk": "medium",
+            "manager_id": "u17", "shan_project_identifier": "P-1", "shan_manager_kept": None, "shan_active": True}
+    return {**base, **kw}
+
+
+def _plan(linked, masters=None, levels=None):
+    masters = {"P-1": MASTER} if masters is None else masters
+    return lpl.sync_plan(linked, masters, levels or {"P-1": "follow"}, ALIASES, PROFILES)
+
+
+def test_sync_nothing_changes_when_the_module_already_agrees():
+    assert _plan([_linked()]) == []
+
+
+def test_sync_applies_the_file_fields():
+    out = _plan([_linked(name="שם ישן", stage_indexes=[0], risk="low")], levels={"P-1": "escalate"})
+    assert out == [{"id": 1, "fields": {"name": "תחנה א", "stage_indexes": [2], "risk": "high"},
+                    "manager": None, "active": True}]
+
+
+def test_sync_unknown_stage_or_type_keeps_the_module_value():
+    m = {**MASTER, "stage": "שלב מוזר", "project_type": "משהו"}
+    out = _plan([_linked(stage_indexes=[7], project_type="maintenance")], masters={"P-1": m})
+    assert out == []
+
+
+def test_sync_moves_the_manager_only_through_the_confirmed_chain():
+    # the file's name resolves to u17; the module has someone else → move
+    assert _plan([_linked(manager_id="u3")])[0]["manager"] == "u17"
+    # an admin chose to keep against THIS name → leave it
+    assert _plan([_linked(manager_id="u3", shan_manager_kept="משה כהן")]) == []
+    # an unresolved name never moves anyone
+    m = {**MASTER, "manager": "יוסי"}
+    assert _plan([_linked(manager_id="u3")], masters={"P-1": m}) == []
+
+
+def test_sync_marks_a_project_gone_from_the_file_inactive_once():
+    assert _plan([_linked()], masters={}) == [{"id": 1, "fields": {}, "manager": None, "active": False}]
+    assert _plan([_linked(shan_active=False)], masters={}) == []
+
+
+def test_sync_reactivates_a_project_back_in_the_file():
+    assert _plan([_linked(shan_active=False)]) == [{"id": 1, "fields": {}, "manager": None, "active": True}]
+
+
+def test_both_upload_paths_call_the_lessons_sync():
+    import pathlib
+    for f in ("app/routers/projects.py", "app/services/knowledge_service.py"):
+        assert "sync_after_upload()" in pathlib.Path(f).read_text(encoding="utf-8"), f

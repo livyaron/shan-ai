@@ -264,6 +264,26 @@ $function$""",
      "FOR EACH ROW EXECUTE FUNCTION lessons.sync_project_stage_index()"),
     ("CREATE OR REPLACE TRIGGER referent_members_check BEFORE INSERT OR UPDATE ON lessons.referent_members "
      "FOR EACH ROW EXECUTE FUNCTION lessons.check_referent_member()"),
+    # PLAN-lessons-projects.md L3: on a project linked to the master file, the
+    # file owns name / stages / type / risk and the link itself. Only PostgREST's
+    # role is refused (every UI edit); the upload sync and the admin pages run
+    # as the app's own role. NOT security definer: current_user must stay the caller.
+    f"""CREATE OR REPLACE FUNCTION lessons.lock_master_fields() RETURNS trigger LANGUAGE plpgsql SET search_path TO 'lessons'
+AS $function$
+BEGIN
+  IF current_user = '{ANON_ROLE}' AND OLD.shan_project_identifier IS NOT NULL AND (
+       NEW.name IS DISTINCT FROM OLD.name
+    OR NEW.stage_indexes IS DISTINCT FROM OLD.stage_indexes
+    OR NEW.project_type IS DISTINCT FROM OLD.project_type
+    OR NEW.risk IS DISTINCT FROM OLD.risk
+    OR NEW.shan_project_identifier IS DISTINCT FROM OLD.shan_project_identifier) THEN
+    RAISE EXCEPTION 'שם, שלב, סוג וסיכון של פרויקט מקושר נקבעים מקובץ המאסטר';
+  END IF;
+  RETURN NEW;
+END;
+$function$""",
+    ("CREATE OR REPLACE TRIGGER projects_lock_master_fields BEFORE UPDATE ON lessons.projects "
+     "FOR EACH ROW EXECUTE FUNCTION lessons.lock_master_fields()"),
 )
 
 SCHEMA_STATEMENTS: tuple[str, ...] = (
