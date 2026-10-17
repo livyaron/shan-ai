@@ -26,6 +26,8 @@ import { format, parseISO } from "date-fns";
 import { cn } from "@/lib/utils";
 import LessonTimeline from "@/components/LessonTimeline";
 import LessonWorkflowHistory from "@/components/LessonWorkflowHistory";
+import { ApproveNew, DistributionSheet } from "@/components/mobile/LessonActions";
+import { useApproveWithAI } from "@/hooks/useApproveWithAI";
 
 import ReturnLessonDialog from "@/components/ReturnLessonDialog";
 import { useFieldLabels } from "@/hooks/useFieldLabels";
@@ -35,6 +37,8 @@ const LessonDetail = () => {
   const { id } = useParams();
   const navigate = useNavigate();
   const workflow = useLessonWorkflow();
+  // First approval of a new lesson: the same flow (and AI distribution sheet) as the phone and the lessons list.
+  const approval = useApproveWithAI();
   const { lessons, projects, equipment, users, implementations, referentReviews, respondToImplementation, respondToReferentReview, currentUser, updateLesson, updateLessonAIReview, deleteLesson, returnLessonToCreator, submitDraftLesson, lessonCategories: categories } = useUser();
   const [feedbackNotes, setFeedbackNotes] = useState<Record<string, string>>({});
   const [isEditing, setIsEditing] = useState(false);
@@ -327,7 +331,14 @@ const LessonDetail = () => {
           <Zap className="w-4 h-4 text-warning" />
           <AlertTitle className="text-warning font-semibold">דורש פעולה</AlertTitle>
           <AlertDescription className="text-sm text-muted-foreground">
-            {currentUser.role === "admin" && lesson.status === "new" && "לקח זה ממתין לאישור או דחייה שלך."}
+            {currentUser.role === "admin" && lesson.status === "new" && (
+              <div className="space-y-2">
+                <p>לקח זה ממתין לאישור או דחייה שלך. אחרי האישור הוא יעבור לרפרנט שבחר יוצר הלקח.</p>
+                <div className="max-w-sm">
+                  <ApproveNew lesson={lesson} approval={approval} />
+                </div>
+              </div>
+            )}
             {currentUser.role === "admin" && lesson.status === "approved" && (!lesson.distributedTo || lesson.distributedTo.length === 0) && "לקח זה אושר אך טרם הופץ לפרויקטים. הפץ אותו כדי שמנהלי הפרויקטים יוכלו ליישם."}
             {currentUser.role === "project_manager" && lesson.status === "rejected" && lesson.createdBy === currentUser.id && "לקח זה נדחה. ערוך ושלח מחדש."}
             {currentUser.role === "project_manager" && lessonNeedsAction(lesson.id).label === "ממתין לתגובה" && "יש implementation של לקח זה בפרויקט שלך שממתין לתגובה. גלול מטה כדי להגיב."}
@@ -335,6 +346,8 @@ const LessonDetail = () => {
           </AlertDescription>
         </Alert>
       )}
+
+      {approval.open && <DistributionSheet lesson={lesson} approval={approval} />}
 
       {/* Draft — waits with its creator until a referent is assigned and it is sent for approval */}
       {isDraft(lesson) && lesson.createdBy === currentUser.id && !isEditing && (
