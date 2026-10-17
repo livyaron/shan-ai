@@ -40,7 +40,7 @@ STAGE_SECTORS: dict[str, tuple[str, ...]] = {
     "בדיקות": (EXECUTION,),
     "עבודה אזרחית והרכבות": (SUPERVISION, EXECUTION),
     "בחירת קבלן": (PM_DEPT,),
-    "הסכם- אגירת אנרגיה": (PM_DEPT,),
+    "הסכם- אגירת אנרגיה": (EXECUTION,),   # an energy-storage project in execution (user, 2026-10-17)
     "טופס 4": (PM_DEPT,),
 }
 

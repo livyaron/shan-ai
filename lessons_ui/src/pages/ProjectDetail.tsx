@@ -348,6 +348,7 @@ const ProjectDetail = () => {
                   { value: "new_build", label: "הקמה" },
                   { value: "expansion", label: "הרחבה" },
                   { value: "maintenance", label: "שו\"ש" },
+                  { value: "mobility", label: "ניידות" },
                 ]}
               />
             </div>

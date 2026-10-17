@@ -279,6 +279,17 @@ SCHEMA_STATEMENTS: tuple[str, ...] = (
     # `s<id>` viewer = nobody decided yet (an explicit "צפייה בלבד" is not).
     "ALTER TABLE lessons.profiles ADD COLUMN IF NOT EXISTS defined_at timestamptz",
     "ALTER TABLE lessons.projects ADD COLUMN IF NOT EXISTS shan_project_identifier varchar(100)",
+    # Master-file link (PLAN-lessons-projects.md L0). shan_active mirrors the
+    # file's is_active (NULL = never synced / a local project). station_type_set
+    # tells a chosen station type from the 'closed' placeholder: every existing
+    # or hand-made project was set up by a person (DEFAULT true); the sync
+    # writes false explicitly on the projects it creates.
+    "ALTER TABLE lessons.projects ADD COLUMN IF NOT EXISTS shan_active boolean",
+    "ALTER TABLE lessons.projects ADD COLUMN IF NOT EXISTS shan_synced_at timestamptz",
+    "ALTER TABLE lessons.projects ADD COLUMN IF NOT EXISTS station_type_set boolean NOT NULL DEFAULT true",
+    # One file project ↔ at most one lessons project.
+    ("CREATE UNIQUE INDEX IF NOT EXISTS uq_lessons_projects_shan_identifier "
+     "ON lessons.projects (shan_project_identifier) WHERE shan_project_identifier IS NOT NULL"),
     # Sequences must be OWNED BY their column, or pg_get_serial_sequence returns
     # NULL and the import's setval silently does nothing (found in testing).
     *(f"ALTER SEQUENCE lessons.{seq} OWNED BY lessons.{tbl}.id" for seq, tbl in _SEQUENCES),

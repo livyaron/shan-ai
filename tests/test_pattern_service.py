@@ -517,3 +517,8 @@ def test_stage_contradiction_flag_levels():
     h = pt.project_history(frames, p, "P-2")                 # P-2 sits in קבלת היתר
     fl = next(x for x in h["flags"] if "לא תואם לדיווח" in x["text"])
     assert fl["level"] == "medium" and "קבלת היתר" in fl["text"]
+
+
+def test_energy_storage_agreement_is_execution():
+    """User decision 2026-10-17: an energy-storage project in this stage is in execution."""
+    assert ss.sectors_for("הסכם- אגירת אנרגיה") == (ss.EXECUTION,)

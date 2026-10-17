@@ -171,6 +171,7 @@ const Projects = () => {
             { value: "new_build", label: "הקמה" },
             { value: "expansion", label: "הרחבה" },
             { value: "maintenance", label: "שו&quot;ש" },
+            { value: "mobility", label: "ניידות" },
           ]}
         />
 

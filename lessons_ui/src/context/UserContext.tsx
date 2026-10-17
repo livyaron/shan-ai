@@ -88,13 +88,14 @@ export const PROJECT_STAGES = [
 
 export type LessonStatus = "draft" | "new" | "approved" | "rejected" | "distributed" | "closed";
 
-export type ProjectType = "new_build" | "expansion" | "maintenance";
+export type ProjectType = "new_build" | "expansion" | "maintenance" | "mobility";
 export type StationType = "closed" | "open" | "switching" | "combined" | "mobile_substation";
 
 export const projectTypeLabels: Record<ProjectType, string> = {
   new_build: "הקמה",
   expansion: "הרחבה",
   maintenance: "שו\"ש",
+  mobility: "ניידות",
 };
 
 export const stationTypeLabels: Record<StationType, string> = {

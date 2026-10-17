@@ -98,6 +98,12 @@ def plan_links(profiles: dict[str, str], users: dict[int, str]) -> tuple[list[tu
     return ok, problems
 
 
+def local_only_projects(source_ids: list, target_ids: list) -> list[int]:
+    """Target project ids the source does not have — an import would delete them."""
+    src = set(source_ids)
+    return sorted(i for i in target_ids if i not in src)
+
+
 async def fetch_all(client: httpx.AsyncClient, base: str, key: str, table: str) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     expected = -1
@@ -160,6 +166,17 @@ async def run_import(engine, base: str, key: str, *, write: bool) -> dict[str, A
         links, problems = plan_links(profiles, users)
         report["links"] = [f"{p} → {u}" for p, u in links]
         report["link_problems"] = problems
+        # The import replaces lessons.projects wholesale, so a project only the
+        # module has (created from the master file, or by hand after the
+        # migration) would vanish. Report it on a dry run, refuse on a write.
+        local = local_only_projects(
+            [r.get("id") for r in data["projects"]],
+            [r[0] for r in (await conn.execute(text("SELECT id FROM lessons.projects"))).all()],
+        )
+        report["local_projects"] = local
+        if write and local:
+            raise ImportAbort(f"{len(local)} פרויקטים קיימים רק במודול ויימחקו בייבוא: "
+                              f"{local[:20]} — הייבוא בוטל")
         if not write:
             report["ok"] = True
             return report
@@ -178,8 +195,9 @@ async def run_import(engine, base: str, key: str, *, write: bool) -> dict[str, A
             "SELECT profile_id, shan_user_id FROM lessons.referent_members"
         ))).all()
         kept_projects = (await conn.execute(text(
-            "SELECT id, shan_project_identifier FROM lessons.projects WHERE shan_project_identifier IS NOT NULL"
-        ))).all()
+            "SELECT id, shan_project_identifier, shan_active, shan_synced_at, station_type_set "
+            "FROM lessons.projects WHERE shan_project_identifier IS NOT NULL OR NOT station_type_set"
+        ))).mappings().all()
 
         # Triggers off while loading: the source's own lessons_count/stage_index
         # are the truth, not a recomputation. FK checks stay on (load order is FK-safe).
@@ -237,10 +255,12 @@ async def run_import(engine, base: str, key: str, *, write: bool) -> dict[str, A
                 "SELECT CAST(:p AS text), CAST(:u AS integer) WHERE EXISTS (SELECT 1 FROM lessons.profiles WHERE id = :p AND role = 'referent') "
                 "ON CONFLICT DO NOTHING"
             ), {"p": pid, "u": uid})
-        for pid, ident in kept_projects:
+        for kp in kept_projects:
             await conn.execute(text(
-                "UPDATE lessons.projects SET shan_project_identifier = :i WHERE id = :p"
-            ), {"i": ident, "p": pid})
+                "UPDATE lessons.projects SET shan_project_identifier = :shan_project_identifier, "
+                "shan_active = :shan_active, shan_synced_at = :shan_synced_at, "
+                "station_type_set = :station_type_set WHERE id = :id"
+            ), dict(kp))
         for t in (*TABLES, "referent_members"):
             await conn.execute(text(f"ALTER TABLE lessons.{t} ENABLE TRIGGER USER"))
 
@@ -255,7 +275,7 @@ async def run_import(engine, base: str, key: str, *, write: bool) -> dict[str, A
             raise ImportAbort(f"אי-התאמה בספירות (מקור, יעד): {bad} — הכל בוטל")
         report["target"] = target
         report["kept"] = {"links": len(kept_links), "viewers": extra_profiles,
-                          "members": len(kept_members), "project_links": len(kept_projects)}
+                          "members": len(kept_members), "project_links": sum(1 for kp in kept_projects if kp["shan_project_identifier"])}
         await conn.execute(text("NOTIFY pgrst, 'reload schema'"))
     report["ok"] = True
     logger.info("lessons import done: %s", report["target"])
