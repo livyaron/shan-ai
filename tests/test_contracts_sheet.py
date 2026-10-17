@@ -74,10 +74,11 @@ def test_a_plan_is_never_a_step_reached():
     assert r["runway_days"] == (datetime.date(2026, 9, 30) - REPORT).days
 
 
-def test_signed_order_amount_contractor_and_award_duration():
+def test_signed_order_contractor_and_award_duration():
     r = by_ident(parsed(), "X-102")
     assert r["group"] == "signed" and r["stage"] == cs.ORDER
-    assert r["award_amount"] == 1_200_000 and r["contractor"] == "קבלן אלפא"
+    assert r["contractor"] == "קבלן אלפא"
+    assert "award_amount" not in r and "1,200,000" not in r["status"] and cs.REDACTED in r["status"]
     assert r["order_no"] == "4001000001"
     assert r["runway_days"] is None and r["next"] is None
     assert r["ground"]["permit_received"] and r["ground"]["permit"] is None
@@ -98,7 +99,7 @@ def test_a_postponed_submission_counts_at_its_last_date():
 
 def test_package_estimate_is_not_an_award_and_month_year_ground():
     r = by_ident(parsed(), "WBM-105")
-    assert r["award_amount"] is None and r["package_amount"] == 900_000
+    assert "900,000" not in r["status"] and "package_amount" not in r
     assert r["group"] == "docs" and r["transfer"] is None and "annex5" in r["topics"]
     assert r["ground"]["ground"] == "2026-11-30"          # "11/26" = end of November
 
@@ -111,7 +112,7 @@ def test_agreement_ended_mid_text_is_not_done():
 
 def test_award_without_besach_converted_procedure_and_bare_date():
     r = by_ident(parsed(), "X-107")
-    assert r["group"] == "awarded" and r["award_amount"] == 287_600 and r["contractor"] == "בטא"
+    assert r["group"] == "awarded" and r["contractor"] == "בטא"
     assert r["family"] == "פומבי (הוסב)"
     assert r["ground"]["bare"] and r["ground"]["ground"] == "2026-12-15"
 
@@ -148,7 +149,6 @@ def test_every_number_counts_rows():
     for s, nxt in zip(a["funnel"], a["funnel"][1:]):
         assert s["reached"] >= nxt["reached"]
     assert len(a["overdue"]) == sum(1 for r in rows if r["runway_days"] is not None and r["runway_days"] < 0)
-    assert a["awarded_total"] == 1_200_000 + 287_600
     assert sum(f["total"] for f in a["families"]) == len(rows)
     for f in a["families"]:
         assert sum(f["phases"].values()) == f["total"]
@@ -197,7 +197,7 @@ def test_page_renders_every_row_and_the_empty_state():
     html = _render(parsed())
     assert html.count('<tbody class="row"') == 8
     assert "/dashboard/projects/p/X-101" in html
-    assert "1,200,000 ₪" in html
+    assert "₪" not in html and "1,200,000" not in html and "287,600" not in html
     assert "הגיליון לא עודכן" in html
     assert "עדיין לא נקלט" in _render(None)
 
@@ -215,3 +215,25 @@ def test_upload_saves_the_sheet_after_a_live_sync_only():
     body = src.split("async def _sync_and_summarize")[1].split("@router")[0]
     live = body.split('if result.get("processed") and not result.get("historical"):')[1]
     assert "contracts_sheet.save_from_file" in live
+
+
+def test_no_money_figure_survives():
+    for text in ("ע\"ש קבלן בסך 30,432,546 ש\"ח מס הזמנה", "בסך 872,710", "287,600 ₪",
+                 "לא יועבר - פחות מ500 אש\"ח", "בעלות של כ-3 מלש\"ח", "₪ 1,000"):
+        out = cs.redact(text)
+        assert not re.search(r"\d{3,}|₪", out.replace("4001", "")), out
+        assert cs.REDACTED in out
+    # dates, order numbers and stage words are not money
+    assert cs.redact("ב17.05 התקבל מכתב זכייה הזמנה 4001435775") == "ב17.05 התקבל מכתב זכייה הזמנה 4001435775"
+
+
+def test_a_payload_stored_before_the_rule_is_cleaned_on_read():
+    old = {"rows": [{"status": "התקבל מכתב זכייה בסך 1,200,000 ש\"ח", "award_amount": 1200000,
+                     "package_amount": 5, "events": [{"date": "2026-05-17", "text": "בסך 9,000 ₪"}]}],
+           "awarded_total": 1200000}
+    clean = cs.redact_payload(old)
+    assert "awarded_total" not in clean
+    row = clean["rows"][0]
+    assert "award_amount" not in row and "package_amount" not in row
+    assert "1,200,000" not in row["status"] and "9,000" not in row["events"][0]["text"]
+    assert row["events"][0]["date"] == "2026-05-17"
