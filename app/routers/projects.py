@@ -343,7 +343,8 @@ async def project_page(
     events and a computed risk read-out. Visible to whoever sees the project
     on the patterns page (insight_access) — admins and the PM department see
     every project, including ones that have left the file."""
-    from app.services import insight_ai, insight_triage, pattern_service, project_chart, stage_sectors
+    from app.services import (insight_ai, insight_triage, pattern_service, project_chart, project_lessons,
+                              stage_sectors)
     frames, p = await _visible_project(session, current_user, identifier)
     h = pattern_service.project_history(frames, p, identifier)
     if h is None:
@@ -362,6 +363,7 @@ async def project_page(
         "ai": insight_ai.for_display((await insight_ai.load(
             session, [insight_ai.project_kind(identifier)], p.get("as_of"))).get(insight_ai.project_kind(identifier))),
         "ai_error": request.query_params.get("ai_error") == "1",
+        "lessons": await project_lessons.for_project(session, identifier),
     })
 
 
