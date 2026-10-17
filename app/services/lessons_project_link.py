@@ -841,5 +841,5 @@ async def sync_after_upload() -> None:
             counts = await sync_from_file(session)
             await session.commit()
         log.info("lessons project sync: %s", counts)
-    except Exception:  # noqa: BLE001
+    except Exception:
         log.exception("lessons project sync failed (the master upload itself is fine)")
