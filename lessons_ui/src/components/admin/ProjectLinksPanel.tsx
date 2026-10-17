@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AlertTriangle, CheckCircle, FolderPlus, GitMerge, Link2, Link2Off, Loader2, MapPin, Star, UserCheck } from "lucide-react";
+import { AlertTriangle, CheckCircle, FolderPlus, GitMerge, Link2, Link2Off, Loader2, MapPin, Search, Star, UserCheck } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -18,7 +18,9 @@ import {
   managerNeedsAnswer,
   masterLabel,
   rowState,
+  SEARCH_REASON_LABELS,
   type LinkRow,
+  type SearchRow,
   type LinksPayload,
 } from "@/lib/projectLinks";
 
@@ -42,6 +44,8 @@ const ProjectLinksPanel = () => {
   const [mergeTarget, setMergeTarget] = useState("");
   const [confirmMerge, setConfirmMerge] = useState(false);
   const [confirmCreate, setConfirmCreate] = useState(false);
+  const [fileQuery, setFileQuery] = useState("");
+  const [fileRows, setFileRows] = useState<SearchRow[] | null>(null);
   const [mgrRow, setMgrRow] = useState<number | null>(null);
   const [mgrUser, setMgrUser] = useState("");
 
@@ -88,6 +92,18 @@ const ProjectLinksPanel = () => {
       return null;
     } finally {
       setBusy(null);
+    }
+  };
+
+  const searchFile = async () => {
+    const q = fileQuery.trim();
+    if (q.length < 2) return;
+    try {
+      const r = await fetch(`${SUPABASE_URL}/_project_links/search?q=${encodeURIComponent(q)}`, { credentials: "same-origin" });
+      if (!r.ok) throw new Error(String(r.status));
+      setFileRows((await r.json()).rows);
+    } catch {
+      toast({ title: "החיפוש נכשל", variant: "destructive" });
     }
   };
 
@@ -299,6 +315,36 @@ const ProjectLinksPanel = () => {
               </div>
             );
           })}
+        </CardContent>
+      </Card>
+
+      <Card className="border-0 shadow-sm">
+        <CardHeader>
+          <CardTitle className="text-base font-heading flex items-center gap-2">
+            <Search className="w-4 h-4" />
+            חיפוש בקובץ המאסטר
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3 text-sm">
+          <p className="text-muted-foreground">
+            פרויקט לא מופיע בהצעות? חפש לפי שם, מקום, מזהה או מנה״פ — החיפוש עובר על כל הפרויקטים בקובץ, כולל לא פעילים,
+            ואומר למה כל אחד מוצע או לא.
+          </p>
+          <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); searchFile(); }}>
+            <Input value={fileQuery} onChange={(e) => setFileQuery(e.target.value)} placeholder="למשל: גבעת אורן" className="sm:max-w-xs" />
+            <Button type="submit" variant="outline" className="gap-1.5" disabled={fileQuery.trim().length < 2}>
+              <Search className="w-4 h-4" />
+              חפש
+            </Button>
+          </form>
+          {fileRows !== null && fileRows.length === 0 && <p className="text-muted-foreground">לא נמצא בקובץ.</p>}
+          {fileRows?.map((f) => (
+            <div key={f.identifier} className={`rounded-lg p-2 text-xs space-y-0.5 ${f.reason === "free" ? "bg-success/5 ring-1 ring-success/30" : "bg-muted/50"}`}>
+              <div className="font-medium">{f.identifier} · {f.name}</div>
+              <div className="text-muted-foreground">{[f.manager && `מנה״פ ${f.manager}`, f.stage].filter(Boolean).join(" · ")}</div>
+              <div>{SEARCH_REASON_LABELS[f.reason]}{f.reason === "linked" && f.linked_name ? `: ${f.linked_name}` : ""}</div>
+            </div>
+          ))}
         </CardContent>
       </Card>
 

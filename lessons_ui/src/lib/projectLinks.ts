@@ -104,3 +104,23 @@ export const freeMasters = (masters: MasterProject[], forRow: number): MasterPro
 
 export const masterLabel = (m: MasterProject): string =>
   [m.name || m.identifier, m.manager ? `מנה"פ ${m.manager}` : "", m.stage ?? ""].filter(Boolean).join(" · ");
+
+export type SearchReason = "free" | "linked" | "inactive";
+
+export interface SearchRow {
+  identifier: string;
+  name: string | null;
+  manager: string | null;
+  stage: string | null;
+  is_active: boolean;
+  linked_to: number | null;
+  linked_name: string | null;
+  score: number;
+  reason: SearchReason;
+}
+
+export const SEARCH_REASON_LABELS: Record<SearchReason, string> = {
+  free: "פעיל ופנוי — אפשר לקשר",
+  linked: "כבר מקושר לפרויקט לקחים",
+  inactive: "לא פעיל — לא נמצא בגיליון \"דוח שבועי עדכני\" בהעלאה האחרונה",
+};

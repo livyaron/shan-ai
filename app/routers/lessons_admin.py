@@ -511,6 +511,15 @@ async def project_links_list(request: Request, session: AsyncSession = Depends(g
     return JSONResponse(await lpl.payload(session), headers={"Cache-Control": "no-store"})
 
 
+@project_links_router.get("/search")
+async def project_links_search(request: Request, q: str = "", session: AsyncSession = Depends(get_db_session)) -> Response:
+    """Search EVERY file project (active and inactive) — why is X not offered?"""
+    from app.services import lessons_project_link as lpl
+    if await _shan_admin(request, session) is None:
+        return JSONResponse({"message": "Shan-AI admin only"}, status_code=403)
+    return JSONResponse({"q": q, "rows": await lpl.search_file(session, q)}, headers={"Cache-Control": "no-store"})
+
+
 @project_links_router.post("")
 async def project_links_act(request: Request, session: AsyncSession = Depends(get_db_session)) -> Response:
     """Body: {"action": "link", "project_id": 3, "identifier": "123" | null}
