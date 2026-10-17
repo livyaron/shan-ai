@@ -344,7 +344,7 @@ async def project_page(
     on the patterns page (insight_access) — admins and the PM department see
     every project, including ones that have left the file."""
     from app.services import (insight_ai, insight_triage, pattern_service, project_chart, project_lessons,
-                              stage_sectors)
+                              project_links, stage_sectors)
     frames, p = await _visible_project(session, current_user, identifier)
     h = pattern_service.project_history(frames, p, identifier)
     if h is None:
@@ -364,7 +364,33 @@ async def project_page(
             session, [insight_ai.project_kind(identifier)], p.get("as_of"))).get(insight_ai.project_kind(identifier))),
         "ai_error": request.query_params.get("ai_error") == "1",
         "lessons": await project_lessons.for_project(session, identifier),
+        "links": await project_links.for_project(session, identifier, current_user),
     })
+
+
+@router.get("/link/options")
+async def project_link_options(
+    session: AsyncSession = Depends(get_db_session),
+    current_user: User = Depends(get_current_user),
+):
+    """Active projects for the optional mission/decision project picker."""
+    from app.services import project_links
+    return {"projects": [{k: p[k] for k in ("id", "identifier", "name")}
+                         for p in await project_links.options(session)]}
+
+
+@router.get("/link/suggest")
+async def project_link_suggest(
+    text: str = "",
+    user_id: int | None = None,
+    session: AsyncSession = Depends(get_db_session),
+    current_user: User = Depends(get_current_user),
+):
+    """Suggested projects for a mission/decision text — a hint a person picks
+    from, never applied by itself. `user_id` = the mission owner / decision
+    submitter (their confirmed מנה"פ name ranks their projects higher)."""
+    from app.services import project_links
+    return {"suggestions": await project_links.suggest_for(session, text[:4000], user_id or current_user.id)}
 
 
 @router.get("/insights/access", response_class=HTMLResponse)

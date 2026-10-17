@@ -121,9 +121,15 @@ class Decision(Base):
     irrelevant_reason  = Column(Text, nullable=True)
     irrelevant_at      = Column(DateTime, nullable=True)
     irrelevant_by_id   = Column(Integer, ForeignKey("users.id"), nullable=True)
+    # Optional link to a master-file project (project_links). ALTERed in at
+    # startup; SET NULL — a project row going away never deletes a decision.
+    project_id         = Column(Integer, ForeignKey("projects.id", ondelete="SET NULL"),
+                                nullable=True, index=True)
 
     submitter = relationship("User", back_populates="decisions", foreign_keys=[submitter_id])
     irrelevant_by = relationship("User", foreign_keys=[irrelevant_by_id])
+    # selectin: loaded with the row, so a card can show it after the session closes.
+    project = relationship("Project", foreign_keys=[project_id], lazy="selectin")
     distributions = relationship("DecisionDistribution", back_populates="decision", cascade="all, delete-orphan")
     raci_roles = relationship("DecisionRaciRole", back_populates="decision", cascade="all, delete-orphan")
 
@@ -461,10 +467,14 @@ class Mission(Base):
     # chain simply stops one link earlier.
     parent_id       = Column(Integer, ForeignKey("missions.id", ondelete="SET NULL"),
                              nullable=True, index=True)
+    # Optional link to a master-file project (project_links). ALTERed in at startup.
+    project_id      = Column(Integer, ForeignKey("projects.id", ondelete="SET NULL"),
+                             nullable=True, index=True)
 
     owner      = relationship("User", foreign_keys=[owner_id])
     created_by = relationship("User", foreign_keys=[created_by_id])
     parent     = relationship("Mission", remote_side=[id], foreign_keys=[parent_id])
+    project    = relationship("Project", foreign_keys=[project_id], lazy="selectin")
     updates    = relationship(
         "MissionUpdate",
         cascade="all, delete-orphan",

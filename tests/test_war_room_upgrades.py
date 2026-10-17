@@ -314,6 +314,7 @@ def _ctx(style, is_viewer=False, active_kpi="", chains=None, moves=None):
              "range": "01/09/2026–היום"},
         ]},
         "child_counts": {7: 1},
+        "project_labels": {},
         "postpone_label": oms.postpone_label,
         "fmt_due": oms.format_due,
         "is_viewer": is_viewer,

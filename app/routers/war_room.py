@@ -16,6 +16,7 @@ from app.database import get_db_session
 from app.models import Mission, MissionStatusEnum, MissionUpdate, User, RoleEnum
 from app.routers.login import get_current_user
 from app.services import missions_menu_service as oms
+from app.services import project_links
 from app.services import war_room_chain as chain
 from app.services import war_room_kpis as kpis
 from app.services import war_room_styles as wrs
@@ -208,6 +209,8 @@ async def war_room_page(
         "active_kpi": active_kpi,
         "chains": chains,
         "child_counts": child_counts,
+        # Optional project link per mission (project_links): chip + picker.
+        "project_labels": await project_links.labels_for(session, {m.project_id for m in missions}),
         "postpone_label": oms.postpone_label,
         "fmt_due": oms.format_due,
         "is_viewer": current_user.role == RoleEnum.VIEWER,
@@ -445,6 +448,7 @@ async def create_mission_web(
     owner_id: int = Form(...),
     due_date: str = Form(""),
     parent_id: BlankableIntForm = Form(None),
+    project_id: BlankableIntForm = Form(None),
 ):
     _require_editor(current_user)
     if not title.strip():
@@ -454,6 +458,8 @@ async def create_mission_web(
     # itself is real work and must not be lost to a stale button.
     if parent_id is not None and await session.get(Mission, parent_id) is None:
         parent_id = None
+    # Optional project link: an id that does not resolve is dropped, never an error.
+    project = await project_links.resolve(session, project_id)
     urg, imp = oms.quadrant_flags(quadrant)
     m = await oms.create_mission(
         session,
@@ -465,6 +471,7 @@ async def create_mission_web(
         created_by_id=current_user.id,
         due_date=_parse_due(due_date),
         parent_id=parent_id,
+        project_id=project.id if project else None,
     )
     await _notify_owner_via_telegram(session, m, current_user)
     msg = "משימת+ההמשך+נוצרה" if parent_id else "המשימה+נוצרה"
@@ -603,6 +610,26 @@ async def move_quadrant(
         return JSONResponse({"status": "error", "message": "המשימה לא נמצאה"}, status_code=404)
     await oms.update_mission(session, m, quadrant=quadrant)
     return JSONResponse({"status": "ok", "message": "הרביע עודכן"})
+
+
+@router.post("/{mission_id}/project")
+async def set_project(
+    mission_id: int,
+    session: AsyncSession = Depends(get_db_session),
+    current_user: User = Depends(get_current_user),
+    project_id: BlankableIntForm = Form(None),
+):
+    """Link the mission to a master-file project, or clear it (blank)."""
+    _require_editor(current_user)
+    m = await session.get(Mission, mission_id)
+    if not m:
+        return JSONResponse({"status": "error", "message": "המשימה לא נמצאה"}, status_code=404)
+    project = await project_links.resolve(session, project_id)
+    if project_id and project is None:
+        return JSONResponse({"status": "error", "message": "הפרויקט לא נמצא"}, status_code=404)
+    m.project_id = project.id if project else None
+    await session.commit()
+    return JSONResponse({"status": "ok", "message": "הקישור לפרויקט עודכן"})
 
 
 @router.post("/{mission_id}/assign")

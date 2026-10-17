@@ -221,6 +221,7 @@ dialog.tb-dlg input,dialog.tb-dlg textarea,dialog.tb-dlg select{width:100%;backg
     {% if m.due_changes %}<button type="button" class="tb-mark post" onclick="toggleHist({{ m.id }})"
        title="{{ postpone_label(m.due_changes|length) }}">↻ {{ m.due_changes|length }}</button>{% endif %}
     {% if child_counts.get(m.id) %}<span class="tb-mark" title="נפתחה ממנה משימת המשך">↳</span>{% endif %}
+    {% set pl = project_labels.get(m.project_id) %}{% if pl %}<a class="tb-mark" href="/dashboard/projects/p/{{ pl.identifier|urlencode }}" title="{{ pl.label }}" dir="auto">🏗 {{ pl.identifier }}</a>{% endif %}
   </span>
   <span style="color:var(--ink-2)">{{ m.owner.username if m.owner else '—' }}</span>
   <span class="tb-mono" style="{% if late %}color:var(--red){% elif is_today %}color:var(--amber){% endif %}">
@@ -293,6 +294,9 @@ dialog.tb-dlg input,dialog.tb-dlg textarea,dialog.tb-dlg select{width:100%;backg
       <button class="tb-btn" type="button" onclick="setDue({{ m.id }})">עדכן יעד</button>
       <button class="tb-btn" type="button" data-child="{{ m.id }}" data-child-title="{{ m.title }}"
               data-child-owner="{{ m.owner_id }}" data-child-quad="{{ qkey }}">משימת המשך</button>
+      <button type="button" class="tb-btn" data-proj="{{ m.id }}" data-proj-cur="{{ m.project_id or '' }}"
+                    data-proj-label="{{ pl.label if pl else '' }}" data-proj-user="{{ m.owner_id }}"
+                    data-proj-text="{{ m.title }} {{ m.description or '' }}" title="קישור המשימה לפרויקט (לא חובה)">🏗 פרויקט</button>
     </div>
   </div>
   <div class="tb-exp" id="closebox-{{ m.id }}">
@@ -353,6 +357,7 @@ dialog.tb-dlg input,dialog.tb-dlg textarea,dialog.tb-dlg select{width:100%;backg
     </select>
     <label>תאריך יעד</label>
     <input type="date" name="due_date">
+    {% include "_war_room_project_field.html" %}
     <div style="display:flex;gap:8px;margin-top:16px">
       <button class="tb-btn go" type="submit">שמור</button>
       <button class="tb-btn" type="button" onclick="document.getElementById('createDlg').close()">ביטול</button>

@@ -108,3 +108,7 @@ _missions_create_state: dict[int, dict] = {}
 # value: { "mission_id": int, "mode": "own"|"due_text", "owner_ids": [user_id, ...],
 #          "origin": str, "page": int }
 _missions_edit_state: dict[int, dict] = {}
+
+# { telegram_id (int): {"kind": "m"|"d", "id": int, "back": str, "mode": "pick"|"search"} }
+# Optional project link on a mission / decision card (project_links, pl: callbacks)
+_project_link_state: dict[int, dict] = {}

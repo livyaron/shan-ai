@@ -53,6 +53,7 @@ dialog.wrx-dlg::backdrop{background:rgba(0,0,0,.55)}
     <button type="button" class="wrx-btn" onclick="closeDueDlg()">ביטול</button>
   </div>
 </dialog>
+{% include "_project_picker.html" %}
 {% endif %}
 <script>
 async function post(url, data){
@@ -198,6 +199,10 @@ function openCreate(){
   if (note){ note.hidden = true; note.textContent = ''; }
   const head = document.getElementById('createHead');
   if (head) head.textContent = '➕ משימה חדשה';
+  const proj = document.getElementById('createProject');
+  if (proj) proj.value = '';
+  const projLabel = document.getElementById('createProjectLabel');
+  if (projLabel) projLabel.textContent = 'ללא';
   dlg.showModal();
 }
 function openChild(ds){
@@ -221,6 +226,31 @@ function openChild(ds){
 }
 document.querySelectorAll('[data-child]').forEach(btn =>
   btn.addEventListener('click', () => openChild(btn.dataset)));
+// ---- קישור לפרויקט (project_links) — optional, suggested, applied by a click ----
+function pickCreateProject(form){
+  // form.elements, not form.title: `title` is the form's own attribute property.
+  const f = form.elements;
+  const text = [f['title'].value, f['description'] ? f['description'].value : ''].join(' ');
+  const hidden = document.getElementById('createProject');
+  pjxOpen({
+    text, userId: f['owner_id'] ? f['owner_id'].value : '',
+    currentId: hidden.value, currentLabel: hidden.value ? document.getElementById('createProjectLabel').textContent : '',
+    onPick: (id, label) => {
+      hidden.value = id || '';
+      document.getElementById('createProjectLabel').textContent = id ? label : 'ללא';
+    },
+  });
+}
+document.querySelectorAll('[data-proj]').forEach(btn => btn.addEventListener('click', () => {
+  const ds = btn.dataset;
+  pjxOpen({
+    text: ds.projText, userId: ds.projUser, currentId: ds.projCur, currentLabel: ds.projLabel,
+    onPick: async (id) => {
+      if (!await post(`/dashboard/war-room/${ds.proj}/project`, {project_id: id || ''})) return false;
+      location.reload();
+    },
+  });
+}));
 async function openSummary(refresh){
   const dlg  = document.getElementById('summaryDlg');
   const body = document.getElementById('summaryBody');

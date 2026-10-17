@@ -636,6 +636,10 @@
                 {% if d.raci_summary != '—' %}
                 <span style="font-size:.7rem;color:#8b9aaa;" title="RACI">RACI {{ d.raci_summary }}</span>
                 {% endif %}
+                {% if d.project %}
+                <a class="meta-item" href="/dashboard/projects/p/{{ d.project.identifier|urlencode }}" title="{{ d.project.label }}"
+                   onclick="event.stopPropagation()" dir="auto" style="color:inherit">🏗 {{ d.project.identifier }}</a>
+                {% endif %}
             </div>
 
             <!-- Accountable chip (pending only, only when accountable ≠ submitter) -->
@@ -683,6 +687,10 @@
                 <button class="btn btn-outline-secondary btn-sm" onclick="openDetail({{ loop.index0 }})" title="פרטים">🔍</button>
                 {% if d.can_edit %}
                 <button class="btn btn-outline-primary btn-sm" onclick="openEdit({{ loop.index0 }})" title="עריכה">✏️</button>
+                <button class="btn btn-outline-primary btn-sm" type="button" title="קישור לפרויקט (לא חובה)"
+                        data-dproj="{{ d.id }}" data-proj-cur="{{ d.project_id or '' }}"
+                        data-proj-label="{{ d.project.label if d.project else '' }}" data-proj-user="{{ d.submitter_id }}"
+                        data-proj-text="{{ d.link_text }}">🏗</button>
                 {% endif %}
                 <button class="btn btn-outline-info btn-sm" onclick="openDecisionAI({{ d.id }})" title="ניתוח AI">🤖</button>
                 {% if d.can_edit_raci %}
@@ -1811,6 +1819,27 @@ if (new URLSearchParams(window.location.search).get('new') === '1') {
         history.replaceState(null, '', window.location.pathname);
     });
 }
+</script>
+{% include "_project_picker.html" %}
+<script>
+// קישור לפרויקט (project_links) — optional, suggested, applied by a click.
+document.querySelectorAll('[data-dproj]').forEach(btn => btn.addEventListener('click', () => {
+    const ds = btn.dataset;
+    pjxOpen({
+        text: ds.projText, userId: ds.projUser, currentId: ds.projCur, currentLabel: ds.projLabel,
+        onPick: async (id) => {
+            const body = new FormData();
+            body.append('project_id', id || '');
+            const res = await fetch(`/dashboard/decisions/${ds.dproj}/project`, {method: 'POST', body});
+            if (!res.ok) {
+                let p = {}; try { p = await res.json(); } catch (e) {}
+                alert(p.detail || 'שגיאה');
+                return false;
+            }
+            location.reload();
+        },
+    });
+}));
 </script>
 </body>
 </html>

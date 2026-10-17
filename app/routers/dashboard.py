@@ -1386,6 +1386,9 @@ async def decisions_page(
     )
     accountable_map = {row.decision_id: {"id": row.user_id, "name": row.username} for row in accountable_q}
 
+    from app.services import project_links
+    project_labels = await project_links.labels_for(session, {d.project_id for d, _ in rows})
+
     decisions = []
     for d, submitter_name in rows:
         my_fb = my_feedbacks.get(d.id)
@@ -1452,6 +1455,9 @@ async def decisions_page(
             "irrelevant_reason":     d.irrelevant_reason or "",
             "irrelevant_at":         d.irrelevant_at.strftime("%d/%m/%Y") if d.irrelevant_at else "",
             "can_toggle_relevance":  _can_toggle_relevance(d, current_user, my_raci_roles),
+            "project_id":            d.project_id,
+            "project":               project_labels.get(d.project_id),
+            "link_text":             project_links.decision_text(d),
         })
 
     users_q = (await session.execute(select(User).order_by(User.username))).scalars().all()
@@ -1751,6 +1757,30 @@ async def update_decision(
 
     await session.commit()
     return RedirectResponse("/dashboard/decisions?msg=החלטה+עודכנה", status_code=303)
+
+
+@router.post("/decisions/{decision_id}/project")
+async def set_decision_project(
+    decision_id: int,
+    project_id: str = Form(""),
+    session: AsyncSession = Depends(get_db_session),
+    current_user: User = Depends(get_current_user),
+):
+    """Link the decision to a master-file project, or clear it (blank). Same
+    right as editing its content (admin or submitter)."""
+    from app.services import project_links
+    d = await session.get(Decision, decision_id)
+    if not d:
+        return JSONResponse({"detail": "החלטה לא נמצאה"}, status_code=404)
+    if not _can_edit(d, current_user):
+        return JSONResponse({"detail": "אין הרשאה לעריכת החלטה זו"}, status_code=403)
+    pid = int(project_id) if project_id.strip().isdigit() else None
+    project = await project_links.resolve(session, pid)
+    if pid and project is None:
+        return JSONResponse({"detail": "הפרויקט לא נמצא"}, status_code=404)
+    d.project_id = project.id if project else None
+    await session.commit()
+    return JSONResponse({"status": "ok"})
 
 
 @router.post("/decisions/{decision_id}/delete")

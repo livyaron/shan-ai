@@ -142,12 +142,16 @@ dialog.fc-dlg input,dialog.fc-dlg textarea,dialog.fc-dlg select{width:100%;backg
         {% set u = m.updates[-1] %}
         <div class="fc-upd" dir="auto">{{ fmt_stamp(u.created_at) }} · {{ u.author_name or '—' }} — {{ u.text }}</div>
         {% endif %}
-        <div class="fc-born">🕒 נוצרה {{ fmt_created(m.created_at) }}</div>
+        {% set pl = project_labels.get(m.project_id) %}
+        <div class="fc-born">🕒 נוצרה {{ fmt_created(m.created_at) }}{% if pl %} · {% if pl %}<a href="/dashboard/projects/p/{{ pl.identifier|urlencode }}" title="{{ pl.label }}" dir="auto">🏗 {{ pl.identifier }}</a>{% endif %}{% endif %}</div>
         {% if not is_viewer %}
         <div class="fc-acts">
           <button class="fc-btn go" onclick="toggleNote({{ m.id }})">כתוב עדכון</button>
           <button class="fc-btn" onclick="toggleClose({{ m.id }}, 'done')">סמן כבוצע</button>
           <button class="fc-btn" onclick="toggleClose({{ m.id }}, 'cancel')">בטל</button>
+          <button type="button" class="fc-btn" data-proj="{{ m.id }}" data-proj-cur="{{ m.project_id or '' }}"
+                    data-proj-label="{{ pl.label if pl else '' }}" data-proj-user="{{ m.owner_id }}"
+                    data-proj-text="{{ m.title }} {{ m.description or '' }}" title="קישור המשימה לפרויקט (לא חובה)">🏗 פרויקט</button>
         </div>
         <div class="fc-box" id="notebox-{{ m.id }}">
           <textarea id="note-{{ m.id }}" rows="3" dir="auto" maxlength="2000"
@@ -279,6 +283,7 @@ dialog.fc-dlg input,dialog.fc-dlg textarea,dialog.fc-dlg select{width:100%;backg
     </select>
     <label>תאריך יעד</label>
     <input type="date" name="due_date">
+    {% include "_war_room_project_field.html" %}
     <div class="fc-acts">
       <button class="fc-btn go" type="submit">שמור</button>
       <button class="fc-btn" type="button" onclick="document.getElementById('createDlg').close()">ביטול</button>

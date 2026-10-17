@@ -333,6 +333,8 @@ def build_mission_card_keyboard(
             if show_all_updates else
             InlineKeyboardButton(f"🗒 כל העדכונים ({n_updates})", callback_data=f"om:u:{tail}")
         ])
+    # Optional project link (project_links) — handled by the pl: callbacks.
+    rows.append([InlineKeyboardButton("🏗 פרויקט", callback_data=f"pl:o:m:{tail}")])
     rows.append([
         InlineKeyboardButton("🔙 חזרה לרשימה", callback_data=f"om:{origin}:{page}"),
         InlineKeyboardButton("🏠 חדר מבצעים",  callback_data="om:menu"),
@@ -557,6 +559,10 @@ def build_mission_card(m: Mission, show_all_updates: bool = False) -> str:
             f"↻ <i>{_html.escape(postpone_label(len(postponed)))} · "
             f"{_html.escape(format_due_change(postponed[-1]))}</i>\n"
         )
+    # Optional master-file project (project_links); getattr — test doubles carry no relationship.
+    proj = getattr(m, "project", None)
+    project_line = (f"🏗 <b>פרויקט:</b> {_html.escape(proj.project_identifier)}"
+                    f"{' — ' + _html.escape(proj.name) if proj.name else ''}\n") if proj else ""
     desc = f"\n📝 {_html.escape(m.description)}\n" if m.description else ""
     updates = format_updates_block(
         m,
@@ -574,6 +580,7 @@ def build_mission_card(m: Mission, show_all_updates: bool = False) -> str:
         f"👤 <b>אחראי:</b> {_html.escape(owner_name)}\n"
         f"📅 <b>יעד:</b> {due_line}\n"
         f"{postpone_line}"
+        f"{project_line}"
         f"{desc}"
         "──────────────────\n"
         f"<i>נפתחה ע\"י {_html.escape(creator)} · {created_str}</i>"
@@ -729,6 +736,7 @@ async def create_mission(
     created_by_id: int | None,
     due_date: datetime.date | None,
     parent_id: int | None = None,
+    project_id: int | None = None,
 ) -> Mission:
     m = Mission(
         title=title.strip()[:255],
@@ -741,6 +749,7 @@ async def create_mission(
         # משימת המשך: the mission this one grew out of. Keyword with a default so
         # every existing caller (the bot wizard included) is untouched.
         parent_id=parent_id,
+        project_id=project_id,   # optional master-file project (project_links)
     )
     session.add(m)
     await session.commit()

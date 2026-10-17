@@ -1,0 +1,99 @@
+{# Optional project link (project_links) — one dialog for the war room and the
+   decisions page. Suggestions come from /dashboard/projects/link/suggest (rules,
+   not a model) and are only ever applied by a click. Painted from --wrs-bg /
+   --wrs-fg when the page defines them, so it looks native on every layout.
+   Data enters the DOM with textContent only. #}
+<style>
+dialog.pjx-dlg{background:var(--wrs-bg,#1a2332);color:var(--wrs-fg,#e5e7eb);
+  border:1px solid rgba(128,128,128,.45);border-radius:12px;padding:20px;width:min(480px,92vw);font-family:inherit}
+dialog.pjx-dlg::backdrop{background:rgba(0,0,0,.55)}
+.pjx-h{font-weight:700;font-size:1.02rem;margin-bottom:6px}
+.pjx-sub{font-size:.78rem;opacity:.7;margin:10px 0 4px}
+.pjx-cur{font-size:.85rem;margin-bottom:4px}
+.pjx-sug{display:block;width:100%;text-align:right;margin:4px 0;background:transparent;color:inherit;
+  border:1px solid rgba(128,128,128,.45);border-radius:7px;padding:6px 9px;font-family:inherit;font-size:.86rem;cursor:pointer}
+.pjx-sug:hover{border-color:currentColor}
+.pjx-sug .sc{opacity:.6;font-size:.75rem}
+.pjx-dlg input{width:100%;background:transparent;color:inherit;border:1px solid rgba(128,128,128,.45);
+  border-radius:7px;padding:7px 9px;font-family:inherit;font-size:.88rem}
+.pjx-acts{display:flex;gap:8px;margin-top:16px;flex-wrap:wrap}
+.pjx-btn{border:1px solid rgba(128,128,128,.45);background:transparent;color:inherit;border-radius:7px;
+  padding:6px 14px;font-family:inherit;font-size:.86rem;cursor:pointer}
+.pjx-btn.go{background:var(--wrs-fg,#e5e7eb);color:var(--wrs-bg,#1a2332);font-weight:600}
+</style>
+<dialog id="pjxDlg" class="pjx-dlg">
+  <div class="pjx-h">🏗 קישור לפרויקט <span style="font-weight:400;opacity:.7;font-size:.8rem">(לא חובה)</span></div>
+  <div class="pjx-cur" id="pjxCur"></div>
+  <div class="pjx-sub">הצעות לפי הטקסט — רק לחיצה שלך מקשרת</div>
+  <div id="pjxSug"></div>
+  <div class="pjx-sub">או חיפוש לפי מזהה / שם</div>
+  <input id="pjxSearch" list="pjxList" dir="auto" placeholder="WBE-087 או שם התחנה…" autocomplete="off">
+  <datalist id="pjxList"></datalist>
+  <div class="pjx-acts">
+    <button type="button" class="pjx-btn go" onclick="pjxSaveSearch()">✅ קשר</button>
+    <button type="button" class="pjx-btn" id="pjxClear" onclick="pjxDone(null, '')">🚫 הסר קישור</button>
+    <button type="button" class="pjx-btn" onclick="document.getElementById('pjxDlg').close()">ביטול</button>
+  </div>
+</dialog>
+<script>
+let pjxProjects = null, pjxCtx = null;
+async function pjxLoad(){
+  if (pjxProjects) return pjxProjects;
+  try {
+    const r = await fetch('/dashboard/projects/link/options');
+    pjxProjects = (await r.json()).projects || [];
+  } catch(e) { pjxProjects = []; }
+  const list = document.getElementById('pjxList');
+  list.replaceChildren(...pjxProjects.map(p => {
+    const o = document.createElement('option');
+    o.value = pjxLabel(p);
+    return o;
+  }));
+  return pjxProjects;
+}
+function pjxLabel(p){ return p.name ? `${p.identifier} — ${p.name}` : p.identifier; }
+// opts: {text, userId, currentId, currentLabel, onPick(projectId|null, label)}
+async function pjxOpen(opts){
+  pjxCtx = opts;
+  const dlg = document.getElementById('pjxDlg');
+  document.getElementById('pjxCur').textContent = opts.currentLabel ? '🔗 מקושר כעת: ' + opts.currentLabel : 'לא מקושר לפרויקט';
+  document.getElementById('pjxClear').hidden = !opts.currentId;
+  document.getElementById('pjxSearch').value = '';
+  const box = document.getElementById('pjxSug');
+  box.textContent = 'מחפש הצעות…';
+  dlg.showModal();
+  pjxLoad();
+  try {
+    const q = new URLSearchParams({text: opts.text || ''});
+    if (opts.userId) q.set('user_id', opts.userId);
+    const r = await fetch('/dashboard/projects/link/suggest?' + q);
+    const sug = (await r.json()).suggestions || [];
+    box.replaceChildren();
+    if (!sug.length){ box.textContent = 'אין הצעה מתאימה — חפש למטה.'; return; }
+    for (const s of sug){
+      const b = document.createElement('button');
+      b.type = 'button'; b.className = 'pjx-sug';
+      b.textContent = pjxLabel(s) + ' ';
+      const sc = document.createElement('span');
+      sc.className = 'sc';
+      sc.textContent = s.reason === 'id' ? '(המזהה מופיע בטקסט)' : `(התאמת שם ${s.score}%)`;
+      b.appendChild(sc);
+      b.addEventListener('click', () => pjxDone(s.id, pjxLabel(s)));
+      box.appendChild(b);
+    }
+  } catch(e) { box.textContent = 'לא ניתן לטעון הצעות — חפש למטה.'; }
+}
+async function pjxSaveSearch(){
+  const v = document.getElementById('pjxSearch').value.trim();
+  const all = await pjxLoad();
+  const p = all.find(x => pjxLabel(x) === v) || all.find(x => x.identifier.toLowerCase() === v.toLowerCase());
+  if (!p){ alert('בחר פרויקט מהרשימה'); return; }
+  pjxDone(p.id, pjxLabel(p));
+}
+async function pjxDone(id, label){
+  const ctx = pjxCtx;
+  if (!ctx) return;
+  const ok = await ctx.onPick(id, label);
+  if (ok !== false) document.getElementById('pjxDlg').close();
+}
+</script>
