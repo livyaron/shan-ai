@@ -282,9 +282,14 @@ spinner. Text: "מערכת לקחים · רושמים לקחים — סוגרי�
   no image model) in the app's colours; the lift's brand and model lettering were erased before
   sketching. `public/intro/ink.webp` (navy lines + halftone) and `orange.webp` (people + lift), 780×1040,
   ~590 KB together, precached by the service worker (`webp` added to `globPatterns`).
-  **NOT COMMITTED (2026-10-18):** the repo is public and built files are served without a login, so
-  the photo-based images wait for the owner's decision (public / behind login / vector art). Until
-  then this branch carries the code only and must not be merged.
+  **Public by owner decision (2026-10-18, option A):** the repo is public and built files are served
+  without a login — the owner chose to publish the art as is (workers' consent given).
+- **App icon** = the same art, cropped to the insulator + worker (lines and orange only: the halftone
+  turns to mush at 48 px): `pwa-192x192.png`, `pwa-512x512.png`, `pwa-maskable-512x512.png` (wider
+  margin for Android's circle mask), `apple-touch-icon.png` (180). The manifest `background_color` =
+  `--background` (#F5F6F8), so Android's system splash hands over to the opening screen without a flash.
+  An already-installed app picks the new icon up on Android's own schedule (can take days); reinstalling
+  shows it at once.
 - Title font Karantina is bundled (`public/fonts/karantina-700-hebrew.woff2`, OFL) so it works offline.
 - A 6-second MP4 of the same opening was rendered with Remotion for presentations only; it is not in the
   app and not in the repo (Remotion needs a company licence beyond 3 people).

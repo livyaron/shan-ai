@@ -30,7 +30,8 @@ export default defineConfig(() => ({
         short_name: "לקחים",
         description: "מערכת חכמה לניהול לקחים בפרויקטי בנייה ותשתיות",
         theme_color: "#1a2744",
-        background_color: "#f8f9fb",
+        // = --background: Android's system splash hands over to the opening screen without a flash.
+        background_color: "#F5F6F8",
         display: "standalone",
         dir: "rtl",
         lang: "he",
@@ -53,10 +54,11 @@ export default defineConfig(() => ({
             type: "image/png",
           },
           {
-            src: "pwa-512x512.png",
+            // Same art with a wider margin: Android cuts adaptive icons to a circle/squircle.
+            src: "pwa-maskable-512x512.png",
             sizes: "512x512",
             type: "image/png",
-            purpose: "any maskable",
+            purpose: "maskable",
           },
         ],
       },

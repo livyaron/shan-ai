@@ -56,4 +56,15 @@ describe("the opening's content and assets", () => {
     expect(css).toContain('.intro[data-mode="hold"] *');
     expect(css).toContain("@media (prefers-reduced-motion: reduce)");
   });
+
+  it("the app icon set is the opening art, with a separate maskable icon", () => {
+    expect(vite).toContain('src: "pwa-maskable-512x512.png"');
+    expect(vite).toContain('purpose: "maskable"');
+    expect(vite).not.toContain('"any maskable"');
+    expect(vite).toContain('background_color: "#F5F6F8"');
+    expect(readFileSync("index.html", "utf8")).toContain('href="/lessons/apple-touch-icon.png"');
+    for (const f of ["pwa-192x192.png", "pwa-512x512.png", "pwa-maskable-512x512.png", "apple-touch-icon.png", "intro/ink.webp", "intro/orange.webp"]) {
+      expect(readFileSync(`public/${f}`).length, f).toBeGreaterThan(1000);
+    }
+  });
 });
