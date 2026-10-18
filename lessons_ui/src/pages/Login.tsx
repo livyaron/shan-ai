@@ -6,6 +6,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
+import IntroSplash from "@/components/mobile/IntroSplash";
+import { isPhoneWidth } from "@/lib/standalone";
 
 // The module's own login (PLAN-lessons-mobile.md M0). An installed app must not
 // leave /lessons/ to sign in, so this page talks to Shan-AI's JSON login routes:
@@ -113,6 +115,8 @@ const Login = () => {
     }
   };
 
+  // On a phone the session check shows the opening picture, not a spinner.
+  if ((isLoading || isLoggedIn) && isPhoneWidth()) return <IntroSplash mode="hold" />;
   if (isLoading || isLoggedIn) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-primary">
