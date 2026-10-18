@@ -22,7 +22,7 @@ export default defineConfig(() => ({
         navigateFallback: "/lessons/index.html",
         // API calls are never answered from the cache.
         navigateFallbackDenylist: [/^\/lessons\/api\//],
-        globPatterns: ["**/*.{js,css,html,ico,png,svg,woff2}"],
+        globPatterns: ["**/*.{js,css,html,ico,png,svg,woff2,webp}"],
         maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
       },
       manifest: {
