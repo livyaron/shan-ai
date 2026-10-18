@@ -276,7 +276,10 @@ only (`MobileShell`): the animation plays **once a local day** (`shouldPlayIntro
 motion", never when storage is unavailable — a still picture instead of replaying every launch) and
 is marked played only when it finishes (a logged-out start leaves for /login midway). A tap skips.
 Every other start shows the finished picture (`mode="hold"`) while the data loads — it replaced the
-spinner. Text: "מערכת לקחים · רושמים לקחים — סוגרים מעגל · אגף פרויקטי השנאה" (`INTRO_TEXT`).
+spinner. **No spinner on a phone anywhere on the way in (owner, 2026-10-19):** `AppLayout` sends a
+phone at `/` (the manifest's start_url) to `/m` BEFORE it loads anything — it used to load all data
+behind its own spinner first, so the picture never showed — and `/login` shows the picture while it
+checks the session. Text: "מערכת לקחים · רושמים לקחים — סוגרים מעגל · אגף פרויקטי השנאה" (`INTRO_TEXT`).
 
 - Art = a field photo (workers' consent given to the owner), sketched by rules (edge pencil + halftone,
   no image model) in the app's colours; the lift's brand and model lettering were erased before

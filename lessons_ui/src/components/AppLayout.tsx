@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Outlet, useNavigate } from "react-router-dom";
+import { Navigate, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { LogOut, Menu, Smartphone } from "lucide-react";
 import AppSidebar from "./AppSidebar";
 import UserSwitcher from "./UserSwitcher";
@@ -8,7 +8,7 @@ import { Button } from "./ui/button";
 import { useUser } from "@/context/UserContext";
 import FeedbackButton from "./FeedbackButton";
 import ShanNavbar from "./ShanNavbar";
-import { isStandalone, setPrefersDesktop } from "@/lib/standalone";
+import { isStandalone, opensPhoneHome, setPrefersDesktop } from "@/lib/standalone";
 
 // Height of Shan-AI's top bar (set by ShanNavbar); 0 until it loads.
 const NAV_H = "var(--shan-nav-h, 0px)";
@@ -20,12 +20,18 @@ const AppLayout = () => {
   // phone screen two rows and links to pages outside the app. Logout moves here.
   const [standalone] = useState(isStandalone);
   const navigate = useNavigate();
+  const { pathname } = useLocation();
 
   useEffect(() => {
     if (!isLoading && !isLoggedIn) {
       navigate("/login", { replace: true });
     }
   }, [isLoggedIn, isLoading, navigate]);
+
+  // A phone opening the app (start_url = /lessons/) goes to the phone screens NOW,
+  // not after the computer frame has loaded everything behind a spinner: the phone
+  // frame shows the opening picture while it loads (owner, 2026-10-19).
+  if (pathname === "/" && opensPhoneHome()) return <Navigate to="/m" replace />;
 
   if (isLoading || !isLoggedIn) {
     return (
