@@ -268,3 +268,28 @@ action panel (`components/mobile/LessonActions.tsx`) for exactly those tasks.
   sidebar badge still uses `useActionRequired`, which does not count the admin's final step or a
   lesson returned to its creator — the two numbers can differ.
 - Still on the full page only: editing a returned lesson, manual distribution, AI re-analysis, history.
+
+## Opening screen (owner decisions 2026-10-18)
+
+`components/mobile/IntroSplash.tsx` + `lib/intro.ts` + `.intro-*` in `src/index.css`. Phone screens
+only (`MobileShell`): the animation plays **once a local day** (`shouldPlayIntro`; never with "reduce
+motion", never when storage is unavailable — a still picture instead of replaying every launch) and
+is marked played only when it finishes (a logged-out start leaves for /login midway). A tap skips.
+Every other start shows the finished picture (`mode="hold"`) while the data loads — it replaced the
+spinner. Text: "מערכת לקחים · רושמים לקחים — סוגרים מעגל · אגף פרויקטי השנאה" (`INTRO_TEXT`).
+
+- Art = a field photo (workers' consent given to the owner), sketched by rules (edge pencil + halftone,
+  no image model) in the app's colours; the lift's brand and model lettering were erased before
+  sketching. `public/intro/ink.webp` (navy lines + halftone) and `orange.webp` (people + lift), 780×1040,
+  ~590 KB together, precached by the service worker (`webp` added to `globPatterns`).
+  **Public by owner decision (2026-10-18, option A):** the repo is public and built files are served
+  without a login — the owner chose to publish the art as is (workers' consent given).
+- **App icon** = the same art, cropped to the insulator + worker (lines and orange only: the halftone
+  turns to mush at 48 px): `pwa-192x192.png`, `pwa-512x512.png`, `pwa-maskable-512x512.png` (wider
+  margin for Android's circle mask), `apple-touch-icon.png` (180). The manifest `background_color` =
+  `--background` (#F5F6F8), so Android's system splash hands over to the opening screen without a flash.
+  An already-installed app picks the new icon up on Android's own schedule (can take days); reinstalling
+  shows it at once.
+- Title font Karantina is bundled (`public/fonts/karantina-700-hebrew.woff2`, OFL) so it works offline.
+- A 6-second MP4 of the same opening was rendered with Remotion for presentations only; it is not in the
+  app and not in the repo (Remotion needs a company licence beyond 3 people).

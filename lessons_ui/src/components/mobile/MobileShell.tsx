@@ -1,10 +1,12 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { BookOpen, ClipboardCheck, FileEdit, Home, Plus } from "lucide-react";
 import { useUser } from "@/context/UserContext";
 import { cn } from "@/lib/utils";
 import { showsTabBar } from "@/lib/standalone";
 import { useMyTasks } from "@/hooks/useMyTasks";
+import IntroSplash from "@/components/mobile/IntroSplash";
+import { browserEnv, markIntroPlayed, shouldPlayIntro } from "@/lib/intro";
 
 /**
  * Full-screen frame for the phone screens under /m (PLAN-lessons-mobile.md):
@@ -26,18 +28,23 @@ const MobileShell = () => {
   const canAdd = hasPermission("add_lessons");
   const isWizard = !showsTabBar(pathname);
   const taskCount = useMyTasks().length;
+  // The opening animation: once a day (lib/intro.ts); decided once per app start.
+  // Marked only once it really finished: a logged-out start leaves for /login midway
+  // and should still see it after signing in.
+  const [playIntro, setPlayIntro] = useState(() => shouldPlayIntro(browserEnv()));
+  const introDone = () => {
+    markIntroPlayed(browserEnv());
+    setPlayIntro(false);
+  };
 
   useEffect(() => {
     if (!isLoading && !isLoggedIn) navigate("/login", { replace: true });
   }, [isLoggedIn, isLoading, navigate]);
 
-  if (isLoading || !isLoggedIn) {
-    return (
-      <div className="min-h-[100dvh] flex items-center justify-center bg-background">
-        <div className="w-8 h-8 border-4 border-accent border-t-transparent rounded-full animate-spin" />
-      </div>
-    );
-  }
+  if (playIntro) return <IntroSplash mode="play" onDone={introDone} />;
+
+  // Every other start: the finished picture while the data loads (was a spinner).
+  if (isLoading || !isLoggedIn) return <IntroSplash mode="hold" loading />;
 
   if (!canAdd && (isWizard || pathname.startsWith("/m/drafts"))) {
     return (
