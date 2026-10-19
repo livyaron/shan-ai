@@ -537,6 +537,7 @@ async def project_links_act(request: Request, session: AsyncSession = Depends(ge
     · {"action": "manager", "project_id": 3, "mode": "file" | "user" | "keep", "user_id": 12}
     · {"action": "alias", "alias": "<name as in the file>", "user_id": 12}
     · {"action": "complete", "identifier": "123", "stage": "<file stage>", "project_type": "new_build"}
+    · {"action": "dismiss", "identifier": "123", "out": true | false}  (take out of / back into the module)
     · {"action": "sync_now"} · {"action": "create_missing"}. Answers with the fresh payload.
 
     A confirmed name is synced at once, so the projects waiting on it leave the
@@ -564,6 +565,8 @@ async def project_links_act(request: Request, session: AsyncSession = Depends(ge
             problem = await lpl.confirm_alias(session, admin, str(body["alias"]), int(body["user_id"]))
             if problem is None:
                 await lpl.sync_from_file(session, admin)
+        elif action == "dismiss":
+            problem = await lpl.dismiss(session, admin, str(body["identifier"]), bool(body.get("out", True)))
         elif action == "complete":
             problem = await lpl.complete(session, admin, str(body["identifier"]),
                                          str(body.get("stage") or "") or None,

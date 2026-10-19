@@ -526,3 +526,17 @@ def test_one_undecided_lessons_project_no_longer_holds_back_everything():
 
 def test_no_undecided_project_holds_nothing():
     assert lpl.possible_duplicates([], [MASTER]) == {}
+
+
+# ------------------------------------------------------------------ "מחק" in the completion list (2026-10-19)
+
+def test_a_dismissed_file_project_is_not_a_lessons_project():
+    rows = [MASTER, {**MASTER, "identifier": "P-2"}, {**MASTER, "identifier": "P-M", "project_type": "ניידות"}]
+    assert [m["identifier"] for m in lpl.drop_excluded(rows, {"P-2"})] == ["P-1"]
+    assert lpl.search_reason({"is_active": True, "dismissed": True, "linked_to": None}) == "excluded"
+
+
+def test_only_a_file_project_with_no_lessons_project_can_be_dismissed():
+    assert lpl.dismiss_problem(MASTER, None) is None
+    assert lpl.dismiss_problem(None, None) is not None
+    assert "כבר קיים" in lpl.dismiss_problem(MASTER, "תחנה א")

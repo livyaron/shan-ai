@@ -433,10 +433,67 @@ def link_issues(row: dict[str, Any]) -> list[str]:
 # ----------------------------------------------------------------- DB reads
 
 async def _masters(session, include_excluded: bool = False) -> list[dict[str, Any]]:
+    """Active file projects that are lessons projects: without an excluded type
+    (ניידות) and without the ones an admin took out (`dismiss`)."""
     rows = [dict(r) for r in (await session.execute(text(
         "SELECT project_identifier AS identifier, name, manager, stage, project_type "
         "FROM public.projects WHERE is_active ORDER BY name"))).mappings().all()]
-    return rows if include_excluded else [m for m in rows if not excluded(m)]
+    if include_excluded:
+        return rows
+    return drop_excluded(rows, await _dismissed_ids(session))
+
+
+def drop_excluded(rows: list[dict[str, Any]], dismissed: set[str]) -> list[dict[str, Any]]:
+    """The file projects the lessons module takes. Pure."""
+    return [m for m in rows if not excluded(m) and m["identifier"] not in dismissed]
+
+
+async def _dismissed_ids(session) -> set[str]:
+    return {r[0] for r in (await session.execute(text(
+        "SELECT identifier FROM lessons.master_overrides WHERE excluded"))).all()}
+
+
+def dismiss_problem(master: dict[str, Any] | None, linked_to: str | None) -> str | None:
+    """Why a file project may not be taken out of the lessons module, or None. Pure.
+    Only a file project with no lessons project behind it: a linked one holds
+    lessons and is handled in its own row (unlink / merge), never dropped here."""
+    if master is None:
+        return "הפרויקט לא נמצא בקובץ המאסטר (רק פרויקטים פעילים)"
+    if linked_to:
+        return f"הפרויקט כבר קיים במערכת הלקחים ('{linked_to}') — אי אפשר להוציא אותו מכאן"
+    return None
+
+
+async def dismiss(session, admin, identifier: str, out: bool = True) -> str | None:
+    """Take a file project out of the lessons module (it is never created,
+    never suggested, never asked about) — or bring it back. Reversible; the
+    master file is never touched."""
+    master = next((m for m in await _masters(session, include_excluded=True) if m["identifier"] == identifier), None)
+    linked = (await session.execute(text(
+        "SELECT name FROM lessons.projects WHERE shan_project_identifier = :i"), {"i": identifier})).scalar()
+    if out and (problem := dismiss_problem(master, linked)) is not None:
+        return problem
+    if master is None:
+        return "הפרויקט לא נמצא בקובץ המאסטר"
+    await session.execute(text(
+        "INSERT INTO lessons.master_overrides (identifier, excluded, set_by, set_at) VALUES (:i, :x, :by, now()) "
+        "ON CONFLICT (identifier) DO UPDATE SET excluded = EXCLUDED.excluded, set_by = EXCLUDED.set_by, set_at = now()"),
+        {"i": identifier, "x": out, "by": (admin.username or "").strip() if admin else SYNC_ACTOR})
+    name = (master.get("name") or identifier).strip()
+    await _log(session, admin, "master_dismissed" if out else "master_restored", "", name,
+               f"{'הוצא ממערכת הלקחים' if out else 'הוחזר למערכת הלקחים'} ({identifier}) — קובץ המאסטר לא שונה")
+    if not out and await _levels(session) is not None:
+        await create_missing(session, admin, {identifier})
+    return None
+
+
+async def _dismissed(session) -> list[dict[str, Any]]:
+    return [{"identifier": r["identifier"], "name": r["name"], "set_by": r["set_by"],
+             "set_at": r["set_at"].isoformat() if r["set_at"] else None}
+            for r in (await session.execute(text(
+                "SELECT o.identifier, m.name, o.set_by, o.set_at FROM lessons.master_overrides o "
+                "LEFT JOIN public.projects m ON m.project_identifier = o.identifier "
+                "WHERE o.excluded ORDER BY m.name"))).mappings().all()]
 
 
 async def _lessons_projects(session) -> list[dict[str, Any]]:
@@ -582,6 +639,7 @@ async def payload(session) -> dict[str, Any]:
         "to_create": len(plan["create"]) if levels is not None else 0,
         "held": plan["held"],
         "waiting_duplicate": plan["waiting_duplicate"],
+        "dismissed": await _dismissed(session),
         "managers_unlinked": plan["managers_unlinked"],
         "managers_open": managers_open,
         "no_manager": plan["no_manager"],
@@ -609,7 +667,7 @@ def search_reason(row: dict[str, Any]) -> str:
     """Why a file project is or is not offered for linking. Pure."""
     if not row.get("is_active"):
         return "inactive"
-    if excluded(row):
+    if excluded(row) or row.get("dismissed"):
         return "excluded"
     if row.get("linked_to") is not None:
         return "linked"
@@ -625,8 +683,9 @@ async def search_file(session, q: str) -> list[dict[str, Any]]:
         return []
     rows = [dict(r) for r in (await session.execute(text(
         "SELECT m.project_identifier AS identifier, m.name, m.manager, m.stage, m.project_type, m.is_active, "
-        "m.last_updated, p.id AS linked_to, p.name AS linked_name "
-        "FROM public.projects m LEFT JOIN lessons.projects p ON p.shan_project_identifier = m.project_identifier"
+        "m.last_updated, p.id AS linked_to, p.name AS linked_name, COALESCE(o.excluded, false) AS dismissed "
+        "FROM public.projects m LEFT JOIN lessons.projects p ON p.shan_project_identifier = m.project_identifier "
+        "LEFT JOIN lessons.master_overrides o ON o.identifier = m.project_identifier"
     ))).mappings().all()]
     words = nq.split()
     out = []

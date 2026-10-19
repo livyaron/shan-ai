@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AlertTriangle, CheckCircle, Download, FileSpreadsheet, FolderPlus, GitMerge, History, Link2, Link2Off, Loader2, MapPin, RefreshCw, Search, Star, Upload, UserCheck, Users } from "lucide-react";
+import { AlertTriangle, CheckCircle, Download, Trash2, Undo2, FileSpreadsheet, FolderPlus, GitMerge, History, Link2, Link2Off, Loader2, MapPin, RefreshCw, Search, Star, Upload, UserCheck, Users } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -58,6 +58,7 @@ const ProjectLinksPanel = () => {
   const [heldPick, setHeldPick] = useState<Record<string, { stage?: string; project_type?: string }>>({});
   const [importFile, setImportFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<ImportPreview | null>(null);
+  const [dismissing, setDismissing] = useState<HeldProject | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [picked, setPicked] = useState<Record<number, string>>({});
   const [mergeSource, setMergeSource] = useState("");
@@ -456,6 +457,37 @@ const ProjectLinksPanel = () => {
         </CardContent>
       </Card>
 
+      {view === "handled" && s.dismissed.length > 0 && (
+        <Card className="border-0 shadow-sm">
+          <CardHeader className="space-y-1">
+            <CardTitle className="text-base font-heading flex items-center gap-2">
+              <Trash2 className="w-4 h-4" />
+              הוצאו מהפקת לקחים ({s.dismissed.length})
+            </CardTitle>
+            <p className="text-xs text-muted-foreground">
+              פרויקטים מקובץ המאסטר שנמחקו מ"פרויקטים להשלמת נתונים". הם לא נוצרים ולא נשאלים עליהם, וקובץ המאסטר לא שונה.
+              "החזר" מחזיר את הפרויקט לתהליך.
+            </p>
+          </CardHeader>
+          <CardContent className="space-y-1.5">
+            {s.dismissed.map((d) => (
+              <div key={d.identifier} className="flex items-center justify-between gap-2 p-2.5 rounded-xl bg-muted/50 text-sm">
+                <div className="min-w-0">
+                  <span className="font-medium">{d.identifier} · {(d.name ?? "").trim() || "—"}</span>
+                  {d.set_by && <span className="text-xs text-muted-foreground"> · הוצא ע״י {d.set_by}</span>}
+                </div>
+                <Button size="sm" variant="outline" className="gap-1" disabled={busy !== null}
+                  onClick={() => act(`d${d.identifier}`, { action: "dismiss", identifier: d.identifier, out: false },
+                    `${(d.name ?? d.identifier).trim()} הוחזר ✓`)}>
+                  <Undo2 className="w-3.5 h-3.5" />
+                  החזר
+                </Button>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
+
       {(() => {
         const ls = data.last_sync;
         return (
@@ -603,6 +635,11 @@ const ProjectLinksPanel = () => {
                     )}
                     <Button size="sm" disabled={!ready || busy !== null} onClick={() => completeHeld(h)}>
                       שמירה והמשך סנכרון
+                    </Button>
+                    <Button size="sm" variant="ghost" className="gap-1 text-destructive hover:text-destructive"
+                      disabled={busy !== null} onClick={() => setDismissing(h)}>
+                      <Trash2 className="w-3.5 h-3.5" />
+                      מחק
                     </Button>
                   </div>
                 );
@@ -870,6 +907,29 @@ const ProjectLinksPanel = () => {
             <Button disabled={!preview?.counts.ok || !importFile || busy !== null}
               onClick={() => importFile && sendTable(importFile, "apply")}>
               {busy === "xapply" ? <Loader2 className="w-4 h-4 animate-spin" /> : `החל ${preview?.counts.ok ?? 0} השלמות`}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={dismissing !== null} onOpenChange={(o) => !o && setDismissing(null)}>
+        <DialogContent dir="rtl">
+          <DialogHeader>
+            <DialogTitle>למחוק את "{(dismissing?.name ?? dismissing?.identifier ?? "").trim()}" מהפקת לקחים?</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            הפרויקט ({dismissing?.identifier}) לא ייווצר במערכת הלקחים ולא יופיע יותר ברשימת ההשלמה. קובץ המאסטר לא משתנה.
+            אפשר להחזיר אותו בכל רגע מ"טופלו" ← "הוצאו מהפקת לקחים".
+          </p>
+          <DialogFooter>
+            <Button variant="destructive" disabled={!dismissing || busy !== null}
+              onClick={async () => {
+                if (!dismissing) return;
+                const ok = await act(`d${dismissing.identifier}`, { action: "dismiss", identifier: dismissing.identifier, out: true },
+                  `${(dismissing.name ?? dismissing.identifier).trim()} נמחק מהפקת לקחים`);
+                if (ok) setDismissing(null);
+              }}>
+              מחק מהפקת לקחים
             </Button>
           </DialogFooter>
         </DialogContent>

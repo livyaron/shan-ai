@@ -332,6 +332,9 @@ SCHEMA_STATEMENTS: tuple[str, ...] = (
     "ALTER TABLE lessons.projects ADD COLUMN IF NOT EXISTS shan_manager_kept text",
     # The last sync's failure on this project (2026-10-19) — cleared by the next
     # run it goes through. Shown in the work list until then.
+    # An admin took this file project out of the lessons module ("מחק" in
+    # פרויקטים להשלמת נתונים, 2026-10-19). Reversible — the row is the decision.
+    "ALTER TABLE lessons.master_overrides ADD COLUMN IF NOT EXISTS excluded boolean NOT NULL DEFAULT false",
     "ALTER TABLE lessons.projects ADD COLUMN IF NOT EXISTS shan_sync_error text",
     "ALTER TABLE lessons.projects ADD COLUMN IF NOT EXISTS shan_sync_error_at timestamptz",
     # One file project ↔ at most one lessons project.
