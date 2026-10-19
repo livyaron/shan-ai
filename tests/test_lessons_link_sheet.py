@@ -57,12 +57,12 @@ def test_export_has_one_row_per_item_with_dropdowns_and_a_hidden_key():
 
 def test_round_trip_reads_back_every_filled_row():
     data = _fill(sheet.build_workbook(ITEMS, STAGES, TYPES, USERS),
-                 {"stage|P-3": "בחירת קבלן", "project_type|P-4": "ניידות", "alias|יוסי": "משה כהן · #7",
+                 {"stage|P-3": "בחירת קבלן", "project_type|P-4": "שו״ש", "alias|יוסי": "משה כהן · #7",
                   "pm|12": "דנה לוי · #9"})
     check = sheet.validate(sheet.parse_workbook(data), _open(), STAGES, TYPES, {7, 9})
     assert check["counts"]["ok"] == 4
     got = {a["key"]: a["value"] for a in check["apply"]}
-    assert got == {"stage|P-3": "בחירת קבלן", "project_type|P-4": "mobility", "alias|יוסי": 7, "pm|12": 9}
+    assert got == {"stage|P-3": "בחירת קבלן", "project_type|P-4": "maintenance", "alias|יוסי": 7, "pm|12": 9}
     # the raw file name travels with the alias row (the file spells it with a space)
     assert next(a for a in check["apply"] if a["kind"] == "alias")["alias"] == "יוסי "
 
@@ -80,6 +80,12 @@ def test_an_empty_cell_changes_nothing():
 def test_stage_must_be_a_legal_value(value, status):
     data = _fill(sheet.build_workbook(ITEMS, STAGES, TYPES, USERS), {"stage|P-3": value})
     assert sheet.validate(sheet.parse_workbook(data), _open(), STAGES, TYPES, {7})["rows"][0]["status"] == status
+
+
+def test_mobility_is_not_a_type_to_complete():
+    # user 2026-10-19: ניידות projects are not in the lessons module at all
+    data = _fill(sheet.build_workbook(ITEMS, STAGES, TYPES, USERS), {"project_type|P-4": "ניידות"})
+    assert sheet.validate(sheet.parse_workbook(data), _open(), STAGES, TYPES, {7})["rows"][0]["status"] == "invalid"
 
 
 def test_a_user_is_read_by_id_only_and_must_exist():
