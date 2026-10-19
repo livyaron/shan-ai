@@ -296,3 +296,12 @@ checks the session. Text: "מערכת לקחים · רושמים לקחים — 
 - Title font Karantina is bundled (`public/fonts/karantina-700-hebrew.woff2`, OFL) so it works offline.
 - A 6-second MP4 of the same opening was rendered with Remotion for presentations only; it is not in the
   app and not in the repo (Remotion needs a company licence beyond 3 people).
+
+## Project links work list (2026-10-19) — `PLAN-lessons-projects.md` L5
+
+- The "קישור פרויקטים" tab lists only what still needs the admin (`lessons_project_link.link_issues`);
+  "טופלו" shows the rest for control. All clear → "כל הפרויקטים סונכרנו וקושרו בהצלחה…".
+- Stage / type the file does not give → "פרויקטים להשלמת נתונים" (saved in `lessons.master_overrides`).
+- Excel: `GET /lessons/api/_project_links/completion.xlsx` → fill the yellow column →
+  `POST /lessons/api/_project_links/completion?mode=preview` then `mode=apply` (same file).
+- Last sync report: `lessons.sync_runs` (latest row shown in the tab). Server-only tables, like `referent_members`.

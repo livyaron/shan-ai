@@ -351,7 +351,7 @@ const ProjectDetail = () => {
             {linked && (
               <p className="rounded-lg bg-muted/60 p-2 text-xs text-muted-foreground">
                 🔗 מקושר לקובץ המאסטר ({project.shanIdentifier}): שם, סוג, מנה״פ, סיכון ושלבים מתעדכנים מהקובץ בכל העלאה.
-                כאן משלימים סוג תחנה, אתר וציוד.
+                כאן משלימים סוג תחנה ואתר (ציוד — רשות).
               </p>
             )}
             <div>

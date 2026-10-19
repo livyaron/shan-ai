@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { defaultPick, filterLinkRows, managerNeedsAnswer, heldElsewhere, manualOptions, masterLabel, rowState, type LinkRow } from "@/lib/projectLinks";
+import { defaultPick, filterLinkRows, managerNeedsAnswer, heldElsewhere, manualOptions, masterLabel, rowState, visibleManagers, type LinkRow } from "@/lib/projectLinks";
 
 const row = (id: number, name: string, extra: Partial<LinkRow> = {}): LinkRow => ({
   id, name, site: null, lessons_count: 0, manager_name: null, identifier: null, linked: null, manager_check: null,
@@ -15,19 +15,35 @@ describe("rowState", () => {
 });
 
 describe("filterLinkRows", () => {
-  const rows = [row(1, "חדרה", { identifier: "X" }), row(2, "עכו"), row(3, "חיפה", { decision: "local", manager_name: "דנה" })];
+  const rows = [
+    row(1, "חדרה", { identifier: "X", issues: [] }),
+    row(2, "עכו", { issues: ["undecided"] }),
+    row(3, "חיפה", { decision: "local", manager_name: "דנה", issues: [] }),
+    row(4, "נתניה", { identifier: "Y", issues: ["manager_differs"] }),
+  ];
 
-  it("puts the open rows first", () => {
-    expect(filterLinkRows(rows, "", false).map((r) => r.id)[0]).toBe(2);
+  it("the work list (default) shows only rows with an open issue, undecided first", () => {
+    expect(filterLinkRows(rows, "", "pending").map((r) => r.id)).toEqual([2, 4]);
   });
 
-  it("keeps only the open rows when asked", () => {
-    expect(filterLinkRows(rows, "", true).map((r) => r.id)).toEqual([2]);
+  it("a handled row never shows in the work list, only in the control view", () => {
+    expect(filterLinkRows(rows, "", "handled").map((r) => r.id)).toEqual([1, 3]);
   });
 
-  it("searches name and manager", () => {
-    expect(filterLinkRows(rows, "דנה", false).map((r) => r.id)).toEqual([3]);
-    expect(filterLinkRows(rows, " חדרה ", false).map((r) => r.id)).toEqual([1]);
+  it("searches name and manager within the view", () => {
+    expect(filterLinkRows(rows, "דנה", "handled").map((r) => r.id)).toEqual([3]);
+    expect(filterLinkRows(rows, " נתניה ", "pending").map((r) => r.id)).toEqual([4]);
+    expect(filterLinkRows(rows, "חדרה", "pending")).toEqual([]);
+  });
+});
+
+describe("visibleManagers", () => {
+  const m = (name: string, problem: "alias_unlinked" | null) =>
+    ({ name, projects: 1, user_id: null, username: null, profile_id: null, problem, hint_user_id: null });
+  it("lists only the names still to link in the work list", () => {
+    const rows = [m("א", "alias_unlinked"), m("ב", null)];
+    expect(visibleManagers(rows, "pending").map((r) => r.name)).toEqual(["א"]);
+    expect(visibleManagers(rows, "handled").map((r) => r.name)).toEqual(["ב"]);
   });
 });
 

@@ -181,6 +181,18 @@ _TABLE_DDL: tuple[str, ...] = (
     """CREATE TABLE IF NOT EXISTS lessons.ai_summary_cache (
   prompt_hash char(64) PRIMARY KEY, answer text NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now())""",
+    # קישור פרויקטים (2026-10-19). What an admin completed for a master-file
+    # project the file does not say enough about (stage in the file's words →
+    # lessons indexes, or a project type) — never a default. Keyed by the file
+    # identifier, so it outlives a re-import. Server-only, like referent_members.
+    """CREATE TABLE IF NOT EXISTS lessons.master_overrides (
+  identifier varchar(100) PRIMARY KEY, stage_indexes integer[], project_type text,
+  set_by text, set_at timestamptz NOT NULL DEFAULT now())""",
+    # One row per sync run: the five-category report (created / linked and ok /
+    # awaiting data / awaiting a manager decision / failed). Server-only.
+    """CREATE TABLE IF NOT EXISTS lessons.sync_runs (
+  id integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY, at timestamptz NOT NULL DEFAULT now(),
+  actor text, report jsonb NOT NULL)""",
 )
 
 _FUNCTION_DDL: tuple[str, ...] = (
@@ -318,6 +330,10 @@ SCHEMA_STATEMENTS: tuple[str, ...] = (
     # The file's מנה"פ name an admin chose to keep the lessons manager against
     # (manager check). Asked again once the file names someone else.
     "ALTER TABLE lessons.projects ADD COLUMN IF NOT EXISTS shan_manager_kept text",
+    # The last sync's failure on this project (2026-10-19) — cleared by the next
+    # run it goes through. Shown in the work list until then.
+    "ALTER TABLE lessons.projects ADD COLUMN IF NOT EXISTS shan_sync_error text",
+    "ALTER TABLE lessons.projects ADD COLUMN IF NOT EXISTS shan_sync_error_at timestamptz",
     # One file project ↔ at most one lessons project.
     ("CREATE UNIQUE INDEX IF NOT EXISTS uq_lessons_projects_shan_identifier "
      "ON lessons.projects (shan_project_identifier) WHERE shan_project_identifier IS NOT NULL"),
@@ -349,6 +365,8 @@ END$$""",
     f"REVOKE UPDATE, DELETE ON lessons.lesson_workflow_events FROM {ANON_ROLE}",
     f"REVOKE ALL ON lessons.referent_members FROM {ANON_ROLE}",
     f"REVOKE ALL ON lessons.ai_summary_cache FROM {ANON_ROLE}",
+    f"REVOKE ALL ON lessons.master_overrides FROM {ANON_ROLE}",
+    f"REVOKE ALL ON lessons.sync_runs FROM {ANON_ROLE}",
     f"GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA lessons TO {ANON_ROLE}",
     f"GRANT EXECUTE ON FUNCTION lessons.apply_lesson_workflow_event(integer,text,text,text,text,text,jsonb,text,text,text) TO {ANON_ROLE}",
     "NOTIFY pgrst, 'reload schema'",

@@ -87,11 +87,24 @@ def test_fields_for_owns_the_file_fields():
                  "risk": "medium", "manager_id": "u17", "shan_active": True}
 
 
-def test_fields_for_defaults_and_unknown_stage():
-    f = lpl.fields_for({**MASTER, "project_type": "אחר", "name": None}, None, None)
-    assert f["project_type"] == lpl.DEFAULT_TYPE and f["risk"] == "low"
-    assert f["manager_id"] == lpl.PLACEHOLDER_PM_ID and f["name"] == "P-1"
+def test_fields_for_never_guesses_a_missing_stage_or_type():
+    # 2026-10-19: no unfounded defaults — an unknown type no longer becomes "הקמה"
+    assert lpl.fields_for({**MASTER, "project_type": "אחר"}, None, None) is None
+    assert lpl.fields_for({**MASTER, "project_type": None}, None, None) is None
     assert lpl.fields_for({**MASTER, "stage": "שלב מוזר"}, None, "u17") is None
+    f = lpl.fields_for({**MASTER, "name": None}, None, None)
+    assert f["risk"] == "low" and f["manager_id"] == lpl.PLACEHOLDER_PM_ID and f["name"] == "P-1"
+
+
+def test_an_admin_completion_fills_only_what_is_missing():
+    m = {**MASTER, "stage": "שלב מוזר", "project_type": "אחר"}
+    assert lpl.missing_fields(m) == ["stage", "project_type"]
+    assert lpl.missing_fields(m, {"stage_indexes": [4], "project_type": None}) == ["project_type"]
+    f = lpl.fields_for(m, None, None, {"stage_indexes": [4], "project_type": "mobility"})
+    assert f["stage_indexes"] == [4] and f["project_type"] == "mobility"
+    # a value the file gives always wins over a completion
+    f = lpl.fields_for(MASTER, None, None, {"stage_indexes": [9], "project_type": "mobility"})
+    assert f["stage_indexes"] == [2] and f["project_type"] == "expansion"
 
 
 def test_creation_plan_skips_linked_and_reports_problems():
@@ -103,13 +116,16 @@ def test_creation_plan_skips_linked_and_reports_problems():
         {**MASTER, "identifier": "P-5"},
     ]
     plan = lpl.creation_plan(masters, {"P-5"}, {"P-1": "escalate"}, ALIASES, PROFILES)
-    assert [c["identifier"] for c in plan["create"]] == ["P-1", "P-2", "P-4"]
+    assert [c["identifier"] for c in plan["create"]] == ["P-1", "P-2"]
     assert plan["create"][0]["risk"] == "high" and plan["create"][0]["manager_id"] == "u17"
-    assert [u["identifier"] for u in plan["unknown_stage"]] == ["P-3"]
-    # P-3 is not created, so its manager is not counted; an empty name is "no manager", not a link to make
+    # P-3 (stage) and P-4 (type) wait for the admin, each with exactly what is missing
+    assert [(h["identifier"], h["missing"]) for h in plan["held"]] == [("P-3", ["stage"]), ("P-4", ["project_type"])]
+    # held projects are not created, so their managers are not counted
     assert plan["managers_unlinked"] == [{"name": "יוסי", "problem": "alias_unlinked", "projects": 1}]
-    assert plan["no_manager"] == 2
-    assert plan["type_unknown"] == ["משהו"]
+    assert plan["no_manager"] == 1
+    # the completion releases P-4
+    plan = lpl.creation_plan(masters, {"P-5"}, {}, ALIASES, PROFILES, {"P-4": {"project_type": "maintenance"}})
+    assert "P-4" in [c["identifier"] for c in plan["create"]]
 
 
 # ------------------------------------------------------------------ suggestions
@@ -355,14 +371,86 @@ def test_sync_unknown_stage_or_type_keeps_the_module_value():
     assert out == []
 
 
-def test_sync_moves_the_manager_only_through_the_confirmed_chain():
-    # the file's name resolves to u17; the module has someone else → move
-    assert _plan([_linked(manager_id="u3")])[0]["manager"] == "u17"
-    # an admin chose to keep against THIS name → leave it
+def test_sync_never_moves_a_real_manager_without_the_admin():
+    # 2026-10-19: the file names someone else → nothing moves; it waits in the work list
+    assert _plan([_linked(manager_id="u3")]) == []
     assert _plan([_linked(manager_id="u3", shan_manager_kept="משה כהן")]) == []
-    # an unresolved name never moves anyone
+
+
+def test_sync_fills_only_the_placeholder_through_the_confirmed_chain():
+    out = _plan([_linked(manager_id=lpl.PLACEHOLDER_PM_ID)])
+    assert out[0]["manager"] == "u17"
+    # an unresolved name never fills it
     m = {**MASTER, "manager": "יוסי"}
-    assert _plan([_linked(manager_id="u3")], masters={"P-1": m}) == []
+    assert _plan([_linked(manager_id=lpl.PLACEHOLDER_PM_ID)], masters={"P-1": m}) == []
+
+
+def test_sync_leaves_every_risk_when_the_engine_failed():
+    # levels=None: the engine is down — "low" is never written for it
+    assert lpl.sync_plan([_linked(risk="high")], {"P-1": MASTER}, None, ALIASES, PROFILES) == []
+    # …while the other fields still follow the file
+    out = lpl.sync_plan([_linked(name="ישן", risk="high")], {"P-1": MASTER}, None, ALIASES, PROFILES)
+    assert out[0]["fields"] == {"name": "תחנה א"}
+
+
+# ------------------------------------------------------------------ the work list (2026-10-19)
+
+def _row(**kw):
+    base = {"identifier": "P-1", "decision": None, "manager_id": "u17", "sync_error": None,
+            "manager_check": {"status": "match"}}
+    return {**base, **kw}
+
+
+def test_a_linked_project_with_nothing_open_is_handled():
+    assert lpl.link_issues(_row()) == []
+    assert lpl.link_issues(_row(identifier=None, decision="local", manager_check=None)) == []
+    # a kept manager or an empty file cell is a decision, not a problem
+    assert lpl.link_issues(_row(manager_check={"status": "kept"})) == []
+
+
+@pytest.mark.parametrize(("row", "issues"), [
+    ({"identifier": None, "manager_check": None}, ["undecided"]),
+    ({"manager_check": {"status": "differs"}}, ["manager_differs"]),
+    ({"manager_check": {"status": "unresolved"}}, ["manager_unresolved"]),
+    ({"manager_id": lpl.PLACEHOLDER_PM_ID, "manager_check": {"status": "no_name"}}, ["manager_placeholder"]),
+    ({"sync_error": "boom"}, ["sync_error"]),
+])
+def test_link_issues(row, issues):
+    assert lpl.link_issues(_row(**row)) == issues
+
+
+def test_station_site_and_equipment_never_keep_a_project_in_the_work_list():
+    # decision א (2026-10-19): the PM completes those in "השלמת נתונים"
+    assert lpl.link_issues(_row(site=None, station_type_set=False, equipment_ids=[])) == []
+
+
+def _summary(**kw):
+    base = {"pending": 0, "held": [], "managers_open": 0, "to_create": 0, "engine_ok": True}
+    return {**base, **kw}
+
+
+def test_all_clear_only_when_nothing_at_all_is_open():
+    assert lpl.all_clear(_summary())
+    for k, v in [("pending", 1), ("held", [{}]), ("managers_open", 2), ("to_create", 3), ("engine_ok", False)]:
+        assert not lpl.all_clear(_summary(**{k: v})), k
+
+
+def test_sync_report_has_the_five_categories():
+    rows = [_row(issues=[]), _row(issues=["manager_differs"]), _row(issues=["sync_error"]),
+            _row(identifier=None, issues=["undecided"])]
+    r = lpl.sync_report([{"identifier": "P-9", "name": "x"}], [{"id": 3, "error": "e"}], rows,
+                        [{"identifier": "P-7", "name": "y", "missing": ["stage"]}],
+                        {"updated": 2, "managers": 1, "inactive": 0}, 0, True)
+    assert r["created"] == [{"identifier": "P-9", "name": "x"}]
+    assert r["linked_ok"] == 1 and r["awaiting_manager"] == 1
+    assert r["awaiting_data"] == [{"identifier": "P-7", "name": "y", "missing": ["stage"]}]
+    assert r["failed"] == [{"id": 3, "error": "e"}]
+
+
+def test_change_note_says_what_changed():
+    assert "סיכון: high" in lpl.change_note({"risk": "high"}, None, True)
+    assert "לא נמחק" in lpl.change_note({}, None, False)
+    assert "טרם שויך" in lpl.change_note({}, "u17", True)
 
 
 def test_sync_marks_a_project_gone_from_the_file_inactive_once():

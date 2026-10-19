@@ -64,6 +64,7 @@ jobs:
             tests/test_insight_ai.py \
             tests/test_lessons_module.py \
             tests/test_lessons_project_link.py \
+            tests/test_lessons_link_sheet.py \
             tests/test_project_lessons.py \
             tests/test_project_links.py \
             tests/test_lessons_app_login.py \

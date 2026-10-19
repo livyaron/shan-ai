@@ -114,7 +114,7 @@ const ProjectDataPanel = () => {
           )}
         </CardTitle>
         <p className="text-xs text-muted-foreground">
-          סוג תחנה, אתר וציוד — מה שקובץ המאסטר לא יודע. שם, שלב, סוג פרויקט, סיכון ומנה״פ של פרויקט מקושר (🔗) מגיעים מהקובץ.
+          סוג תחנה ואתר — מה שקובץ המאסטר לא יודע (ציוד אפשר להוסיף, אבל הוא לא חובה). שם, שלב, סוג פרויקט, סיכון ומנה״פ של פרויקט מקושר (🔗) מגיעים מהקובץ.
           מנה״פ רואה את אותו סימון "חסר" על הפרויקטים שלו.
         </p>
         <div className="flex flex-col sm:flex-row sm:items-center gap-3">
@@ -143,7 +143,6 @@ const ProjectDataPanel = () => {
           const problems = projectProblems({
             stationTypeSet: d.stationType !== undefined || p.stationTypeSet,
             site: d.site ?? p.site,
-            equipmentIds: d.equipmentIds ?? p.equipmentIds,
           });
           return (
             <div key={p.id} className={`space-y-2 p-3 rounded-xl ${problems.length ? "bg-warning/5 ring-1 ring-warning/30" : "bg-muted/50"}`}>
