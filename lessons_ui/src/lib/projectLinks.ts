@@ -104,6 +104,8 @@ export interface LinkSummary {
   held: HeldProject[];
   /** File projects that may be an undecided lessons project — created once it is decided. */
   waiting_duplicate: { identifier: string; name: string | null; candidate: string }[];
+  /** File projects an admin took out of the lessons module ("מחק") — reversible. */
+  dismissed: { identifier: string; name: string | null; set_by: string | null; set_at: string | null }[];
   managers_unlinked: { name: string; problem: ManagerProblem; projects: number }[];
   managers_open: number;
   no_manager: number;
@@ -199,7 +201,7 @@ export const SEARCH_REASON_LABELS: Record<SearchReason, string> = {
   free: "פעיל ופנוי — אפשר לקשר",
   linked: "כבר מקושר לפרויקט לקחים",
   inactive: "לא פעיל — לא נמצא בגיליון \"דוח שבועי עדכני\" בהעלאה האחרונה",
-  excluded: "ניידות — לא נכלל במערכת הלקחים",
+  excluded: "לא נכלל במערכת הלקחים (ניידות, או שהוצא ע״י מנהל מערכת)",
 };
 
 export interface ManagerRow {
