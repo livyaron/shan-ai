@@ -3,10 +3,13 @@ import { isLinked, missingLabel, projectProblems } from "@/lib/projectProblems";
 
 describe("projectProblems", () => {
   it("flags what the master file cannot know", () => {
-    expect(projectProblems({ stationTypeSet: false, site: undefined, equipmentIds: [] }))
-      .toEqual(["station_type_unset", "no_site", "no_equipment"]);
-    expect(projectProblems({ stationTypeSet: true, site: "  ", equipmentIds: [3] })).toEqual(["no_site"]);
-    expect(projectProblems({ stationTypeSet: true, site: "חדרה", equipmentIds: [3] })).toEqual([]);
+    expect(projectProblems({ stationTypeSet: false, site: undefined })).toEqual(["station_type_unset", "no_site"]);
+    expect(projectProblems({ stationTypeSet: true, site: "  " })).toEqual(["no_site"]);
+    expect(projectProblems({ stationTypeSet: true, site: "חדרה" })).toEqual([]);
+  });
+
+  it("never asks for equipment (user decision 2026-10-19)", () => {
+    expect(projectProblems({ stationTypeSet: true, site: "חדרה", equipmentIds: [] } as never)).toEqual([]);
   });
 
   it("names the missing fields", () => {

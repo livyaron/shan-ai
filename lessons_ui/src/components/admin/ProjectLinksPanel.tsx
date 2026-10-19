@@ -1,11 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AlertTriangle, CheckCircle, FolderPlus, GitMerge, Link2, Link2Off, Loader2, MapPin, RefreshCw, Search, Star, UserCheck, Users } from "lucide-react";
+import { AlertTriangle, CheckCircle, Download, FileSpreadsheet, FolderPlus, GitMerge, History, Link2, Link2Off, Loader2, MapPin, RefreshCw, Search, Star, Upload, UserCheck, Users } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import SearchableSelect from "@/components/ui/searchable-select";
 import { SUPABASE_URL } from "@/integrations/supabase/client";
@@ -14,13 +13,18 @@ import {
   defaultPick,
   filterLinkRows,
   heldElsewhere,
+  ISSUE_LABELS,
   MANAGER_PROBLEM_LABELS,
+  MISSING_LABELS,
   managerNeedsAnswer,
   manualOptions,
   masterLabel,
   rowState,
   SEARCH_REASON_LABELS,
+  visibleManagers,
+  type HeldProject,
   type LinkRow,
+  type LinkView,
   type SearchRow,
   type LinksPayload,
   type ManagersPayload,
@@ -33,13 +37,27 @@ import {
  * lessons move, the duplicate is deleted). Once every lessons project is linked
  * or kept local, the file's remaining projects are created in one click.
  * Server: /lessons/api/_project_links (Shan-AI admin only).
+ *
+ * Work list (2026-10-19): by default only what still needs the admin is shown
+ * (the server's link_issues); a handled project leaves the list at once and
+ * comes back only with a new problem. "טופלו" shows the rest, for control.
+ * What the file does not give (stage / type, a manager name) is completed here
+ * or through the Excel table (download → fill → upload → preview → apply).
  */
+
+interface ImportRow { row: number; label: string; value: string; status: string; status_label: string }
+interface ImportPreview { rows: ImportRow[]; counts: Record<string, number> }
+
+const ALL_CLEAR = "כל הפרויקטים סונכרנו וקושרו בהצלחה. אין פרויקטים הממתינים לטיפול.";
 
 const ProjectLinksPanel = () => {
   const [data, setData] = useState<LinksPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
-  const [onlyOpen, setOnlyOpen] = useState(false);
+  const [view, setView] = useState<LinkView>("pending");
+  const [heldPick, setHeldPick] = useState<Record<string, { stage?: string; project_type?: string }>>({});
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [preview, setPreview] = useState<ImportPreview | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [picked, setPicked] = useState<Record<number, string>>({});
   const [mergeSource, setMergeSource] = useState("");
@@ -140,7 +158,49 @@ const ProjectLinksPanel = () => {
     if (fresh && managerNeedsAnswer(fresh)) openManager(fresh);
   };
 
-  const visible = useMemo(() => (data ? filterLinkRows(data.projects, query, onlyOpen) : []), [data, query, onlyOpen]);
+  const visible = useMemo(() => (data ? filterLinkRows(data.projects, query, view) : []), [data, query, view]);
+
+  /** Upload the completed table: preview first (nothing written), then apply the same file. */
+  const sendTable = async (file: File, mode: "preview" | "apply") => {
+    setBusy(`x${mode}`);
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const r = await fetch(`${SUPABASE_URL}/_project_links/completion?mode=${mode}`, {
+        method: "POST", credentials: "same-origin", body: form,
+      });
+      const res = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        toast({ title: res.message || "קליטת הטבלה נכשלה", variant: "destructive" });
+        return;
+      }
+      if (mode === "preview") {
+        setPreview(res as ImportPreview);
+        return;
+      }
+      setData(res.payload);
+      loadManagers();
+      setPreview(null);
+      setImportFile(null);
+      const failed = res.result?.failed?.length ?? 0;
+      toast({
+        title: `נקלטו ${res.result?.applied ?? 0} השלמות ✓`,
+        description: failed ? `${failed} נכשלו — הם נשארים ברשימה` : undefined,
+        variant: failed ? "destructive" : undefined,
+      });
+    } catch {
+      toast({ title: "קליטת הטבלה נכשלה", variant: "destructive" });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const completeHeld = async (h: HeldProject) => {
+    const pick = heldPick[h.identifier] ?? {};
+    const res = await act(`h${h.identifier}`, { action: "complete", identifier: h.identifier, ...pick },
+      `${(h.name ?? h.identifier).trim()} נשמר ✓`);
+    if (res) setHeldPick((m) => { const n = { ...m }; delete n[h.identifier]; return n; });
+  };
 
   if (error) {
     return (
@@ -172,22 +232,22 @@ const ProjectLinksPanel = () => {
           <CardTitle className="text-base font-heading flex flex-wrap items-center gap-2">
             <Link2 className="w-4 h-4" />
             קישור פרויקטים לקובץ המאסטר
-            {s.undecided > 0 ? (
-              <Badge variant="outline" className="bg-warning/10 text-warning border-warning/30 gap-1">
-                <AlertTriangle className="w-3 h-3" />
-                {s.undecided} ממתינים להחלטה
-              </Badge>
-            ) : (
+            {s.all_clear ? (
               <Badge variant="outline" className="bg-success/10 text-success border-success/30 gap-1">
                 <CheckCircle className="w-3 h-3" />
-                כל פרויקטי הלקחים טופלו
+                הכל מטופל
+              </Badge>
+            ) : (
+              <Badge variant="outline" className="bg-warning/10 text-warning border-warning/30 gap-1">
+                <AlertTriangle className="w-3 h-3" />
+                {s.pending + s.held.length + s.managers_open} ממתינים לטיפול
               </Badge>
             )}
           </CardTitle>
-          {s.manager_open > 0 && (
+          {!s.engine_ok && (
             <div className="text-xs text-warning flex items-center gap-1">
               <AlertTriangle className="w-3 h-3" />
-              {s.manager_open} פרויקטים מקושרים שהמנה״פ שלהם לא תואם לקובץ — לחץ "בדוק" בכרטיס.
+              מנוע הדפוסים לא זמין כרגע — רמות הסיכון לא עודכנו ופרויקטים חדשים לא נוצרים עד שיחזור. לא שונה דבר.
             </div>
           )}
           <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-center">
@@ -204,21 +264,41 @@ const ProjectLinksPanel = () => {
               </div>
             ))}
           </div>
-          <p className="text-xs text-muted-foreground">
-            לכל פרויקט לקחים מוצגות עד 3 הצעות מקובץ המאסטר. ⭐ = המלצה ברורה (מזהה זהה בשם, או אותו מנה״פ) והיא
-            מסומנת מראש — שום דבר לא מקושר עד שלוחצים "קשר". אחוז = דמיון שמות בלבד. "מקומי" = פרויקט שלא קיים בקובץ.
-          </p>
-          <div className="flex flex-col sm:flex-row sm:items-center gap-3">
-            <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="חיפוש לפי שם או מנה״פ"
-              className="sm:max-w-xs" />
-            <div className="flex items-center gap-2">
-              <Switch id="only-open" checked={onlyOpen} onCheckedChange={setOnlyOpen} />
-              <Label htmlFor="only-open" className="text-sm">רק ממתינים להחלטה</Label>
-            </div>
+          <div className="inline-flex rounded-lg bg-muted p-1 w-fit" role="tablist">
+            {([["pending", `ממתינים לטיפול (${s.pending})`], ["handled", `טופלו (${s.handled})`]] as const).map(([v, label]) => (
+              <button key={v} type="button" role="tab" aria-selected={view === v} onClick={() => setView(v)}
+                className={`px-3 py-1.5 text-sm rounded-md transition-colors ${view === v ? "bg-background shadow-sm font-medium" : "text-muted-foreground hover:text-foreground"}`}>
+                {label}
+              </button>
+            ))}
           </div>
+          {view === "handled" && (
+            <p className="text-xs text-muted-foreground">
+              לבקרה בלבד: פרויקטים שקושרו (או סומנו מקומיים) ואין להם שום דבר פתוח. הם לא יחזרו לרשימת העבודה, אלא אם
+              יתגלה שינוי חדש — למשל הקובץ ימנה מנה״פ אחר.
+            </p>
+          )}
+          {view === "pending" && (
+            <p className="text-xs text-muted-foreground">
+              לכל פרויקט לקחים שלא קושר מוצגות עד 3 הצעות מקובץ המאסטר. ⭐ = המלצה ברורה (מזהה זהה בשם, או אותו מנה״פ)
+              והיא מסומנת מראש — שום דבר לא מקושר עד שלוחצים "קשר". אחוז = דמיון שמות בלבד. "מקומי" = פרויקט שלא קיים בקובץ.
+            </p>
+          )}
+          <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="חיפוש לפי שם או מנה״פ"
+            className="sm:max-w-xs" />
         </CardHeader>
         <CardContent className="space-y-2">
-          {visible.length === 0 && <p className="text-sm text-muted-foreground text-center py-6">אין פרויקטים להצגה</p>}
+          {view === "pending" && s.all_clear && (
+            <div className="rounded-xl bg-success/10 ring-1 ring-success/30 p-4 text-center text-sm text-success flex items-center justify-center gap-2">
+              <CheckCircle className="w-4 h-4" />
+              {ALL_CLEAR}
+            </div>
+          )}
+          {visible.length === 0 && !(view === "pending" && s.all_clear) && (
+            <p className="text-sm text-muted-foreground text-center py-6">
+              {view === "pending" ? "אין פרויקטי לקחים הממתינים לטיפול ברשימה הזו" : "אין פרויקטים להצגה"}
+            </p>
+          )}
           {visible.map((r) => {
             const state = rowState(r);
             const options = manualOptions(data.masters, r.id);
@@ -245,6 +325,15 @@ const ProjectLinksPanel = () => {
                       return <Badge variant="outline" className="text-muted-foreground">מנה״פ נשמר ידנית (בקובץ: {mc.file_manager})</Badge>;
                     }
                     if (mc.status === "no_name") {
+                      if ((r.issues ?? []).includes("manager_placeholder")) {
+                        return (
+                          <button type="button" onClick={() => openManager(r)}
+                            className="inline-flex items-center gap-1 rounded-full border border-warning/40 bg-warning/10 px-2 py-0.5 text-xs text-warning hover:bg-warning/20">
+                            <AlertTriangle className="w-3 h-3" />
+                            אין מנה״פ בקובץ — הפרויקט אצל "טרם שויך". בחר מנה״פ
+                          </button>
+                        );
+                      }
                       return <Badge variant="outline" className="text-muted-foreground">אין מנה״פ בקובץ</Badge>;
                     }
                     return (
@@ -255,6 +344,15 @@ const ProjectLinksPanel = () => {
                       </button>
                     );
                   })()}
+                  {r.sync_error && (
+                    <span className="inline-flex flex-wrap items-center gap-1 rounded-full border border-destructive/40 bg-destructive/10 px-2 py-0.5 text-xs text-destructive"
+                      title={r.sync_error}>
+                      <AlertTriangle className="w-3 h-3" />
+                      {ISSUE_LABELS.sync_error}: {r.sync_error.slice(0, 80)}
+                      <button type="button" className="underline" disabled={busy !== null}
+                        onClick={() => act("sync", { action: "sync_now" }, "הסנכרון הושלם ✓")}>נסה שוב</button>
+                    </span>
+                  )}
                   {r.linked_missing && (
                     <Badge variant="outline" className="bg-destructive/10 text-destructive border-destructive/30">
                       הפרויקט לא פעיל יותר בקובץ
@@ -358,36 +456,170 @@ const ProjectLinksPanel = () => {
         </CardContent>
       </Card>
 
-      {managers && (
+      {(() => {
+        const ls = data.last_sync;
+        return (
+          <Card className="border-0 shadow-sm">
+            <CardHeader className="space-y-2">
+              <CardTitle className="text-base font-heading flex flex-wrap items-center gap-2">
+                <History className="w-4 h-4" />
+                סנכרון אחרון מול קובץ המאסטר
+                {ls?.at && (
+                  <span className="text-xs font-normal text-muted-foreground">
+                    {new Date(ls.at).toLocaleString("he-IL", { dateStyle: "short", timeStyle: "short" })}
+                    {ls.actor ? ` · ${ls.actor}` : ""}
+                  </span>
+                )}
+              </CardTitle>
+              <div>
+                <Button size="sm" variant="outline" className="gap-1.5" disabled={busy !== null}
+                  onClick={async () => {
+                    const res = await act("sync", { action: "sync_now" }, "הסנכרון הושלם ✓");
+                    if (res) loadManagers();
+                  }}>
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  סנכרן עכשיו מול הקובץ
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-2 text-sm">
+              {!ls ? (
+                <p className="text-muted-foreground">עדיין לא נרשם סנכרון. הדוח יופיע אחרי ההעלאה הבאה של קובץ המאסטר או אחרי "סנכרן עכשיו".</p>
+              ) : (
+                <>
+                  <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-center">
+                    {[
+                      ["נוצרו", ls.created.length, ""],
+                      ["מקושרים ותקינים", ls.linked_ok, "text-success"],
+                      ["ממתינים להשלמת נתונים", ls.awaiting_data.length, ls.awaiting_data.length ? "text-warning" : ""],
+                      ["ממתינים לאישור מנה״פ", ls.awaiting_manager, ls.awaiting_manager ? "text-warning" : ""],
+                      ["נכשלו", ls.failed.length, ls.failed.length ? "text-destructive" : ""],
+                    ].map(([label, n, cls]) => (
+                      <div key={label as string} className="rounded-xl bg-muted/50 p-2">
+                        <div className={`text-lg font-bold ${cls}`}>{n}</div>
+                        <div className="text-xs text-muted-foreground">{label}</div>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    עודכנו {ls.updated} פרויקטים מהקובץ{ls.managers_filled ? ` · ${ls.managers_filled} קיבלו מנה״פ במקום "טרם שויך"` : ""}
+                    {ls.inactive ? ` · ${ls.inactive} יצאו מהקובץ (סומנו לא פעילים, לא נמחקו)` : ""}
+                    {ls.creation_paused ? ` · יצירה מושהית: ${ls.creation_paused} פרויקטי לקחים עוד לא קושרו` : ""}
+                    {!ls.engine_ok ? " · מנוע הדפוסים לא היה זמין — סיכון לא עודכן ולא נוצרו פרויקטים" : ""}
+                  </p>
+                  {ls.failed.length > 0 && (
+                    <div className="rounded-xl bg-destructive/5 ring-1 ring-destructive/30 p-3 space-y-1">
+                      {ls.failed.map((f, i) => (
+                        <div key={i} className="text-xs">{(f.name ?? f.identifier ?? f.id ?? "").toString().trim()} — {f.error}</div>
+                      ))}
+                    </div>
+                  )}
+                  {ls.created.length > 0 && (
+                    <details className="text-xs">
+                      <summary className="cursor-pointer text-muted-foreground">הפרויקטים שנוצרו ({ls.created.length})</summary>
+                      <div className="mt-1 space-y-0.5">
+                        {ls.created.map((c) => <div key={c.identifier}>{c.identifier} · {(c.name ?? "").trim()}</div>)}
+                      </div>
+                    </details>
+                  )}
+                </>
+              )}
+            </CardContent>
+          </Card>
+        );
+      })()}
+
+      {view === "pending" && (s.held.length > 0 || s.managers_open > 0 || data.projects.some((p) => (p.issues ?? []).includes("manager_placeholder"))) && (
+        <Card className="border-0 shadow-sm">
+          <CardHeader className="space-y-2">
+            <CardTitle className="text-base font-heading flex flex-wrap items-center gap-2">
+              <FileSpreadsheet className="w-4 h-4" />
+              פרויקטים להשלמת נתונים
+              {s.held.length > 0 && (
+                <Badge variant="outline" className="bg-warning/10 text-warning border-warning/30">{s.held.length} ממתינים ליצירה</Badge>
+              )}
+            </CardTitle>
+            <p className="text-xs text-muted-foreground">
+              רק מה שקובץ המאסטר לא נותן ואי אפשר לקבוע בלי אדם: שלב או סוג פרויקט לא מוכרים, ושמות מנה״פ שלא קושרו
+              למשתמש. מוצגים רק השדות החסרים — שום ערך לא ממולא בברירת מחדל. אפשר להשלים כאן, או בטבלת Excel: להוריד,
+              למלא את העמודה הצהובה ולהעלות בחזרה (קודם תצוגה מקדימה, ורק אז החלה).
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <Button asChild size="sm" variant="outline" className="gap-1.5">
+                <a href={`${SUPABASE_URL}/_project_links/completion.xlsx`} download>
+                  <Download className="w-3.5 h-3.5" />
+                  הורד טבלה להשלמה (Excel)
+                </a>
+              </Button>
+              <Button asChild size="sm" variant="outline" className="gap-1.5" disabled={busy !== null}>
+                <label className="cursor-pointer">
+                  <Upload className="w-3.5 h-3.5" />
+                  העלה טבלה מושלמת
+                  <input type="file" accept=".xlsx" className="hidden"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      e.target.value = "";
+                      if (f) { setImportFile(f); sendTable(f, "preview"); }
+                    }} />
+                </label>
+              </Button>
+              {busy?.startsWith("x") && <Loader2 className="w-4 h-4 animate-spin text-muted-foreground self-center" />}
+            </div>
+          </CardHeader>
+          {s.held.length > 0 && (
+            <CardContent className="space-y-2">
+              {s.held.map((h) => {
+                const pick = heldPick[h.identifier] ?? {};
+                const ready = h.missing.some((f) => Boolean(pick[f]));
+                return (
+                  <div key={h.identifier} className="flex flex-col lg:flex-row lg:items-center gap-2 p-3 rounded-xl bg-warning/5 ring-1 ring-warning/30 text-sm">
+                    <div className="min-w-0 flex-1">
+                      <div className="font-medium">{h.identifier} · {(h.name ?? "").trim() || "—"}</div>
+                      <div className="text-xs text-muted-foreground">
+                        {h.manager ? `מנה״פ בקובץ: ${h.manager.trim()} · ` : ""}
+                        חסר: {h.missing.map((f) => MISSING_LABELS[f]).join(", ")}
+                        {h.missing.includes("stage") && ` (בקובץ: "${h.stage || "ריק"}")`}
+                        {h.missing.includes("project_type") && ` (סוג בקובץ: "${h.project_type || "ריק"}")`}
+                      </div>
+                    </div>
+                    {h.missing.includes("stage") && (
+                      <SearchableSelect value={pick.stage ?? ""} searchable placeholder="בחר שלב…" className="w-full lg:w-52"
+                        onValueChange={(v) => setHeldPick((m) => ({ ...m, [h.identifier]: { ...m[h.identifier], stage: v } }))}
+                        options={data.stage_options.map((o) => ({ value: o, label: o }))} />
+                    )}
+                    {h.missing.includes("project_type") && (
+                      <SearchableSelect value={pick.project_type ?? ""} placeholder="בחר סוג…" className="w-full lg:w-40"
+                        onValueChange={(v) => setHeldPick((m) => ({ ...m, [h.identifier]: { ...m[h.identifier], project_type: v } }))}
+                        options={data.type_options} />
+                    )}
+                    <Button size="sm" disabled={!ready || busy !== null} onClick={() => completeHeld(h)}>
+                      שמירה והמשך סנכרון
+                    </Button>
+                  </div>
+                );
+              })}
+            </CardContent>
+          )}
+        </Card>
+      )}
+
+      {managers && visibleManagers(managers.rows, view).length > 0 && (
         <Card className="border-0 shadow-sm">
           <CardHeader className="space-y-2">
             <CardTitle className="text-base font-heading flex flex-wrap items-center gap-2">
               <Users className="w-4 h-4" />
-              שמות מנה״פ בקובץ ({managers.rows.length})
-              {managers.open > 0 ? (
-                <Badge variant="outline" className="bg-warning/10 text-warning border-warning/30">{managers.open} דורשים קישור</Badge>
-              ) : (
-                <Badge variant="outline" className="bg-success/10 text-success border-success/30">כולם מקושרים</Badge>
-              )}
+              {view === "pending"
+                ? `שמות מנה״פ בקובץ שעדיין לא קושרו (${managers.open})`
+                : `שמות מנה״פ בקובץ שקושרו (${managers.rows.length - managers.open})`}
             </CardTitle>
             <p className="text-xs text-muted-foreground">
               כל שם שמופיע בעמודת מנה״פ בקובץ, ומי הוא ב-Shan-AI. ההצעה היא רמז בלבד — שום דבר לא נשמר עד שלוחצים "אשר".
-              הקישור משמש גם בדף הדפוסים; משתמש שאינו מנה״פ במערכת הלקחים יוגדר כמנה״פ. הפרויקטים עוברים אליו בסנכרון הבא,
-              או מיד ב"סנכרן עכשיו".
+              אחרי "אשר" הסנכרון רץ מיד: פרויקטים של השם הזה שנמצאים אצל "טרם שויך" עוברים אליו. פרויקט שכבר יש לו מנה״פ
+              אחר לא מוחלף — הוא מופיע ברשימה כ"ממתין לאישור". משתמש שאינו מנה״פ במערכת הלקחים יוגדר כמנה״פ.
             </p>
-            <div>
-              <Button size="sm" variant="outline" className="gap-1.5" disabled={busy !== null}
-                onClick={async () => {
-                  const res = await act("sync", { action: "sync_now" }, "הסנכרון הושלם ✓");
-                  if (res) loadManagers();
-                }}>
-                <RefreshCw className="w-3.5 h-3.5" />
-                סנכרן עכשיו מול הקובץ
-              </Button>
-            </div>
           </CardHeader>
           <CardContent className="space-y-2">
-            {managers.rows.map((m) => {
+            {visibleManagers(managers.rows, view).map((m) => {
               const pick = mgrPick[m.name] ?? (m.user_id ? String(m.user_id) : m.hint_user_id ? String(m.hint_user_id) : "");
               return (
                 <div key={m.name}
@@ -486,58 +718,38 @@ const ProjectLinksPanel = () => {
         </CardContent>
       </Card>
 
-      <Card className="border-0 shadow-sm">
-        <CardHeader>
-          <CardTitle className="text-base font-heading flex items-center gap-2">
-            <FolderPlus className="w-4 h-4" />
-            יצירת הפרויקטים החסרים מהקובץ ({s.to_create})
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3 text-sm">
-          <p className="text-muted-foreground">
-            כל פרויקט פעיל בקובץ שאין לו פרויקט לקחים מקושר ייווצר עם שם, שלב, סוג, סיכון ומנה״פ מהקובץ. סוג התחנה, האתר
-            והציוד יסומנו "חסר" להשלמה.
-          </p>
-          {s.no_manager > 0 && (
-            <p className="text-warning">
-              {s.no_manager} פרויקטים ייווצרו עם מנה״פ "טרם שויך" — השם שלהם בקובץ לא מקושר למשתמש.
+      {view === "pending" && s.to_create > 0 && (
+        <Card className="border-0 shadow-sm">
+          <CardHeader>
+            <CardTitle className="text-base font-heading flex items-center gap-2">
+              <FolderPlus className="w-4 h-4" />
+              יצירת הפרויקטים החסרים מהקובץ ({s.to_create})
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3 text-sm">
+            <p className="text-muted-foreground">
+              כל פרויקט פעיל בקובץ שאין לו פרויקט לקחים מקושר, ושיש לו שלב וסוג מוכרים, ייווצר עם שם, שלב, סוג, סיכון
+              ומנה״פ מהקובץ. פרויקטים שחסר להם שלב או סוג מחכים ב"פרויקטים להשלמת נתונים" ולא נוצרים עם ערך מומצא. אחרי
+              היצירה הראשונה, פרויקטים חדשים בקובץ נוצרים מעצמם בכל העלאה.
             </p>
-          )}
-          {s.managers_unlinked.length > 0 && (
-            <div className="rounded-xl bg-warning/5 ring-1 ring-warning/30 p-3 space-y-1">
-              <div className="font-medium">מנה״פים שעדיין לא קושרו ({s.managers_unlinked.length})</div>
-              {s.managers_unlinked.map((m) => (
-                <div key={m.name} className="text-xs">
-                  {m.name} — {MANAGER_PROBLEM_LABELS[m.problem]} ({m.projects} פרויקטים)
-                </div>
-              ))}
-              <a href="/dashboard/projects/insights/access" className="text-xs text-primary underline">
-                קישור שמות מנה״פ למשתמשים (Shan-AI) ←
-              </a>
-            </div>
-          )}
-          {s.unknown_stage.length > 0 && (
-            <div className="rounded-xl bg-muted/50 p-3 space-y-1">
-              <div className="font-medium">לא ייווצרו — שלב לא מוכר ({s.unknown_stage.length})</div>
-              {s.unknown_stage.map((u) => (
-                <div key={u.identifier} className="text-xs">{u.name || u.identifier} — "{u.stage || "ריק"}"</div>
-              ))}
-            </div>
-          )}
-          {s.type_unknown.length > 0 && (
-            <p className="text-xs text-muted-foreground">סוגי פרויקט לא מוכרים (ייווצרו כ"הקמה"): {s.type_unknown.join(", ")}</p>
-          )}
-          <Button className="gap-1.5" disabled={!data.can_create || busy !== null} onClick={() => setConfirmCreate(true)}>
-            <FolderPlus className="w-4 h-4" />
-            צור {s.to_create} פרויקטים
-          </Button>
-          {s.undecided > 0 && (
-            <p className="text-xs text-muted-foreground">
-              זמין אחרי שכל פרויקטי הלקחים קושרו או סומנו כמקומיים — אחרת פרויקט קיים עלול להיווצר פעמיים.
-            </p>
-          )}
-        </CardContent>
-      </Card>
+            {s.no_manager > 0 && (
+              <p className="text-warning">
+                {s.no_manager} פרויקטים ייווצרו עם מנה״פ "טרם שויך" — השם שלהם בקובץ לא מקושר למשתמש. הם יישארו ברשימה עד
+                שהשם יקושר.
+              </p>
+            )}
+            <Button className="gap-1.5" disabled={!data.can_create || busy !== null} onClick={() => setConfirmCreate(true)}>
+              <FolderPlus className="w-4 h-4" />
+              צור {s.to_create} פרויקטים
+            </Button>
+            {s.undecided > 0 && (
+              <p className="text-xs text-muted-foreground">
+                זמין אחרי שכל פרויקטי הלקחים קושרו או סומנו כמקומיים — אחרת פרויקט קיים עלול להיווצר פעמיים.
+              </p>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {(() => {
         const r = data.projects.find((p) => p.id === mgrRow);
@@ -575,7 +787,7 @@ const ProjectLinksPanel = () => {
                 )}
                 <div className="space-y-1.5 rounded-lg border p-3">
                   <div className="text-xs">
-                    {mc.status === "unresolved"
+                    {mc.status === "no_name" ? "אין מנה״פ בקובץ לפרויקט הזה. בחר את מנה״פ שלו:" : mc.status === "unresolved"
                       ? `מי זה "${mc.file_manager}"? ${mc.problem && mc.problem !== "no_name" ? `(${MANAGER_PROBLEM_LABELS[mc.problem]})` : ""}`
                       : `"${mc.file_manager}" מקושר לאדם הלא נכון? בחר את הנכון:`}
                   </div>
@@ -585,20 +797,66 @@ const ProjectLinksPanel = () => {
                     onClick={() => answer("user")}>
                     זה הוא — קבע כמנה״פ של הפרויקט
                   </Button>
-                  <p className="text-[11px] text-muted-foreground">
-                    הקישור "{mc.file_manager}" ← המשתמש נשמר גם לדף הדפוסים. משתמש שאינו מנה״פ במערכת הלקחים יוגדר כמנה״פ.
-                  </p>
+                  {mc.file_manager && (
+                    <p className="text-[11px] text-muted-foreground">
+                      הקישור "{mc.file_manager}" ← המשתמש נשמר גם לדף הדפוסים. משתמש שאינו מנה״פ במערכת הלקחים יוגדר כמנה״פ.
+                    </p>
+                  )}
                 </div>
               </div>
-              <DialogFooter>
-                <Button variant="ghost" disabled={busy !== null} onClick={() => answer("keep")}>
-                  השאר את {mc.current.name?.trim() || "המנה״פ הנוכחי"}
-                </Button>
-              </DialogFooter>
+              {mc.file_manager && (
+                <DialogFooter>
+                  <Button variant="ghost" disabled={busy !== null} onClick={() => answer("keep")}>
+                    השאר את {mc.current.name?.trim() || "המנה״פ הנוכחי"}
+                  </Button>
+                </DialogFooter>
+              )}
             </DialogContent>
           </Dialog>
         );
       })()}
+
+      <Dialog open={preview !== null} onOpenChange={(o) => { if (!o) { setPreview(null); setImportFile(null); } }}>
+        <DialogContent dir="rtl" className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>תצוגה מקדימה — טבלת ההשלמה</DialogTitle>
+          </DialogHeader>
+          {preview && (
+            <div className="space-y-3 text-sm">
+              <p className="text-muted-foreground">
+                עדיין לא נשמר כלום. {preview.counts.ok ?? 0} שורות יעודכנו · {preview.counts.empty ?? 0} שורות ריקות לא נוגעות בכלום
+                {(preview.rows.length - (preview.counts.ok ?? 0)) > 0 ? ` · ${preview.rows.length - (preview.counts.ok ?? 0)} ידולגו או יידחו` : ""}.
+              </p>
+              <div className="max-h-80 overflow-y-auto rounded-lg border">
+                <table className="w-full text-xs">
+                  <thead className="bg-muted/60 sticky top-0">
+                    <tr><th className="p-1.5 text-start">שורה</th><th className="p-1.5 text-start">פריט</th><th className="p-1.5 text-start">ערך</th><th className="p-1.5 text-start">מה יקרה</th></tr>
+                  </thead>
+                  <tbody>
+                    {preview.rows.map((r) => (
+                      <tr key={r.row} className="border-t">
+                        <td className="p-1.5">{r.row}</td>
+                        <td className="p-1.5">{r.label}</td>
+                        <td className="p-1.5">{r.value}</td>
+                        <td className={`p-1.5 ${r.status === "ok" ? "text-success" : r.status === "closed" ? "text-muted-foreground" : "text-destructive"}`}>{r.status_label}</td>
+                      </tr>
+                    ))}
+                    {preview.rows.length === 0 && (
+                      <tr><td colSpan={4} className="p-3 text-center text-muted-foreground">לא מולא אף ערך בעמודה הצהובה</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button disabled={!preview?.counts.ok || !importFile || busy !== null}
+              onClick={() => importFile && sendTable(importFile, "apply")}>
+              {busy === "xapply" ? <Loader2 className="w-4 h-4 animate-spin" /> : `החל ${preview?.counts.ok ?? 0} השלמות`}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={confirmMerge} onOpenChange={setConfirmMerge}>
         <DialogContent dir="rtl">

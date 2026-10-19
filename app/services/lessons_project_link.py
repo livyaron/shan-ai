@@ -17,6 +17,7 @@ are only read.
 """
 from __future__ import annotations
 
+import json
 import re
 from typing import Any
 
@@ -271,16 +272,30 @@ def manager_check(file_manager: str | None, resolved: str | None, problem: str |
     return "differs" if resolved is not None else "unresolved"
 
 
-def fields_for(master: dict[str, Any], level: str | None, manager_pid: str | None) -> dict[str, Any] | None:
+def missing_fields(master: dict[str, Any], override: dict[str, Any] | None = None) -> list[str]:
+    """The required fields neither the file nor an admin's completion gives
+    (user decision 2026-10-19: no unfounded defaults — the project waits). Pure."""
+    o = override or {}
+    out = []
+    if stage_indexes_for(master.get("stage")) is None and not o.get("stage_indexes"):
+        out.append("stage")
+    if project_type_for(master.get("project_type")) is None and not o.get("project_type"):
+        out.append("project_type")
+    return out
+
+
+def fields_for(master: dict[str, Any], level: str | None, manager_pid: str | None,
+               override: dict[str, Any] | None = None) -> dict[str, Any] | None:
     """The file-owned fields of the lessons project for one master project, or
-    None when the stage is unknown (a project is never created on a guessed stage)."""
-    stages = stage_indexes_for(master.get("stage"))
-    if stages is None:
+    None while a required field is missing (stage or type the file does not
+    give and no admin completed — never a guess)."""
+    if missing_fields(master, override):
         return None
+    o = override or {}
     return {
         "name": (master.get("name") or master["identifier"]).strip(),
-        "stage_indexes": stages,
-        "project_type": project_type_for(master.get("project_type")) or DEFAULT_TYPE,
+        "stage_indexes": stage_indexes_for(master.get("stage")) or list(o["stage_indexes"]),
+        "project_type": project_type_for(master.get("project_type")) or o["project_type"],
         "risk": risk_for(level),
         "manager_id": manager_pid or PLACEHOLDER_PM_ID,
         "shan_active": True,
@@ -320,16 +335,24 @@ def undecided(projects: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 def creation_plan(masters: list[dict[str, Any]], linked_ids: set[str],
                   levels: dict[str, str], alias_users: dict[str, int | None],
-                  profile_of_user: dict[int, dict[str, Any]]) -> dict[str, Any]:
-    """What "create the missing" would do — the preview and the action read it. Pure."""
-    create, unknown_stage, managers = [], [], {}
+                  profile_of_user: dict[int, dict[str, Any]],
+                  overrides: dict[str, dict[str, Any]] | None = None) -> dict[str, Any]:
+    """What "create the missing" would do — the preview and the action read it. Pure.
+
+    `held`: file projects that wait for an admin's completion (stage or type
+    the file does not give) — listed with exactly the fields missing."""
+    overrides = overrides or {}
+    create, held, managers = [], [], {}
     for m in masters:
         if m["identifier"] in linked_ids:
             continue
+        ov = overrides.get(m["identifier"])
         pid, problem = manager_profile_for(m.get("manager"), alias_users, profile_of_user)
-        f = fields_for(m, levels.get(m["identifier"]), pid)
+        f = fields_for(m, levels.get(m["identifier"]), pid, ov)
         if f is None:
-            unknown_stage.append({"identifier": m["identifier"], "name": m.get("name"), "stage": m.get("stage")})
+            held.append({"identifier": m["identifier"], "name": m.get("name"), "manager": m.get("manager"),
+                         "stage": m.get("stage"), "project_type": m.get("project_type"),
+                         "missing": missing_fields(m, ov)})
             continue
         create.append({"identifier": m["identifier"], **f})
         if problem and problem != "no_name":
@@ -337,13 +360,36 @@ def creation_plan(masters: list[dict[str, Any]], linked_ids: set[str],
             managers.setdefault(name, {"name": name, "problem": problem, "projects": 0})["projects"] += 1
     return {
         "create": create,
-        "unknown_stage": unknown_stage,
+        "held": held,
         "managers_unlinked": sorted(managers.values(), key=lambda r: -r["projects"]),
         "no_manager": sum(1 for c in create if c["manager_id"] == PLACEHOLDER_PM_ID),
-        "type_unknown": sorted({str(m.get("project_type")) for m in masters
-                                if m["identifier"] not in linked_ids and m.get("project_type")
-                                and project_type_for(m.get("project_type")) is None}),
     }
+
+
+# What still needs the admin on one lessons project (user decision 2026-10-19).
+# A project with none of these is "handled" and leaves the work list; it comes
+# back only when a new problem appears. Station type / site / equipment are NOT
+# here — the PM completes them in "השלמת נתונים" (decision א, 2026-10-19).
+ISSUES = ("undecided", "manager_differs", "manager_unresolved", "manager_placeholder", "sync_error")
+
+
+def link_issues(row: dict[str, Any]) -> list[str]:
+    """The open problems of one lessons project row (as `payload` builds it). Pure.
+    The ONLY definition of "ממתין לטיפול" — the list, the counters, the
+    all-clear message and the Excel export all read it."""
+    out = []
+    if not row.get("identifier") and row.get("decision") != LOCAL:
+        out.append("undecided")
+    mc = row.get("manager_check") or {}
+    if mc.get("status") == "differs":
+        out.append("manager_differs")
+    elif mc.get("status") == "unresolved":
+        out.append("manager_unresolved")
+    elif row.get("identifier") and row.get("manager_id") == PLACEHOLDER_PM_ID:
+        out.append("manager_placeholder")
+    if row.get("sync_error"):
+        out.append("sync_error")
+    return out
 
 
 # ----------------------------------------------------------------- DB reads
@@ -357,7 +403,8 @@ async def _masters(session) -> list[dict[str, Any]]:
 async def _lessons_projects(session) -> list[dict[str, Any]]:
     return [dict(r) for r in (await session.execute(text(
         "SELECT p.id, p.name, p.site, p.lessons_count, p.manager_id, m.name AS manager_name, "
-        "m.shan_user_id AS manager_user_id, p.shan_project_identifier, p.shan_link_decision, p.shan_manager_kept "
+        "m.shan_user_id AS manager_user_id, p.shan_project_identifier, p.shan_link_decision, p.shan_manager_kept, "
+        "p.shan_sync_error, p.shan_sync_error_at "
         "FROM lessons.projects p LEFT JOIN lessons.profiles m ON m.id = p.manager_id ORDER BY p.name"
     ))).mappings().all()]
 
@@ -379,15 +426,61 @@ async def _manager_chain(session) -> tuple[dict[str, int | None], dict[int, dict
     return alias_users, profile_of_user
 
 
-async def _levels(session) -> dict[str, str]:
-    """identifier → handling level, from the same engine output the dashboard uses."""
+async def _levels(session) -> dict[str, str] | None:
+    """identifier → handling level, from the same engine output the dashboard uses.
+    None when the engine failed: then no risk is written and nothing is created
+    (2026-10-19 — an empty answer used to reset every linked project to "low")."""
     from app.services import insight_triage, pattern_service
     try:
         async with session.begin_nested():   # a failed engine query must not poison the page's transaction
             p = await pattern_service.compute_cached(session)
-    except Exception:  # noqa: BLE001 — no engine output = every risk is low, never a failed page
-        return {}
+    except Exception:  # noqa: BLE001 — never a failed page; the caller holds risk and creation
+        return None
     return {k: v["level"] for k, v in insight_triage.triage_all(p).items()}
+
+
+async def _overrides(session) -> dict[str, dict[str, Any]]:
+    """An admin's completions of what the file does not give (stage / type)."""
+    return {r["identifier"]: {"stage_indexes": list(r["stage_indexes"]) if r["stage_indexes"] else None,
+                              "project_type": r["project_type"]}
+            for r in (await session.execute(text(
+                "SELECT identifier, stage_indexes, project_type FROM lessons.master_overrides"))).mappings().all()}
+
+
+async def _last_sync(session) -> dict[str, Any] | None:
+    row = (await session.execute(text(
+        "SELECT at, actor, report FROM lessons.sync_runs ORDER BY id DESC LIMIT 1"))).mappings().first()
+    if row is None:
+        return None
+    return {"at": row["at"].isoformat() if row["at"] else None, "actor": row["actor"], **(row["report"] or {})}
+
+
+def _manager_check_row(p: dict[str, Any], master: dict[str, Any] | None, alias_users: dict[str, int | None],
+                       profile_of_user: dict[int, dict[str, Any]], profile_names: dict[str, str]) -> dict[str, Any] | None:
+    if master is None:
+        return None
+    fm = master.get("manager")
+    pid, problem = manager_profile_for(fm, alias_users, profile_of_user)
+    return {
+        "status": manager_check(fm, pid, problem, p["manager_id"], p["shan_manager_kept"]),
+        "file_manager": (fm or "").strip() or None,
+        "problem": problem,
+        "file_profile": {"id": pid, "name": profile_names.get(pid)} if pid else None,
+        "current": {"id": p["manager_id"], "name": p["manager_name"]},
+        # The likeliest person behind the file's name: the alias if one is
+        # confirmed, else the lessons manager's own user. A hint only.
+        "suggest_user_id": alias_users.get((fm or "").strip()) or p["manager_user_id"],
+    }
+
+
+STAGE_OPTIONS = list(STAGE_MAP)                       # an admin completes a stage in the file's own words
+TYPE_LABELS = {"new_build": "הקמה", "expansion": "הרחבה", "maintenance": "שו״ש", "mobility": "ניידות"}
+
+
+def all_clear(summary: dict[str, Any]) -> bool:
+    """"כל הפרויקטים סונכרנו וקושרו בהצלחה" — only when nothing at all is open. Pure."""
+    return (summary["pending"] == 0 and not summary["held"] and summary["managers_open"] == 0
+            and summary["to_create"] == 0 and summary["engine_ok"])
 
 
 async def payload(session) -> dict[str, Any]:
@@ -402,7 +495,8 @@ async def payload(session) -> dict[str, Any]:
              "linked_name": names_by_id.get(linked[m["identifier"]]["id"]) if m["identifier"] in linked else None}
             for m in masters]
     alias_users, profile_of_user = await _manager_chain(session)
-    plan = creation_plan(masters, set(linked), await _levels(session), alias_users, profile_of_user)
+    levels = await _levels(session)
+    plan = creation_plan(masters, set(linked), levels or {}, alias_users, profile_of_user, await _overrides(session))
     profile_names = {r[0]: r[1] for r in (await session.execute(text(
         "SELECT id, name FROM lessons.profiles"))).all()}
     users = [{"id": r[0], "username": (r[1] or "").strip()} for r in (await session.execute(text(
@@ -410,49 +504,51 @@ async def payload(session) -> dict[str, Any]:
     rows = []
     for p in projects:
         ident = p["shan_project_identifier"]
-        mcheck = None
-        if ident and ident in by_ident:
-            fm = by_ident[ident].get("manager")
-            pid, problem = manager_profile_for(fm, alias_users, profile_of_user)
-            mcheck = {
-                "status": manager_check(fm, pid, problem, p["manager_id"], p["shan_manager_kept"]),
-                "file_manager": (fm or "").strip() or None,
-                "problem": problem,
-                "file_profile": {"id": pid, "name": profile_names.get(pid)} if pid else None,
-                "current": {"id": p["manager_id"], "name": p["manager_name"]},
-                # The likeliest person behind the file's name: the alias if one is
-                # confirmed, else the lessons manager's own user. A hint only.
-                "suggest_user_id": alias_users.get((fm or "").strip()) or p["manager_user_id"],
-            }
-        rows.append({
-            "manager_check": mcheck,
+        row = {
+            "manager_check": _manager_check_row(p, by_ident.get(ident) if ident else None,
+                                                alias_users, profile_of_user, profile_names),
             "id": p["id"], "name": p["name"], "site": p["site"], "lessons_count": p["lessons_count"],
-            "manager_name": p["manager_name"], "identifier": ident,
+            "manager_name": p["manager_name"], "manager_id": p["manager_id"], "identifier": ident,
             "linked": by_ident.get(ident) if ident else None,
             "linked_missing": bool(ident and ident not in by_ident),
             "decision": p["shan_link_decision"],
+            "sync_error": p["shan_sync_error"],
+            "sync_error_at": p["shan_sync_error_at"].isoformat() if p["shan_sync_error_at"] else None,
             "suggestions": [] if ident else suggest(p["name"], pool, manager=p["manager_name"]),
-        })
+        }
+        row["issues"] = link_issues(row)
+        rows.append(row)
     open_rows = undecided(projects)
+    counts = {}
+    for m in masters:
+        if (m.get("manager") or "").strip():
+            counts[m["manager"]] = counts.get(m["manager"], 0) + 1
+    managers_open = sum(1 for r in manager_rows(counts, alias_users, profile_of_user, users) if r["problem"])
+    summary = {
+        "lessons_total": len(projects),
+        "linked": len(linked),
+        "local": sum(1 for p in projects if p["shan_link_decision"] == LOCAL and not p["shan_project_identifier"]),
+        "undecided": len(open_rows),
+        "master_total": len(masters),
+        "to_create": len(plan["create"]) if levels is not None else 0,
+        "held": plan["held"],
+        "managers_unlinked": plan["managers_unlinked"],
+        "managers_open": managers_open,
+        "no_manager": plan["no_manager"],
+        "pending": sum(1 for r in rows if r["issues"]),
+        "handled": sum(1 for r in rows if not r["issues"]),
+        "engine_ok": levels is not None,
+    }
+    summary["all_clear"] = all_clear(summary)
     return {
         "projects": rows,
         "masters": pool,
-        "summary": {
-            "lessons_total": len(projects),
-            "linked": len(linked),
-            "local": sum(1 for p in projects if p["shan_link_decision"] == LOCAL and not p["shan_project_identifier"]),
-            "undecided": len(open_rows),
-            "master_total": len(masters),
-            "to_create": len(plan["create"]),
-            "unknown_stage": plan["unknown_stage"],
-            "managers_unlinked": plan["managers_unlinked"],
-            "manager_open": sum(1 for r in rows if r["manager_check"]
-                                and r["manager_check"]["status"] in ("differs", "unresolved")),
-            "no_manager": plan["no_manager"],
-            "type_unknown": plan["type_unknown"],
-        },
-        "can_create": not open_rows and bool(plan["create"]),
+        "summary": summary,
+        "can_create": not open_rows and bool(plan["create"]) and levels is not None,
         "users": users,
+        "stage_options": STAGE_OPTIONS,
+        "type_options": [{"value": k, "label": v} for k, v in TYPE_LABELS.items()],
+        "last_sync": await _last_sync(session),
     }
 
 
@@ -710,44 +806,118 @@ class MergeAbort(Exception):
     """Counts did not add up — the caller rolls the whole merge back."""
 
 
-async def create_missing(session, admin) -> tuple[int, str | None]:
-    """Create a lessons project for every active file project nobody links to.
-    Refused while any existing lessons project is undecided (it might BE one of them)."""
-    data = await payload(session)
-    if data["summary"]["undecided"]:
-        return 0, f"{data['summary']['undecided']} פרויקטי לקחים עוד לא קושרו או סומנו כמקומיים"
+async def create_missing(session, admin, identifiers: set[str] | None = None) -> tuple[int, str | None]:
+    """Create a lessons project for every active file project nobody links to
+    (or only `identifiers`). Refused while any existing lessons project is
+    undecided (it might BE one of them) or the engine is down (no risk to give)."""
+    n_open = await _undecided_count(session)
+    if n_open:
+        return 0, f"{n_open} פרויקטי לקחים עוד לא קושרו או סומנו כמקומיים"
+    levels = await _levels(session)
+    if levels is None:
+        return 0, "מנוע הדפוסים לא זמין כרגע — אין רמת סיכון לתת. נסה שוב בעוד כמה דקות"
     alias_users, profile_of_user = await _manager_chain(session)
     masters = await _masters(session)
+    if identifiers is not None:
+        masters = [m for m in masters if m["identifier"] in identifiers]
     linked = {r[0] for r in (await session.execute(text(
         "SELECT shan_project_identifier FROM lessons.projects WHERE shan_project_identifier IS NOT NULL"))).all()}
-    plan = creation_plan(masters, linked, await _levels(session), alias_users, profile_of_user)
+    plan = creation_plan(masters, linked, levels, alias_users, profile_of_user, await _overrides(session))
     if not plan["create"]:
-        return 0, "אין פרויקטים חדשים ליצירה"
-    await _insert_created(session, plan)
-    await _log(session, admin, "projects_created_from_master", "", "קובץ המאסטר",
-               f"נוצרו {len(plan['create'])} פרויקטים מקובץ המאסטר "
-               f"({plan['no_manager']} עם מנה\"פ '{PLACEHOLDER_PM_NAME}')")
-    return len(plan["create"]), None
+        return 0, None if identifiers is not None else "אין פרויקטים חדשים ליצירה"
+    created, failed = await _insert_created(session, plan, admin)
+    if failed and not created:
+        return 0, f"היצירה נכשלה: {failed[0]['error']}"
+    return len(created), None
 
 
-async def _insert_created(session, plan: dict[str, Any]) -> None:
-    """Insert creation_plan's projects (admin's "create" and the upload sync)."""
+async def _undecided_count(session) -> int:
+    return (await session.execute(text(
+        "SELECT count(*) FROM lessons.projects WHERE shan_project_identifier IS NULL "
+        "AND shan_link_decision IS DISTINCT FROM :l"), {"l": LOCAL})).scalar_one()
+
+
+def _short_error(e: Exception) -> str:
+    return f"{type(e).__name__}: {e}"[:300]
+
+
+async def _insert_created(session, plan: dict[str, Any], actor=None) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Insert creation_plan's projects (admin's "create" and the upload sync),
+    each in its own savepoint: one bad row is reported, never the whole batch.
+    Returns (created, failed)."""
     if plan["no_manager"]:
         await session.execute(text(
             "INSERT INTO lessons.profiles (id, name, email, role, is_login) "
             "VALUES (:id, :name, '', 'project_manager', false) ON CONFLICT (id) DO NOTHING"),
             {"id": PLACEHOLDER_PM_ID, "name": PLACEHOLDER_PM_NAME})
+    created, failed = [], []
     for c in plan["create"]:
-        new_id = (await session.execute(text(
-            "INSERT INTO lessons.projects (name, stage_indexes, project_type, risk, manager_id, station_type, "
-            "station_type_set, shan_project_identifier, shan_active, shan_synced_at) "
-            "VALUES (:name, :stage_indexes, :project_type, :risk, :manager_id, 'closed', false, "
-            ":identifier, true, now()) RETURNING id"), c)).scalar_one()
-        # One manager per project (UserContext.updateUser) + an admin holds every project.
-        await session.execute(text(
-            "UPDATE lessons.profiles SET assigned_projects = array_append(assigned_projects, CAST(:p AS integer)) "
-            "WHERE (id = :m OR role = 'admin') AND NOT (CAST(:p AS integer) = ANY(assigned_projects))"),
-            {"p": new_id, "m": c["manager_id"]})
+        try:
+            async with session.begin_nested():
+                new_id = (await session.execute(text(
+                    "INSERT INTO lessons.projects (name, stage_indexes, project_type, risk, manager_id, station_type, "
+                    "station_type_set, shan_project_identifier, shan_active, shan_synced_at) "
+                    "VALUES (:name, :stage_indexes, :project_type, :risk, :manager_id, 'closed', false, "
+                    ":identifier, true, now()) RETURNING id"), c)).scalar_one()
+                # One manager per project (UserContext.updateUser) + an admin holds every project.
+                await session.execute(text(
+                    "UPDATE lessons.profiles SET assigned_projects = array_append(assigned_projects, CAST(:p AS integer)) "
+                    "WHERE (id = :m OR role = 'admin') AND NOT (CAST(:p AS integer) = ANY(assigned_projects))"),
+                    {"p": new_id, "m": c["manager_id"]})
+                await _log(session, actor, "project_created_from_master", new_id, c["name"],
+                           f"נוצר מקובץ המאסטר ({c['identifier']})"
+                           + (f" — מנה\"פ '{PLACEHOLDER_PM_NAME}'" if c["manager_id"] == PLACEHOLDER_PM_ID else ""))
+            created.append({"identifier": c["identifier"], "name": c["name"]})
+        except Exception as e:  # noqa: BLE001 — reported per project, the rest still go in
+            failed.append({"identifier": c["identifier"], "name": c["name"], "error": _short_error(e)})
+    return created, failed
+
+
+async def complete(session, admin, identifier: str, stage: str | None = None,
+                   project_type: str | None = None, create: bool = True) -> str | None:
+    """An admin completes what the file does not give for one file project
+    (stage in the file's own words, or a project type). Only a field that is
+    actually missing may be completed — a value the file gives is never
+    overridden. The project is created at once when nothing else blocks it."""
+    master = next((m for m in await _masters(session) if m["identifier"] == identifier), None)
+    if master is None:
+        return "הפרויקט לא נמצא בקובץ המאסטר (רק פרויקטים פעילים)"
+    if (await session.execute(text(
+            "SELECT 1 FROM lessons.projects WHERE shan_project_identifier = :i"), {"i": identifier})).first():
+        return "הפרויקט כבר קיים במערכת הלקחים"
+    missing = missing_fields(master)
+    stages = None
+    if stage:
+        if "stage" not in missing:
+            return "השלב כבר קיים בקובץ — אין מה להשלים"
+        stages = stage_indexes_for(stage)
+        if stages is None:
+            return "שלב לא מוכר"
+    if project_type:
+        if "project_type" not in missing:
+            return "סוג הפרויקט כבר קיים בקובץ — אין מה להשלים"
+        if project_type not in TYPE_LABELS:
+            return "סוג פרויקט לא מוכר"
+    if not stages and not project_type:
+        return "לא נבחר ערך"
+    await session.execute(text(
+        "INSERT INTO lessons.master_overrides (identifier, stage_indexes, project_type, set_by, set_at) "
+        "VALUES (:i, :s, :t, :by, now()) ON CONFLICT (identifier) DO UPDATE SET "
+        "stage_indexes = COALESCE(EXCLUDED.stage_indexes, lessons.master_overrides.stage_indexes), "
+        "project_type = COALESCE(EXCLUDED.project_type, lessons.master_overrides.project_type), "
+        "set_by = EXCLUDED.set_by, set_at = now()"),
+        {"i": identifier, "s": stages, "t": project_type, "by": (admin.username or "").strip() if admin else SYNC_ACTOR})
+    await _log(session, admin, "master_completed", "", (master.get("name") or identifier).strip(),
+               f"הושלם ({identifier}): " + ", ".join(
+                   x for x in (f"שלב {stage}" if stages else "", f"סוג {TYPE_LABELS.get(project_type or '', '')}"
+                                                                   if project_type else "") if x))
+    # Creation may still wait (another missing field, an undecided lessons
+    # project, the engine) — the completion itself is saved either way, and the
+    # next sync creates it.
+    if create and await _undecided_count(session) == 0 and await _levels(session) is not None:
+        _, problem = await create_missing(session, admin, {identifier})
+        return problem
+    return None
 
 
 # ----------------------------------------------------------------- L3: every live upload
@@ -756,16 +926,17 @@ SYNC_ACTOR = "סנכרון קובץ המאסטר"
 FILE_FIELDS = ("name", "stage_indexes", "project_type", "risk")
 
 
-def sync_plan(linked: list[dict[str, Any]], masters: dict[str, dict[str, Any]], levels: dict[str, str],
+def sync_plan(linked: list[dict[str, Any]], masters: dict[str, dict[str, Any]], levels: dict[str, str] | None,
               alias_users: dict[str, int | None], profile_of_user: dict[int, dict[str, Any]]) -> list[dict[str, Any]]:
     """What a live upload changes on each LINKED lessons project. Pure.
 
     The file owns name / stage / type / risk (LP-D3/D5/D6). An unknown stage or
-    type leaves the module's value. The manager moves only to a profile the
-    confirmed chain resolves to, and never against a name an admin chose to
-    keep (LP-D12); an unresolved name changes nothing (the manager check asks).
-    A project gone from the active file is marked shan_active=false — never
-    deleted, its lessons stay.
+    type leaves the module's value; `levels=None` (the engine failed) leaves
+    every risk. The manager is filled automatically ONLY on a project still
+    held by the "טרם שויך" placeholder (nobody's assignment is changed); a
+    project whose real manager differs from the file waits for the admin's
+    approval in the work list (user decision 2026-10-19). A project gone from
+    the active file is marked shan_active=false — never deleted, its lessons stay.
     """
     out = []
     for p in linked:
@@ -774,25 +945,65 @@ def sync_plan(linked: list[dict[str, Any]], masters: dict[str, dict[str, Any]], 
             if p.get("shan_active") is not False:
                 out.append({"id": p["id"], "fields": {}, "manager": None, "active": False})
             continue
-        pid, _ = manager_profile_for(m.get("manager"), alias_users, profile_of_user)
-        f = fields_for(m, levels.get(m["identifier"]), pid) or {
-            "name": (m.get("name") or m["identifier"]).strip(), "risk": risk_for(levels.get(m["identifier"]))}
-        if project_type_for(m.get("project_type")) is None:
-            f.pop("project_type", None)
+        f: dict[str, Any] = {"name": (m.get("name") or m["identifier"]).strip()}
+        if (stages := stage_indexes_for(m.get("stage"))) is not None:
+            f["stage_indexes"] = stages
+        if (ptype := project_type_for(m.get("project_type"))) is not None:
+            f["project_type"] = ptype
+        if levels is not None:
+            f["risk"] = risk_for(levels.get(m["identifier"]))
         changed = {k: f[k] for k in FILE_FIELDS if k in f and f[k] != p.get(k)}
-        status = manager_check(m.get("manager"), pid, None, p.get("manager_id"), p.get("shan_manager_kept"))
-        manager = pid if status == "differs" else None
+        pid, _ = manager_profile_for(m.get("manager"), alias_users, profile_of_user)
+        manager = pid if pid is not None and p.get("manager_id") == PLACEHOLDER_PM_ID else None
         if changed or manager or p.get("shan_active") is not True:
             out.append({"id": p["id"], "fields": changed, "manager": manager, "active": True})
     return out
 
 
-async def sync_from_file(session) -> dict[str, int]:
+FIELD_LABELS = {"name": "שם", "stage_indexes": "שלב", "project_type": "סוג", "risk": "סיכון"}
+
+
+def change_note(fields: dict[str, Any], manager: str | None, active: bool) -> str:
+    """One activity-log line for one project's sync changes. Pure."""
+    parts = [f"{FIELD_LABELS[k]}: {v}" for k, v in fields.items()]
+    if manager:
+        parts.append(f"מנה\"פ: {manager} (במקום '{PLACEHOLDER_PM_NAME}')")
+    if not active:
+        parts.append("יצא מקובץ המאסטר (סומן לא פעיל, לא נמחק)")
+    return "סנכרון מקובץ המאסטר — " + ("; ".join(parts) if parts else "חזר לקובץ")
+
+
+def sync_report(created: list[dict[str, Any]], failed: list[dict[str, Any]], rows: list[dict[str, Any]],
+                held: list[dict[str, Any]], counts: dict[str, int], undecided_n: int, engine_ok: bool) -> dict[str, Any]:
+    """The five categories the admin asked for (2026-10-19), from one sync. Pure.
+    `rows` are the linked projects after the sync, each with its `issues`."""
+    linked_active = [r for r in rows if r.get("identifier") and not r.get("linked_missing")]
+    return {
+        "created": created,
+        "linked_ok": sum(1 for r in linked_active if not r["issues"]),
+        "awaiting_data": [{"identifier": h["identifier"], "name": h.get("name"), "missing": h["missing"]} for h in held],
+        "awaiting_manager": sum(1 for r in linked_active
+                                if {"manager_differs", "manager_unresolved", "manager_placeholder"} & set(r["issues"])),
+        "failed": failed,
+        "updated": counts["updated"],
+        "managers_filled": counts["managers"],
+        "inactive": counts["inactive"],
+        "creation_paused": undecided_n,
+        "engine_ok": engine_ok,
+    }
+
+
+async def sync_from_file(session, actor=None) -> dict[str, Any]:
     """Bring the lessons module up to date with the file just synced LIVE
     (never a history replay — the caller checks). Updates linked projects,
     marks the vanished inactive, and creates the file's new projects — the
-    last only once the initial linking is done (no undecided lessons project),
-    or a project not linked yet would be created twice."""
+    last only once the initial linking is done (no undecided lessons project,
+    or a project not linked yet would be created twice) and only with the
+    engine up (no risk to give otherwise).
+
+    Every project is its own savepoint: a failure is written on that project
+    (`shan_sync_error`) and in the report; the rest of the sync goes on. Every
+    change is one activity-log line; the run's report is kept in `sync_runs`."""
     masters = {m["identifier"]: m for m in await _masters(session)}
     linked = [dict(r) for r in (await session.execute(text(
         "SELECT id, name, stage_indexes, project_type, risk, manager_id, shan_project_identifier, "
@@ -800,33 +1011,51 @@ async def sync_from_file(session) -> dict[str, int]:
     ))).mappings().all()]
     for p in linked:
         p["stage_indexes"] = list(p["stage_indexes"] or [])
+    names = {p["id"]: p["name"] for p in linked}
     alias_users, profile_of_user = await _manager_chain(session)
     levels = await _levels(session)
-    counts = {"updated": 0, "managers": 0, "inactive": 0, "created": 0}
+    counts = {"updated": 0, "managers": 0, "inactive": 0}
+    failed: list[dict[str, Any]] = []
+    failed_ids: list[int] = []
     for ch in sync_plan(linked, masters, levels, alias_users, profile_of_user):
-        sets = ", ".join(f"{k} = :{k}" for k in ch["fields"])
-        await session.execute(text(
-            f"UPDATE lessons.projects SET {sets + ', ' if sets else ''}shan_active = :active, "
-            "shan_synced_at = now() WHERE id = :id"), {**ch["fields"], "active": ch["active"], "id": ch["id"]})
+        try:
+            async with session.begin_nested():
+                sets = ", ".join(f"{k} = :{k}" for k in ch["fields"])
+                await session.execute(text(
+                    f"UPDATE lessons.projects SET {sets + ', ' if sets else ''}shan_active = :active, "
+                    "shan_synced_at = now(), shan_sync_error = NULL, shan_sync_error_at = NULL WHERE id = :id"),
+                    {**ch["fields"], "active": ch["active"], "id": ch["id"]})
+                if ch["manager"]:
+                    await apply_manager(session, ch["id"], ch["manager"])
+                await _log(session, actor, "project_synced_from_master", ch["id"], names.get(ch["id"], ""),
+                           change_note(ch["fields"], ch["manager"], ch["active"]))
+        except Exception as e:  # noqa: BLE001 — written on the project, the sync goes on
+            failed_ids.append(ch["id"])
+            failed.append({"id": ch["id"], "name": names.get(ch["id"]), "error": _short_error(e)})
+            await session.execute(text(
+                "UPDATE lessons.projects SET shan_sync_error = :e, shan_sync_error_at = now() WHERE id = :id"),
+                {"e": failed[-1]["error"], "id": ch["id"]})
+            continue
         if ch["manager"]:
-            await apply_manager(session, ch["id"], ch["manager"])
             counts["managers"] += 1
         counts["updated" if ch["active"] else "inactive"] += 1
-    undecided_n = (await session.execute(text(
-        "SELECT count(*) FROM lessons.projects WHERE shan_project_identifier IS NULL "
-        "AND shan_link_decision IS DISTINCT FROM :l"), {"l": LOCAL})).scalar_one()
-    if undecided_n == 0:
-        plan = creation_plan(list(masters.values()), {p["shan_project_identifier"] for p in linked},
-                             levels, alias_users, profile_of_user)
-        if plan["create"]:
-            await _insert_created(session, plan)
-            counts["created"] = len(plan["create"])
-    if any(counts.values()):
-        await _log(session, None, "projects_synced_from_master", "", "קובץ המאסטר",
-                   f"עודכנו {counts['updated']} פרויקטים (מנה\"פ: {counts['managers']}), "
-                   f"{counts['inactive']} יצאו מהקובץ, נוצרו {counts['created']}"
-                   + ("" if undecided_n == 0 else f" — יצירה מושהית: {undecided_n} פרויקטי לקחים עוד לא קושרו"))
-    return {**counts, "undecided": undecided_n}
+    # An error from an earlier run is cleared once the project went through this one.
+    await session.execute(text(
+        "UPDATE lessons.projects SET shan_sync_error = NULL, shan_sync_error_at = NULL "
+        "WHERE shan_sync_error IS NOT NULL AND NOT (id = ANY(:f))"), {"f": failed_ids})
+    undecided_n = await _undecided_count(session)
+    created: list[dict[str, Any]] = []
+    plan = creation_plan(list(masters.values()), {p["shan_project_identifier"] for p in linked},
+                         levels or {}, alias_users, profile_of_user, await _overrides(session))
+    if undecided_n == 0 and levels is not None and plan["create"]:
+        created, create_failed = await _insert_created(session, plan, actor)
+        failed.extend(create_failed)
+    rows = (await payload(session))["projects"]
+    report = sync_report(created, failed, rows, plan["held"], counts, undecided_n, levels is not None)
+    await session.execute(text(
+        "INSERT INTO lessons.sync_runs (actor, report) VALUES (:a, CAST(:r AS jsonb))"),
+        {"a": (actor.username or "").strip() if actor else SYNC_ACTOR, "r": json.dumps(report, ensure_ascii=False)})
+    return report
 
 
 async def sync_after_upload() -> None:
@@ -914,3 +1143,81 @@ async def confirm_alias(session, admin, alias: str, user_id: int) -> str | None:
     await _log(session, admin, "manager_alias_confirmed", "", alias.strip(),
                f"השם בקובץ '{alias.strip()}' = משתמש {user_id} (פרופיל {pid})")
     return None
+
+
+# ----------------------------------------------------------------- the completion table (Excel, option ב)
+
+def completion_items(data: dict[str, Any], manager_rows_: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Every item only a person can give, from `payload` + `managers_payload`. Pure.
+
+    · a held file project: each missing field (stage / type), current = the file's raw value
+    · a file מנה"פ name nobody confirmed: one row per NAME (all its projects at once)
+    · a linked project held by "טרם שויך" whose file cell is EMPTY: one row per project
+    A manager that DIFFERS is an approval, not a completion — it stays in the tab."""
+    items = []
+    for h in data["summary"]["held"]:
+        for f in h["missing"]:
+            items.append({"key": f"{f}|{h['identifier']}", "kind": f, "identifier": h["identifier"],
+                          "name": h.get("name"), "manager": h.get("manager"),
+                          "current": (h.get("stage") if f == "stage" else h.get("project_type")) or "",
+                          "note": "השלב בקובץ לא מוכר" if f == "stage" else "סוג הפרויקט בקובץ לא מוכר"})
+    for m in manager_rows_:
+        if m["problem"]:
+            items.append({"key": f"alias|{m['name'].strip()}", "kind": "alias", "identifier": "", "alias": m["name"],
+                          "name": f"{m['projects']} פרויקטים", "manager": m["name"].strip(),
+                          "current": (m.get("username") or "").strip(),
+                          "note": {"alias_unlinked": "השם בקובץ לא קושר למשתמש",
+                                   "no_profile": "למשתמש אין פרופיל במערכת הלקחים",
+                                   "not_pm": "המשתמש לא מוגדר כמנהל פרויקט"}.get(m["problem"], m["problem"])})
+    for r in data["projects"]:
+        mc = r.get("manager_check") or {}
+        if "manager_placeholder" in r["issues"] and mc.get("status") == "no_name":
+            items.append({"key": f"pm|{r['id']}", "kind": "pm", "identifier": r.get("identifier") or "",
+                          "name": r["name"], "manager": "", "current": "", "project_id": r["id"],
+                          "note": "אין מנה״פ בקובץ — הפרויקט אצל \"טרם שויך\""})
+    return items
+
+
+async def completion_state(session) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """(open items, users) — what the export writes and the import checks against, now."""
+    data = await payload(session)
+    managers = await managers_payload(session)
+    return completion_items(data, managers["rows"]), data["users"]
+
+
+async def apply_completion(session, admin, changes: list[dict[str, Any]]) -> dict[str, Any]:
+    """Apply validated rows (lessons_link_sheet.validate → `apply`), each in its
+    own savepoint, then ONE sync (which creates what is now complete and fills
+    the placeholders). Returns what happened per row."""
+    done, failed = [], []
+    by_ident: dict[str, dict[str, Any]] = {}
+    for c in changes:
+        if c["kind"] in ("stage", "project_type"):
+            by_ident.setdefault(c["identifier"], {})[c["kind"]] = c["value"]
+    for ident, f in by_ident.items():
+        try:
+            async with session.begin_nested():
+                problem = await complete(session, admin, ident, f.get("stage"), f.get("project_type"), create=False)
+                if problem:
+                    raise ValueError(problem)
+            done.append(ident)
+        except Exception as e:  # noqa: BLE001 — per item, the rest go on
+            failed.append({"key": ident, "error": str(e)[:300]})
+    for c in changes:
+        if c["kind"] not in ("alias", "pm"):
+            continue
+        try:
+            async with session.begin_nested():
+                if c["kind"] == "alias":
+                    problem = await confirm_alias(session, admin, c["alias"], int(c["value"]))
+                else:
+                    problem = await set_manager(session, admin, int(c["project_id"]), "user", int(c["value"]))
+                if problem:
+                    raise ValueError(problem)
+            done.append(c["key"])
+        except Exception as e:  # noqa: BLE001
+            failed.append({"key": c["key"], "error": str(e)[:300]})
+    report = await sync_from_file(session, admin) if done else None
+    await _log(session, admin, "completion_imported", "", "טבלת השלמה",
+               f"נקלטו {len(done)} השלמות מטבלת Excel, {len(failed)} נכשלו")
+    return {"applied": len(done), "failed": failed, "sync": report}

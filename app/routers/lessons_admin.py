@@ -18,7 +18,7 @@ from __future__ import annotations
 import html
 from typing import Any
 
-from fastapi import APIRouter, Depends, Form, Request
+from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -536,7 +536,11 @@ async def project_links_act(request: Request, session: AsyncSession = Depends(ge
     · {"action": "merge", "source_id": 3, "target_id": 7}
     · {"action": "manager", "project_id": 3, "mode": "file" | "user" | "keep", "user_id": 12}
     · {"action": "alias", "alias": "<name as in the file>", "user_id": 12}
-    · {"action": "sync_now"} · {"action": "create_missing"}. Answers with the fresh payload."""
+    · {"action": "complete", "identifier": "123", "stage": "<file stage>", "project_type": "new_build"}
+    · {"action": "sync_now"} · {"action": "create_missing"}. Answers with the fresh payload.
+
+    A confirmed name is synced at once, so the projects waiting on it leave the
+    work list without another click (2026-10-19)."""
     from app.services import lessons_project_link as lpl
     admin = await _shan_admin(request, session)
     if admin is None:
@@ -558,8 +562,14 @@ async def project_links_act(request: Request, session: AsyncSession = Depends(ge
                                             None if raw_uid in (None, "") else int(raw_uid))
         elif action == "alias":
             problem = await lpl.confirm_alias(session, admin, str(body["alias"]), int(body["user_id"]))
+            if problem is None:
+                await lpl.sync_from_file(session, admin)
+        elif action == "complete":
+            problem = await lpl.complete(session, admin, str(body["identifier"]),
+                                         str(body.get("stage") or "") or None,
+                                         str(body.get("project_type") or "") or None)
         elif action == "sync_now":
-            await lpl.sync_from_file(session)
+            await lpl.sync_from_file(session, admin)
             problem = None
         elif action == "create_missing":
             _, problem = await lpl.create_missing(session, admin)
@@ -576,3 +586,52 @@ async def project_links_act(request: Request, session: AsyncSession = Depends(ge
         return JSONResponse({"message": problem}, status_code=409)
     await session.commit()
     return JSONResponse(await lpl.payload(session))
+
+
+# ------------------------------------------------------------------ the completion table (Excel, 2026-10-19)
+# Option ב: download every item only a person can give, fill the yellow column,
+# upload → preview → apply. Rules: lessons_link_sheet (pure) + lessons_project_link.
+
+@project_links_router.get("/completion.xlsx")
+async def project_links_completion_export(request: Request, session: AsyncSession = Depends(get_db_session)) -> Response:
+    from datetime import date
+
+    from app.services import lessons_link_sheet as sheet
+    from app.services import lessons_project_link as lpl
+    if await _shan_admin(request, session) is None:
+        return JSONResponse({"message": "Shan-AI admin only"}, status_code=403)
+    items, users = await lpl.completion_state(session)
+    data = sheet.build_workbook(items, lpl.STAGE_OPTIONS, lpl.TYPE_LABELS, users)
+    name = f"lessons-projects-completion-{date.today().isoformat()}.xlsx"
+    return Response(data, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": f'attachment; filename="{name}"', "Cache-Control": "no-store"})
+
+
+@project_links_router.post("/completion")
+async def project_links_completion_import(request: Request, mode: str = "preview",
+                                          file: UploadFile = File(...),
+                                          session: AsyncSession = Depends(get_db_session)) -> Response:
+    """mode=preview: what each filled row would do (nothing written).
+    mode=apply: the same check again on the same file, then the ok rows only."""
+    from app.services import lessons_link_sheet as sheet
+    from app.services import lessons_project_link as lpl
+    admin = await _shan_admin(request, session)
+    if admin is None:
+        return JSONResponse({"message": "Shan-AI admin only"}, status_code=403)
+    if mode not in {"preview", "apply"}:
+        return JSONResponse({"message": "mode must be preview or apply"}, status_code=400)
+    raw = await file.read(sheet.MAX_BYTES + 1)
+    try:
+        rows = sheet.parse_workbook(raw)
+    except sheet.SheetError as e:
+        return JSONResponse({"message": str(e)}, status_code=400)
+    items, users = await lpl.completion_state(session)
+    check = sheet.validate(rows, {i["key"]: i for i in items}, lpl.STAGE_OPTIONS, lpl.TYPE_LABELS,
+                           {u["id"] for u in users})
+    if mode == "preview":
+        return JSONResponse({"rows": check["rows"], "counts": check["counts"]}, headers={"Cache-Control": "no-store"})
+    if not check["apply"]:
+        return JSONResponse({"message": "אין בקובץ שורות תקינות להחלה"}, status_code=409)
+    result = await lpl.apply_completion(session, admin, check["apply"])
+    await session.commit()
+    return JSONResponse({"result": result, "counts": check["counts"], "payload": await lpl.payload(session)})
