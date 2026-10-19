@@ -504,9 +504,18 @@ const ProjectLinksPanel = () => {
                   <p className="text-xs text-muted-foreground">
                     עודכנו {ls.updated} פרויקטים מהקובץ{ls.managers_filled ? ` · ${ls.managers_filled} קיבלו מנה״פ במקום "טרם שויך"` : ""}
                     {ls.inactive ? ` · ${ls.inactive} יצאו מהקובץ (סומנו לא פעילים, לא נמחקו)` : ""}
-                    {ls.creation_paused ? ` · יצירה מושהית: ${ls.creation_paused} פרויקטי לקחים עוד לא קושרו` : ""}
+                    {ls.waiting_duplicate?.length ? ` · ${ls.waiting_duplicate.length} ממתינים להחלטה על פרויקט לקחים דומה` : ""}
+                    {ls.excluded_removed?.length ? ` · ${ls.excluded_removed.length} פרויקטי ניידות הוסרו מהלקחים` : ""}
                     {!ls.engine_ok ? " · מנוע הדפוסים לא היה זמין — סיכון לא עודכן ולא נוצרו פרויקטים" : ""}
                   </p>
+                  {(ls.excluded_kept?.length ?? 0) > 0 && (
+                    <div className="rounded-xl bg-warning/5 ring-1 ring-warning/30 p-3 space-y-1">
+                      <div className="text-xs font-medium">פרויקטי ניידות שנשארו כי יש עליהם לקחים — לא נמחקים אוטומטית:</div>
+                      {ls.excluded_kept.map((k) => (
+                        <div key={k.id} className="text-xs">{k.name.trim()} — {k.lessons} לקחים, {k.implementations} הפצות</div>
+                      ))}
+                    </div>
+                  )}
                   {ls.failed.length > 0 && (
                     <div className="rounded-xl bg-destructive/5 ring-1 ring-destructive/30 p-3 space-y-1">
                       {ls.failed.map((f, i) => (
@@ -718,7 +727,7 @@ const ProjectLinksPanel = () => {
         </CardContent>
       </Card>
 
-      {view === "pending" && s.to_create > 0 && (
+      {view === "pending" && (s.to_create > 0 || s.waiting_duplicate.length > 0) && (
         <Card className="border-0 shadow-sm">
           <CardHeader>
             <CardTitle className="text-base font-heading flex items-center gap-2">
@@ -729,8 +738,8 @@ const ProjectLinksPanel = () => {
           <CardContent className="space-y-3 text-sm">
             <p className="text-muted-foreground">
               כל פרויקט פעיל בקובץ שאין לו פרויקט לקחים מקושר, ושיש לו שלב וסוג מוכרים, ייווצר עם שם, שלב, סוג, סיכון
-              ומנה״פ מהקובץ. פרויקטים שחסר להם שלב או סוג מחכים ב"פרויקטים להשלמת נתונים" ולא נוצרים עם ערך מומצא. אחרי
-              היצירה הראשונה, פרויקטים חדשים בקובץ נוצרים מעצמם בכל העלאה.
+              ומנה״פ מהקובץ. פרויקטים שחסר להם שלב או סוג מחכים ב"פרויקטים להשלמת נתונים" ולא נוצרים עם ערך מומצא.
+              פרויקטי ניידות לא נכללים במערכת הלקחים. פרויקטים חדשים בקובץ נוצרים מעצמם בכל העלאה ובכל "סנכרן עכשיו".
             </p>
             {s.no_manager > 0 && (
               <p className="text-warning">
@@ -738,14 +747,22 @@ const ProjectLinksPanel = () => {
                 שהשם יקושר.
               </p>
             )}
-            <Button className="gap-1.5" disabled={!data.can_create || busy !== null} onClick={() => setConfirmCreate(true)}>
-              <FolderPlus className="w-4 h-4" />
-              צור {s.to_create} פרויקטים
-            </Button>
-            {s.undecided > 0 && (
-              <p className="text-xs text-muted-foreground">
-                זמין אחרי שכל פרויקטי הלקחים קושרו או סומנו כמקומיים — אחרת פרויקט קיים עלול להיווצר פעמיים.
-              </p>
+            {s.to_create > 0 && (
+              <Button className="gap-1.5" disabled={!data.can_create || busy !== null} onClick={() => setConfirmCreate(true)}>
+                <FolderPlus className="w-4 h-4" />
+                צור {s.to_create} פרויקטים
+              </Button>
+            )}
+            {s.waiting_duplicate.length > 0 && (
+              <div className="rounded-xl bg-muted/50 p-3 space-y-1">
+                <div className="text-xs font-medium">
+                  ממתינים להחלטה ({s.waiting_duplicate.length}) — דומים לפרויקט לקחים שעוד לא קושר, ולכן לא נוצרים לידו כדי שלא
+                  תהיה כפילות. ייווצרו מעצמם ברגע שתקשר את פרויקט הלקחים הדומה או תסמן אותו "מקומי":
+                </div>
+                {s.waiting_duplicate.map((w) => (
+                  <div key={w.identifier} className="text-xs">{w.identifier} · {(w.name ?? "").trim()} ← דומה ל"{w.candidate.trim()}"</div>
+                ))}
+              </div>
             )}
           </CardContent>
         </Card>

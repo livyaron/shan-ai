@@ -102,6 +102,8 @@ export interface LinkSummary {
   master_total: number;
   to_create: number;
   held: HeldProject[];
+  /** File projects that may be an undecided lessons project — created once it is decided. */
+  waiting_duplicate: { identifier: string; name: string | null; candidate: string }[];
   managers_unlinked: { name: string; problem: ManagerProblem; projects: number }[];
   managers_open: number;
   no_manager: number;
@@ -123,7 +125,10 @@ export interface SyncReport {
   updated: number;
   managers_filled: number;
   inactive: number;
-  creation_paused: number;
+  waiting_duplicate: { identifier: string; name: string | null; candidate: string }[];
+  /** ניידות projects taken out of the module (no lessons) / kept because they hold lessons. */
+  excluded_removed: { id: number; name: string; identifier: string | null }[];
+  excluded_kept: { id: number; name: string; identifier: string | null; lessons: number; implementations: number }[];
   engine_ok: boolean;
 }
 
@@ -176,7 +181,7 @@ export const manualOptions = (masters: MasterProject[], forRow: number) =>
 export const masterLabel = (m: MasterProject): string =>
   [m.name || m.identifier, m.manager ? `מנה"פ ${m.manager}` : "", m.stage ?? ""].filter(Boolean).join(" · ");
 
-export type SearchReason = "free" | "linked" | "inactive";
+export type SearchReason = "free" | "linked" | "inactive" | "excluded";
 
 export interface SearchRow {
   identifier: string;
@@ -194,6 +199,7 @@ export const SEARCH_REASON_LABELS: Record<SearchReason, string> = {
   free: "פעיל ופנוי — אפשר לקשר",
   linked: "כבר מקושר לפרויקט לקחים",
   inactive: "לא פעיל — לא נמצא בגיליון \"דוח שבועי עדכני\" בהעלאה האחרונה",
+  excluded: "ניידות — לא נכלל במערכת הלקחים",
 };
 
 export interface ManagerRow {

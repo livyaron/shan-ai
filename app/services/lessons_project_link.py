@@ -58,6 +58,16 @@ TYPE_MAP: dict[str, str] = {
 }
 DEFAULT_TYPE = "new_build"
 
+# File project types that are NOT lessons-module projects at all (user decision
+# 2026-10-19: "את כל הניידות תוריד מהפקת לקחים"). Never created, never offered
+# for linking; the ones already created are removed by `remove_excluded` when
+# they hold no lessons — one that does is kept and reported, never deleted.
+EXCLUDED_TYPES = frozenset({"mobility"})
+
+
+def excluded(master: dict[str, Any]) -> bool:
+    return project_type_for(master.get("project_type")) in EXCLUDED_TYPES
+
 # insight_triage level → lessons risk (LP-D6). A project the engine does not
 # rate (finished) is low.
 RISK_BY_LEVEL: dict[str, str] = {"escalate": "high", "week": "high", "follow": "medium", "fyi": "low"}
@@ -328,6 +338,25 @@ def merge_problem(source: dict[str, Any] | None, target: dict[str, Any] | None) 
     return None
 
 
+# A file project that MAY be one of the lessons projects nobody decided on yet
+# waits for that decision instead of being created next to it (a duplicate).
+# Everything else is created at once (user, 2026-10-19: "still missing lots of
+# projects" — one undecided lessons project used to hold back ALL creation).
+POSSIBLE_DUP_SCORE = 60
+
+
+def possible_duplicates(undecided_projects: list[dict[str, Any]], masters: list[dict[str, Any]]) -> dict[str, str]:
+    """file identifier → name of the undecided lessons project it may be. Pure.
+    The same signal the tab shows as a suggestion: a recommendation, the
+    identifier in the name, or a name similar enough."""
+    out: dict[str, str] = {}
+    for p in undecided_projects:
+        for sg in suggest(p["name"], masters, manager=p.get("manager_name")):
+            if sg["recommended"] or sg["id_match"] or sg["score"] >= POSSIBLE_DUP_SCORE:
+                out.setdefault(sg["identifier"], p["name"])
+    return out
+
+
 def undecided(projects: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Lessons projects an admin has not linked or kept local yet."""
     return [p for p in projects if not p.get("shan_project_identifier") and p.get("shan_link_decision") != LOCAL]
@@ -336,15 +365,23 @@ def undecided(projects: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def creation_plan(masters: list[dict[str, Any]], linked_ids: set[str],
                   levels: dict[str, str], alias_users: dict[str, int | None],
                   profile_of_user: dict[int, dict[str, Any]],
-                  overrides: dict[str, dict[str, Any]] | None = None) -> dict[str, Any]:
+                  overrides: dict[str, dict[str, Any]] | None = None,
+                  maybe_dup: dict[str, str] | None = None) -> dict[str, Any]:
     """What "create the missing" would do — the preview and the action read it. Pure.
 
     `held`: file projects that wait for an admin's completion (stage or type
-    the file does not give) — listed with exactly the fields missing."""
+    the file does not give) — listed with exactly the fields missing.
+    `waiting_duplicate`: file projects that may be an undecided lessons project
+    (`possible_duplicates`) — created once that project is linked or kept local."""
     overrides = overrides or {}
-    create, held, managers = [], [], {}
+    maybe_dup = maybe_dup or {}
+    create, held, waiting, managers = [], [], [], {}
     for m in masters:
-        if m["identifier"] in linked_ids:
+        if m["identifier"] in linked_ids or excluded(m):
+            continue
+        if m["identifier"] in maybe_dup:
+            waiting.append({"identifier": m["identifier"], "name": m.get("name"),
+                            "candidate": maybe_dup[m["identifier"]]})
             continue
         ov = overrides.get(m["identifier"])
         pid, problem = manager_profile_for(m.get("manager"), alias_users, profile_of_user)
@@ -361,6 +398,7 @@ def creation_plan(masters: list[dict[str, Any]], linked_ids: set[str],
     return {
         "create": create,
         "held": held,
+        "waiting_duplicate": waiting,
         "managers_unlinked": sorted(managers.values(), key=lambda r: -r["projects"]),
         "no_manager": sum(1 for c in create if c["manager_id"] == PLACEHOLDER_PM_ID),
     }
@@ -394,10 +432,11 @@ def link_issues(row: dict[str, Any]) -> list[str]:
 
 # ----------------------------------------------------------------- DB reads
 
-async def _masters(session) -> list[dict[str, Any]]:
-    return [dict(r) for r in (await session.execute(text(
+async def _masters(session, include_excluded: bool = False) -> list[dict[str, Any]]:
+    rows = [dict(r) for r in (await session.execute(text(
         "SELECT project_identifier AS identifier, name, manager, stage, project_type "
         "FROM public.projects WHERE is_active ORDER BY name"))).mappings().all()]
+    return rows if include_excluded else [m for m in rows if not excluded(m)]
 
 
 async def _lessons_projects(session) -> list[dict[str, Any]]:
@@ -447,6 +486,13 @@ async def _overrides(session) -> dict[str, dict[str, Any]]:
                 "SELECT identifier, stage_indexes, project_type FROM lessons.master_overrides"))).mappings().all()}
 
 
+async def _dup_holds(session, masters: list[dict[str, Any]]) -> dict[str, str]:
+    linked = {r[0] for r in (await session.execute(text(
+        "SELECT shan_project_identifier FROM lessons.projects WHERE shan_project_identifier IS NOT NULL"))).all()}
+    open_rows = undecided(await _lessons_projects(session))
+    return possible_duplicates(open_rows, [m for m in masters if m["identifier"] not in linked])
+
+
 async def _last_sync(session) -> dict[str, Any] | None:
     row = (await session.execute(text(
         "SELECT at, actor, report FROM lessons.sync_runs ORDER BY id DESC LIMIT 1"))).mappings().first()
@@ -474,7 +520,8 @@ def _manager_check_row(p: dict[str, Any], master: dict[str, Any] | None, alias_u
 
 
 STAGE_OPTIONS = list(STAGE_MAP)                       # an admin completes a stage in the file's own words
-TYPE_LABELS = {"new_build": "הקמה", "expansion": "הרחבה", "maintenance": "שו״ש", "mobility": "ניידות"}
+# What an admin may complete a type to — an excluded type is not a lessons project.
+TYPE_LABELS = {"new_build": "הקמה", "expansion": "הרחבה", "maintenance": "שו״ש"}
 
 
 def all_clear(summary: dict[str, Any]) -> bool:
@@ -496,7 +543,9 @@ async def payload(session) -> dict[str, Any]:
             for m in masters]
     alias_users, profile_of_user = await _manager_chain(session)
     levels = await _levels(session)
-    plan = creation_plan(masters, set(linked), levels or {}, alias_users, profile_of_user, await _overrides(session))
+    free = [m for m in masters if m["identifier"] not in linked]
+    plan = creation_plan(masters, set(linked), levels or {}, alias_users, profile_of_user, await _overrides(session),
+                         possible_duplicates(undecided(projects), free))
     profile_names = {r[0]: r[1] for r in (await session.execute(text(
         "SELECT id, name FROM lessons.profiles"))).all()}
     users = [{"id": r[0], "username": (r[1] or "").strip()} for r in (await session.execute(text(
@@ -532,6 +581,7 @@ async def payload(session) -> dict[str, Any]:
         "master_total": len(masters),
         "to_create": len(plan["create"]) if levels is not None else 0,
         "held": plan["held"],
+        "waiting_duplicate": plan["waiting_duplicate"],
         "managers_unlinked": plan["managers_unlinked"],
         "managers_open": managers_open,
         "no_manager": plan["no_manager"],
@@ -544,7 +594,7 @@ async def payload(session) -> dict[str, Any]:
         "projects": rows,
         "masters": pool,
         "summary": summary,
-        "can_create": not open_rows and bool(plan["create"]) and levels is not None,
+        "can_create": bool(plan["create"]) and levels is not None,
         "users": users,
         "stage_options": STAGE_OPTIONS,
         "type_options": [{"value": k, "label": v} for k, v in TYPE_LABELS.items()],
@@ -559,6 +609,8 @@ def search_reason(row: dict[str, Any]) -> str:
     """Why a file project is or is not offered for linking. Pure."""
     if not row.get("is_active"):
         return "inactive"
+    if excluded(row):
+        return "excluded"
     if row.get("linked_to") is not None:
         return "linked"
     return "free"
@@ -572,7 +624,7 @@ async def search_file(session, q: str) -> list[dict[str, Any]]:
     if len(nq) < 2:
         return []
     rows = [dict(r) for r in (await session.execute(text(
-        "SELECT m.project_identifier AS identifier, m.name, m.manager, m.stage, m.is_active, "
+        "SELECT m.project_identifier AS identifier, m.name, m.manager, m.stage, m.project_type, m.is_active, "
         "m.last_updated, p.id AS linked_to, p.name AS linked_name "
         "FROM public.projects m LEFT JOIN lessons.projects p ON p.shan_project_identifier = m.project_identifier"
     ))).mappings().all()]
@@ -808,11 +860,9 @@ class MergeAbort(Exception):
 
 async def create_missing(session, admin, identifiers: set[str] | None = None) -> tuple[int, str | None]:
     """Create a lessons project for every active file project nobody links to
-    (or only `identifiers`). Refused while any existing lessons project is
-    undecided (it might BE one of them) or the engine is down (no risk to give)."""
-    n_open = await _undecided_count(session)
-    if n_open:
-        return 0, f"{n_open} פרויקטי לקחים עוד לא קושרו או סומנו כמקומיים"
+    (or only `identifiers`). A file project that may be an undecided lessons
+    project waits for that decision (`possible_duplicates`); refused while the
+    engine is down (no risk to give)."""
     levels = await _levels(session)
     if levels is None:
         return 0, "מנוע הדפוסים לא זמין כרגע — אין רמת סיכון לתת. נסה שוב בעוד כמה דקות"
@@ -822,19 +872,14 @@ async def create_missing(session, admin, identifiers: set[str] | None = None) ->
         masters = [m for m in masters if m["identifier"] in identifiers]
     linked = {r[0] for r in (await session.execute(text(
         "SELECT shan_project_identifier FROM lessons.projects WHERE shan_project_identifier IS NOT NULL"))).all()}
-    plan = creation_plan(masters, linked, levels, alias_users, profile_of_user, await _overrides(session))
+    plan = creation_plan(masters, linked, levels, alias_users, profile_of_user, await _overrides(session),
+                         await _dup_holds(session, masters))
     if not plan["create"]:
         return 0, None if identifiers is not None else "אין פרויקטים חדשים ליצירה"
     created, failed = await _insert_created(session, plan, admin)
     if failed and not created:
         return 0, f"היצירה נכשלה: {failed[0]['error']}"
     return len(created), None
-
-
-async def _undecided_count(session) -> int:
-    return (await session.execute(text(
-        "SELECT count(*) FROM lessons.projects WHERE shan_project_identifier IS NULL "
-        "AND shan_link_decision IS DISTINCT FROM :l"), {"l": LOCAL})).scalar_one()
 
 
 def _short_error(e: Exception) -> str:
@@ -914,7 +959,7 @@ async def complete(session, admin, identifier: str, stage: str | None = None,
     # Creation may still wait (another missing field, an undecided lessons
     # project, the engine) — the completion itself is saved either way, and the
     # next sync creates it.
-    if create and await _undecided_count(session) == 0 and await _levels(session) is not None:
+    if create and await _levels(session) is not None:
         _, problem = await create_missing(session, admin, {identifier})
         return problem
     return None
@@ -974,7 +1019,8 @@ def change_note(fields: dict[str, Any], manager: str | None, active: bool) -> st
 
 
 def sync_report(created: list[dict[str, Any]], failed: list[dict[str, Any]], rows: list[dict[str, Any]],
-                held: list[dict[str, Any]], counts: dict[str, int], undecided_n: int, engine_ok: bool) -> dict[str, Any]:
+                held: list[dict[str, Any]], counts: dict[str, int], waiting: list[dict[str, Any]], engine_ok: bool,
+                excluded_result: dict[str, list[dict[str, Any]]] | None = None) -> dict[str, Any]:
     """The five categories the admin asked for (2026-10-19), from one sync. Pure.
     `rows` are the linked projects after the sync, each with its `issues`."""
     linked_active = [r for r in rows if r.get("identifier") and not r.get("linked_missing")]
@@ -988,22 +1034,54 @@ def sync_report(created: list[dict[str, Any]], failed: list[dict[str, Any]], row
         "updated": counts["updated"],
         "managers_filled": counts["managers"],
         "inactive": counts["inactive"],
-        "creation_paused": undecided_n,
+        "waiting_duplicate": waiting,
+        "excluded_removed": (excluded_result or {}).get("removed", []),
+        "excluded_kept": (excluded_result or {}).get("kept", []),
         "engine_ok": engine_ok,
     }
+
+
+async def remove_excluded(session, actor=None) -> dict[str, list[dict[str, Any]]]:
+    """Take the excluded types (ניידות, user 2026-10-19) out of the lessons
+    module: a project with no lessons and no distributed lessons is deleted
+    (its own savepoint, one log line); one that holds lessons is KEPT and
+    reported — lessons are never lost. Idempotent; runs at every sync."""
+    idents = [m["identifier"] for m in await _masters(session, include_excluded=True) if excluded(m)]
+    rows = [dict(r) for r in (await session.execute(text(
+        "SELECT p.id, p.name, p.shan_project_identifier AS identifier, "
+        "(SELECT count(*) FROM lessons.lessons l WHERE l.project_id = p.id) AS n_lessons, "
+        "(SELECT count(*) FROM lessons.lesson_implementations i WHERE i.project_id = p.id) AS n_impl "
+        "FROM lessons.projects p WHERE p.project_type = ANY(:types) OR p.shan_project_identifier = ANY(:ids)"),
+        {"types": sorted(EXCLUDED_TYPES), "ids": idents})).mappings().all()]
+    removed, kept = [], []
+    for r in rows:
+        item = {"id": r["id"], "name": r["name"], "identifier": r["identifier"]}
+        if r["n_lessons"] or r["n_impl"]:
+            kept.append({**item, "lessons": r["n_lessons"], "implementations": r["n_impl"]})
+            continue
+        async with session.begin_nested():
+            await session.execute(text(
+                "UPDATE lessons.profiles SET assigned_projects = array_remove(assigned_projects, CAST(:p AS integer)) "
+                "WHERE CAST(:p AS integer) = ANY(assigned_projects)"), {"p": r["id"]})
+            await session.execute(text("DELETE FROM lessons.projects WHERE id = :p"), {"p": r["id"]})
+            await _log(session, actor, "project_removed_excluded_type", r["id"], r["name"],
+                       f"הוסר ממערכת הלקחים — פרויקט ניידות ({r['identifier'] or 'לא מקושר'}), ללא לקחים")
+        removed.append(item)
+    return {"removed": removed, "kept": kept}
 
 
 async def sync_from_file(session, actor=None) -> dict[str, Any]:
     """Bring the lessons module up to date with the file just synced LIVE
     (never a history replay — the caller checks). Updates linked projects,
-    marks the vanished inactive, and creates the file's new projects — the
-    last only once the initial linking is done (no undecided lessons project,
-    or a project not linked yet would be created twice) and only with the
+    marks the vanished inactive, removes the excluded types (ניידות) that hold
+    no lessons, and creates the file's new projects — except one that may be an
+    undecided lessons project (it waits for that decision) — only with the
     engine up (no risk to give otherwise).
 
     Every project is its own savepoint: a failure is written on that project
     (`shan_sync_error`) and in the report; the rest of the sync goes on. Every
     change is one activity-log line; the run's report is kept in `sync_runs`."""
+    excluded_result = await remove_excluded(session, actor)
     masters = {m["identifier"]: m for m in await _masters(session)}
     linked = [dict(r) for r in (await session.execute(text(
         "SELECT id, name, stage_indexes, project_type, risk, manager_id, shan_project_identifier, "
@@ -1043,15 +1121,16 @@ async def sync_from_file(session, actor=None) -> dict[str, Any]:
     await session.execute(text(
         "UPDATE lessons.projects SET shan_sync_error = NULL, shan_sync_error_at = NULL "
         "WHERE shan_sync_error IS NOT NULL AND NOT (id = ANY(:f))"), {"f": failed_ids})
-    undecided_n = await _undecided_count(session)
     created: list[dict[str, Any]] = []
     plan = creation_plan(list(masters.values()), {p["shan_project_identifier"] for p in linked},
-                         levels or {}, alias_users, profile_of_user, await _overrides(session))
-    if undecided_n == 0 and levels is not None and plan["create"]:
+                         levels or {}, alias_users, profile_of_user, await _overrides(session),
+                         await _dup_holds(session, list(masters.values())))
+    if levels is not None and plan["create"]:
         created, create_failed = await _insert_created(session, plan, actor)
         failed.extend(create_failed)
     rows = (await payload(session))["projects"]
-    report = sync_report(created, failed, rows, plan["held"], counts, undecided_n, levels is not None)
+    report = sync_report(created, failed, rows, plan["held"], counts, plan["waiting_duplicate"],
+                         levels is not None, excluded_result)
     await session.execute(text(
         "INSERT INTO lessons.sync_runs (actor, report) VALUES (:a, CAST(:r AS jsonb))"),
         {"a": (actor.username or "").strip() if actor else SYNC_ACTOR, "r": json.dumps(report, ensure_ascii=False)})

@@ -440,11 +440,14 @@ def test_sync_report_has_the_five_categories():
             _row(identifier=None, issues=["undecided"])]
     r = lpl.sync_report([{"identifier": "P-9", "name": "x"}], [{"id": 3, "error": "e"}], rows,
                         [{"identifier": "P-7", "name": "y", "missing": ["stage"]}],
-                        {"updated": 2, "managers": 1, "inactive": 0}, 0, True)
+                        {"updated": 2, "managers": 1, "inactive": 0},
+                        [{"identifier": "P-8", "name": "z", "candidate": "z ישן"}], True,
+                        {"removed": [{"id": 5}], "kept": []})
     assert r["created"] == [{"identifier": "P-9", "name": "x"}]
     assert r["linked_ok"] == 1 and r["awaiting_manager"] == 1
     assert r["awaiting_data"] == [{"identifier": "P-7", "name": "y", "missing": ["stage"]}]
     assert r["failed"] == [{"id": 3, "error": "e"}]
+    assert r["waiting_duplicate"][0]["candidate"] == "z ישן" and r["excluded_removed"] == [{"id": 5}]
 
 
 def test_change_note_says_what_changed():
@@ -493,3 +496,33 @@ def test_manager_rows_problems_first_and_reserved_name_skipped():
     assert by["משה כהן"]["hint_user_id"] is None           # already confirmed — no hint
     assert by["יוסי"]["problem"] == "alias_unlinked"
     assert by["דנה לוי"]["problem"] == "not_pm" and by["דנה לוי"]["user_id"] == 8
+
+
+# ------------------------------------------------------------------ ניידות out, nothing held back for nothing (2026-10-19)
+
+def test_mobility_is_never_a_lessons_project():
+    assert lpl.excluded({"project_type": "ניידות"})
+    assert not lpl.excluded({"project_type": "הקמה"}) and not lpl.excluded({"project_type": None})
+    plan = lpl.creation_plan([MASTER, {**MASTER, "identifier": "P-M", "project_type": "ניידות"}],
+                             set(), {}, ALIASES, PROFILES)
+    assert [c["identifier"] for c in plan["create"]] == ["P-1"]
+    assert not plan["held"] and not plan["waiting_duplicate"]
+    assert "mobility" not in lpl.TYPE_LABELS          # an admin cannot complete a type into it
+    assert lpl.search_reason({"is_active": True, "project_type": "ניידות", "linked_to": None}) == "excluded"
+
+
+def test_one_undecided_lessons_project_no_longer_holds_back_everything():
+    masters = [{**MASTER, "identifier": "P-1", "name": "תחמש חדרה מזרח"},
+               {**MASTER, "identifier": "P-2", "name": "תחמש עכו צפון"},
+               {**MASTER, "identifier": "P-3", "name": "תחמש אילת דרום"}]
+    open_rows = [{"name": "חדרה מזרח", "manager_name": None}]
+    dups = lpl.possible_duplicates(open_rows, masters)
+    assert dups == {"P-1": "חדרה מזרח"}
+    plan = lpl.creation_plan(masters, set(), {}, ALIASES, PROFILES, None, dups)
+    # only the look-alike waits for the decision; the others are created now
+    assert sorted(c["identifier"] for c in plan["create"]) == ["P-2", "P-3"]
+    assert plan["waiting_duplicate"] == [{"identifier": "P-1", "name": "תחמש חדרה מזרח", "candidate": "חדרה מזרח"}]
+
+
+def test_no_undecided_project_holds_nothing():
+    assert lpl.possible_duplicates([], [MASTER]) == {}
