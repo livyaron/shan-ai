@@ -324,6 +324,13 @@ async def startup():
                     "UPDATE missions SET status = 'open' WHERE status = 'in_progress'"
                 ))
 
+                # Gender-neutral PM title (user 2026-10-20): "מנהלת פרויקט" was
+                # showing under male PMs. Saves already store the neutral form
+                # (job_titles.neutral_title); this rewrites the existing rows. Idempotent.
+                from app.services.job_titles import migration_statements as _title_migrations
+                for _sql, _params in _title_migrations():
+                    await conn.execute(_text(_sql), _params)
+
                 # חדר מבצעים: the note written while closing a mission is stored as
                 # an ordinary status update tagged kind='close'. create_all does not
                 # ALTER an existing table, so this column needs its own migration.
