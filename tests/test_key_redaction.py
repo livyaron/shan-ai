@@ -84,3 +84,32 @@ def test_request_urls_are_not_logged():
     import logging
     import app.main  # noqa: F401  — the logging setup lives there
     assert logging.getLogger("httpx").getEffectiveLevel() >= logging.WARNING
+
+
+def test_the_router_redacts_the_error_it_logs():
+    """llm_router logged `{e}` raw: the live Google key sat in the Railway logs (2026-10-20)."""
+    import inspect
+    from app.services import llm_router
+    src = inspect.getsource(llm_router)
+    assert "({type(e).__name__}: {e})" not in src
+    assert "redact(str(e))" in src
+
+
+def test_every_root_log_record_is_scrubbed(caplog):
+    """A module that forgets redact() must still not write a key to the logs."""
+    import logging
+    import app.main  # noqa: F401  — installs the filter on the root handlers
+    flt = next(f for h in logging.getLogger().handlers for f in h.filters
+               if type(f).__name__ == "_RedactKeys")
+    key = "AIzaSyABCDEFG1234567890"
+    rec = logging.LogRecord("x", logging.WARNING, __file__, 1,
+                            "failed: %s", (f"url?key={key}",), None)
+    assert flt.filter(rec) is True
+    assert key not in rec.getMessage()
+    try:
+        raise RuntimeError(f"for url 'https://g.example/m?key={key}'")
+    except RuntimeError:
+        import sys
+        rec = logging.LogRecord("x", logging.ERROR, __file__, 1, "boom", None, sys.exc_info())
+    flt.filter(rec)
+    assert key not in (rec.exc_text or "") and "RuntimeError" in rec.exc_text

@@ -9,6 +9,8 @@ import random
 import time
 from contextvars import ContextVar
 
+from app.services.gemma_client import redact
+
 logger = logging.getLogger(__name__)
 
 # Per-task context vars: set after every llm_chat call so callers can read metadata
@@ -152,7 +154,7 @@ async def llm_chat(usage: str, messages: list, **kwargs) -> str:
     except Exception as e:
         if fallback:
             logger.warning(
-                f"llm_router [{usage}]: {primary_name} failed ({type(e).__name__}: {e}), "
+                f"llm_router [{usage}]: {primary_name} failed ({type(e).__name__}: {redact(str(e))}), "
                 f"falling back to {secondary_name}"
             )
             result = await secondary(messages, **kwargs)

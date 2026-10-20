@@ -17,6 +17,32 @@ logging.basicConfig(
 # in the Railway logs (2026-10-07). Warnings and errors still come through, and
 # those pass through gemma_client.redact where they carry a URL.
 logging.getLogger("httpx").setLevel(logging.WARNING)
+
+
+class _RedactKeys(logging.Filter):
+    """Last line of defence: an httpx error's text is its URL, and a module that
+    logs `{e}` without gemma_client.redact put the live Google key into the
+    Railway logs (llm_router, 2026-10-20). Every record through the root handlers
+    is scrubbed — message and traceback alike."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        from app.services.gemma_client import redact
+        try:
+            msg = record.getMessage()
+        except Exception:
+            return True
+        clean = redact(msg)
+        if clean != msg:
+            record.msg, record.args = clean, None
+        if record.exc_info and not record.exc_text:
+            record.exc_text = logging.Formatter().formatException(record.exc_info)
+        if record.exc_text:
+            record.exc_text = redact(record.exc_text)
+        return True
+
+
+for _h in logging.getLogger().handlers:
+    _h.addFilter(_RedactKeys())
 from app.database import engine  # noqa: E402
 from app.models import Base  # noqa: E402
 from app.routers import auth, telegram, dashboard, login  # noqa: E402
