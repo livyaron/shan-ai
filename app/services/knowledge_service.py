@@ -833,8 +833,14 @@ async def process_master_file(file_id: int) -> None:
                     total["errors"].extend(sr["errors"])
                     synced_idents.update(sr.get("identifiers", []))
                     if sr.get("processed") and not sr.get("historical"):
-                        from app.services import exec_summary
+                        from datetime import date as _date
+
+                        from app.services import contracts_sheet, exec_summary
                         await exec_summary.save_from_file(str(path), kf.original_name)
+                        rd = sr.get("report_date")
+                        await contracts_sheet.save_from_file(
+                            str(path), kf.original_name,
+                            _date.fromisoformat(rd) if rd else None)
                 except Exception as sheet_err:
                     logger.warning(f"process_master_file {file_id}: sheet '{sn}' sync failed: {sheet_err}")
                 if total["errors"]:
