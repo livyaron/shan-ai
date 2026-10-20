@@ -217,6 +217,15 @@ def test_upload_saves_the_sheet_after_a_live_sync_only():
     assert "contracts_sheet.save_from_file" in live
 
 
+
+def test_knowledge_upload_saves_the_sheet_after_a_live_sync_only():
+    # Telegram + the files page go through process_master_file, not /projects/upload.
+    # It saved the exec summary but never this sheet — the page stayed on 17.10.
+    src = Path("app/services/knowledge_service.py").read_text(encoding="utf-8")
+    body = src.split("async def process_master_file")[1]
+    live = body.split('if sr.get("processed") and not sr.get("historical"):')[1].split("except")[0]
+    assert "contracts_sheet.save_from_file" in live
+
 def test_no_money_figure_survives():
     for text in ("ע\"ש קבלן בסך 30,432,546 ש\"ח מס הזמנה", "בסך 872,710", "287,600 ₪",
                  "לא יועבר - פחות מ500 אש\"ח", "בעלות של כ-3 מלש\"ח", "₪ 1,000"):
