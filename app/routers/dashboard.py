@@ -14,6 +14,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, or_, exists, update, delete, desc, true
 
+from app.services.job_titles import neutral_title
 from app.database import get_db_session
 from app.models import Decision, User, DecisionTypeEnum, DecisionStatusEnum, RoleEnum, DecisionDistribution, DistributionTypeEnum, DistributionStatusEnum, DecisionFeedback, DecisionRaciRole, RaciRoleEnum, LessonLearned, Message, KnowledgeFile, QueryLog, RACISuggestion, RACISuggestionStatusEnum, RACIRule, ReportHistory, Mission, MissionUpdate, MissionDueChange
 from app.routers.login import get_current_user
@@ -380,7 +381,7 @@ async def create_user(
         username=username,
         password_hash=get_default_password_hash(),
         password_is_default=True,
-        job_title=job_title or None,
+        job_title=neutral_title(job_title),
         role=RoleEnum(role),
         hierarchy_level=_ROLE_HIERARCHY.get(role),
         manager_id=int(manager_id) if manager_id.strip() else None,
@@ -579,7 +580,7 @@ async def edit_user(
     if role:
         user.role = RoleEnum(role)
         user.hierarchy_level = _ROLE_HIERARCHY.get(role)
-    user.job_title = job_title or None
+    user.job_title = neutral_title(job_title)
     user.responsibilities = responsibilities.strip() or None
     user.manager_id = int(manager_id) if manager_id.strip() else None
     if password.strip():
@@ -2767,7 +2768,7 @@ async def profile_save(
     if not user:
         return HTMLResponse("<h3>קישור לא תקין</h3>", status_code=404)
 
-    user.job_title = job_title or None
+    user.job_title = neutral_title(job_title)
     user.responsibilities = responsibilities.strip() or None
     user.hierarchy_level = int(hierarchy_level) if hierarchy_level.strip() else None
     user.manager_id = int(manager_id) if manager_id.strip() else None
