@@ -92,6 +92,8 @@ jobs:
           # and this is the one carrying the /app/uploads volume. A repository
           # variable of the same name overrides it if the service is renamed.
           RAILWAY_SERVICE: ${{ vars.RAILWAY_SERVICE || 'easygoing-endurance' }}
+          # Only used when the secret turns out to be an account token (below).
+          RAILWAY_PROJECT_ID: ${{ vars.RAILWAY_PROJECT_ID || '369d826d-2dd9-42ae-879e-69f3806db3ed' }}
         run: |
           railway --version || true
           if [ -n "$RAILWAY_SERVICE" ]; then
@@ -101,6 +103,20 @@ jobs:
             set +e
             railway up --detach --service "$RAILWAY_SERVICE" 2>&1 | tee railway-up.log
             rc=${PIPESTATUS[0]}
+            # A project token and an account/workspace token look the same (a
+            # UUID). The CLI reads RAILWAY_TOKEN as a project token only, so an
+            # account token in that secret is "Invalid RAILWAY_TOKEN" (2026-10-21).
+            # Retry it as an account token, linked to this project explicitly.
+            if [ "$rc" -ne 0 ] && grep -q "Invalid RAILWAY_TOKEN" railway-up.log; then
+              echo "--- project-token mode refused; retrying as an account token ---"
+              export RAILWAY_API_TOKEN="$RAILWAY_TOKEN"
+              unset RAILWAY_TOKEN
+              railway link --project "$RAILWAY_PROJECT_ID" --environment production \
+                --service "$RAILWAY_SERVICE" 2>&1 | tee -a railway-up.log
+              railway up --detach --service "$RAILWAY_SERVICE" 2>&1 | tee -a railway-up.log
+              rc=${PIPESTATUS[0]}
+              [ "$rc" -eq 0 ] && echo "::warning title=RAILWAY_TOKEN is an account token::Deployed with it as an account token. A project token (project → Settings → Tokens) is the narrower key."
+            fi
             set -e
             if [ "$rc" -ne 0 ]; then
               echo "::error title=railway up failed (exit $rc)::$(tail -n 8 railway-up.log | tr -d '\r' | tr '\n' ' ' | cut -c1-900)"
