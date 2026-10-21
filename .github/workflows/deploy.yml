@@ -93,9 +93,19 @@ jobs:
           # variable of the same name overrides it if the service is renamed.
           RAILWAY_SERVICE: ${{ vars.RAILWAY_SERVICE || 'easygoing-endurance' }}
         run: |
+          railway --version || true
           if [ -n "$RAILWAY_SERVICE" ]; then
-            railway up --detach --service "$RAILWAY_SERVICE"
-            exit $?
+            # The job log is not readable from every place a deploy is checked
+            # from (a remote session reaches the API, not the log storage), so a
+            # failure also publishes its last lines as an annotation.
+            set +e
+            railway up --detach --service "$RAILWAY_SERVICE" 2>&1 | tee railway-up.log
+            rc=${PIPESTATUS[0]}
+            set -e
+            if [ "$rc" -ne 0 ]; then
+              echo "::error title=railway up failed (exit $rc)::$(tail -n 8 railway-up.log | tr -d '\r' | tr '\n' ' ' | cut -c1-900)"
+            fi
+            exit "$rc"
           fi
           # No service pinned: fine for a single-service project, but this one
           # has a database alongside the app, and `railway up` refuses to guess.
