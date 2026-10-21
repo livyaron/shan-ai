@@ -205,7 +205,7 @@ dialog.tb-dlg input,dialog.tb-dlg textarea,dialog.tb-dlg select{width:100%;backg
 {% set late = m.due_date and m.status in active_statuses and m.due_date < today %}
 {% set is_today = m.due_date and m.status in active_statuses and m.due_date == today %}
 {% set fresh = is_new(m) %}
-<div class="tb-row{% if late %} late{% endif %}{% if fresh %} fresh{% endif %}" id="row-{{ m.id }}" data-id="{{ m.id }}"
+<div class="tb-row{% if late %} late{% endif %}{% if fresh %} fresh{% endif %}" id="row-{{ m.id }}" data-id="{{ m.id }}" data-mission="{{ m.id }}"
      data-title="{{ m.title }}" data-owner="{{ m.owner.username if m.owner else '' }}"
      data-due="{{ m.due_date.isoformat() if m.due_date else '' }}"
      data-created="{{ m.created_at.isoformat() if m.created_at else '' }}"
@@ -349,12 +349,7 @@ dialog.tb-dlg input,dialog.tb-dlg textarea,dialog.tb-dlg select{width:100%;backg
       <option value="{{ k2 }}">{{ v2 }} — {{ a2 }}</option>
       {% endfor %}
     </select>
-    <label>אחראי</label>
-    <select name="owner_id">
-      {% for u in users %}
-      <option value="{{ u.id }}" {% if u.id == current_user.id %}selected{% endif %}>{{ u.username }}</option>
-      {% endfor %}
-    </select>
+    {% include "_war_room_owner_field.html" %}
     <label>תאריך יעד</label>
     <input type="date" name="due_date">
     {% include "_war_room_project_field.html" %}
@@ -411,7 +406,7 @@ async function bulk(action){
     if (reason) data.reason = reason;
   }
   if (action === 'done' && !confirm(`לסמן ${ids.length} משימות כבוצעו?`)) return;
-  if (await post('/dashboard/war-room/bulk', data)) location.reload();
+  if (await post('/dashboard/war-room/bulk', data)) wrReload(null);
 }
 
 // The row's history (chain + postponements) opens in place, like every other

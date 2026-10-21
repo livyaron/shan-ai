@@ -55,6 +55,10 @@ dialog.wrx-dlg::backdrop{background:rgba(0,0,0,.55)}
 </dialog>
 {% include "_project_picker.html" %}
 {% endif %}
+<style>
+.wr-flash{outline:2px solid #00d4ff;outline-offset:2px;transition:outline-color 1.6s ease-out}
+.wr-owner-hint{display:block;font-size:.75rem;opacity:.7;margin-top:3px}
+</style>
 <script>
 async function post(url, data){
   const body = new FormData();
@@ -65,8 +69,72 @@ async function post(url, data){
   if (!res.ok){ alert(payload.detail || payload.message || 'שגיאה'); return false; }
   return true;
 }
+// ---- חזרה לאותה נקודה אחרי שמירה (user 2026-10-21) ----
+// A save reloads the board; the page used to come back at the top (the main
+// view scrolls INSIDE each quadrant, which the browser does not restore). The
+// window scroll, every inner scroll box and the mission just touched are kept
+// in sessionStorage for this one reload; the card comes back into view and
+// flashes once. Same page + under a minute only — never a stale jump.
+const WR_POS_KEY = 'wr_pos_v1';
+const wrScrollBoxes = () => [...document.querySelectorAll('.wr-quad-body, [data-wr-scroll]')];
+function wrReload(id){
+  try {
+    sessionStorage.setItem(WR_POS_KEY, JSON.stringify({
+      path: location.pathname + location.search, at: Date.now(),
+      y: window.scrollY, boxes: wrScrollBoxes().map(b => b.scrollTop), id: id ?? null,
+    }));
+  } catch (e) {}
+  location.reload();
+}
+(function wrRestore(){
+  let s = null;
+  try { s = JSON.parse(sessionStorage.getItem(WR_POS_KEY) || 'null'); sessionStorage.removeItem(WR_POS_KEY); } catch (e) {}
+  if (!s || s.path !== location.pathname + location.search || Date.now() - s.at > 60000) return;
+  let flashed = false;
+  const apply = () => {
+    const boxes = wrScrollBoxes();
+    (s.boxes || []).forEach((t, i) => { if (boxes[i]) boxes[i].scrollTop = t; });
+    window.scrollTo(0, s.y);
+    if (s.id == null) return;
+    const card = document.querySelector(`[data-mission="${s.id}"]`);
+    if (!card) return;                      // closed / filtered out — the position alone is right
+    const r = card.getBoundingClientRect();
+    const box = card.closest('.wr-quad-body, [data-wr-scroll]');
+    const br = box ? box.getBoundingClientRect() : {top: 0, bottom: innerHeight};
+    if (r.top < Math.max(0, br.top) || r.bottom > Math.min(innerHeight, br.bottom))
+      card.scrollIntoView({block: 'nearest'});
+    if (!flashed){
+      flashed = true;
+      card.classList.add('wr-flash');
+      setTimeout(() => card.classList.remove('wr-flash'), 1800);
+    }
+  };
+  apply();
+  window.addEventListener('load', apply, {once: true});   // again after fonts/images settle the layout
+})();
+// ---- אחראי: חיפוש חופשי בנוסף לרשימה (user 2026-10-21) ----
+function wrOwnerFilter(inp){
+  const form = inp.closest('form') || inp.parentElement;
+  const sel = form.querySelector('select[name=owner_id]');
+  const hint = form.querySelector('.wr-owner-hint');
+  if (!sel) return;
+  if (!sel._all) sel._all = [...sel.options].map(o => ({v: o.value, t: o.text}));
+  const norm = t => (t || '').toLowerCase().replace(/["'״׳]/g, '');
+  const words = norm(inp.value).split(/\s+/).filter(Boolean);
+  const hits = sel._all.filter(o => words.every(w => norm(o.t).includes(w)));
+  const keep = sel.value;
+  const shown = hits.length ? hits : sel._all;
+  sel.innerHTML = '';
+  shown.forEach(o => sel.add(new Option(o.t, o.v, false, o.v === keep)));
+  if (hits.length && !hits.some(o => o.v === keep)) sel.value = hits[0].v;
+  if (hint){
+    hint.hidden = !words.length;
+    hint.textContent = !hits.length ? 'לא נמצא שם כזה — מוצגת כל הרשימה'
+      : hits.length === 1 ? `נבחר: ${hits[0].t}` : `${hits.length} תוצאות — בחר/י מהרשימה`;
+  }
+}
 async function act(id, action){
-  if (await post(`/dashboard/war-room/${id}/status`, {action})) location.reload();
+  if (await post(`/dashboard/war-room/${id}/status`, {action})) wrReload(id);
 }
 function toggleNote(id){
   const box = document.getElementById(`notebox-${id}`);
@@ -102,23 +170,23 @@ async function closeMission(id, withNote, thenChild){
     // The board behind the dialog now shows a mission that is already closed;
     // backing out of the follow-up has to bring the real board back.
     document.getElementById('createDlg')
-            .addEventListener('close', () => location.reload(), {once: true});
+            .addEventListener('close', () => wrReload(id), {once: true});
     return;
   }
-  location.reload();
+  wrReload(id);
 }
 async function addNote(id){
   const note = document.getElementById(`note-${id}`).value.trim();
   if (!note){ alert('נדרש טקסט לעדכון'); return; }
-  if (await post(`/dashboard/war-room/${id}/note`, {note})) location.reload();
+  if (await post(`/dashboard/war-room/${id}/note`, {note})) wrReload(id);
 }
 async function move(id){
   const quadrant = document.getElementById(`quad-${id}`).value;
-  if (await post(`/dashboard/war-room/${id}/move`, {quadrant})) location.reload();
+  if (await post(`/dashboard/war-room/${id}/move`, {quadrant})) wrReload(id);
 }
 async function assign(id){
   const owner_id = document.getElementById(`own-${id}`).value;
-  if (await post(`/dashboard/war-room/${id}/assign`, {owner_id})) location.reload();
+  if (await post(`/dashboard/war-room/${id}/assign`, {owner_id})) wrReload(id);
 }
 // Moving a target date that already exists is a postponement, not an edit:
 // it opens the dialog and asks why. Setting a FIRST date stays one click.
@@ -128,7 +196,7 @@ async function setDue(id){
   const due_date = input.value;
   const old = input.dataset.old || '';
   if (old && due_date !== old){ openDueDlg(id, old, due_date); return; }
-  if (await post(`/dashboard/war-room/${id}/due`, {due_date})) location.reload();
+  if (await post(`/dashboard/war-room/${id}/due`, {due_date})) wrReload(id);
 }
 function fmtDate(iso){
   if (!iso) return 'ללא תאריך';
@@ -139,7 +207,7 @@ function openDueDlg(id, oldDate, newDate){
   const dlg = document.getElementById('dueDlg');
   if (!dlg){   // no dialog in this layout — never silently swallow the change
     if (confirm('לשנות את תאריך היעד ללא תיעוד סיבה?')) {
-      post(`/dashboard/war-room/${id}/due`, {due_date: newDate}).then(ok => ok && location.reload());
+      post(`/dashboard/war-room/${id}/due`, {due_date: newDate}).then(ok => ok && wrReload(id));
     }
     return;
   }
@@ -183,7 +251,7 @@ async function saveDue(){
     data.requested_by = whoSel.options[whoSel.selectedIndex].text;
     data.requested_by_id = picked;
   }
-  if (await post(`/dashboard/war-room/${dueCtx.id}/due`, data)) location.reload();
+  if (await post(`/dashboard/war-room/${dueCtx.id}/due`, data)) wrReload(dueCtx.id);
 }
 
 // ---- משימת המשך ------------------------------------------------------------
@@ -203,6 +271,7 @@ function openCreate(){
   if (proj) proj.value = '';
   const projLabel = document.getElementById('createProjectLabel');
   if (projLabel) projLabel.textContent = 'ללא';
+  dlg.querySelectorAll('.wr-owner-q').forEach(q => { q.value = ''; wrOwnerFilter(q); });
   dlg.showModal();
 }
 function openChild(ds){
@@ -247,7 +316,7 @@ document.querySelectorAll('[data-proj]').forEach(btn => btn.addEventListener('cl
     text: ds.projText, userId: ds.projUser, currentId: ds.projCur, currentLabel: ds.projLabel,
     onPick: async (id) => {
       if (!await post(`/dashboard/war-room/${ds.proj}/project`, {project_id: id || ''})) return false;
-      location.reload();
+      wrReload(ds.proj);
     },
   });
 }));

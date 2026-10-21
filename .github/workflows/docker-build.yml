@@ -52,6 +52,7 @@ jobs:
             tests/test_war_room_upgrades.py \
             tests/test_war_room_filters.py \
             tests/test_war_room_wall.py \
+            tests/test_war_room_return.py \
             tests/test_war_room_motto.py \
             tests/test_groq_retry.py \
             tests/test_key_redaction.py \

@@ -1,0 +1,15 @@
+{# חדר מבצעים — the "אחראי" field of the create dialog, shared by every layout
+   (user 2026-10-21: free-text search in addition to the list). Typing narrows
+   the list to the names that contain every typed word; one match is selected
+   at once. The <select> stays the value that is posted — the text is only a
+   filter, never a name sent to the server. Behaviour: wrOwnerFilter in
+   _war_room_actions.html. #}
+<label>אחראי</label>
+<input type="search" class="wr-owner-q" dir="auto" autocomplete="off"
+       placeholder="🔍 הקלד/י שם לחיפוש…" oninput="wrOwnerFilter(this)">
+<select name="owner_id">
+  {% for u in users %}
+  <option value="{{ u.id }}" {% if u.id == current_user.id %}selected{% endif %}>{{ u.username }}</option>
+  {% endfor %}
+</select>
+<small class="wr-owner-hint" hidden></small>

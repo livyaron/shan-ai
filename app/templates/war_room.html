@@ -227,7 +227,7 @@ dialog.wr-dlg::backdrop{background:rgba(3,6,12,.75)}
         {% set late = m.due_date and m.status in active_statuses and m.due_date < today %}
         {% set fresh = is_new(m) %}
         {% set pl = project_labels.get(m.project_id) %}
-        <div class="wr-card{% if late %} overdue{% endif %}{% if fresh %} fresh{% endif %}">
+        <div class="wr-card{% if late %} overdue{% endif %}{% if fresh %} fresh{% endif %}" data-mission="{{ m.id }}">
           <div class="m-title" dir="auto">{% if fresh %}<span class="wr-chip m-new">🆕 חדשה</span> {% endif %}{{ m.title }}</div>
           {% if m.description %}<div class="m-desc" dir="auto">{{ m.description }}</div>{% endif %}
           {% set chain = chains.get(m.id) %}
@@ -380,12 +380,7 @@ dialog.wr-dlg::backdrop{background:rgba(3,6,12,.75)}
       <option value="{{ k2 }}">{{ e2 }} {{ v2 }} — {{ a2 }}</option>
       {% endfor %}
     </select>
-    <label>אחראי</label>
-    <select name="owner_id">
-      {% for u in users %}
-      <option value="{{ u.id }}" {% if u.id == current_user.id %}selected{% endif %}>{{ u.username }}</option>
-      {% endfor %}
-    </select>
+    {% include "_war_room_owner_field.html" %}
     <label>תאריך יעד</label>
     <input type="date" name="due_date">
     {% include "_war_room_project_field.html" %}
