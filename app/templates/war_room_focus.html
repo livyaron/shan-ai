@@ -126,7 +126,7 @@ dialog.fc-dlg input,dialog.fc-dlg textarea,dialog.fc-dlg select{width:100%;backg
       {% for m in my_due_now %}
       {% set late = m.due_date < today %}
       {% set fresh = is_new(m) %}
-      <div class="fc-card {% if late %}late{% else %}today{% endif %}{% if fresh %} fresh{% endif %}">
+      <div class="fc-card {% if late %}late{% else %}today{% endif %}{% if fresh %} fresh{% endif %}" data-mission="{{ m.id }}">
         <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
           {% if late %}
           <span class="fc-tag late">באיחור {{ (today - m.due_date).days }} ימים</span>
@@ -275,12 +275,7 @@ dialog.fc-dlg input,dialog.fc-dlg textarea,dialog.fc-dlg select{width:100%;backg
       <option value="{{ k2 }}">{{ v2 }} — {{ a2 }}</option>
       {% endfor %}
     </select>
-    <label>אחראי</label>
-    <select name="owner_id">
-      {% for u in users %}
-      <option value="{{ u.id }}" {% if u.id == current_user.id %}selected{% endif %}>{{ u.username }}</option>
-      {% endfor %}
-    </select>
+    {% include "_war_room_owner_field.html" %}
     <label>תאריך יעד</label>
     <input type="date" name="due_date">
     {% include "_war_room_project_field.html" %}
