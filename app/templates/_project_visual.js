@@ -164,8 +164,13 @@ function sceneTwin(box) {
         'מודל תלת-ממד של תחנת משנה. מה שבנוי עומד, מה שבביצוע נבנה מול העיניים, ומה שעוד לא התחיל מופיע כשרטוט. טבעת האור על הקרקע היא סימני הסיכון, קשת לכל סימן.');
     const stage = el('div', { class: 'twin glass' });
     box.appendChild(stage);
-    box.appendChild(el('div', { class: 'muted', style: 'margin-top:.5rem' },
-        'מודל להמחשה בלבד (substation-bimfra, Sketchfab), לא התחנה של הפרויקט. מצב הבנייה נגזר מהשלב בקובץ בלבד.'));
+    // CC BY 4.0 credit (title · source · licence · changes) — required wherever the model is shown
+    const link = (href, text) => el('a', { href, target: '_blank', rel: 'noopener', style: 'color:inherit' }, text);
+    box.appendChild(el('div', { class: 'muted', style: 'margin-top:.5rem; line-height:1.6' },
+        'מודל להמחשה בלבד, לא התחנה של הפרויקט. מצב הבנייה נגזר מהשלב בקובץ בלבד.', el('br', {}),
+        '3D: ', link('https://sketchfab.com/3d-models/substation-bimfra-37528b7d65f945d0b31389d95abced6d', '"substation-bimfra"'),
+        ' (Sketchfab) · ', link('https://creativecommons.org/licenses/by/4.0/', 'CC BY 4.0'),
+        ' · שונה: הפשטת גאומטריה, דחיסה וחלוקה לשכבות.'));
     anim(stage, { opacity: [0, 1], scale: [.96, 1] }, { duration: .9, ease: EASE });
     const opts = { twin: D.twin, flags: D.flags, tone: TONE };
     const go = () => window.mountTwin(stage, opts);
