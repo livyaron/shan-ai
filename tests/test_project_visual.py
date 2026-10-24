@@ -167,7 +167,19 @@ def test_switching_and_combined_read_the_project_name_first():
     assert pv.station_model("combined", "משולבת סגורה")[0] == "gis"
     assert pv.station_model("combined", "Afula GIS")[0] == "gis"
     assert pv.station_model("switching", "פיתוח מיתוג")[0] == "gis"      # "פיתוח" is not "פתוחה"
-    _, why = pv.station_model("switching", "מיתוג חדרה")
+    _, why, _ = pv.station_model("switching", "מיתוג חדרה")
     assert "השם לא מציין" in why
     t = pv.twin_state("בדיקות", 3, False, "combined", "משולבת סגורה")
     assert t["model"] == "gis" and t["steps"] == t["models"]["gis"]["steps"] and "לפי שם הפרויקט" in t["model_why"]
+
+
+def test_mobile_by_name_or_file_type_when_no_station_type():
+    # user 2026-10-24: "ניידת" can also be written "ניידות"; ניידות projects never reach the lessons module
+    assert pv.station_model(None, "תחנה ניידות צפון")[:1] == ("mobile",)
+    assert pv.station_model(None, "שנאי נייד ניידת חדרה")[0] == "mobile"
+    assert pv.station_model(None, "חדרה", "ניידות")[::2] == ("mobile", "file")
+    assert pv.station_model(None, "חדרה", "הקמה")[::2] == (pv.DEFAULT_MODEL, "default")   # no type: open, as today
+    assert pv.station_model("closed", "ניידות")[0] == "gis"            # the PM's choice wins over the name
+    assert pv.station_model("switching", "מיתוג סגורה")[0] == "gis" and pv.station_model("combined", "משולבת פתוחה")[0] == "ais"
+    t = pv.twin_state("בדיקות", 3, False, None, "x", "ניידות")
+    assert t["model"] == "mobile" and t["model_from"] == "file" and t["steps"] == t["models"]["mobile"]["steps"]
