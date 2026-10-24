@@ -18,6 +18,45 @@ from app.services.il_format import il_dates
 LEVEL_ORDER = ("high", "medium", "info")
 QUOTE_CHARS = 180
 
+# The 3D substation (static/models/substation.glb, one mesh per key below), in
+# construction order. Which layers stand, which are being built and which are
+# still a blueprint is read from the project's stage on the stage ladder —
+# never from free text. A stage off the ladder draws no claim (`twin` = None).
+TWIN_LAYERS = (
+    ("site", "אתר ועבודות אזרחיות"),
+    ("structure", "קונסטרוקציית פלדה"),
+    ("equipment", "ציוד חשמלי"),
+    ("insulators", "מבדדים"),
+    ("conductors", "מוליכים ופסי צבירה"),
+)
+_TWIN_BY_RANK = {   # rank → (done layers, active layers, phase label)
+    0: ((), (), "התחנה עדיין על הנייר — שלב התכנון"),
+    1: ((), (), "התחנה עדיין על הנייר — ממתינה להיתר"),
+    2: ((), (), "התחנה עדיין על הנייר — בחירת קבלן"),
+    3: ((), ("site",), "לקראת ביצוע — האתר מתכונן"),
+    4: ((), ("site",), "עבודות אזרחיות באתר"),
+    5: (("site", "structure"), ("equipment", "insulators", "conductors"), "הרכבה חשמלית"),
+    6: (("site", "structure", "equipment", "insulators"), ("conductors",), "בדיקות לפני חשמול"),
+    7: (("site", "structure", "equipment", "insulators", "conductors"), (), "טופס 4 — התחנה בנויה"),
+}
+
+
+def twin_state(stage: str | None) -> dict | None:
+    from app.services import stage_sectors
+    st = stage_sectors.normalize_stage(stage)
+    if stage_sectors.is_closed(st):
+        done, active, phase, energized = tuple(k for k, _ in TWIN_LAYERS), (), "הפרויקט הסתיים — התחנה מחושמלת", True
+    elif st in stage_sectors.STAGE_RANK:
+        done, active, phase = _TWIN_BY_RANK[stage_sectors.STAGE_RANK[st]]
+        energized = False
+        if st == "עבודה אזרחית והרכבות":
+            active = ("site", "structure")
+    else:
+        return None
+    return {"phase": phase, "energized": energized,
+            "layers": [{"key": k, "label": lbl, "state": "done" if k in done else "active" if k in active else "todo"}
+                       for k, lbl in TWIN_LAYERS]}
+
 
 def _weeks_between(a: str, b: str) -> int:
     return max(0, round((date.fromisoformat(b) - date.fromisoformat(a)).days / 7))
@@ -76,6 +115,7 @@ def build(h: dict, delay: dict | None, matrix: dict | None,
         "journey": stage_journey(h.get("timeline") or [], h.get("as_of")),
         "events": [{"from": e["from"], "to": e["to"], "kind": e["kind"], "months": e["months"],
                     "stage": e.get("stage")} for e in h.get("events") or []],
+        "twin": twin_state(r.get("stage")),
         "delay": delay, "matrix": matrix,
         "weekly_n": len(h.get("weekly") or []),
         "repeats": sum(bool(w.get("same_as_before")) for w in h.get("weekly") or []),

@@ -158,6 +158,20 @@ function sceneHero(box) {
     }
 }
 
+// ── scene 1b: the digital twin — the 3D substation in the project's stage ──
+function sceneTwin(box) {
+    sceneHead(box, 'התאום הדיגיטלי', 'איפה התחנה עומדת',
+        'מודל תלת-ממד של תחנת משנה. מה שבנוי עומד, מה שבביצוע נבנה מול העיניים, ומה שעוד לא התחיל מופיע כשרטוט. טבעת האור על הקרקע היא סימני הסיכון, קשת לכל סימן.');
+    const stage = el('div', { class: 'twin glass' });
+    box.appendChild(stage);
+    box.appendChild(el('div', { class: 'muted', style: 'margin-top:.5rem' },
+        'מודל להמחשה בלבד (substation-bimfra, Sketchfab), לא התחנה של הפרויקט. מצב הבנייה נגזר מהשלב בקובץ בלבד.'));
+    anim(stage, { opacity: [0, 1], scale: [.96, 1] }, { duration: .9, ease: EASE });
+    const opts = { twin: D.twin, flags: D.flags, tone: TONE };
+    const go = () => window.mountTwin(stage, opts);
+    if (window.mountTwin) go(); else addEventListener('twin-ready', go, { once: true });
+}
+
 // ── scene 2: instruments ─────────────────────────────────────────────────
 function sceneInstruments(box) {
     sceneHead(box, 'מכשירי מדידה', 'המספרים שמספרים את הסיפור', 'כל מכשיר הוא ערך אחד מנתוני הפרויקט. היכן שיש — מול החציון של הפרויקטים הפעילים באותו שלב.');
@@ -510,6 +524,7 @@ function sceneFlags(box) {
 const T = D.targets;
 const SCENES = [
     { id: 'hero', label: 'דרגה', build: sceneHero, on: true },
+    { id: 'twin', label: 'תאום', build: sceneTwin, on: true },
     { id: 'kpi', label: 'מדדים', build: sceneInstruments, on: true },
     { id: 'targets', label: 'יעדים', build: sceneTargets, on: !!(T.dev || T.appr || T.fc) },
     { id: 'journey', label: 'שלבים', build: sceneJourney, on: D.journey.length > 0 },

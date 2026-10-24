@@ -75,3 +75,31 @@ def test_visual_route_is_declared_before_the_page_route():
     from app.routers import projects
     paths = [r.path for r in projects.router.routes]
     assert paths.index("/dashboard/projects/p/{identifier:path}/visual") < paths.index("/dashboard/projects/p/{identifier:path}")
+
+
+def test_twin_state_follows_the_stage_ladder():
+    assert pv.twin_state("תכנון")["layers"][0]["state"] == "todo"
+    s5 = {x["key"]: x["state"] for x in pv.twin_state("הרכבה חשמלית")["layers"]}
+    assert s5 == {"site": "done", "structure": "done", "equipment": "active", "insulators": "active", "conductors": "active"}
+    both = {x["key"]: x["state"] for x in pv.twin_state("עבודה אזרחית והרכבות")["layers"]}
+    assert both["site"] == both["structure"] == "active"
+    end = pv.twin_state("הסתיים")
+    assert end["energized"] and all(x["state"] == "done" for x in end["layers"])
+    assert pv.twin_state("הסכם- אגירת אנרגיה") is None and pv.twin_state(None) is None   # off the ladder: no claim
+    from app.services import stage_sectors
+    assert set(pv._TWIN_BY_RANK) == set(stage_sectors.STAGE_RANK.values())
+
+
+def test_twin_module_and_model_ship_with_the_page():
+    from pathlib import Path
+    glb = Path("static/models/substation.glb")
+    assert glb.exists() and glb.read_bytes()[:4] == b"glTF" and glb.stat().st_size < 5_000_000
+    js = Path("static/js/substation_twin.js").read_text()
+    assert "innerHTML" not in js and "fetch(" not in js
+    # every layer the server names is a mesh the module draws from the model
+    assert all(k in Path("app/services/project_visual.py").read_text() for k, _ in pv.TWIN_LAYERS)
+    h, d = _data()
+    html = template_env().get_template("project_visual.html").render(
+        request=SimpleNamespace(url=SimpleNamespace(path="/x")), current_user=SimpleNamespace(is_admin=True), h=h, data=d)
+    assert html.index('type="importmap"') < html.index('src="/static/js/substation_twin.js"') and "three@0.169.0" in html
+    assert d["twin"] is not None
