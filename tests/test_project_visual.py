@@ -3,6 +3,7 @@ data (no new numbers), dates stay ISO in the data and read DD/MM/YYYY on screen,
 and the page inserts text with textContent only."""
 import json
 import re
+from itertools import pairwise
 from types import SimpleNamespace
 
 from app.services import insight_triage as it
@@ -77,17 +78,29 @@ def test_visual_route_is_declared_before_the_page_route():
     assert paths.index("/dashboard/projects/p/{identifier:path}/visual") < paths.index("/dashboard/projects/p/{identifier:path}")
 
 
-def test_twin_state_follows_the_stage_ladder():
-    assert pv.twin_state("תכנון")["layers"][0]["state"] == "todo"
-    s5 = {x["key"]: x["state"] for x in pv.twin_state("הרכבה חשמלית")["layers"]}
-    assert s5 == {"site": "done", "structure": "done", "equipment": "active", "insulators": "active", "conductors": "active"}
-    both = {x["key"]: x["state"] for x in pv.twin_state("עבודה אזרחית והרכבות")["layers"]}
-    assert both["site"] == both["structure"] == "active"
-    end = pv.twin_state("הסתיים")
-    assert end["energized"] and all(x["state"] == "done" for x in end["layers"])
-    assert pv.twin_state("הסכם- אגירת אנרגיה") is None and pv.twin_state(None) is None   # off the ladder: no claim
-    from app.services import stage_sectors
-    assert set(pv._TWIN_BY_RANK) == set(stage_sectors.STAGE_RANK.values())
+def test_twin_ladder_is_the_files_stage_ladder():
+    from app.services import stage_sectors as ss
+    # every rung of STAGE_RANK is a step, named as the file names it, in order
+    for rank, name in ss.STAGE_BY_RANK.items():
+        assert pv.TWIN_STEPS[rank][0] == name
+    assert pv.TWIN_STEPS[0][0] == "תכנון" and pv.TWIN_STEPS[-1][0] == "הסתיים"
+    t = pv.twin_state("עבודה אזרחית והרכבות", 14)
+    assert t["current"] == ss.STAGE_RANK["עבודה אזרחית"] and t["weeks"] == 14
+    assert t["steps"][t["current"]]["label"] == "עבודה אזרחית"
+    assert pv.twin_state("הסתיים")["current"] == len(pv.TWIN_STEPS) - 1
+    off = pv.twin_state("הסכם- אגירת אנרגיה", 9)
+    assert off["current"] is None and off["weeks"] is None          # off the ladder: no step marked
+
+
+def test_twin_steps_only_ever_build_forward():
+    # a layer once done stays done on every later step; the last two are fully built
+    order = {"todo": 0, "active": 1, "done": 2}
+    steps = pv.twin_state("תכנון")["steps"]
+    for a, b in pairwise(steps):
+        assert all(order[b["layers"][k]] >= order[a["layers"][k]] for k in pv.TWIN_LAYERS)
+    assert all(st == "done" for st in steps[-1]["layers"].values()) and steps[-1]["energized"]
+    assert not any(s["energized"] for s in steps[:-1])
+    assert all(s["caption"] for s in steps)
 
 
 def test_twin_module_and_model_ship_with_the_page():
@@ -96,8 +109,9 @@ def test_twin_module_and_model_ship_with_the_page():
     assert glb.exists() and glb.read_bytes()[:4] == b"glTF" and glb.stat().st_size < 5_000_000
     js = Path("static/js/substation_twin.js").read_text()
     assert "innerHTML" not in js and "fetch(" not in js
-    # every layer the server names is a mesh the module draws from the model
-    assert all(k in Path("app/services/project_visual.py").read_text() for k, _ in pv.TWIN_LAYERS)
+    # every layer the server names is a mesh in the model
+    raw = glb.read_bytes()
+    assert all(f'"name":"{k}"'.encode() in raw for k in pv.TWIN_LAYERS)
     h, d = _data()
     html = template_env().get_template("project_visual.html").render(
         request=SimpleNamespace(url=SimpleNamespace(path="/x")), current_user=SimpleNamespace(is_admin=True), h=h, data=d)

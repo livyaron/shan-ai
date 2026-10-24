@@ -18,44 +18,43 @@ from app.services.il_format import il_dates
 LEVEL_ORDER = ("high", "medium", "info")
 QUOTE_CHARS = 180
 
-# The 3D substation (static/models/substation.glb, one mesh per key below), in
-# construction order. Which layers stand, which are being built and which are
-# still a blueprint is read from the project's stage on the stage ladder —
-# never from free text. A stage off the ladder draws no claim (`twin` = None).
-TWIN_LAYERS = (
-    ("site", "אתר ועבודות אזרחיות"),
-    ("structure", "קונסטרוקציית פלדה"),
-    ("equipment", "ציוד חשמלי"),
-    ("insulators", "מבדדים"),
-    ("conductors", "מוליכים ופסי צבירה"),
+# The 3D substation (static/models/substation.glb, one mesh per layer key) on
+# the file's own stage ladder (user decision 2026-10-24: the file's stages,
+# never technical layers). Each step says how the model looks at that stage —
+# which layers stand, which are being built, which are still a blueprint — in
+# one plain sentence. The project's step is read from its stage on
+# stage_sectors.STAGE_RANK only; a stage off the ladder marks no step.
+TWIN_LAYERS = ("site", "structure", "equipment", "insulators", "conductors")
+_ALL = TWIN_LAYERS
+TWIN_STEPS = (   # (label, done layers, active layers, what the model shows)
+    ("תכנון", (), (), "התחנה כולה עדיין שרטוט כחול."),
+    ("קבלת היתר", (), (), "התחנה כולה שרטוט — ממתינים להיתר."),
+    ("בחירת קבלן", (), (), "התחנה כולה שרטוט — עוד אין קבלן בשטח."),
+    ("לקראת ביצוע", (), ("site",), "השטח מתחיל להיבנות. כל השאר שרטוט."),
+    ("עבודה אזרחית", (), ("site", "structure"), "יסודות, קירות ומבנים נבנים. הציוד החשמלי עוד שרטוט."),
+    ("הרכבה חשמלית", ("site", "structure"), ("equipment", "insulators", "conductors"),
+     "השטח והפלדה עומדים. הציוד, המבדדים והמוליכים מורכבים."),
+    ("בדיקות", ("site", "structure", "equipment", "insulators"), ("conductors",), "הכול מורכב. המוליכים בבדיקות."),
+    ("טופס 4", _ALL, (), "התחנה בנויה ומוכנה לחשמול."),
+    ("הסתיים", _ALL, (), "התחנה מחושמלת — המוליכים זוהרים."),
 )
-_TWIN_BY_RANK = {   # rank → (done layers, active layers, phase label)
-    0: ((), (), "התחנה עדיין על הנייר — שלב התכנון"),
-    1: ((), (), "התחנה עדיין על הנייר — ממתינה להיתר"),
-    2: ((), (), "התחנה עדיין על הנייר — בחירת קבלן"),
-    3: ((), ("site",), "לקראת ביצוע — האתר מתכונן"),
-    4: ((), ("site",), "עבודות אזרחיות באתר"),
-    5: (("site", "structure"), ("equipment", "insulators", "conductors"), "הרכבה חשמלית"),
-    6: (("site", "structure", "equipment", "insulators"), ("conductors",), "בדיקות לפני חשמול"),
-    7: (("site", "structure", "equipment", "insulators", "conductors"), (), "טופס 4 — התחנה בנויה"),
-}
+_CLOSED_STEP = len(TWIN_STEPS) - 1
 
 
-def twin_state(stage: str | None) -> dict | None:
+def twin_state(stage: str | None, weeks_in_stage: int | None = None, lower_bound: bool = False) -> dict:
     from app.services import stage_sectors
     st = stage_sectors.normalize_stage(stage)
     if stage_sectors.is_closed(st):
-        done, active, phase, energized = tuple(k for k, _ in TWIN_LAYERS), (), "הפרויקט הסתיים — התחנה מחושמלת", True
+        current = _CLOSED_STEP
     elif st in stage_sectors.STAGE_RANK:
-        done, active, phase = _TWIN_BY_RANK[stage_sectors.STAGE_RANK[st]]
-        energized = False
-        if st == "עבודה אזרחית והרכבות":
-            active = ("site", "structure")
+        current = stage_sectors.STAGE_RANK[st]
     else:
-        return None
-    return {"phase": phase, "energized": energized,
-            "layers": [{"key": k, "label": lbl, "state": "done" if k in done else "active" if k in active else "todo"}
-                       for k, lbl in TWIN_LAYERS]}
+        current = None
+    steps = [{"label": lbl, "caption": cap, "energized": i == _CLOSED_STEP,
+              "layers": {k: "done" if k in done else "active" if k in active else "todo" for k in TWIN_LAYERS}}
+             for i, (lbl, done, active, cap) in enumerate(TWIN_STEPS)]
+    return {"current": current, "stage": st or None, "weeks": weeks_in_stage if current is not None else None,
+            "weeks_lower_bound": bool(lower_bound), "steps": steps}
 
 
 def _weeks_between(a: str, b: str) -> int:
@@ -115,7 +114,7 @@ def build(h: dict, delay: dict | None, matrix: dict | None,
         "journey": stage_journey(h.get("timeline") or [], h.get("as_of")),
         "events": [{"from": e["from"], "to": e["to"], "kind": e["kind"], "months": e["months"],
                     "stage": e.get("stage")} for e in h.get("events") or []],
-        "twin": twin_state(r.get("stage")),
+        "twin": twin_state(r.get("stage"), r.get("weeks_in_stage"), bool(r.get("weeks_lower_bound"))),
         "delay": delay, "matrix": matrix,
         "weekly_n": len(h.get("weekly") or []),
         "repeats": sum(bool(w.get("same_as_before")) for w in h.get("weekly") or []),

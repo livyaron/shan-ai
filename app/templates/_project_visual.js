@@ -161,7 +161,7 @@ function sceneHero(box) {
 // ── scene 1b: the digital twin — the 3D substation in the project's stage ──
 function sceneTwin(box) {
     sceneHead(box, 'התאום הדיגיטלי', 'איפה התחנה עומדת',
-        'מודל תלת-ממד של תחנת משנה. מה שבנוי עומד, מה שבביצוע נבנה מול העיניים, ומה שעוד לא התחיל מופיע כשרטוט. טבעת האור על הקרקע היא סימני הסיכון, קשת לכל סימן.');
+        'סולם השלבים של הקובץ, ולצדו התחנה כפי שהיא נראית בכל שלב. השלב של הפרויקט מסומן. לחיצה על שלב מציגה אותו, ו-▶ מנגן את הבנייה מהתכנון ועד השלב של הפרויקט. טבעת האור על הקרקע היא סימני הסיכון, קשת לכל סימן.');
     const stage = el('div', { class: 'twin glass' });
     box.appendChild(stage);
     // CC BY 4.0 credit (title · source · licence · changes) — required wherever the model is shown
