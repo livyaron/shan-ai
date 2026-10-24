@@ -81,13 +81,14 @@ def test_visual_route_is_declared_before_the_page_route():
 def test_twin_ladder_is_the_files_stage_ladder():
     from app.services import stage_sectors as ss
     # every rung of STAGE_RANK is a step, named as the file names it, in order
+    labels = [s["label"] for s in pv.twin_steps("ais")]
     for rank, name in ss.STAGE_BY_RANK.items():
-        assert pv.TWIN_STEPS[rank][0] == name
-    assert pv.TWIN_STEPS[0][0] == "תכנון" and pv.TWIN_STEPS[-1][0] == "הסתיים"
+        assert labels[rank] == name
+    assert labels[0] == "תכנון" and labels[-1] == "הסתיים"
     t = pv.twin_state("עבודה אזרחית והרכבות", 14)
     assert t["current"] == ss.STAGE_RANK["עבודה אזרחית"] and t["weeks"] == 14
     assert t["steps"][t["current"]]["label"] == "עבודה אזרחית"
-    assert pv.twin_state("הסתיים")["current"] == len(pv.TWIN_STEPS) - 1
+    assert pv.twin_state("הסתיים")["current"] == len(labels) - 1
     off = pv.twin_state("הסכם- אגירת אנרגיה", 9)
     assert off["current"] is None and off["weeks"] is None          # off the ladder: no step marked
 
@@ -117,3 +118,39 @@ def test_twin_module_and_model_ship_with_the_page():
         request=SimpleNamespace(url=SimpleNamespace(path="/x")), current_user=SimpleNamespace(is_admin=True), h=h, data=d)
     assert html.index('type="importmap"') < html.index('src="/static/js/substation_twin.js"') and "three@0.169.0" in html
     assert d["twin"] is not None
+
+
+def test_station_type_picks_the_model_and_says_why():
+    t = pv.twin_state("בדיקות", 3, False, "closed")
+    assert t["model"] == "gis" and t["model_from"] == "lessons" and t["station_label"] == "תחנה סגורה"
+    assert pv.twin_state("בדיקות", 3, False, "open")["model"] == "ais"
+    other = pv.twin_state("בדיקות", 3, False, "switching")       # no model of its own yet
+    assert other["model"] == pv.DEFAULT_MODEL and other["model_from"] == "default" and other["station_label"] == "תחנת מיתוג"
+    none = pv.twin_state("בדיקות")
+    assert none["model"] == pv.DEFAULT_MODEL and none["station_label"] is None
+    # both models walk the same ladder, each with its own sentence per step
+    a, g = (t["models"][k]["steps"] for k in ("ais", "gis"))
+    assert [s["label"] for s in a] == [s["label"] for s in g] and [s["layers"] for s in a] == [s["layers"] for s in g]
+    assert all(s["caption"] for s in g) and a[4]["caption"] != g[4]["caption"]
+    assert t["steps"] == g
+
+
+def test_gis_station_draws_every_layer_and_only_draws():
+    from pathlib import Path
+    js = Path("static/js/gis_station.js").read_text()
+    for k in pv.TWIN_LAYERS:
+        assert f"'{k}'" in js
+    assert "innerHTML" not in js and "fetch(" not in js and "textContent" not in js   # geometry only, no text, no network
+    twin = Path("static/js/substation_twin.js").read_text()
+    assert "/static/js/gis_station.js" in twin and all(f"{k}:" in twin for k in pv.TWIN_MODELS)
+
+
+def test_station_type_never_breaks_the_page():
+    import asyncio
+
+    from app.services import project_lessons
+
+    class Broken:
+        def begin_nested(self):
+            raise RuntimeError("no lessons schema")
+    assert asyncio.run(project_lessons.station_type(Broken(), "P-1")) is None

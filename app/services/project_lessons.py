@@ -97,3 +97,19 @@ async def for_project(session, identifier: str) -> dict[str, Any]:
     except Exception as e:  # noqa: BLE001 — the project page must render without the lessons module
         logger.warning("project lessons for %s failed: %s", identifier, e)
         return {"ok": False}
+
+
+async def station_type(session, identifier: str) -> str | None:
+    """The station type a PM chose for this project in the lessons module
+    (`lessons.projects.station_type`, only where `station_type_set`), through
+    the admin's link only. None when unlinked, unchosen, ambiguous (two linked
+    lessons projects disagree) or the module is unreachable. Never raises."""
+    try:
+        async with session.begin_nested():
+            kinds = {r[0] for r in (await session.execute(text(
+                "SELECT station_type FROM lessons.projects "
+                "WHERE shan_project_identifier = :i AND station_type_set"), {"i": identifier})).all()}
+        return kinds.pop() if len(kinds) == 1 else None
+    except Exception as e:  # noqa: BLE001 — the visual report must render without the lessons module
+        logger.warning("station type for %s failed: %s", identifier, e)
+        return None

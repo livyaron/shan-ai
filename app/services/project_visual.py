@@ -18,30 +18,73 @@ from app.services.il_format import il_dates
 LEVEL_ORDER = ("high", "medium", "info")
 QUOTE_CHARS = 180
 
-# The 3D substation (static/models/substation.glb, one mesh per layer key) on
-# the file's own stage ladder (user decision 2026-10-24: the file's stages,
-# never technical layers). Each step says how the model looks at that stage —
-# which layers stand, which are being built, which are still a blueprint — in
-# one plain sentence. The project's step is read from its stage on
+# The 3D substation beside the file's own stage ladder (user decision
+# 2026-10-24: the file's stages, never technical layer names). Two models:
+#   ais — static/models/substation.glb, an open (air-insulated) yard (Sketchfab
+#         sample, CC BY 4.0);
+#   gis — a closed 161kV gas-insulated station, 8 bays (3 lines, 3
+#         transformers, coupler, measurement), drawn in code by
+#         static/js/gis_station.js (user decision 2026-10-24).
+# Both are made of the same five layers. Each step says which layers stand,
+# which are being built and which are still a blueprint, in one plain sentence
+# per model. The project's step is read from its stage on
 # stage_sectors.STAGE_RANK only; a stage off the ladder marks no step.
 TWIN_LAYERS = ("site", "structure", "equipment", "insulators", "conductors")
 _ALL = TWIN_LAYERS
-TWIN_STEPS = (   # (label, done layers, active layers, what the model shows)
-    ("תכנון", (), (), "התחנה כולה עדיין שרטוט כחול."),
-    ("קבלת היתר", (), (), "התחנה כולה שרטוט — ממתינים להיתר."),
-    ("בחירת קבלן", (), (), "התחנה כולה שרטוט — עוד אין קבלן בשטח."),
-    ("לקראת ביצוע", (), ("site",), "השטח מתחיל להיבנות. כל השאר שרטוט."),
-    ("עבודה אזרחית", (), ("site", "structure"), "יסודות, קירות ומבנים נבנים. הציוד החשמלי עוד שרטוט."),
-    ("הרכבה חשמלית", ("site", "structure"), ("equipment", "insulators", "conductors"),
-     "השטח והפלדה עומדים. הציוד, המבדדים והמוליכים מורכבים."),
-    ("בדיקות", ("site", "structure", "equipment", "insulators"), ("conductors",), "הכול מורכב. המוליכים בבדיקות."),
-    ("טופס 4", _ALL, (), "התחנה בנויה ומוכנה לחשמול."),
-    ("הסתיים", _ALL, (), "התחנה מחושמלת — המוליכים זוהרים."),
+_STEP_LAYERS = (   # (label, done layers, active layers) — shared by both models
+    ("תכנון", (), ()),
+    ("קבלת היתר", (), ()),
+    ("בחירת קבלן", (), ()),
+    ("לקראת ביצוע", (), ("site",)),
+    ("עבודה אזרחית", (), ("site", "structure")),
+    ("הרכבה חשמלית", ("site", "structure"), ("equipment", "insulators", "conductors")),
+    ("בדיקות", ("site", "structure", "equipment", "insulators"), ("conductors",)),
+    ("טופס 4", _ALL, ()),
+    ("הסתיים", _ALL, ()),
 )
-_CLOSED_STEP = len(TWIN_STEPS) - 1
+TWIN_CAPTIONS = {
+    "ais": (
+        "התחנה כולה עדיין שרטוט כחול.",
+        "התחנה כולה שרטוט — ממתינים להיתר.",
+        "התחנה כולה שרטוט — עוד אין קבלן בשטח.",
+        "השטח מתחיל להיבנות. כל השאר שרטוט.",
+        "יסודות, קירות ומבנים נבנים. הציוד החשמלי עוד שרטוט.",
+        "השטח והפלדה עומדים. הציוד, המבדדים והמוליכים מורכבים.",
+        "הכול מורכב. המוליכים בבדיקות.",
+        "התחנה בנויה ומוכנה לחשמול.",
+        "התחנה מחושמלת — המוליכים זוהרים.",
+    ),
+    "gis": (
+        "התחנה כולה עדיין שרטוט כחול.",
+        "התחנה כולה שרטוט — ממתינים להיתר.",
+        "התחנה כולה שרטוט — עוד אין קבלן בשטח.",
+        "השטח מתחיל להיבנות. כל השאר שרטוט.",
+        "היסודות, אולם ה-GIS ומבנה הפיקוד נבנים. התאים והשנאים עוד שרטוט.",
+        "המבנים עומדים. תאי ה-GIS, השנאים, המגשרים והקווים מורכבים.",
+        "הכול מורכב. בדיקות לפני חשמול.",
+        "התחנה בנויה ומוכנה לחשמול.",
+        "התחנה מחושמלת — הקווים זוהרים.",
+    ),
+}
+TWIN_MODELS = {"ais": "תחנה פתוחה", "gis": "תחנה סגורה (GIS)"}
+# lessons.projects.station_type → model. Only these two are decided (user,
+# 2026-10-24); every other type, and a project with no type chosen, shows the
+# default — and the page says which it is and why.
+STATION_MODEL = {"closed": "gis", "open": "ais"}
+DEFAULT_MODEL = "ais"
+STATION_LABELS = {"closed": "תחנה סגורה", "open": "תחנה פתוחה", "switching": "תחנת מיתוג",
+                  "combined": "תחנה משולבת", "mobile_substation": "תחנת משנה ניידת"}   # lessons_ui stationTypeLabels
+_CLOSED_STEP = len(_STEP_LAYERS) - 1
 
 
-def twin_state(stage: str | None, weeks_in_stage: int | None = None, lower_bound: bool = False) -> dict:
+def twin_steps(model: str) -> list[dict]:
+    return [{"label": lbl, "caption": cap, "energized": i == _CLOSED_STEP,
+             "layers": {k: "done" if k in done else "active" if k in active else "todo" for k in TWIN_LAYERS}}
+            for i, ((lbl, done, active), cap) in enumerate(zip(_STEP_LAYERS, TWIN_CAPTIONS[model], strict=True))]
+
+
+def twin_state(stage: str | None, weeks_in_stage: int | None = None, lower_bound: bool = False,
+               station_type: str | None = None) -> dict:
     from app.services import stage_sectors
     st = stage_sectors.normalize_stage(stage)
     if stage_sectors.is_closed(st):
@@ -50,11 +93,13 @@ def twin_state(stage: str | None, weeks_in_stage: int | None = None, lower_bound
         current = stage_sectors.STAGE_RANK[st]
     else:
         current = None
-    steps = [{"label": lbl, "caption": cap, "energized": i == _CLOSED_STEP,
-              "layers": {k: "done" if k in done else "active" if k in active else "todo" for k in TWIN_LAYERS}}
-             for i, (lbl, done, active, cap) in enumerate(TWIN_STEPS)]
+    model = STATION_MODEL.get(station_type or "", DEFAULT_MODEL)
     return {"current": current, "stage": st or None, "weeks": weeks_in_stage if current is not None else None,
-            "weeks_lower_bound": bool(lower_bound), "steps": steps}
+            "weeks_lower_bound": bool(lower_bound),
+            "model": model, "station_type": station_type, "station_label": STATION_LABELS.get(station_type or ""),
+            "model_from": "lessons" if station_type in STATION_MODEL else "default",
+            "models": {k: {"label": v, "steps": twin_steps(k)} for k, v in TWIN_MODELS.items()},
+            "steps": twin_steps(model)}
 
 
 def _weeks_between(a: str, b: str) -> int:
@@ -82,7 +127,7 @@ def stage_journey(timeline: list[dict], as_of: str | None) -> list[dict]:
 
 
 def build(h: dict, delay: dict | None, matrix: dict | None,
-          triage: dict | None = None, levels: dict | None = None) -> dict:
+          triage: dict | None = None, levels: dict | None = None, station_type: str | None = None) -> dict:
     r = h.get("row") or {}
     flags = [{"level": f["level"], "text": il_dates(f["text"])} for f in h.get("flags") or []]
     counts = {lv: sum(f["level"] == lv for f in flags) for lv in LEVEL_ORDER}
@@ -114,7 +159,7 @@ def build(h: dict, delay: dict | None, matrix: dict | None,
         "journey": stage_journey(h.get("timeline") or [], h.get("as_of")),
         "events": [{"from": e["from"], "to": e["to"], "kind": e["kind"], "months": e["months"],
                     "stage": e.get("stage")} for e in h.get("events") or []],
-        "twin": twin_state(r.get("stage"), r.get("weeks_in_stage"), bool(r.get("weeks_lower_bound"))),
+        "twin": twin_state(r.get("stage"), r.get("weeks_in_stage"), bool(r.get("weeks_lower_bound")), station_type),
         "delay": delay, "matrix": matrix,
         "weekly_n": len(h.get("weekly") or []),
         "repeats": sum(bool(w.get("same_as_before")) for w in h.get("weekly") or []),

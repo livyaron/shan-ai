@@ -1,8 +1,12 @@
 /* The 3D substation on the project's visual report ("התאום הדיגיטלי").
  *
- * Draws static/models/substation.glb (one mesh per layer: site / structure /
- * equipment / insulators / conductors / glass) next to the file's own stage
- * ladder (project_visual.twin_state). The project's stage is marked with its
+ * Draws one of two stations, both made of the same layers (site / structure /
+ * equipment / insulators / conductors): an open yard (static/models/
+ * substation.glb) or a closed 161kV GIS station drawn in code
+ * (static/js/gis_station.js). Which one comes from the server
+ * (project_visual.twin_state: the PM's station type in the lessons module,
+ * else the default); the viewer can switch. Beside it the file's own stage
+ * ladder. The project's stage is marked with its
  * weeks; each step shows the station as that stage leaves it — built layers
  * stand solid, layers under construction rise again and again under a scan
  * line, layers not reached are a blueprint hologram, a finished station's
@@ -85,7 +89,8 @@ window.mountTwin = async function mountTwin(host, opts) {
 
     const camera = new T.PerspectiveCamera(38, W() / H(), 0.5, 2000);
     // a tall phone screen needs the camera further out to fit the yard's width
-    const HOME = new T.Vector3(74, 40, 80).multiplyScalar(Math.min(Math.max(1.3 / (W() / H()), 1), 2.3));
+    const fit = () => Math.min(Math.max(1.3 / (W() / H()), 1), 2.3);
+    const HOME = new T.Vector3(74, 40, 80).multiplyScalar(fit());
     camera.position.set(220, 170, 260);
 
     scene.add(new T.HemisphereLight(0xc9d8ff, 0x101826, 1.1));
@@ -129,28 +134,41 @@ window.mountTwin = async function mountTwin(host, opts) {
     ring.add(outer);
     scene.add(ring);
 
-    // the model: every layer gets a solid (clipped from below while it is
-    // built) and a blueprint ghost; the step on screen decides which shows
-    const layers = {};
+    // the models: an open yard (the GLB) or a closed GIS station drawn in code
+    // (gis_station.js). Every layer gets a solid (clipped from below while it
+    // is built) and a blueprint ghost; the step on screen decides which shows.
+    // Each model is prepared once and kept, so switching back is instant.
     const holoMat = () => new T.MeshBasicMaterial({ color: 0x38bdf8, wireframe: true, transparent: true, opacity: 0,
         blending: T.AdditiveBlending, depthWrite: false });
-    try {
-        const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
-        const gltf = await loader.loadAsync(MODEL_URL, ev => {
-            if (ev.total) status.textContent = `טוען את מודל התחנה… ${Math.round(ev.loaded / ev.total * 100)}%`;
-        });
-        gltf.scene.updateMatrixWorld(true);
-        const meshes = [];
-        gltf.scene.traverse(o => { if (o.isMesh) meshes.push(o); });
+    const loaders = {
+        ais: async () => {
+            const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
+            const gltf = await loader.loadAsync(MODEL_URL, ev => {
+                if (ev.total) status.textContent = `טוען את מודל התחנה… ${Math.round(ev.loaded / ev.total * 100)}%`;
+            });
+            return gltf.scene;
+        },
+        gis: async () => {
+            const [{ buildGIS }, { mergeGeometries }] = await Promise.all([
+                import('/static/js/gis_station.js'), import('three/addons/utils/BufferGeometryUtils.js')]);
+            return buildGIS(T, mergeGeometries);
+        },
+    };
+    const pct = (a, q) => { a.sort((x, y) => x - y); return a[Math.floor(q * (a.length - 1))]; };
+    function prepare(kind, root) {
+        root.updateMatrixWorld(true);
+        const layers = {}, meshes = [];
+        root.traverse(o => { if (o.isMesh) meshes.push(o); });
         meshes.forEach(o => {
-            const key = o.name === 'glass' ? 'equipment' : o.name;   // windows belong to the equipment house
-            const src = o.material, glass = o.name === 'glass';
+            const key = o.name === 'glass' ? 'equipment' : o.name;   // the GLB's windows belong to the equipment house
+            const src = o.material, glass = o.name === 'glass' || !!o.userData.glass;
             o.material = new T.MeshStandardMaterial({
-                color: key === 'site' ? new T.Color(0x3a3f47) : src.color, metalness: src.metalness, roughness: src.roughness,
-                flatShading: true, side: T.DoubleSide, transparent: glass, opacity: glass ? .45 : 1, emissive: new T.Color(0x000000),
+                color: key === 'site' && kind === 'ais' ? new T.Color(0x3a3f47) : src.color, metalness: src.metalness, roughness: src.roughness,
+                flatShading: !o.userData.smooth, side: T.DoubleSide, transparent: glass, opacity: glass ? (o.userData.glass ? .16 : .45) : 1,
+                depthWrite: !glass, emissive: new T.Color(0x000000),
                 clippingPlanes: [new T.Plane(new T.Vector3(0, -1, 0), 1e6)], clipShadows: true,
             });
-            o.castShadow = o.receiveShadow = !small;
+            o.castShadow = o.receiveShadow = !small && !glass;
             const ghost = new T.Mesh(o.geometry, holoMat());
             ghost.position.copy(o.position); ghost.quaternion.copy(o.quaternion); ghost.scale.copy(o.scale);
             o.parent.add(ghost);
@@ -158,30 +176,49 @@ window.mountTwin = async function mountTwin(host, opts) {
             L.box.union(new T.Box3().setFromObject(o));   // world space, like the clipping planes
             L.solids.push(o); L.holos.push(ghost);
         });
-        scene.add(gltf.scene);
+        // the scan line rides over the yard's footprint: the 4th–96th
+        // percentile of the equipment's vertices, so a few far parts and the
+        // conductors' long spans do not stretch it across the map
+        const xs = [], zs = [], v = new T.Vector3();
+        (layers.equipment || Object.values(layers)[0]).solids.forEach(m => {
+            const pos = m.geometry.attributes.position, step = Math.max(1, Math.floor(pos.count / 4000));
+            for (let i = 0; i < pos.count; i += step) { v.fromBufferAttribute(pos, i).applyMatrix4(m.matrixWorld); xs.push(v.x); zs.push(v.z); }
+        });
+        const fx0 = pct(xs, .04), fx1 = pct(xs, .96), fz0 = pct(zs, .04), fz1 = pct(zs, .96);
+        const foot = new T.BufferGeometry().setFromPoints(
+            [[-.5, -.5], [.5, -.5], [.5, .5], [-.5, .5]].map(([x, z]) => new T.Vector3(x * (fx1 - fx0) * 1.08, 0, z * (fz1 - fz0) * 1.08)));
+        // frame each station by its own site: the GIS plot is smaller than the open yard
+        const site = (layers.site || Object.values(layers)[0]).box.getSize(new T.Vector3());
+        const frame = Math.min(Math.max(Math.hypot(site.x, site.z) / 150, .7), 1.2);
+        return { root, layers, foot, footAt: [(fx0 + fx1) / 2, (fz0 + fz1) / 2], frame };
+    }
+    const scanLine = new T.LineLoop(new T.BufferGeometry(), new T.LineBasicMaterial({ color: tone, transparent: true, opacity: .95 }));
+    scanLine.visible = false;
+    scene.add(scanLine);
+    const prepared = {};
+    let layers = {}, current3d = null, model = null;
+    async function install(kind) {
+        const p = prepared[kind] || (prepared[kind] = prepare(kind, await loaders[kind]()));
+        if (current3d) scene.remove(current3d.root);
+        current3d = p; model = kind; layers = p.layers;
+        Object.values(layers).forEach(L => { L.state = null; L.holos.forEach(m => { m.material.opacity = 0; }); });
+        scene.add(p.root);
+        scanLine.geometry = p.foot; scanLine.position.set(p.footAt[0], 0, p.footAt[1]);
+        HOME.set(74, 40, 80).multiplyScalar(fit() * p.frame);
+        if (controls) {                        // a switch: glide to the new station's framing
+            const dir = camera.position.clone().sub(controls.target).normalize();
+            flyFrom = camera.position.clone(); flyTo = dir.multiplyScalar(HOME.length()).add(controls.target); flyAt = performance.now();
+        }
+    }
+    let controls = null, flyFrom = null, flyTo = null, flyAt = 0;
+    try {
+        await install(twin.model in loaders ? twin.model : 'ais');
     } catch (e) {
         status.textContent = 'מודל התחנה לא נטען.';
         console.error(e);
         return;
     }
     status.remove();
-
-    // the scan line rides over the yard's footprint: the 4th–96th percentile
-    // of the equipment's vertices, so a few far parts and the conductors'
-    // long spans do not stretch it across the map
-    const xs = [], zs = [], v = new T.Vector3();
-    (layers.equipment || Object.values(layers)[0]).solids.forEach(m => {
-        const pos = m.geometry.attributes.position, step = Math.max(1, Math.floor(pos.count / 4000));
-        for (let i = 0; i < pos.count; i += step) { v.fromBufferAttribute(pos, i).applyMatrix4(m.matrixWorld); xs.push(v.x); zs.push(v.z); }
-    });
-    const pct = (a, q) => { a.sort((x, y) => x - y); return a[Math.floor(q * (a.length - 1))]; };
-    const fx0 = pct(xs, .04), fx1 = pct(xs, .96), fz0 = pct(zs, .04), fz1 = pct(zs, .96);
-    const scanLine = new T.LineLoop(new T.BufferGeometry().setFromPoints(
-        [[-.5, -.5], [.5, -.5], [.5, .5], [-.5, .5]].map(([x, z]) => new T.Vector3(x * (fx1 - fx0) * 1.08, 0, z * (fz1 - fz0) * 1.08))),
-        new T.LineBasicMaterial({ color: tone, transparent: true, opacity: .95 }));
-    scanLine.position.set((fx0 + fx1) / 2, 0, (fz0 + fz1) / 2);
-    scanLine.visible = false;
-    scene.add(scanLine);
 
     // post: bloom makes energized conductors, the ring and the scan line glow
     const composer = new EffectComposer(renderer);
@@ -190,7 +227,7 @@ window.mountTwin = async function mountTwin(host, opts) {
     composer.addPass(bloom);
     composer.addPass(new OutputPass());
 
-    const controls = new OrbitControls(camera, renderer.domElement);
+    controls = new OrbitControls(camera, renderer.domElement);
     controls.target.set(0, 5, 0);
     controls.enableDamping = true; controls.dampingFactor = .06;
     controls.minDistance = 22; controls.maxDistance = 260; controls.maxPolarAngle = 1.48;
@@ -201,7 +238,8 @@ window.mountTwin = async function mountTwin(host, opts) {
     controls.addEventListener('end', () => { idleAt = performance.now(); });
 
     // ── the stage ladder: the file's stages, the project's one marked ──
-    const steps = twin.steps, current = twin.current;
+    const stepsOf = () => twin.models[model].steps, current = twin.current;
+    const steps = stepsOf();                                 // labels are the same for every model
     const home = current === null || current === undefined ? null : current;
     let shown = home === null ? steps.length - 2 : home;   // off the ladder: the built station, nothing marked
     let scanBox = null, energized = false;
@@ -209,6 +247,31 @@ window.mountTwin = async function mountTwin(host, opts) {
     const clock = () => (performance.now() - t0) / 1000;
 
     const panel = el('div', { class: 'twin-legend' });
+    // which station is drawn, and why: the PM's choice in the lessons module, else the default
+    const why = el('div', { class: 'twin-why' });
+    const pick = el('div', { class: 'twin-models' });
+    const pickBtns = Object.entries(twin.models).map(([k, m]) => {
+        const b = el('button', { type: 'button', 'data-model': k }, m.label);
+        b.addEventListener('click', async () => {
+            if (k === model) return;
+            stopPlay(); pickBtns.forEach(x => { x.disabled = true; });
+            try { await install(k); show(shown, true); } catch (e) { console.error(e); }
+            pickBtns.forEach(x => { x.disabled = false; });
+            sayWhy();
+        });
+        pick.appendChild(b);
+        return b;
+    });
+    function sayWhy() {
+        pickBtns.forEach(b => b.classList.toggle('on', b.dataset.model === model));
+        const label = twin.models[model].label;
+        why.textContent = model !== twin.model ? `תצוגה ידנית — ${label}`
+            : twin.model_from === 'lessons' ? `לפי מערכת הלקחים: ${twin.station_label}`
+            : twin.station_label ? `${twin.station_label} — עוד אין לה מודל משלה; מוצגת ${label}`
+            : `סוג התחנה לא נבחר במערכת הלקחים — מוצגת ${label}`;
+    }
+    panel.appendChild(pick);
+    panel.appendChild(why);
     panel.appendChild(el('div', { class: 'twin-phase' }, home === null
         ? `השלב בקובץ${twin.stage ? ` ("${twin.stage}")` : ''} לא על סולם השלבים`
         : 'שלב הפרויקט בקובץ'));
@@ -232,7 +295,7 @@ window.mountTwin = async function mountTwin(host, opts) {
 
     function show(i, stagger) {
         shown = i;
-        const s = steps[i], t = clock();
+        const s = stepsOf()[i], t = clock();
         let k = 0;
         Object.values(layers).forEach(L => {
             const st = s.layers[L.key] || 'done';
@@ -264,6 +327,7 @@ window.mountTwin = async function mountTwin(host, opts) {
     const ease = x => 1 - Math.pow(1 - Math.min(Math.max(x, 0), 1), 3);
     const startPos = camera.position.clone();
     const RISE = 1.4;
+    sayWhy();
     show(shown, true);
     if (!reduce) Object.values(layers).forEach(L => { if (L.riseAt >= 0) L.riseAt += .6; });
     const tick = now => {
@@ -272,6 +336,11 @@ window.mountTwin = async function mountTwin(host, opts) {
         const t = (now - t0) / 1000;
         if (t < intro) camera.position.lerpVectors(startPos, HOME, ease(t / intro));
         else if (!controls.enabled) { camera.position.copy(HOME); controls.enabled = true; }
+        if (flyTo) {
+            const f = Math.min((now - flyAt) / 1200, 1);
+            camera.position.lerpVectors(flyFrom, flyTo, ease(f));
+            if (f >= 1) flyTo = null;
+        }
         if (!controls.autoRotate && idleAt && now - idleAt > 6000 && !reduce) { controls.autoRotate = true; idleAt = 0; }
         // the active layers rise under the scan line, again and again
         const cyc = BUILD_SECONDS + HOLD_SECONDS, ph = reduce ? 1 : Math.min((t % cyc) / BUILD_SECONDS, 1);
