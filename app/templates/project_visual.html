@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Shan-AI — דוח ויזואלי {{ h.identifier }}</title>
+    <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500;700;900&family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet">
+    {# Motion (motion.dev) — springs, staggers, tweens. Optional: without it (CDN
+       down / reduced motion) every scene is drawn in its final state at once. #}
+    <script src="https://cdn.jsdelivr.net/npm/motion@13.4.6/dist/motion.js"></script>
+    <style>
+        :root {
+            --bg: #05080f; --card: rgba(15,24,38,.72); --border: #1a2d47; --border-hi: #2a4a72;
+            --t1: #e8eef7; --t2: #9fb0c6; --t3: #64748b;
+            --mono: 'IBM Plex Mono', monospace; --ui: 'Heebo', sans-serif;
+            --high: #ef6b6b; --med: #e0a028; --info: #3987e5;
+            --fc: #3987e5; --dev: #d95926; --gap: #199e70;
+            --accent: #8b5cf6;
+        }
+        * { box-sizing: border-box; }
+        html, body { margin: 0; background: var(--bg); color: var(--t1); font-family: var(--ui); overflow-x: clip; }
+        #bg { position: fixed; inset: 0; width: 100%; height: 100%; z-index: 0; pointer-events: none; }
+        .progress { position: fixed; top: 0; right: 0; left: 0; height: 3px; z-index: 30; transform-origin: right;
+                    background: linear-gradient(90deg, var(--fc), var(--accent), var(--dev)); transform: scaleX(0); }
+        .topbar { position: fixed; top: 3px; right: 0; left: 0; z-index: 25; display: flex; justify-content: space-between; align-items: center;
+                  padding: .55rem 1rem; background: linear-gradient(rgba(5,8,15,.92), rgba(5,8,15,0)); }
+        .topbar a, .topbar button { color: var(--t2); background: rgba(255,255,255,.04); border: 1px solid var(--border-hi);
+                  border-radius: 999px; padding: .3rem .85rem; font: 500 .85rem var(--ui); text-decoration: none; cursor: pointer; }
+        .topbar a:hover, .topbar button:hover { color: var(--t1); border-color: var(--accent); }
+        .topbar .id { font-family: var(--mono); color: var(--t3); font-size: .8rem; }
+        .dots { position: fixed; left: 14px; top: 50%; transform: translateY(-50%); z-index: 25; display: flex; flex-direction: column; gap: .55rem; }
+        .dots button { width: 10px; height: 10px; border-radius: 50%; border: 1px solid var(--t3); background: transparent; padding: 0; cursor: pointer; transition: all .3s; }
+        .dots button.on { background: var(--accent); border-color: var(--accent); box-shadow: 0 0 10px var(--accent); transform: scale(1.4); }
+        main { position: relative; z-index: 1; }
+        .scene { min-height: 88vh; padding: 5.5rem 1.25rem 3rem; max-width: 1180px; margin: 0 auto; display: flex; flex-direction: column; justify-content: center; }
+        .eyebrow { font: 700 .82rem var(--ui); letter-spacing: .06em; color: var(--accent); text-transform: uppercase; }
+        .scene h2 { font-size: clamp(1.6rem, 3.6vw, 2.6rem); font-weight: 900; margin: .25rem 0 .4rem; line-height: 1.1;
+                    background: linear-gradient(90deg, #fff, #9fb0c6); -webkit-background-clip: text; background-clip: text; color: transparent; }
+        .lead { color: var(--t2); font-size: 1rem; max-width: 720px; margin: 0 0 1.6rem; }
+        .glass { background: var(--card); border: 1px solid var(--border); border-radius: 18px; backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
+        .mono { font-family: var(--mono); }
+        .muted { color: var(--t3); font-size: .82rem; }
+        bdi { unicode-bidi: isolate; }
+
+        /* hero */
+        .hero { display: grid; grid-template-columns: minmax(280px, 460px) 1fr; gap: 2.5rem; align-items: center; }
+        .hero h1 { font-size: clamp(2rem, 5vw, 3.6rem); font-weight: 900; line-height: 1.02; margin: .3rem 0 .6rem; }
+        .chips span { display: inline-block; border: 1px solid var(--border-hi); border-radius: 999px; padding: .15rem .7rem; margin: 0 0 .35rem .35rem; font-size: .85rem; color: var(--t2); background: rgba(255,255,255,.03); }
+        .reactor { width: 100%; aspect-ratio: 1; display: block; overflow: visible; }
+        .counts { display: grid; grid-template-columns: repeat(3, 1fr); gap: .8rem; margin-top: 1.4rem; }
+        .count { padding: 1rem; text-align: center; position: relative; overflow: hidden; }
+        .count b { display: block; font: 700 2.6rem/1 var(--mono); }
+        .count span { color: var(--t2); font-size: .85rem; }
+        .count::after { content: ""; position: absolute; inset: auto 0 0 0; height: 3px; background: currentColor; opacity: .8; }
+        .reasons { margin-top: 1rem; display: flex; flex-wrap: wrap; gap: .4rem; }
+        .reasons span { font-size: .82rem; color: var(--t2); border-radius: 8px; padding: .25rem .6rem; background: rgba(255,255,255,.04); border: 1px solid var(--border); }
+
+        /* instruments */
+        .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 1rem; perspective: 900px; }
+        .tile { padding: 1.2rem 1.25rem 1.1rem; position: relative; overflow: hidden; transform-style: preserve-3d; }
+        .tile .k { color: var(--t2); font-size: .88rem; min-height: 2.4em; }
+        .tile .v { font: 700 3rem/1.05 var(--mono); margin: .35rem 0 .2rem; direction: ltr; text-align: right; }
+        .tile .v small { font-size: 1rem; color: var(--t2); margin-inline-start: .3rem; }
+        .tile .glow { position: absolute; width: 180px; height: 180px; border-radius: 50%; top: -70px; left: -60px; filter: blur(40px); opacity: .35; }
+        .cmp { margin-top: .6rem; display: grid; gap: .35rem; }
+        .cmp div { display: grid; grid-template-columns: 5.6rem 1fr 3rem; gap: .5rem; align-items: center; font-size: .78rem; color: var(--t2); }
+        .cmp i { display: block; height: 8px; border-radius: 4px; transform-origin: right; }
+        .cmp em { font: normal .8rem var(--mono); color: var(--t1); text-align: left; }
+
+        /* charts */
+        .chart { padding: 1.2rem; position: relative; }
+        .chart svg { display: block; width: 100%; height: auto; overflow: visible; direction: ltr; }
+        svg text { font-family: var(--ui); }
+        .readout { min-height: 3.2rem; margin-top: .8rem; font-size: .9rem; color: var(--t2); line-height: 1.5; }
+        .readout b { color: var(--t1); font-family: var(--mono); }
+        .readout .q { display: block; color: var(--t1); margin-top: .2rem; }
+        .legend { display: flex; flex-wrap: wrap; gap: 1.1rem; margin-bottom: .6rem; font-size: .85rem; color: var(--t2); }
+        .legend i { display: inline-block; width: 18px; height: 3px; border-radius: 2px; margin-inline-end: .4rem; vertical-align: middle; }
+
+        /* constellation */
+        .stars { position: relative; height: 420px; overflow: hidden; }
+        .star { position: absolute; border-radius: 50%; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; cursor: pointer; font-family: var(--ui);
+                color: #fff; font-weight: 700; padding: .4rem; line-height: 1.15; border: 1px solid rgba(255,255,255,.18);
+                background: radial-gradient(circle at 35% 30%, rgba(255,255,255,.35), rgba(139,92,246,.35) 40%, rgba(57,135,229,.15) 75%);
+                box-shadow: 0 0 30px rgba(139,92,246,.35), inset 0 0 18px rgba(255,255,255,.08); animation: drift var(--d, 9s) ease-in-out infinite alternate; }
+        .star small { display: block; font: 400 .72rem var(--mono); opacity: .8; margin-top: .15rem; }
+        .star.sel { border-color: #fff; box-shadow: 0 0 40px rgba(255,255,255,.45); }
+        @keyframes drift { from { translate: -6px -8px; } to { translate: 6px 8px; } }
+
+        /* flags */
+        .flags { display: grid; gap: .7rem; }
+        .flag { display: grid; grid-template-columns: 7px 1fr; overflow: hidden; }
+        .flag i { display: block; }
+        .flag div { padding: .85rem 1rem; line-height: 1.55; }
+        .flag div b { display: block; font-size: .78rem; margin-bottom: .15rem; }
+
+        .foot { text-align: center; color: var(--t3); font-size: .82rem; padding: 2rem 1rem 4rem; position: relative; z-index: 1; }
+        @media (max-width: 820px) {
+            .hero { grid-template-columns: 1fr; }
+            .reactor { max-width: 340px; margin: 0 auto; }
+            .dots, .topbar .id { display: none; }
+            .chart { overflow-x: auto; } .chart svg { min-width: 680px; }
+            .scene { min-height: auto; padding-top: 4.5rem; }
+            .stars { height: 520px; }
+        }
+        @media (prefers-reduced-motion: reduce) { .star { animation: none; } }
+        body.present .topbar, body.present .dots { opacity: .25; transition: opacity .4s; }
+        body.present .topbar:hover, body.present .dots:hover { opacity: 1; }
+    </style>
+</head>
+<body>
+<canvas id="bg" aria-hidden="true"></canvas>
+<div class="progress" id="progress"></div>
+<div class="topbar">
+    <a href="/dashboard/projects/p/{{ h.identifier|urlencode }}">→ חזרה לדף הפרויקט</a>
+    <span class="id">{{ h.identifier }} · נכון לדוח {{ h.as_of|il_date }}</span>
+    <button type="button" id="present" title="מעבר אוטומטי בין הסצנות · Esc לעצירה">▶ מצגת</button>
+</div>
+<nav class="dots" id="dots" aria-label="סצנות"></nav>
+<main id="report">
+    <noscript><div class="scene"><h2>הדוח הוויזואלי דורש JavaScript.</h2><p class="lead">כל הנתונים מופיעים גם בדף הפרויקט.</p></div></noscript>
+</main>
+<div class="foot">כל מספר בדוח הוא ערך או ספירה מתוך נתוני דף הפרויקט — כללים מחושבים, לא ניסוח של מודל שפה.</div>
+<script type="application/json" id="visual-data">{{ data|tojson }}</script>
+<script>{% include "_project_visual.js" %}</script>
+</body>
+</html>

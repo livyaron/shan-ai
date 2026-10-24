@@ -332,6 +332,28 @@ async def project_ai(
     return RedirectResponse(f"/dashboard/projects/p/{quote(identifier)}{suffix}#ai", status_code=303)
 
 
+@router.get("/p/{identifier:path}/visual", response_class=HTMLResponse)
+async def project_visual_report(
+    identifier: str,
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+    current_user: User = Depends(get_current_user),
+):
+    """The project's risks as one animated visual report — the same data as
+    the project page (project_visual.build), behind the same access gate.
+    Declared before the page route: `{identifier:path}` would swallow `/visual`."""
+    from app.services import insight_triage, pattern_service, project_chart, project_visual
+    frames, p = await _visible_project(session, current_user, identifier)
+    h = pattern_service.project_history(frames, p, identifier)
+    if h is None:
+        raise HTTPException(status_code=404, detail="פרויקט לא ידוע")
+    h = pattern_service._plain(h)
+    data = project_visual.build(h, project_chart.delay_story(h), project_chart.risk_matrix(h),
+                                insight_triage.triage_all(p).get(identifier), insight_triage.LEVELS)
+    return templates.TemplateResponse("project_visual.html", {
+        "request": request, "current_user": current_user, "h": h, "data": data})
+
+
 @router.get("/p/{identifier:path}", response_class=HTMLResponse)
 async def project_page(
     identifier: str,

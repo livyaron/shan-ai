@@ -69,6 +69,7 @@ jobs:
             tests/test_job_titles.py \
             tests/test_project_lessons.py \
             tests/test_project_links.py \
+            tests/test_project_visual.py \
             tests/test_lessons_app_login.py \
             tests/test_login_page.py \
             tests/test_files_open.py
