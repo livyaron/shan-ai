@@ -10,26 +10,23 @@
  * cables run on the ground to the container and out to the network.
  *
  * Same five layers as the other stations (project_visual.TWIN_LAYERS):
- * site = pad, fence, jack pads · structure = portal, lights, the two
+ * site = pad, Yehuda fence + entrance gate, jack pads · structure = portal, lights, the two
  * station-service poles ·
  * equipment = the trailers and everything on them · insulators = bushings and
  * arresters · conductors = the line, jumpers and cables. Units: metres, Y up. */
 import { kit } from './station_kit.js';
 
 export function buildMobile(T, mergeGeometries) {
-    const { box, rod, sphere, bushing, wire, finish } = kit(T, mergeGeometries);
+    const { box, rod, sphere, bushing, wire, fence, finish } = kit(T, mergeGeometries);
 
     // ── site: temporary pad, fence, jack pads, access road ────────────────
     // the pad is just big enough for the portal and the two trailers (user correction 2026-10-24)
     const X0 = -31, X1 = 9, Z0 = -12, Z1 = 16, CX = (X0 + X1) / 2, CZ = (Z0 + Z1) / 2;
     box('site', 'gravel', X1 - X0 + 2, .3, Z1 - Z0 + 2, CX, -.3, CZ);
-    box('site', 'asphalt', X1 - X0 + 2, .05, 5, CX, 0, Z1 + 3.5);
-    for (let x = X0; x <= X1; x += 4) { box('site', 'steel', .1, 2.2, .1, x, 0, Z0); box('site', 'steel', .1, 2.2, .1, x, 0, Z1); }
-    for (let z = Z0; z <= Z1; z += 4) { box('site', 'steel', .1, 2.2, .1, X0, 0, z); box('site', 'steel', .1, 2.2, .1, X1, 0, z); }
-    for (const y of [.7, 2.1]) {
-        box('site', 'steel', X1 - X0, .05, .05, CX, y, Z0); box('site', 'steel', X1 - X0, .05, .05, CX, y, Z1);
-        box('site', 'steel', .05, .05, Z1 - Z0, X0, y, CZ); box('site', 'steel', .05, .05, Z1 - Z0, X1, y, CZ);
-    }
+    box('site', 'asphalt', X1 - X0 + 10, .05, 5, CX, 0, Z1 + 5.5);                                   // road
+    const GATE_X = -5;
+    box('site', 'asphalt', 6, .05, 5, GATE_X, 0, Z1 + 1.5);                                          // driveway to the gate
+    fence(X0, X1, Z0, Z1, { side: 'z1', at: GATE_X, width: 6 });                                     // Yehuda fence + entrance gate
     for (const [x, z] of [[-15, -1.9], [-15, 1.9], [-4, -1.9], [-4, 1.9], [-10, 6.6], [-10, 10.4], [0, 6.6], [0, 10.4]])
         box('site', 'concrete', 1.2, .25, 1.2, x, 0, z);                                     // jack pads
     box('site', 'concrete', 3, .5, 3, -25, 0, -4); box('site', 'concrete', 3, .5, 3, -25, 0, 4);   // portal footings
@@ -124,20 +121,23 @@ export function buildMobile(T, mergeGeometries) {
         rod('structure', 'concrete', .2, [px, 0, pz], [px, 9.5, pz], 12);                          // pole
         box('structure', 'steel', .12, .12, 2.2, px, 8.6, pz);                                      // cross-arm
         box('structure', 'steel', .1, .1, 1, px, 5.9, pz - .5);                                     // transformer bracket
-        rod('equipment', 'xfmrRound', .45, [px, 5.1, pz - .75], [px, 6.4, pz - .75], 18);           // pole-mounted transformer
-        sphere('equipment', 'xfmrRound', .46, px, 6.4, pz - .75, .25);
-        for (const a of [0, 1, 2, 3]) {                                                              // cooling fins
-            const ang = a * Math.PI / 2 + Math.PI / 4;
-            box('equipment', 'xfmr', .05, .9, .32, px + Math.cos(ang) * .5, 5.25, pz - .75 + Math.sin(ang) * .5);
+        // three-phase, rectangular tank (IEC house transformers are square — user 2026-10-24)
+        const tz = pz - .8;
+        box('equipment', 'xfmr', .9, 1.1, .7, px, 5.15, tz);                                         // tank
+        box('equipment', 'xfmr', 1, .08, .8, px, 6.25, tz);                                          // cover
+        for (let f = -.36; f <= .36; f += .12) {                                                    // corrugated sides
+            box('equipment', 'xfmr', .04, .9, .12, px + f, 5.25, tz - .41);
+            box('equipment', 'xfmr', .04, .9, .12, px + f, 5.25, tz + .41);
         }
-        for (const dz of [-.18, .18]) bushing(px + dz, 6.5, pz - .75, .45, .07);                     // MV bushings
+        box('equipment', 'cabinet', .35, .3, .12, px, 5.4, tz + .5);                                 // LV terminal box
+        for (const dx of [-.3, 0, .3]) bushing(px + dx, 6.33, tz, .42, .065);                        // 3 MV bushings
         for (const dz of [-.8, 0, .8]) {                                                             // fuse cut-outs
             bushing(px, 8.72, pz + dz, .55, .06);
-            rod('conductors', 'wire', .025, [px, 9.27, pz + dz], [px + (dz < 0 ? -.18 : .18), 6.95, pz - .75], 6);
+            rod('conductors', 'wire', .025, [px, 9.27, pz + dz], [px + dz * .375, 6.75, pz - .8], 6);
         }
         rod('conductors', 'wire', .06, [px + .12, 0, pz + .25], [px + .12, 8.7, pz + .25], 6);       // MV riser cable
         rod('conductors', 'wire', .06, [px + .12, 0, pz + .25], [Math.max(Math.min(px, 1.5), -10.5), 0, 9.8], 6);   // to the container
-        rod('conductors', 'wire', .045, [px - .15, 5.2, pz - .55], [px - .15, 0, pz - .2], 6);      // LV back down
+        rod('conductors', 'wire', .045, [px, 5.4, pz - .22], [px, 0, pz - .22], 6);                  // LV back down
     }
     return finish();
 }

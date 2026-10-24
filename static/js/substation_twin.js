@@ -235,6 +235,7 @@ window.mountTwin = async function mountTwin(host, opts) {
     controls = new OrbitControls(camera, renderer.domElement);
     controls.target.set(0, 5, 0);
     controls.enableDamping = true; controls.dampingFactor = .06;
+    controls.zoomToCursor = true;                 // the wheel zooms where the pointer is
     controls.minDistance = 22; controls.maxDistance = 260; controls.maxPolarAngle = 1.48;
     controls.autoRotate = !reduce; controls.autoRotateSpeed = .55;
     controls.enabled = false;
