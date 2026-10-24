@@ -14,6 +14,7 @@ from __future__ import annotations
 import re
 from datetime import date
 
+from app.services import project_chart
 from app.services.il_format import il_dates
 
 LEVEL_ORDER = ("high", "medium", "info")
@@ -190,7 +191,7 @@ def build(h: dict, delay: dict | None, matrix: dict | None,
         ev = (t.get("evidence") or [{}])[0]
         q = ev.get("quote") or ""
         topics.append({"category": t["category"], "weeks": t["weeks"], "source": ev.get("source"),
-                       "quote": il_dates(q[:QUOTE_CHARS] + ("…" if len(q) > QUOTE_CHARS else ""))})
+                       "quote": il_dates(project_chart._clip(q, QUOTE_CHARS))})
     peers = h.get("peers") or None
     return {
         "identifier": h["identifier"], "name": h.get("name") or h["identifier"],

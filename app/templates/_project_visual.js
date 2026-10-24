@@ -450,7 +450,7 @@ function scenePulse(box) {
             if (!c.hit) { svg.appendChild(sv('circle', { cx, cy: y, r: Math.max(1.5, rad * .3), fill: '#1c2f4a' })); return; }
             const dot = sv('circle', { cx, cy: y, r: rad, fill: tone, filter: 'url(#pg)', style: 'transform-box: fill-box; transform-origin: center; cursor: pointer' });
             dot.dataset.col = ci;
-            const tell = () => ro.replaceChildren(el('b', {}, fmtD(Wk[ci])), ` · ${row.label}`, c.quote ? el('span', { class: 'q' }, `"${c.quote}"`) : null);
+            const tell = () => ro.replaceChildren(el('b', {}, fmtD(Wk[ci])), ` · ${row.label}`, c.quote ? el('span', { class: 'q' }, c.quote) : null);
             dot.addEventListener('pointerenter', tell); dot.addEventListener('click', tell);
             svg.appendChild(dot); lit.push(dot);
         });
@@ -461,7 +461,8 @@ function scenePulse(box) {
     });
     svg.appendChild(sv('text', { x: LBL, y: H - 8, 'font-size': 12, fill: '#64748b', class: 'mono' }, fmtD(Wk[0])));
     svg.appendChild(sv('text', { x: W - TOT, y: H - 8, 'text-anchor': 'end', 'font-size': 12, fill: '#64748b', class: 'mono' }, fmtD(Wk[Wk.length - 1])));
-    const beam = sv('rect', { x: LBL, y: Tp - 10, width: Math.max(pitch, 6), height: H - Tp - 20, fill: '#8b5cf6', opacity: 0, rx: 3 });
+    const beam = sv('rect', { x: LBL, y: Tp - 10, width: Math.max(pitch, 6), height: H - Tp - 20, fill: '#8b5cf6', opacity: 0, rx: 3,
+        style: 'pointer-events:none' });   // invisible after its sweep — it must never eat the hover of the column under it
     svg.appendChild(beam);
     card.appendChild(svg); card.appendChild(ro);
     box.appendChild(card);
@@ -507,7 +508,7 @@ function sceneTopics(box) {
             t.category, el('small', {}, t.weeks ? `${t.weeks} שב׳` : 'בעמודה'));
         s.addEventListener('click', () => {
             sky.querySelectorAll('.star.sel').forEach(x => x.classList.remove('sel')); s.classList.add('sel');
-            ro.replaceChildren(el('b', {}, t.category), ` · ${t.source && /^\d{4}-/.test(t.source) ? fmtD(t.source) : (t.source || '')}`, el('span', { class: 'q' }, `"${t.quote}"`));
+            ro.replaceChildren(el('b', {}, t.category), ` · ${t.source && /^\d{4}-/.test(t.source) ? fmtD(t.source) : (t.source || '')}`, el('span', { class: 'q' }, t.quote));
             anim(s, { scale: [1, 1.15, 1] }, { duration: .5 });
         });
         sky.appendChild(s); return s;

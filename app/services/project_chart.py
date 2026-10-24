@@ -38,6 +38,14 @@ def _months_between(a: str | None, b: str | None) -> float | None:
     return round((_d(a) - _d(b)).days / 30.44, 1)
 
 
+def _clip(t: str, n: int) -> str:
+    """At most n characters, cut at the last space before n — never mid-word."""
+    if len(t) <= n:
+        return t
+    cut = t.rfind(" ", 0, n)
+    return t[:cut if cut > n // 2 else n].rstrip() + "…"
+
+
 def _norm(t: str | None) -> str:
     return " ".join((t or "").split())
 
@@ -77,11 +85,11 @@ def delay_story(h: dict) -> dict | None:
             "gap": _months_between(t["fc"], t["dev"]),
             "moves": by_to.get(t["date"], []),
             "week": week["week"] if week else None,
-            "week_text": (text[:WEEK_TEXT_CHARS] + "…") if len(text) > WEEK_TEXT_CHARS else text,
+            "week_text": _clip(text, WEEK_TEXT_CHARS),
             "week_repeat": bool(week and week["same_as_before"]),
             "topics": [c for c, pat in RISK_CATEGORIES.items() if re.search(pat, text)],
             "risk_changed": prev_risk is not None and risk != prev_risk,
-            "risk_text": risk[:WEEK_TEXT_CHARS] + ("…" if len(risk) > WEEK_TEXT_CHARS else ""),
+            "risk_text": _clip(risk, WEEK_TEXT_CHARS),
         })
         prev_risk = risk
 

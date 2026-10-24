@@ -717,6 +717,14 @@ def _times(n: int) -> str:
 
 def _snippet(text: str, match: re.Match) -> str:
     a, b = max(0, match.start() - SNIPPET_CHARS), min(len(text), match.end() + SNIPPET_CHARS)
+    # Never cut a word in half — a quote that opens "…רויקט" reads as broken
+    # (user 2026-10-24). Each edge moves INWARD to a space, never past the match.
+    if a > 0 and not text[a - 1].isspace():
+        sp = text.find(" ", a, match.start())
+        a = sp + 1 if sp != -1 else a
+    if b < len(text) and not text[b].isspace():
+        sp = text.rfind(" ", match.end(), b)
+        b = sp if sp != -1 else b
     return ("…" if a else "") + text[a:b].strip() + ("…" if b < len(text) else "")
 
 

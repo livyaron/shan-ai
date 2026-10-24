@@ -183,3 +183,20 @@ def test_mobile_by_name_or_file_type_when_no_station_type():
     assert pv.station_model("switching", "מיתוג סגורה")[0] == "gis" and pv.station_model("combined", "משולבת פתוחה")[0] == "ais"
     t = pv.twin_state("בדיקות", 3, False, None, "x", "ניידות")
     assert t["model"] == "mobile" and t["model_from"] == "file" and t["steps"] == t["models"]["mobile"]["steps"]
+
+
+def test_quotes_never_cut_a_word_in_half():
+    # user 2026-10-24: "…רויקט" (from פרויקט) read as broken text
+    from app.services.project_chart import _clip
+    t = ("בדיקה מקדימה של כל המסמכים בתיק ואחריה נבחן את הנושא שוב. פרויקט מקדים WBM-10562-ST1 (היתה מעט "
+         "פעילות השבוע בעקבות המלחמה וצורך בבודקים עבור ניידות חירום). נקבעה ישיבת התנעת פרויקט WBE-188 לתאריך 22.03 "
+         "ועוד טקסט ארוך שממשיך הלאה עם מילים")
+    words = set(t.split())
+    for w in ("בבודקים", "פעילות", "התנעת"):
+        q = pt._snippet(t, re.search(w, t))
+        body = q.strip("…")
+        assert body in t                                           # still verbatim (the AI checks quotes against it)
+        assert body.split()[0] in words and body.split()[-1] in words
+    c = _clip(t, 60)
+    assert c.endswith("…") and c[:-1].split()[-1] in words and len(c) <= 61
+    assert _clip("קצר", 60) == "קצר"

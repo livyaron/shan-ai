@@ -73,7 +73,9 @@
         svg text { font-family: var(--ui); }
         .readout { min-height: 3.2rem; margin-top: .8rem; font-size: .9rem; color: var(--t2); line-height: 1.5; }
         .readout b { color: var(--t1); font-family: var(--mono); }
-        .readout .q { display: block; color: var(--t1); margin-top: .2rem; }
+        /* a quote from the weekly report: its own RTL block with a side rule, no straight quote marks (user 2026-10-24) */
+        .readout .q { display: block; color: var(--t1); margin-top: .45rem; padding: .1rem .75rem .1rem 0; border-right: 3px solid var(--accent);
+                      direction: rtl; unicode-bidi: isolate; line-height: 1.7; font-size: .95rem; }
         .legend { display: flex; flex-wrap: wrap; gap: 1.1rem; margin-bottom: .6rem; font-size: .85rem; color: var(--t2); }
         .legend i { display: inline-block; width: 18px; height: 3px; border-radius: 2px; margin-inline-end: .4rem; vertical-align: middle; }
 
