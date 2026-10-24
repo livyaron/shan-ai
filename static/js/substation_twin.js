@@ -271,10 +271,7 @@ window.mountTwin = async function mountTwin(host, opts) {
     function sayWhy() {
         pickBtns.forEach(b => b.classList.toggle('on', b.dataset.model === model));
         const label = twin.models[model].label;
-        why.textContent = model !== twin.model ? `תצוגה ידנית — ${label}`
-            : twin.model_from === 'lessons' ? `לפי מערכת הלקחים: ${twin.station_label}`
-            : twin.station_label ? `${twin.station_label} — עוד אין לה מודל משלה; מוצגת ${label}`
-            : `סוג התחנה לא נבחר במערכת הלקחים — מוצגת ${label}`;
+        why.textContent = model !== twin.model ? `תצוגה ידנית — ${label}` : twin.model_why;   // the server's reason
     }
     panel.appendChild(pick);
     panel.appendChild(why);

@@ -5,7 +5,8 @@
  * 8 bays in one hall on a double busbar: 3 overhead lines (SF6/air bushings
  * through the roof to a line gantry), 3 transformer bays (gas-insulated ducts
  * out to three outdoor power transformers between fire walls), a bus coupler
- * and a measurement bay. Plus the control building, the site, fence and road.
+ * and a measurement bay. Plus the control building, the site, a Yehuda fence
+ * with its entrance gate, and the access road.
  *
  * Returns a THREE.Group of a few merged meshes. Each mesh is named by its
  * layer — site / structure / equipment / insulators / conductors, the keys
@@ -15,7 +16,7 @@
 import { kit } from './station_kit.js';
 
 export function buildGIS(T, mergeGeometries) {
-    const { box, rod, sphere, ring, bushing, wire, finish } = kit(T, mergeGeometries);
+    const { box, rod, sphere, ring, bushing, wire, fence, finish } = kit(T, mergeGeometries);
 
     // ── site ────────────────────────────────────────────────────────────
     box('site', 'gravel', 96, .3, 76, 0, -.3, 0);
@@ -25,12 +26,8 @@ export function buildGIS(T, mergeGeometries) {
     box('site', 'concrete', 18, .5, 12, 31, 0, -2);                 // control building raft
     for (const x of [-14, 0, 14]) box('site', 'concrete', 9, .5, 7, x, 0, 23);   // transformer bunds
     box('site', 'concrete', 40, .4, 3, 0, 0, -24);                  // gantry footings
-    for (let x = -47; x <= 47; x += 6) { box('site', 'steel', .12, 2.4, .12, x, 0, -37.5); box('site', 'steel', .12, 2.4, .12, x, 0, 37.5); }
-    for (let z = -37.5; z <= 37.5; z += 6) { box('site', 'steel', .12, 2.4, .12, -47.5, 0, z); box('site', 'steel', .12, 2.4, .12, 47.5, 0, z); }
-    for (const y of [.8, 2.3]) {
-        box('site', 'steel', 95, .05, .05, 0, y, -37.5); box('site', 'steel', 95, .05, .05, 0, y, 37.5);
-        box('site', 'steel', .05, .05, 75, -47.5, y, 0); box('site', 'steel', .05, .05, 75, 47.5, y, 0);
-    }
+    fence(-47.5, 47.5, -37.5, 37.5, { side: 'z1', at: 40, width: 8 });   // Yehuda fence + entrance gate on the access road (user 2026-10-24)
+    box('site', 'asphalt', 8, .05, 8, 40, 0, 41.5);                 // the road continues out through the gate
 
     // ── structure: the GIS hall, control building, crane, fire walls, gantry ──
     const HL = 44, HW = 18, HH = 13, Y0 = .6;

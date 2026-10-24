@@ -124,12 +124,13 @@ def test_station_type_picks_the_model_and_says_why():
     t = pv.twin_state("בדיקות", 3, False, "closed")
     assert t["model"] == "gis" and t["model_from"] == "lessons" and t["station_label"] == "תחנה סגורה"
     assert pv.twin_state("בדיקות", 3, False, "open")["model"] == "ais"
-    other = pv.twin_state("בדיקות", 3, False, "switching")       # no model of its own yet
-    assert other["model"] == pv.DEFAULT_MODEL and other["model_from"] == "default" and other["station_label"] == "תחנת מיתוג"
+    assert pv.twin_state("בדיקות", 3, False, "mobile_substation")["model"] == "mobile"
     none = pv.twin_state("בדיקות")
-    assert none["model"] == pv.DEFAULT_MODEL and none["station_label"] is None
+    assert none["model"] == pv.DEFAULT_MODEL and none["station_label"] is None and none["model_from"] == "default"
+    assert "לא נבחר" in none["model_why"]
     # both models walk the same ladder, each with its own sentence per step
     a, g = (t["models"][k]["steps"] for k in ("ais", "gis"))
+    assert [s["label"] for s in t["models"]["mobile"]["steps"]] == [s["label"] for s in a]
     assert [s["label"] for s in a] == [s["label"] for s in g] and [s["layers"] for s in a] == [s["layers"] for s in g]
     assert all(s["caption"] for s in g) and a[4]["caption"] != g[4]["caption"]
     assert t["steps"] == g
@@ -156,3 +157,17 @@ def test_station_type_never_breaks_the_page():
         def begin_nested(self):
             raise RuntimeError("no lessons schema")
     assert asyncio.run(project_lessons.station_type(Broken(), "P-1")) is None
+
+
+def test_switching_and_combined_read_the_project_name_first():
+    # user decision 2026-10-24: the name says open/closed; silent → switching closed, combined open
+    assert pv.station_model("switching", "מיתוג חדרה")[0] == "gis"
+    assert pv.station_model("combined", "משולבת עפולה")[0] == "ais"
+    assert pv.station_model("switching", "תחנת מיתוג פתוחה צפון")[0] == "ais"
+    assert pv.station_model("combined", "משולבת סגורה")[0] == "gis"
+    assert pv.station_model("combined", "Afula GIS")[0] == "gis"
+    assert pv.station_model("switching", "פיתוח מיתוג")[0] == "gis"      # "פיתוח" is not "פתוחה"
+    _, why = pv.station_model("switching", "מיתוג חדרה")
+    assert "השם לא מציין" in why
+    t = pv.twin_state("בדיקות", 3, False, "combined", "משולבת סגורה")
+    assert t["model"] == "gis" and t["steps"] == t["models"]["gis"]["steps"] and "לפי שם הפרויקט" in t["model_why"]

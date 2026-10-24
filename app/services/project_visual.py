@@ -11,6 +11,7 @@ script inserts it as-is with textContent.
 """
 from __future__ import annotations
 
+import re
 from datetime import date
 
 from app.services.il_format import il_dates
@@ -78,10 +79,15 @@ TWIN_CAPTIONS = {
     ),
 }
 TWIN_MODELS = {"ais": "תחנה פתוחה", "gis": "תחנה סגורה (GIS)", "mobile": "תחנה ניידת"}
-# lessons.projects.station_type → model. Only these two are decided (user,
-# 2026-10-24); every other type, and a project with no type chosen, shows the
-# default — and the page says which it is and why.
-STATION_MODEL = {"closed": "gis", "open": "ais"}
+# lessons.projects.station_type → model (user decisions 2026-10-24). Switching
+# and combined stations are read from the project's NAME first ("סגורה"/GIS,
+# "פתוחה"/AIS); a name that says neither falls back per type — switching =
+# closed, combined = open. A project with no type chosen shows the default.
+# The page always says which model it drew and why (`model_why`).
+STATION_MODEL = {"closed": "gis", "open": "ais", "mobile_substation": "mobile"}
+NAME_DECIDES = {"switching": "gis", "combined": "ais"}        # type → fallback when the name is silent
+NAME_CLOSED = re.compile(r"סגור|\bGIS\b", re.IGNORECASE)
+NAME_OPEN = re.compile(r"פתוח|\bAIS\b", re.IGNORECASE)
 DEFAULT_MODEL = "ais"
 STATION_LABELS = {"closed": "תחנה סגורה", "open": "תחנה פתוחה", "switching": "תחנת מיתוג",
                   "combined": "תחנה משולבת", "mobile_substation": "תחנת משנה ניידת"}   # lessons_ui stationTypeLabels
@@ -94,8 +100,26 @@ def twin_steps(model: str) -> list[dict]:
             for i, ((lbl, done, active), cap) in enumerate(zip(_STEP_LAYERS, TWIN_CAPTIONS[model], strict=True))]
 
 
+def station_model(station_type: str | None, name: str | None = None) -> tuple[str, str]:
+    """(model key, one sentence saying why) for a project. Pure."""
+    label = STATION_LABELS.get(station_type or "")
+    if station_type in STATION_MODEL:
+        return STATION_MODEL[station_type], f"לפי מערכת הלקחים: {label}"
+    if station_type in NAME_DECIDES:
+        text = name or ""
+        if NAME_CLOSED.search(text):
+            return "gis", f"{label} — סגורה לפי שם הפרויקט"
+        if NAME_OPEN.search(text):
+            return "ais", f"{label} — פתוחה לפי שם הפרויקט"
+        model = NAME_DECIDES[station_type]
+        return model, f"{label} — השם לא מציין, ולכן {TWIN_MODELS[model]}"
+    if label:
+        return DEFAULT_MODEL, f"{label} — עוד אין לה מודל משלה; מוצגת {TWIN_MODELS[DEFAULT_MODEL]}"
+    return DEFAULT_MODEL, f"סוג התחנה לא נבחר במערכת הלקחים — מוצגת {TWIN_MODELS[DEFAULT_MODEL]}"
+
+
 def twin_state(stage: str | None, weeks_in_stage: int | None = None, lower_bound: bool = False,
-               station_type: str | None = None) -> dict:
+               station_type: str | None = None, name: str | None = None) -> dict:
     from app.services import stage_sectors
     st = stage_sectors.normalize_stage(stage)
     if stage_sectors.is_closed(st):
@@ -104,11 +128,13 @@ def twin_state(stage: str | None, weeks_in_stage: int | None = None, lower_bound
         current = stage_sectors.STAGE_RANK[st]
     else:
         current = None
-    model = STATION_MODEL.get(station_type or "", DEFAULT_MODEL)
+    model, why = station_model(station_type, name)
     return {"current": current, "stage": st or None, "weeks": weeks_in_stage if current is not None else None,
             "weeks_lower_bound": bool(lower_bound),
             "model": model, "station_type": station_type, "station_label": STATION_LABELS.get(station_type or ""),
-            "model_from": "lessons" if station_type in STATION_MODEL else "default",
+            "model_from": "default" if station_type is None or (station_type not in STATION_MODEL
+                                                                and station_type not in NAME_DECIDES) else "lessons",
+            "model_why": why,
             "models": {k: {"label": v, "steps": twin_steps(k)} for k, v in TWIN_MODELS.items()},
             "steps": twin_steps(model)}
 
@@ -170,7 +196,8 @@ def build(h: dict, delay: dict | None, matrix: dict | None,
         "journey": stage_journey(h.get("timeline") or [], h.get("as_of")),
         "events": [{"from": e["from"], "to": e["to"], "kind": e["kind"], "months": e["months"],
                     "stage": e.get("stage")} for e in h.get("events") or []],
-        "twin": twin_state(r.get("stage"), r.get("weeks_in_stage"), bool(r.get("weeks_lower_bound")), station_type),
+        "twin": twin_state(r.get("stage"), r.get("weeks_in_stage"), bool(r.get("weeks_lower_bound")), station_type,
+                           h.get("name")),
         "delay": delay, "matrix": matrix,
         "weekly_n": len(h.get("weekly") or []),
         "repeats": sum(bool(w.get("same_as_before")) for w in h.get("weekly") or []),
