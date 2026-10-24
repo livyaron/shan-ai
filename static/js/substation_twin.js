@@ -148,6 +148,11 @@ window.mountTwin = async function mountTwin(host, opts) {
             });
             return gltf.scene;
         },
+        mobile: async () => {
+            const [{ buildMobile }, { mergeGeometries }] = await Promise.all([
+                import('/static/js/mobile_station.js'), import('three/addons/utils/BufferGeometryUtils.js')]);
+            return buildMobile(T, mergeGeometries);
+        },
         gis: async () => {
             const [{ buildGIS }, { mergeGeometries }] = await Promise.all([
                 import('/static/js/gis_station.js'), import('three/addons/utils/BufferGeometryUtils.js')]);
@@ -189,7 +194,7 @@ window.mountTwin = async function mountTwin(host, opts) {
             [[-.5, -.5], [.5, -.5], [.5, .5], [-.5, .5]].map(([x, z]) => new T.Vector3(x * (fx1 - fx0) * 1.08, 0, z * (fz1 - fz0) * 1.08)));
         // frame each station by its own site: the GIS plot is smaller than the open yard
         const site = (layers.site || Object.values(layers)[0]).box.getSize(new T.Vector3());
-        const frame = Math.min(Math.max(Math.hypot(site.x, site.z) / 150, .7), 1.2);
+        const frame = Math.min(Math.max(Math.hypot(site.x, site.z) / 150, .42), 1.2);
         return { root, layers, foot, footAt: [(fx0 + fx1) / 2, (fz0 + fz1) / 2], frame };
     }
     const scanLine = new T.LineLoop(new T.BufferGeometry(), new T.LineBasicMaterial({ color: tone, transparent: true, opacity: .95 }));
