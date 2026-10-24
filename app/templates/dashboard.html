@@ -1182,7 +1182,7 @@ function sbSyncGrid(d) {
 
 /* ── donuts ── */
 let sbFilter = null;
-function sbDonut(svgId, legendId, data, dict, key, animate, center) {
+function sbDonut(svgId, legendId, data, dict, key, animate, center, href) {   // href(k) = a slice opens a list
     const svg = document.getElementById(svgId), leg = document.getElementById(legendId);
     svg.replaceChildren(); leg.replaceChildren();
     const entries = Object.keys(dict).filter(k => data[k]).map(k => [k, data[k]]);
@@ -1194,7 +1194,9 @@ function sbDonut(svgId, legendId, data, dict, key, animate, center) {
         const seg = svgEl('circle', { cx: 66, cy: 66, r: R, class: 'seg', stroke: color, 'stroke-dasharray': `${len} ${CIRC - len}`, 'stroke-dashoffset': -acc, transform: 'rotate(-90 66 66)' });
         seg.style.color = color;
         const t = svgEl('title', {}); t.textContent = `${dict[k][0]}: ${v}`; seg.appendChild(t);
+        const go = href && href(k);
         if (key) seg.addEventListener('click', () => sbApplyFilter(key, k, dict[k][0]));
+        else if (go) seg.addEventListener('click', () => { location.href = go; });
         else seg.style.cursor = 'default';
         svg.appendChild(seg);
         if (animate && SB_GO) SB_M.animate(seg, { strokeDasharray: [`0 ${CIRC}`, `${len} ${CIRC - len}`] }, { duration: .9, delay: .35 + i * .12, ease: SB_EASE });
@@ -1205,6 +1207,7 @@ function sbDonut(svgId, legendId, data, dict, key, animate, center) {
         const n = document.createElement('b'); n.textContent = v;
         b.append(sw, nm, n);
         if (key) b.addEventListener('click', () => sbApplyFilter(key, k, dict[k][0]));
+        else if (go) b.addEventListener('click', () => { location.href = go; });
         else b.style.cursor = 'default';
         leg.appendChild(b);
     });
@@ -1378,9 +1381,12 @@ const STATION_DRAW = {
     projects(a) {
         const s = stOf('projects'); if (!s.ok) return;
         // the centre is the active count, never the sector sum (one stage sits in two sectors)
-        sbDonut('zm-d-sector', 'zm-l-sector', toData(s.sectors), toDict(s.sectors, SECTOR_TONE), null, a, s.active);
-        // in the road's order, never by count; every bar opens its list (user, 2026-10-24)
-        const toList = r => '/dashboard/projects/kpi/' + encodeURIComponent(r[2]) + (SB_SCOPE === 'mine' ? '?scope=mine' : '');
+        // every slice, legend row and bar opens its list (user, 2026-10-24)
+        const kpiUrl = key => '/dashboard/projects/kpi/' + encodeURIComponent(key) + (SB_SCOPE === 'mine' ? '?scope=mine' : '');
+        sbDonut('zm-d-sector', 'zm-l-sector', toData(s.sectors), toDict(s.sectors, SECTOR_TONE), null, a, s.active,
+                k => kpiUrl('sector:' + k));
+        // in the road's order, never by count
+        const toList = r => kpiUrl(r[2]);
         stBars('zm-b-stages', s.stages, toList);
         [['storage', s.stages_storage], ['mobile', s.stages_mobile]].forEach(([k, rows]) => {
             const panel = document.getElementById('zm-p-' + k);

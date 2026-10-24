@@ -55,6 +55,12 @@ def rows_for(key: str, rows: list[dict], as_of: str | None, exec_payload: dict |
     if key in ENGINE_KPIS:
         label, help_, test = ENGINE_KPIS[key]
         return label, help_, [x for x in rows if test(x, as_of)]
+    if key.startswith(SECTOR_PREFIX):   # a sector slice: same rule as the donut's count
+        sector = key[len(SECTOR_PREFIX):]
+        if sector in stage_sectors.SECTORS:
+            return (stage_sectors.SECTORS[sector], "הפרויקטים הפעילים שהשלב הנוכחי שלהם שייך למגזר",
+                    [x for x in rows if sector in (x.get("sectors") or [])])
+        return None
     if key.startswith(STAGE_PREFIX):   # a stage bar: stage:<group>:<stage>
         group, _, stage = key[len(STAGE_PREFIX):].partition(":")
         if group in STAGE_GROUPS:
@@ -73,6 +79,7 @@ def rows_for(key: str, rows: list[dict], as_of: str | None, exec_payload: dict |
 
 
 STAGE_PREFIX = "stage:"
+SECTOR_PREFIX = "sector:"
 # the three stage breakdowns (user, 2026-10-24): the substation road in its
 # order, and apart from it the energy-storage agreements and the ניידות
 STAGE_GROUPS = {"road": "לפי שלב", "storage": "הסכם אגירת אנרגיה", "mobile": "ניידות"}

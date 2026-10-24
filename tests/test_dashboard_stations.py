@@ -366,3 +366,14 @@ def test_stage_bars_follow_the_road_with_storage_and_mobile_apart():
     assert pk.rows_for("stage:nope:תכנון", rows, None) is None
     # every stage the sector map knows is either on the road or the storage agreement
     assert set(ss.STAGE_SECTORS) == set(ss.STAGE_ORDER) | {ss.ENERGY_STORAGE}
+
+
+def test_every_sector_slice_opens_a_list_of_its_count(engine):
+    """User, 2026-10-24: clicking a sector opens its projects — as many as the slice."""
+    from app.services import project_kpis as pk
+    rows = engine["projects"]
+    b = pk.board(rows, engine.get("as_of"))
+    assert b["sectors"]
+    for key, _label, n in b["sectors"]:
+        assert len(pk.rows_for(f"sector:{key}", rows, None)[2]) == n, key
+    assert pk.rows_for("sector:nope", rows, None) is None
