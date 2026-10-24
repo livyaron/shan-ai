@@ -30,6 +30,19 @@ function sv(tag, attrs, text) {
     if (text !== undefined) e.textContent = text;
     return e;
 }
+// A weekly report shown whole, in its own RTL block, with the words that
+// matched the topic marked (`span` = [start, end] in the report, from the
+// engine's own regex). No span → the report is shown plain. An RLM anchors the
+// line so a leading number or date never jumps to the wrong side.
+function reportBlock(full, span, prefix) {
+    const q = el('span', { class: 'q' }, '\u200F' + (prefix || ''));
+    const cp = Array.from(full);                 // the server counts code points; JS strings count UTF-16 units
+    if (span && span[1] > span[0] && span[1] <= cp.length)
+        q.append(cp.slice(0, span[0]).join(''), el('mark', {}, cp.slice(span[0], span[1]).join('')), cp.slice(span[1]).join(''));
+    else q.appendChild(document.createTextNode(full));
+    return q;
+}
+const reportOf = week => (D.weekly_texts || {})[week];
 const fmtD = iso => iso ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}` : '—';
 const fmtM = iso => iso ? `${iso.slice(5, 7)}/${iso.slice(0, 4)}` : '';
 const ms = iso => Date.parse(iso + 'T00:00:00Z');
@@ -404,7 +417,8 @@ function sceneDelay(box) {
         ro.replaceChildren(el('b', {}, fmtD(p.date)), ` · ${p.stage}`,
             ...d.series.map(s => [' · ', s.short, ' ', el('bdi', {}, el('b', {}, p[s.key] === null || p[s.key] === undefined ? '—' : signed(p[s.key], 1)))]).flat(),
             p.moves.length ? ` · זז בדוח: ${p.moves.map(m => (m.kind === 'forecast' ? 'יעד ' : 'תכנית ') + ltr('+' + m.months)).join(', ')}` : '',
-            p.week_text ? el('span', { class: 'q' }, `${p.week_repeat ? '🔁 ' : ''}${p.week_text}`) : null);
+            p.week && reportOf(p.week) ? reportBlock(reportOf(p.week), null, p.week_repeat ? '🔁 ' : '')
+                : p.week_text ? reportBlock(p.week_text, null, p.week_repeat ? '🔁 ' : '') : null);
     };
     const nearest = cx => {
         const r = svg.getBoundingClientRect(), vx = (cx - r.left) / r.width * W;
@@ -450,7 +464,8 @@ function scenePulse(box) {
             if (!c.hit) { svg.appendChild(sv('circle', { cx, cy: y, r: Math.max(1.5, rad * .3), fill: '#1c2f4a' })); return; }
             const dot = sv('circle', { cx, cy: y, r: rad, fill: tone, filter: 'url(#pg)', style: 'transform-box: fill-box; transform-origin: center; cursor: pointer' });
             dot.dataset.col = ci;
-            const tell = () => ro.replaceChildren(el('b', {}, fmtD(Wk[ci])), ` · ${row.label}`, c.quote ? el('span', { class: 'q' }, c.quote) : null);
+            const tell = () => ro.replaceChildren(el('b', {}, fmtD(Wk[ci])), ` · ${row.label}`,
+                reportOf(Wk[ci]) ? reportBlock(reportOf(Wk[ci]), c.span) : c.quote ? reportBlock(c.quote) : null);
             dot.addEventListener('pointerenter', tell); dot.addEventListener('click', tell);
             svg.appendChild(dot); lit.push(dot);
         });
@@ -508,7 +523,7 @@ function sceneTopics(box) {
             t.category, el('small', {}, t.weeks ? `${t.weeks} שב׳` : 'בעמודה'));
         s.addEventListener('click', () => {
             sky.querySelectorAll('.star.sel').forEach(x => x.classList.remove('sel')); s.classList.add('sel');
-            ro.replaceChildren(el('b', {}, t.category), ` · ${t.source && /^\d{4}-/.test(t.source) ? fmtD(t.source) : (t.source || '')}`, el('span', { class: 'q' }, t.quote));
+            ro.replaceChildren(el('b', {}, t.category), ` · ${t.source && /^\d{4}-/.test(t.source) ? fmtD(t.source) : (t.source || '')}`, t.source && reportOf(t.source) ? reportBlock(reportOf(t.source), t.span) : reportBlock(t.quote));
             anim(s, { scale: [1, 1.15, 1] }, { duration: .5 });
         });
         sky.appendChild(s); return s;

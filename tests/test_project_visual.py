@@ -200,3 +200,22 @@ def test_quotes_never_cut_a_word_in_half():
     c = _clip(t, 60)
     assert c.endswith("…") and c[:-1].split()[-1] in words and len(c) <= 61
     assert _clip("קצר", 60) == "קצר"
+
+
+def test_readouts_get_the_whole_report_and_the_matched_span():
+    # user 2026-10-24: a "…18/2 …" fragment read as broken — show the full report, mark the match
+    h, d = _data()
+    weekly = {w["week"]: w["text"] for w in h["weekly"] if w["text"]}
+    assert d["weekly_texts"] == weekly
+    for row in d["matrix"]["rows"]:
+        for week, c in zip(d["matrix"]["weeks"], row["cells"]):
+            if c["hit"] and row["kind"] == "topic":
+                a, b = c["span"]
+                assert 0 <= a < b <= len(weekly[week])
+                assert weekly[week][a:b] in c["quote"]                  # the mark lies inside the engine's quote
+    for t in d["topics"]:
+        if t["span"]:
+            a, b = t["span"]
+            assert re.search(pt.RISK_CATEGORIES[t["category"]], weekly[t["source"]][a:b])
+    js = open("app/templates/_project_visual.js", encoding="utf-8").read()
+    assert "reportBlock(" in js and "Array.from(full)" in js

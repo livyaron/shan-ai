@@ -16,6 +16,7 @@ from datetime import date
 
 from app.services import project_chart
 from app.services.il_format import il_dates
+from app.services.pattern_service import RISK_CATEGORIES
 
 LEVEL_ORDER = ("high", "medium", "info")
 QUOTE_CHARS = 180
@@ -186,11 +187,15 @@ def build(h: dict, delay: dict | None, matrix: dict | None,
         lv = {"key": triage["level"], "icon": meta.get("icon"), "label": meta.get("label"),
               "owner": meta.get("owner"), "when": meta.get("when"),
               "reasons": [il_dates(x["text"]) for x in triage.get("reasons") or []]}
+    weekly_by = {w["week"]: w["text"] for w in h.get("weekly") or [] if w.get("text")}
     topics = []
     for t in h.get("topics") or []:
         ev = (t.get("evidence") or [{}])[0]
         q = ev.get("quote") or ""
+        full = weekly_by.get(ev.get("source") or "")
+        m = re.search(RISK_CATEGORIES[t["category"]], full) if full and t["category"] in RISK_CATEGORIES else None
         topics.append({"category": t["category"], "weeks": t["weeks"], "source": ev.get("source"),
+                       "span": [m.start(), m.end()] if m else None,
                        "quote": il_dates(project_chart._clip(q, QUOTE_CHARS))})
     peers = h.get("peers") or None
     return {
@@ -212,5 +217,9 @@ def build(h: dict, delay: dict | None, matrix: dict | None,
                            h.get("name"), h.get("project_type")),
         "delay": delay, "matrix": matrix,
         "weekly_n": len(h.get("weekly") or []),
+        # every weekly report in full, by week (ISO): the readouts show the
+        # whole report with the matched words highlighted, never a "…" fragment
+        # (user 2026-10-24: a fragment opening "…18/2" read as broken text)
+        "weekly_texts": weekly_by,
         "repeats": sum(bool(w.get("same_as_before")) for w in h.get("weekly") or []),
     }

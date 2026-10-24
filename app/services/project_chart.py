@@ -116,7 +116,8 @@ def risk_matrix(h: dict) -> dict | None:
         cells = []
         for w in weekly:
             m = re.search(pat, w["text"] or "")
-            cells.append({"hit": bool(m), "quote": _snippet(w["text"], m) if m else None})
+            cells.append({"hit": bool(m), "quote": _snippet(w["text"], m) if m else None,
+                          "span": [m.start(), m.end()] if m else None})   # the matched words, in the week's text
         if any(c["hit"] for c in cells):
             rows.append({"label": cat, "kind": "topic", "cells": cells, "weeks": sum(c["hit"] for c in cells)})
     rows.sort(key=lambda r: -r["weeks"])
