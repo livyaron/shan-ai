@@ -45,6 +45,25 @@ STAGE_SECTORS: dict[str, tuple[str, ...]] = {
 }
 
 
+# The order a projects screen lists the stages in (user, 2026-10-24: "תכולה,
+# תצורה, תכנון, היתר, בחירת קבלן, לקראת ביצוע, אזרחית…"). Display only —
+# STAGE_RANK below is the ladder the contradiction check reads. The
+# energy-storage agreement is not a step on this road and is shown apart.
+STAGE_ORDER: tuple[str, ...] = (
+    "הקפאת תכולה", "הקפאת תצורה", "תכנון", "קבלת היתר", "בחירת קבלן", "לקראת ביצוע",
+    "עבודה אזרחית", "עבודה אזרחית והרכבות", "הרכבה חשמלית", "הרכבה חשמלית ובדיקות",
+    "בדיקות", "טופס 4",
+)
+ENERGY_STORAGE = "הסכם- אגירת אנרגיה"
+MOBILE_TYPE = "ניידות"   # the file's project type: mobile substations, shown apart
+
+
+def stage_sort_key(stage: str) -> tuple[int, str]:
+    """STAGE_ORDER first; a stage off it (unseen, ללא סטטוס) after, by name."""
+    s = normalize_stage(stage)
+    return (STAGE_ORDER.index(s), "") if s in STAGE_ORDER else (len(STAGE_ORDER), s)
+
+
 # The order a project moves through (same rank = parallel names for one step).
 # Used only to notice a stage the weekly report has already left behind;
 # stages off the ladder (הסכם- אגירת אנרגיה, הסתיים, empty) are never checked.

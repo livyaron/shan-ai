@@ -341,3 +341,28 @@ def test_zoom_shell_never_covers_the_navbar():
     assert "inset: var(--nav-h, 50px) 0 0 0" in html
     assert "--nav-h" in html and "zmNavH()" in html
     assert "body.zoomed .shan-nav { z-index: 1050; }" in html
+
+
+def test_stage_bars_follow_the_road_with_storage_and_mobile_apart():
+    """User, 2026-10-24: stages in the road's order (not by count); the
+    energy-storage agreements and the ניידות projects are shown apart."""
+    from app.services import project_kpis as pk
+    from app.services import stage_sectors as ss
+    rows = [{"stage": st, "sectors": [], "project_type": t} for st, t in [
+        ("תכנון", "הקמה"), ("תכנון", "הקמה"), ("תכנון", "הקמה"), ("טופס 4", "הרחבה"),
+        ("הקפאת תכולה", "הקמה"), ("בחירת קבלן", "הקמה"), ("ללא סטטוס", "הקמה"),
+        ("הסכם- אגירת אנרגיה", "הקמה"), ("בדיקות", "ניידות"), ("תכנון", "ניידות")]]
+    b = pk.board(rows, None)
+    assert [r[0] for r in b["stages"]] == ["הקפאת תכולה", "תכנון", "בחירת קבלן", "טופס 4", "ללא סטטוס"]
+    assert [r[:2] for r in b["stages_storage"]] == [["הסכם- אגירת אנרגיה", 1]]
+    assert [r[:2] for r in b["stages_mobile"]] == [["תכנון", 1], ["בדיקות", 1]]
+    groups = ("stages", "stages_storage", "stages_mobile")
+    assert sum(r[1] for g in groups for r in b[g]) == b["active"]
+    # every bar opens a list of exactly as many projects as it shows
+    for g in groups:
+        for st, n, key in b[g]:
+            label, _, items = pk.rows_for(key, rows, None)
+            assert len(items) == n and all(x["stage"] == st for x in items), key
+    assert pk.rows_for("stage:nope:תכנון", rows, None) is None
+    # every stage the sector map knows is either on the road or the storage agreement
+    assert set(ss.STAGE_SECTORS) == set(ss.STAGE_ORDER) | {ss.ENERGY_STORAGE}

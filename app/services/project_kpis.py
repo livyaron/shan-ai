@@ -55,6 +55,12 @@ def rows_for(key: str, rows: list[dict], as_of: str | None, exec_payload: dict |
     if key in ENGINE_KPIS:
         label, help_, test = ENGINE_KPIS[key]
         return label, help_, [x for x in rows if test(x, as_of)]
+    if key.startswith(STAGE_PREFIX):   # a stage bar: stage:<group>:<stage>
+        group, _, stage = key[len(STAGE_PREFIX):].partition(":")
+        if group in STAGE_GROUPS:
+            return (f"{STAGE_GROUPS[group]} · {stage}", "הפרויקטים הפעילים שזה השלב הנוכחי שלהם בקובץ",
+                    [x for x in rows if stage_group(x) == group and x["stage"] == stage])
+        return None
     if key.startswith(FILE_PREFIX) and key[len(FILE_PREFIX):].isdigit():
         kpis = _file_kpis(exec_payload)
         i = int(key[len(FILE_PREFIX):])
@@ -64,6 +70,30 @@ def rows_for(key: str, rows: list[dict], as_of: str | None, exec_payload: dict |
                     "נספר מחדש על הפרויקטים הפעילים בלבד",
                     [x for x in rows if x["identifier"] in ids])
     return None
+
+
+STAGE_PREFIX = "stage:"
+# the three stage breakdowns (user, 2026-10-24): the substation road in its
+# order, and apart from it the energy-storage agreements and the ניידות
+STAGE_GROUPS = {"road": "לפי שלב", "storage": "הסכם אגירת אנרגיה", "mobile": "ניידות"}
+
+
+def stage_group(x: dict) -> str:
+    """Which stage breakdown a project row is counted in — the bar and its list both ask."""
+    if (x.get("project_type") or "").strip() == stage_sectors.MOBILE_TYPE:
+        return "mobile"
+    if stage_sectors.normalize_stage(x["stage"]) == stage_sectors.ENERGY_STORAGE:
+        return "storage"
+    return "road"
+
+
+def stage_key(group: str, stage: str) -> str:
+    return f"{STAGE_PREFIX}{group}:{stage}"
+
+
+def _ordered(counts: dict[str, int], group: str) -> list[list]:
+    return [[st, n, stage_key(group, st)]
+            for st, n in sorted(counts.items(), key=lambda kv: stage_sectors.stage_sort_key(kv[0]))]
 
 
 def board(rows: list[dict], as_of: str | None, exec_payload: dict | None = None,
@@ -85,9 +115,10 @@ def board(rows: list[dict], as_of: str | None, exec_payload: dict | None = None,
               "count": sum(1 for x in rows if test(x, as_of))}
              for key, (label, help_, test) in ENGINE_KPIS.items()]
     sectors = {k: 0 for k in stage_sectors.SECTORS}
-    stages: dict[str, int] = {}
+    stages: dict[str, dict[str, int]] = {g: {} for g in STAGE_GROUPS}
     for x in rows:
-        stages[x["stage"]] = stages.get(x["stage"], 0) + 1
+        g = stage_group(x)
+        stages[g][x["stage"]] = stages[g].get(x["stage"], 0) + 1
         for s in x.get("sectors") or []:
             if s in sectors:
                 sectors[s] += 1
@@ -100,5 +131,8 @@ def board(rows: list[dict], as_of: str | None, exec_payload: dict | None = None,
         "cards": cards,
         # per-sector, never summed: one stage belongs to two sectors
         "sectors": [[k, label, sectors[k]] for k, label in stage_sectors.SECTORS.items() if sectors[k]],
-        "stages": sorted(stages.items(), key=lambda kv: -kv[1]),
+        # [stage, count, key of its list] — a bar is a link to /kpi/<key>
+        "stages": _ordered(stages["road"], "road"),
+        "stages_storage": _ordered(stages["storage"], "storage"),
+        "stages_mobile": _ordered(stages["mobile"], "mobile"),
     }

@@ -570,6 +570,7 @@ def _project_rows(cur: pd.DataFrame, stale: set) -> list[dict]:
         rows.append({
             "identifier": r.identifier, "name": r.name, "manager": r.manager,
             "stage": r.stage or "ללא סטטוס", "sectors": list(r.sectors),
+            "project_type": r.project_type if isinstance(r.project_type, str) else None,
             "slip_months": months(r.slip_days),
             "forecast_moved_months": months(r.fc_drift),
             "baseline_moved_months": months(r.dev_drift),

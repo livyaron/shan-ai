@@ -253,7 +253,9 @@
         .sb-empty { color: var(--t2); font-size: .9rem; text-align: center; padding: 30px 0; }
 
         /* roles */
-        .sb-role { margin-bottom: 14px; }
+        .sb-role { margin-bottom: 14px; display: block; color: inherit; text-decoration: none; }
+        a.sb-role { border-radius: 6px; cursor: pointer; }
+        a.sb-role:hover .sb-role-hd span, a.sb-role:focus-visible .sb-role-hd span { color: var(--volt); text-decoration: underline; }
         .sb-role-hd { display: flex; justify-content: space-between; margin-bottom: 6px; font-size: .95rem; color: var(--t1); }
         .sb-role-hd b { font-family: var(--mono); color: var(--volt); }
         .sb-role-bar { height: 6px; background: #0a1320; border-radius: 3px; overflow: hidden; }
@@ -859,6 +861,10 @@
             <div class="sb-panel"><h3>לפי מגזר (לפי השלב)</h3><div class="sb-donut-wrap"><svg class="sb-donut" id="zm-d-sector" viewBox="0 0 132 132" role="img" aria-label="פרויקטים לפי מגזר"></svg><div class="sb-legend" id="zm-l-sector"></div></div></div>
             <div class="sb-panel"><h3>לפי שלב</h3><div id="zm-b-stages"></div></div>
         </div>
+        <div class="sb-charts two">
+            <div class="sb-panel" id="zm-p-storage" hidden><h3>הסכם אגירת אנרגיה</h3><div id="zm-b-storage"></div></div>
+            <div class="sb-panel" id="zm-p-mobile" hidden><h3>ניידות (לפי שלב)</h3><div id="zm-b-mobile"></div></div>
+        </div>
         <div class="zv-foot"><a class="sb-btn" href="/dashboard/projects/insights">🧠 דפוסים וסיכונים</a><a class="sb-btn primary" href="/dashboard/projects">לכל הפרויקטים ←</a></div>
     {% else %}<div class="sb-empty">התחנה לא זמינה כרגע</div>{% endif %}
     </section>
@@ -1336,14 +1342,17 @@ const toDict = (rows, tones) => Object.fromEntries(rows.map(r => [r[0], [r[1], t
 const toData = rows => Object.fromEntries(rows.map(r => [r[0], r[2]]));
 
 /* horizontal bars (owners, stages, categories) — text goes in as textContent */
-function stBars(id, rows) {   // the view's entrance grows the bars
+function stBars(id, rows, href) {   // the view's entrance grows the bars; href(row) makes a row a link
     const box = document.getElementById(id);
     if (!box) return;
     box.replaceChildren();
     if (!rows || !rows.length) { box.innerHTML = '<div class="sb-empty">אין נתונים עדיין</div>'; return; }
     const max = Math.max(1, ...rows.map(r => r[1]));
-    rows.forEach(([label, n]) => {
-        const row = document.createElement('div'); row.className = 'sb-role';
+    rows.forEach(r => {
+        const [label, n] = r;
+        const url = href && href(r);
+        const row = document.createElement(url ? 'a' : 'div'); row.className = 'sb-role';
+        if (url) row.href = url;
         const hd = document.createElement('div'); hd.className = 'sb-role-hd';
         const nm = document.createElement('span'); nm.textContent = label || '—';
         const v = document.createElement('b'); v.textContent = n;
@@ -1370,7 +1379,14 @@ const STATION_DRAW = {
         const s = stOf('projects'); if (!s.ok) return;
         // the centre is the active count, never the sector sum (one stage sits in two sectors)
         sbDonut('zm-d-sector', 'zm-l-sector', toData(s.sectors), toDict(s.sectors, SECTOR_TONE), null, a, s.active);
-        stBars('zm-b-stages', s.stages);
+        // in the road's order, never by count; every bar opens its list (user, 2026-10-24)
+        const toList = r => '/dashboard/projects/kpi/' + encodeURIComponent(r[2]) + (SB_SCOPE === 'mine' ? '?scope=mine' : '');
+        stBars('zm-b-stages', s.stages, toList);
+        [['storage', s.stages_storage], ['mobile', s.stages_mobile]].forEach(([k, rows]) => {
+            const panel = document.getElementById('zm-p-' + k);
+            if (panel) panel.hidden = !(rows && rows.length);
+            if (rows && rows.length) stBars('zm-b-' + k, rows, toList);
+        });
     },
     lessons(a) {
         const s = stOf('lessons'); if (!s.ok) return;
