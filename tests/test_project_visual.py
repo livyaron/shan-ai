@@ -137,10 +137,12 @@ def test_station_type_picks_the_model_and_says_why():
 
 def test_gis_station_draws_every_layer_and_only_draws():
     from pathlib import Path
-    js = Path("static/js/gis_station.js").read_text()
-    for k in pv.TWIN_LAYERS:
-        assert f"'{k}'" in js
-    assert "innerHTML" not in js and "fetch(" not in js and "textContent" not in js   # geometry only, no text, no network
+    kit = Path("static/js/station_kit.js").read_text()
+    for name in ("gis_station.js", "mobile_station.js"):
+        js = Path("static/js", name).read_text() + kit      # the kit draws the bushings for both
+        for k in pv.TWIN_LAYERS:
+            assert f"'{k}'" in js, (name, k)
+        assert "innerHTML" not in js and "fetch(" not in js and "textContent" not in js   # geometry only, no text, no network
     twin = Path("static/js/substation_twin.js").read_text()
     assert "/static/js/gis_station.js" in twin and all(f"{k}:" in twin for k in pv.TWIN_MODELS)
 
