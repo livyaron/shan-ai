@@ -1,0 +1,17 @@
+---
+paths:
+  - "app/services/project_visual.py"
+  - "app/templates/project_visual.html"
+  - "app/templates/_project_visual.js"
+  - "static/js/substation_twin.js"
+  - "static/js/gis_station.js"
+  - "static/js/mobile_station.js"
+  - "static/js/station_kit.js"
+  - "static/models/**"
+  - "tests/test_project_visual.py"
+---
+# Visual report + digital twin
+
+<!-- Moved verbatim from the root CLAUDE.md on 2026-10-26. Loads only when Claude touches a matching file. -->
+
+- **דוח ויזואלי + תאום דיגיטלי (2026-10-24):** `GET /dashboard/projects/p/<id>/visual` (button ✨ in the project page's risk card, same access gate; route declared BEFORE the page route — `{identifier:path}` would swallow `/visual`, a test holds it). `app/services/project_visual.build` only re-shapes the page's own data — no new number. The 3D scene draws `static/models/substation.glb` (a Sketchfab SAMPLE, "substation-bimfra" — illustration only, never the project's station; one mesh per layer, built from the 290MB OBJ: merged materials → meshopt, 15% triangles, ~1.2MB) via `static/js/substation_twin.js` (three@0.169.0 from the page's import map, loaded only when the scene is reached). Beside it: the FILE'S stage ladder (user decision 2026-10-24 — never technical layer names): `project_visual._STEP_LAYERS` (layers done/active/todo per step) + `TWIN_CAPTIONS` (one plain sentence per step, per model) are the only place a step's look is defined, steps only ever build forward (tested); **three models** (user 2026-10-24): `ais` = the GLB, `gis` = a closed 161kV 8-bay GIS station and `mobile` = a two-trailer 161kV mobile substation (no tractor on site; two poles with SQUARE three-phase house transformers), both drawn in code (`static/js/gis_station.js`, `mobile_station.js`) with the shared `static/js/station_kit.js` — merged meshes named by layer; no downloadable model exists under a usable licence. Every drawn station gets the IEC **Yehuda fence** (`kit.fence`: 2.6 m mesh, 45° OUTWARD arm, barbed strands) and a double entrance gate. Changes to these models are shown to the user as screenshots BEFORE they go to master (user 2026-10-24). The model = `project_visual.station_model(station_type, name)`: the PM's `station_type` in the lessons module (`project_lessons.station_type`, admin link only, best-effort) — closed→gis, open→ais, mobile_substation→mobile; switching/combined are read from the project NAME first (סגורה/סגור/GIS → gis, פתוחה/פתוח/AIS → ais), silent name → switching=gis, combined=ais; no type chosen → mobile when the name says ניידת/ניידות or the file's project type is ניידות (those never reach the lessons module), else `DEFAULT_MODEL` (open — user 2026-10-24); the panel prints `model_why`; the viewer can switch; the project's step = `stage_sectors.STAGE_RANK` (הסתיים = last, energized); a stage off the ladder marks no step. Click a step = preview, ▶ = play from תכנון to the project's step. **Readouts never show a "…" fragment** (user 2026-10-24: "…18/2 …" read as broken): the payload carries `weekly_texts` (every report in full) and each matrix cell / topic its `span` (the engine regex's match, in code points); the page shows the WHOLE report with only the match `<mark>`ed (`reportBlock`, RLM-anchored). `_snippet`/`project_chart._clip` cut at spaces, never mid-word. Licence: CC BY 4.0 (user, 2026-10-24) — the credit line under the scene (title · source · licence · changes) must stay wherever the model is shown.
