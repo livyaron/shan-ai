@@ -9,6 +9,8 @@ paths:
 
 <!-- Moved verbatim from the root CLAUDE.md on 2026-10-26. Loads only when Claude touches a matching file. -->
 
+**The fixes below are NOT needed on a fresh, empty DB** (checked 2026-10-26): `telegram_id` is `BigInteger`, and `is_relevant`/`irrelevant_*`, `judged_against_gold`, `failed_questions`, `last_live_*` and `VIEWER` are all in `app/models.py`, so `create_all` creates them. They matter only when an **existing** table predates them — e.g. restoring an old dump. Production already has them.
+
 `Base.metadata.create_all` creates missing tables at startup but never alters an existing one, so every new column on an existing table is an `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` in `app/main.py` startup (or run once on the Railway DB).
 
 - **No local database, anywhere (user instruction 2026-09-26).** Not Docker, and not a throwaway Postgres inside a remote session either. Verify logic with the synthetic-frame tests; real-data checks happen in production only.
