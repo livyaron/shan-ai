@@ -29,7 +29,7 @@ Maintainer notes (stripped before Claude sees this file — they cost no tokens)
 ## How to work
 - Never lie, never guess, always verify — run the check, show the output. If a fact is uncertain, say so.
 - Minimal diffs: targeted edits, never rewrite a whole file. Match the surrounding code's naming and comment density.
-- Terse output: no flattery, no "I understand". Code, diffs and the technical notes that matter.
+- Terse output: lead with the code, diffs and the technical notes that matter; skip acknowledgements and praise.
 - Tests use synthetic frames/fixtures. Pure functions are the norm: a module's DB access lives in one loader, the rest is pure and tested.
 - Mandatory type hints; strict Pydantic v2 schemas.
 - **Single source of truth:** most domains have exactly one module that defines a concept (statuses, KPIs, stages, access, styles…). Never re-spell a key, threshold or where-clause in a template or router — import it. The domain rule file names the module.
