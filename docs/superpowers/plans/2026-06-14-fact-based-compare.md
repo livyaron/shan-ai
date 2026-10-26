@@ -170,7 +170,7 @@ curl -s -m 20 -b /tmp/rw.txt "$URL/dashboard/quality/data" | python -c "import s
 ```
 Spot-check the previously-false-negative questions:
 ```bash
-docker exec shan-ai-postgres psql "postgresql://shan_user:shan_secure_pass_2025@interchange.proxy.rlwy.net:15720/shan_ai" -c "SELECT question, last_live_verdict FROM eval_gold_answers WHERE question IN ('עתלית','בת ים','WBE-178','חולה');"
+docker exec shan-ai-postgres psql "$RAILWAY_DATABASE_URL" -c "SELECT question, last_live_verdict FROM eval_gold_answers WHERE question IN ('עתלית','בת ים','WBE-178','חולה');"
 ```
 Expected: עתלית/בת ים/WBE-178 now PASS.
 

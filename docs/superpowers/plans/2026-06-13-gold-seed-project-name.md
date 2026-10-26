@@ -239,7 +239,7 @@ curl -s -m 15 -c /tmp/rw.txt -o /dev/null -w "login:%{http_code}\n" -X POST "$UR
 ```bash
 URL="https://shan-ai.up.railway.app"
 curl -s -m 120 -b /tmp/rw.txt -X POST "$URL/dashboard/eval/gold/seed-from-production"
-docker exec shan-ai-postgres psql "postgresql://shan_user:shan_secure_pass_2025@interchange.proxy.rlwy.net:15720/shan_ai" -c "SELECT source, count(*) FROM eval_gold_answers GROUP BY 1;"
+docker exec shan-ai-postgres psql "$RAILWAY_DATABASE_URL" -c "SELECT source, count(*) FROM eval_gold_answers GROUP BY 1;"
 ```
 Expected: `seeded` now far higher than 6 (project-name questions); total gold ≥ 50. (If the Railway psql DNS hiccups, read counts via the dashboard `/quality/distinct` `gold_total` instead.)
 

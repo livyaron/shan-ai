@@ -132,14 +132,14 @@ curl -s -X POST "https://backboard.railway.app/graphql/v2" -H "Authorization: Be
 
 After the new build is live (~2-3 min; confirm app up):
 ```bash
-docker exec shan-ai-postgres psql "postgresql://shan_user:shan_secure_pass_2025@interchange.proxy.rlwy.net:15720/shan_ai" -c "DELETE FROM eval_gold_answers WHERE source IN ('db_lookup','auto_user_confirmed');"
+docker exec shan-ai-postgres psql "$RAILWAY_DATABASE_URL" -c "DELETE FROM eval_gold_answers WHERE source IN ('db_lookup','auto_user_confirmed');"
 URL="https://shan-ai.up.railway.app"
 curl -s -m 15 -c /tmp/rw.txt -o /dev/null -X POST "$URL/login" -d "user_id=3&password=1234"
 curl -s -m 150 -b /tmp/rw.txt -X POST "$URL/dashboard/eval/gold/seed-from-production"
 ```
 Expected: re-seed `seeded` count similar to before (~47); gold now identity-line. Spot-check one:
 ```bash
-docker exec shan-ai-postgres psql "postgresql://shan_user:shan_secure_pass_2025@interchange.proxy.rlwy.net:15720/shan_ai" -tAc "SELECT left(gold_answer,80) FROM eval_gold_answers WHERE question='חולה';"
+docker exec shan-ai-postgres psql "$RAILWAY_DATABASE_URL" -tAc "SELECT left(gold_answer,80) FROM eval_gold_answers WHERE question='חולה';"
 ```
 Expected: an identity line (id | name | מנה"פ | שלב), no `📁` card header.
 
