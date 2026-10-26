@@ -123,11 +123,13 @@ Verify output ~700KB–1.5MB. If much smaller, render failed — abort, restore 
 
 ### Step 7: Sync the static copy
 
+**Skip this step unless the owner asks for it.** Since 2026-05-16 the login page links to a video, not the PDF, and the owner chose (2026-10-26, v2.0) not to serve the manual at a public, login-free `/static/manual.pdf`. Only if asked:
+
 ```bash
 cp docs/manual/manual.pdf static/manual.pdf
 ```
 
-The login page serves `/static/manual.pdf`. Without this copy, the download link still points to the previous version.
+Rendering in a remote session: `render_pdf.sh` needs Docker, which is off-limits there — render with the pre-installed Playwright Chromium instead (`page.pdf`, A4, `printBackground: true`, no extra footer: the HTML's `@page` already numbers pages), then fill the TOC page numbers (`.page-num[data-ch]`) from a first pass and render again.
 
 ### Step 8: Bump the version tag
 
