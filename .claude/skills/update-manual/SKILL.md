@@ -165,6 +165,11 @@ git tag "$NEW_TAG"
 git push origin master --tags
 ```
 
+A cloud session cannot push tags (the git proxy refuses `refs/tags`). There, push `master` only, then
+create the tag with the owner-approved `manual-tag` workflow (`.github/workflows/manual-tag.yml`):
+GitHub MCP `actions_run_trigger` → `run_workflow`, workflow `manual-tag.yml`, ref `master`,
+inputs `{"tag": "$NEW_TAG", "sha": "<the manual commit>"}`. Then check `git ls-remote --tags origin`.
+
 ### Step 10: Report
 
 Output a 4-line summary:

@@ -1,0 +1,40 @@
+# Create a user-manual-v* tag on GitHub's side (owner-approved 2026-10-26).
+# Cloud Claude sessions cannot push tags (the git proxy refuses refs/tags), and
+# the update-manual skill needs the tag as its next diff baseline. Run manually
+# (Actions → manual-tag → Run workflow) or via the GitHub API.
+name: manual-tag
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag name, e.g. user-manual-v2.0"
+        required: true
+      sha:
+        description: "Commit to tag (full or short SHA on master)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Create and push the tag
+        env:
+          TAG: ${{ inputs.tag }}
+          SHA: ${{ inputs.sha }}
+        run: |
+          set -eu
+          case "$TAG" in user-manual-v[0-9]*.[0-9]*) ;; *) echo "only user-manual-vX.Y tags"; exit 1;; esac
+          git merge-base --is-ancestor "$SHA" origin/master || { echo "$SHA is not on master"; exit 1; }
+          if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then echo "$TAG already exists"; exit 1; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" "$SHA" -m "User manual ${TAG#user-manual-}"
+          git push origin "refs/tags/$TAG"
+          echo "tagged $(git rev-parse --short=12 "$SHA") as $TAG"
