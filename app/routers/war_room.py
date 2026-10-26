@@ -112,9 +112,12 @@ async def war_room_page(
     kpi: str = "",
     style: str | None = None,
     tv: int = 0,
+    new: int = 0,
 ):
     today = oms.today_il()
     active_style = wrs.resolve(style, current_user.war_room_style)
+    if new:
+        active_style = wrs.resolve_for_create(active_style)
     active_kpi = kpis.resolve(kpi)
 
     base = select(Mission).options(

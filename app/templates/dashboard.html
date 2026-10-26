@@ -396,6 +396,7 @@
         .zm-surge { position: absolute; top: 0; right: 0; left: 0; height: 3px; z-index: 3; background: linear-gradient(90deg, transparent, var(--zacc), #fff, var(--zacc), transparent); box-shadow: 0 0 24px var(--zacc); transform: scaleX(0); pointer-events: none; }
         .zm-body { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 22px 24px 40px; }
         .zv[hidden] { display: none; }
+        .zv-new { display: flex; gap: 10px; justify-content: flex-start; margin-bottom: 14px; flex-wrap: wrap; position: relative; z-index: 1; }
         .zv-foot { display: flex; gap: 10px; justify-content: flex-end; margin-top: 18px; flex-wrap: wrap; }
         .zv-key { font-size: .86rem; color: var(--t2); margin-inline-start: 8px; }
         .zv-key i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin: 0 8px 0 4px; }
@@ -528,6 +529,9 @@
     {% for key, label in scope_labels.items() %}<a role="radio" href="?scope={{ key }}" data-scope="{{ key }}" class="{{ 'on' if scope == key else '' }}" aria-checked="{{ 'true' if scope == key else 'false' }}">{{ '👤' if key == 'mine' else '🏢' }} {{ label }}</a>{% endfor %}
     <i class="sc-pill"></i>
 </div>{% endmacro %}
+{# The three create entry points — each page opens its own create form from these URLs. #}
+{% set new_links = {'decisions': ('/dashboard/decisions?new=1', 'החלטה חדשה'), 'missions': ('/dashboard/war-room?new=1', 'משימה חדשה'), 'lessons': ('/lessons/m/new', 'לקח חדש')} %}
+{% macro new_btns(kinds) %}<div class="zv-new">{% for k in kinds %}<a class="sb-btn{{ ' primary' if loop.first else '' }}" href="{{ new_links[k][0] }}">➕ {{ new_links[k][1] }}</a>{% endfor %}</div>{% endmacro %}
 {% set own_q = ('owner=' ~ current_user.id ~ '&') if scope == 'mine' else '' %}{% set ms = stations.missions %}{% set ps = stations.projects %}{% set ex = ps.exec if ps.ok else none %}{% set kq = '?scope=mine' if scope == 'mine' else '' %}{% set ls = stations.lessons %}
 <div class="container-fluid py-4 px-4 sb" id="sb">
 
@@ -547,7 +551,7 @@
                 {{ scope_switch() }}
                 <button type="button" class="sb-btn" id="sb-bg-toggle" aria-pressed="true" title="הפעלה/כיבוי של רקע התחנה החי">⚡ רקע חי</button>
                 <button type="button" class="sb-btn" onclick="openDashboardAI()">◈ ניתוח AI</button>
-                <a href="/dashboard/decisions?new=1" class="sb-btn primary">➕ החלטה חדשה</a>
+                {% for k, (href, label) in new_links.items() %}<a href="{{ href }}" class="sb-btn{{ ' primary' if loop.first else '' }}">➕ {{ label }}</a>{% endfor %}
             </div>
         </div>
     </div>
@@ -637,6 +641,7 @@
     <!-- ── החלטות: the original dashboard, unchanged ── -->
     <section class="zv" data-view="decisions" data-title="החלטות · {{ 'כל האגף' if decisions_all else 'שלי' }}" hidden>
         <canvas class="zv-scene" data-scene="scope" aria-hidden="true"></canvas>
+        {{ new_btns(['decisions']) }}
     {% if recent_decisions %}
     <div class="sb-ticker" aria-label="החלטות אחרונות">
         <div class="track">
@@ -765,6 +770,7 @@
     <!-- ── משימות ── -->
     <section class="zv" data-view="missions" data-title="חדר מבצעים · {{ 'המשימות שלי' if scope == 'mine' else 'כל האגף' }}" hidden>
         <canvas class="zv-scene" data-scene="breaker" aria-hidden="true"></canvas>
+        {{ new_btns(['missions']) }}
     {% if ms.ok %}
         <div class="sb-bus-label"><span>פס צבירה · חדר מבצעים</span><span>נפתחו <b>{{ ms.daily_data | sum }}</b> · נסגרו <b>{{ ms.daily_done | sum }}</b> ב-7 ימים</span></div>
         <div class="sb-busbar zv-bus"></div>
@@ -821,6 +827,7 @@
     <!-- ── פרויקטים ── -->
     <section class="zv" data-view="projects" data-title="פרויקטים · {{ 'בתחום שלי' if scope == 'mine' else 'כל האגף' }}" hidden>
         <canvas class="zv-scene" data-scene="xfmr" aria-hidden="true"></canvas>
+        {{ new_btns(['decisions', 'missions', 'lessons']) }}
     {% if ps.ok %}
         {# Cards only — every list is one click away (user, 2026-10-16). Every number is
            project_kpis over the patterns-page rows, and its list has exactly that many rows. #}
@@ -872,6 +879,7 @@
     <!-- ── לקחים ── -->
     <section class="zv" data-view="lessons" data-title="לקחים · {{ 'שלי' if scope == 'mine' else 'כל המערכת' }}" hidden>
         <canvas class="zv-scene" data-scene="globe" aria-hidden="true"></canvas>
+        {{ new_btns(['lessons']) }}
     {% if ls.ok %}
         <div class="sb-bus-label"><span>פס צבירה · לקחים</span><span><b>{{ ls.week_activity }}</b> פעולות בתהליך ב-7 ימים</span></div>
         <div class="sb-busbar zv-bus"></div>

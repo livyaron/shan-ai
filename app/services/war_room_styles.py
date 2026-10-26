@@ -25,6 +25,10 @@ _TEMPLATES = {
     "table": "war_room_table.html",
 }
 
+# Layouts without a create dialog (the wall is read-only). `?new=1` from the
+# dashboard lands on the default layout instead, so the dialog can open.
+NO_CREATE = {"wall"}
+
 STYLE_KEYS = [key for key, *_ in STYLES]
 STYLE_LABELS = {key: name for key, name, _ in STYLES}
 
@@ -45,6 +49,11 @@ def resolve(requested: str | None, saved: str | None) -> str:
     if is_known(saved):
         return saved  # type: ignore[return-value]
     return DEFAULT_STYLE
+
+
+def resolve_for_create(style: str) -> str:
+    """The layout to open when the request asks for the create dialog."""
+    return DEFAULT_STYLE if style in NO_CREATE else style
 
 
 def template_for(style: str) -> str:

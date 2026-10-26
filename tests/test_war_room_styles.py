@@ -444,3 +444,17 @@ def test_the_new_mission_marker_is_not_painted_on_every_card():
     missions in the fixture was opened inside the window."""
     for style in wrs.STYLE_KEYS:
         assert _render(style).count("🆕") == 1
+
+
+def test_create_request_never_lands_on_a_layout_without_the_dialog():
+    """?new=1 (the dashboard's "משימה חדשה") must reach a create dialog."""
+    for style in wrs.STYLE_KEYS:
+        target = wrs.resolve_for_create(style)
+        assert 'id="createDlg"' in _render(target), (style, target)
+    assert wrs.resolve_for_create("focus") == "focus"      # a layout with the dialog is kept
+
+
+@pytest.mark.parametrize("style", [s for s in wrs.STYLE_KEYS if s not in wrs.NO_CREATE])
+def test_new_param_opens_the_create_dialog(style):
+    html = _render(style)
+    assert "get('new') === '1'" in html and "openCreate();" in html

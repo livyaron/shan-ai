@@ -377,3 +377,15 @@ def test_every_sector_slice_opens_a_list_of_its_count(engine):
     for key, _label, n in b["sectors"]:
         assert len(pk.rows_for(f"sector:{key}", rows, None)[2]) == n, key
     assert pk.rows_for("sector:nope", rows, None) is None
+
+
+def test_each_view_opens_its_own_create_form_and_the_header_all_three():
+    links = {"decisions": "/dashboard/decisions?new=1", "missions": "/dashboard/war-room?new=1",
+             "lessons": "/lessons/m/new"}
+    html = _render({"missions": {"ok": False}, "projects": {"ok": False}, "lessons": {"ok": False}})
+    head = html.split('class="st-grid"')[0]
+    assert all(href in head for href in links.values())
+    views = dict(re.findall(r'data-view="(\w+)".*?<div class="zv-new">(.*?)</div>', html, re.S))
+    for key in ("decisions", "missions", "lessons"):
+        assert re.findall(r'href="([^"]+)"', views[key]) == [links[key]], key
+    assert set(re.findall(r'href="([^"]+)"', views["projects"])) == set(links.values())

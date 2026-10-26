@@ -336,4 +336,13 @@ async function openSummary(refresh){
 }
 const toast = document.getElementById('toast');
 if (toast) setTimeout(() => toast.remove(), 3500);
+// ?new=1 (the dashboard's "משימה חדשה") opens the create dialog once.
+if (new URLSearchParams(window.location.search).get('new') === '1') {
+  window.addEventListener('load', () => {
+    openCreate();
+    const u = new URL(window.location.href);
+    u.searchParams.delete('new');
+    history.replaceState(null, '', u.pathname + u.search);
+  });
+}
 </script>
