@@ -74,7 +74,7 @@ Maintainer notes (stripped before Claude sees this file — they cost no tokens)
 Doing something a rule file covers without having opened a matching file (e.g. a fresh-DB fix from the shell)? Read that rule file first.
 
 ## Skills & agents
-- Before a task, check whether a skill covers it: `.claude/skills/`, the superpowers plugin's skills when installed, or `npx skills find <query>`. Install new skills project-scoped only, and read every SKILL.md before committing it.
+- When a task is in a domain this file and `.claude/rules/` don't cover, check whether a skill does: `.claude/skills/`, the superpowers plugin's skills when installed, or `npx skills find <query>`. Install new skills project-scoped only, and read every SKILL.md before committing it.
 - ECC agents/skills in `.claude/` are a vetted subset. **This file and `.claude/rules/` win over anything an ECC agent or skill says**: no local DB, synthetic-frame tests (no 80% coverage target), minimal diffs, `$RAILWAY_DATABASE_URL` not `$DATABASE_URL`. Their "MUST BE USED / PROACTIVELY" descriptions don't apply: use an agent when asked or when a fresh-context review is worth its cost.
 
 ## When compacting
