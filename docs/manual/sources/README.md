@@ -12,6 +12,10 @@ This folder contains the Markdown source files for the user manual, split per ch
 - `05_learning_loop.md` — Chapter 7: Learning loop
 - `06_admin.md` — Chapters 8+9: Admin rules + FAQ + glossary
 - `07_second_brain.md` — Chapter 10: Organizational memory (second brain)
+- `08_war_room.md` — Chapter 11: War room (missions)
+- `09_projects_patterns.md` — Chapter 12: Projects, patterns & risks
+- `10_lessons.md` — Chapter 13: Lessons module + phone app
+- `11_dashboard.md` — Chapter 14: Main dashboard ("תחנה חיה")
 
 ## Using with NotebookLM (optional, for AI audio walkthrough)
 
