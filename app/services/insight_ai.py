@@ -66,7 +66,7 @@ def project_kind(identifier: str) -> str:
 # ── Pure helpers ───────────────────────────────────────────────────────────
 
 def _clean(t: object, limit: int | None = None) -> str:
-    """One line, gershayim instead of straight quotes (JSON safety, CLAUDE.md §5)."""
+    """One line, gershayim instead of straight quotes (JSON safety, CLAUDE.md, Hebrew & formatting)."""
     s = " ".join(str(t or "").split()).replace('"', "״")
     return s if limit is None or len(s) <= limit else s[:limit].rstrip() + "…"
 

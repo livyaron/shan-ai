@@ -81,7 +81,7 @@ def extract_remember_content(text: str) -> Optional[str]:
         content = content[2:].strip()
     if len(content) < 4:
         return None
-    # JSON safety — straight quotes break Groq prompts downstream (CLAUDE.md §5)
+    # JSON safety — straight quotes break Groq prompts downstream (CLAUDE.md, Hebrew & formatting)
     return content.replace('"', "״")
 
 

@@ -4,7 +4,6 @@ paths:
   - "deploy.sh"
   - "Dockerfile"
   - "railway.*"
-  - "app/routers/*health*"
   - "tests/test_health_provenance.py"
 ---
 # Deploy pipeline: full detail

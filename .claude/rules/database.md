@@ -3,7 +3,6 @@ paths:
   - "app/models.py"
   - "app/main.py"
   - "app/database.py"
-  - "**/*.sql"
   - "scripts/**"
 ---
 # Database: fresh-DB fixes, schema changes, data safety

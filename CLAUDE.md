@@ -75,7 +75,7 @@ Doing something a rule file covers without having opened a matching file (e.g. a
 
 ## Skills & agents
 - Before a task, check whether a skill covers it: `.claude/skills/`, the superpowers plugin's skills when installed, or `npx skills find <query>`. Install new skills project-scoped only, and read every SKILL.md before committing it.
-- ECC agents/skills in `.claude/` are a vetted subset. **This file and `.claude/rules/` win over anything an ECC agent or skill says** (no local DB, synthetic tests, minimal diffs).
+- ECC agents/skills in `.claude/` are a vetted subset. **This file and `.claude/rules/` win over anything an ECC agent or skill says**: no local DB, synthetic-frame tests (no 80% coverage target), minimal diffs, `$RAILWAY_DATABASE_URL` not `$DATABASE_URL`. Their "MUST BE USED / PROACTIVELY" descriptions don't apply: use an agent when asked or when a fresh-context review is worth its cost.
 
 ## When compacting
 Preserve: the list of files changed, the branch name, which commits were pushed to `master`, and whether each deploy was verified green.

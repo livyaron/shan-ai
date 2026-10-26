@@ -436,7 +436,7 @@ class ProjectReportSchedule(Base):
 
 
 class MissionStatusEnum(str, enum.Enum):
-    # Stored as VARCHAR (not PG enum) — see CLAUDE.md §4; never convert to a PG enum.
+    # Stored as VARCHAR (not PG enum) — see .claude/rules/missions-war-room.md; never convert to a PG enum.
     # open/closed only: the intermediate 'in_progress' is removed. Progress is
     # reported via MissionUpdate rows, not a status change. Legacy rows are
     # normalized to 'open' at startup (app/main.py).

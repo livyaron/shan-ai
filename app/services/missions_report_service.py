@@ -375,7 +375,7 @@ BUCKET_ORDER = ["באיחור", "היום", f"עד {AT_RISK_DAYS} ימים", "ה
 
 
 def _sanitize(text: str | None) -> str:
-    """Gershayim swap before any LLM call — straight quotes break the JSON reply (CLAUDE.md §5)."""
+    """Gershayim swap before any LLM call — straight quotes break the JSON reply (CLAUDE.md, Hebrew & formatting)."""
     if not text:
         return ""
     return text.replace('"', "״").replace("'", "׳")

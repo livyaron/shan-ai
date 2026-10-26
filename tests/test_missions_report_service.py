@@ -292,7 +292,7 @@ def test_focus_summary_plain_fallback_lists_buckets():
         "nodate": [],
     }
     text = mrs._format_at_risk_plain(groups, TODAY)
-    assert text.startswith("‏")  # RTL mark on the first line (CLAUDE.md §5)
+    assert text.startswith("‏")  # RTL mark on the first line (CLAUDE.md, Hebrew & formatting)
     assert "באיחור" in text
     assert "אינו זמין" in text
 
