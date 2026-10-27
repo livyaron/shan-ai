@@ -43,6 +43,7 @@ jobs:
             tests/test_dashboard_ai_analysis.py \
             tests/test_dashboard_live.py \
             tests/test_dashboard_stations.py \
+            tests/test_create_rights.py \
             tests/test_exec_summary.py \
             tests/test_contracts_sheet.py \
             tests/test_target_reading.py \

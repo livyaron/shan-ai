@@ -19,6 +19,7 @@ from app.database import get_db_session
 from app.models import Decision, User, DecisionTypeEnum, DecisionStatusEnum, RoleEnum, DecisionDistribution, DistributionTypeEnum, DistributionStatusEnum, DecisionFeedback, DecisionRaciRole, RaciRoleEnum, LessonLearned, Message, KnowledgeFile, QueryLog, RACISuggestion, RACISuggestionStatusEnum, RACIRule, ReportHistory, Mission, MissionUpdate, MissionDueChange
 from app.routers.login import get_current_user
 from app.services import dashboard_domains
+from app.services import user_access
 from app.config import settings as _cfg
 
 logger = logging.getLogger(__name__)
@@ -275,6 +276,7 @@ async def dashboard(
         "request": request,
         "current_user": current_user,
         "scope_labels": dashboard_domains.SCOPES,
+        "can_create": await dashboard_domains.create_rights(session, current_user),
         **stats,
     })
     # remembered per browser: the next visit opens on the same switch position
@@ -1315,6 +1317,12 @@ MEASURABILITY_LABELS = {
 }
 
 
+def _require_decision_writer(user: User) -> None:
+    """Creating a decision is blocked for viewer-role users (mirrors the Telegram rule)."""
+    if not user_access.can_write(user):
+        raise HTTPException(status_code=403, detail="יצירת החלטות אינה זמינה למשתמשי צפייה")
+
+
 @router.get("/decisions", response_class=HTMLResponse)
 async def decisions_page(
     request: Request,
@@ -1473,6 +1481,7 @@ async def decisions_page(
         "request": request,
         "current_user": current_user,
         "decisions": decisions,
+        "can_create": user_access.can_write(current_user),
         "users": users,
         "users_json": users_json,
         "type_labels": TYPE_LABELS_HE,
@@ -1497,6 +1506,7 @@ async def analyze_decision(
     current_user: User = Depends(get_current_user),
 ):
     """Pre-classify, then run AI analysis on a problem description and show a review page."""
+    _require_decision_writer(current_user)
     from app.services.claude_service import ClaudeService
     from app.services import embedding_service
 
@@ -1575,6 +1585,7 @@ async def confirm_decision(
     current_user: User = Depends(get_current_user),
 ):
     """Save a pre-analyzed decision after the user reviews and confirms it, including RACI assignments."""
+    _require_decision_writer(current_user)
     from app.models import DecisionRaciRole, RaciRoleEnum
 
     decision = Decision(
@@ -1974,6 +1985,7 @@ async def analyze_preview(
     Combined endpoint: Analyze decision + get RACI suggestions in one JSON response.
     For use by Dashboard modal — returns analysis results + RACI suggestions + all users.
     """
+    _require_decision_writer(current_user)
     from fastapi.responses import JSONResponse
     from app.services.claude_service import ClaudeService
     from app.services import embedding_service
@@ -2040,6 +2052,7 @@ async def suggest_raci_from_text(
     current_user: User = Depends(get_current_user),
 ):
     """Get AI RACI suggestions from free-text problem description (before decision is created)."""
+    _require_decision_writer(current_user)
     from fastapi.responses import JSONResponse
     from app.services.raci_service import get_ai_raci_suggestions_from_text
 

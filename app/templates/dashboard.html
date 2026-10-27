@@ -531,7 +531,8 @@
 </div>{% endmacro %}
 {# The three create entry points — each page opens its own create form from these URLs. #}
 {% set new_links = {'decisions': ('/dashboard/decisions?new=1', 'החלטה חדשה'), 'missions': ('/dashboard/war-room?new=1', 'משימה חדשה'), 'lessons': ('/lessons/m/new', 'לקח חדש')} %}
-{% macro new_btns(kinds) %}<div class="zv-new">{% for k in kinds %}<a class="sb-btn{{ ' primary' if loop.first else '' }}" href="{{ new_links[k][0] }}">➕ {{ new_links[k][1] }}</a>{% endfor %}</div>{% endmacro %}
+{# can_create = dashboard_domains.create_rights: no right, no button. #}
+{% macro new_btns(kinds) %}{% for k in kinds if can_create[k] %}{% if loop.first %}<div class="zv-new">{% endif %}<a class="sb-btn{{ ' primary' if loop.first else '' }}" href="{{ new_links[k][0] }}">➕ {{ new_links[k][1] }}</a>{% if loop.last %}</div>{% endif %}{% endfor %}{% endmacro %}
 {% set own_q = ('owner=' ~ current_user.id ~ '&') if scope == 'mine' else '' %}{% set ms = stations.missions %}{% set ps = stations.projects %}{% set ex = ps.exec if ps.ok else none %}{% set kq = '?scope=mine' if scope == 'mine' else '' %}{% set ls = stations.lessons %}
 <div class="container-fluid py-4 px-4 sb" id="sb">
 
@@ -551,7 +552,7 @@
                 {{ scope_switch() }}
                 <button type="button" class="sb-btn" id="sb-bg-toggle" aria-pressed="true" title="הפעלה/כיבוי של רקע התחנה החי">⚡ רקע חי</button>
                 <button type="button" class="sb-btn" onclick="openDashboardAI()">◈ ניתוח AI</button>
-                {% for k, (href, label) in new_links.items() %}<a href="{{ href }}" class="sb-btn{{ ' primary' if loop.first else '' }}">➕ {{ label }}</a>{% endfor %}
+                {% for k, (href, label) in new_links.items() if can_create[k] %}<a href="{{ href }}" class="sb-btn{{ ' primary' if loop.first else '' }}">➕ {{ label }}</a>{% endfor %}
             </div>
         </div>
     </div>
@@ -759,7 +760,7 @@
                     </div></div></td></tr>
                     {% endfor %}
                     {% if not recent_decisions %}
-                    <tr><td colspan="7" class="sb-empty">אין החלטות עדיין. ״החלטה חדשה״ למעלה פותחת את הראשונה.</td></tr>
+                    <tr><td colspan="7" class="sb-empty">אין החלטות עדיין.{% if can_create.decisions %} ״החלטה חדשה״ למעלה פותחת את הראשונה.{% endif %}</td></tr>
                     {% endif %}
                 </tbody>
             </table>

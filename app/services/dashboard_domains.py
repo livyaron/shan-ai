@@ -31,6 +31,7 @@ from app.services import exec_summary, insight_access
 from app.services import missions_menu_service as oms
 from app.services import project_kpis as pk
 from app.services import stage_sectors
+from app.services import user_access
 from app.services import war_room_kpis as kpis
 
 logger = logging.getLogger(__name__)
@@ -284,6 +285,29 @@ async def all_domains(session: AsyncSession, n_days: int, user: User | None = No
             logger.exception("dashboard station %s failed", key)
             out[key] = {"ok": False}
     return out
+
+
+async def create_rights(session: AsyncSession, user: User) -> dict[str, bool]:
+    """Which "new" buttons this user gets — the same rules the create endpoints enforce.
+
+    Missions and decisions: `user_access.can_write`. Lessons: the module's own
+    `Identity.is_viewer` (read without creating a profile). A failed lessons
+    lookup hides its button rather than offering a form that will refuse.
+    """
+    from app.routers.lessons_gateway import read_identity
+
+    writes = user_access.can_write(user)
+    try:
+        nested = getattr(session, "begin_nested", None)
+        if nested:
+            async with nested():
+                lessons = not (await read_identity(session, user)).is_viewer
+        else:
+            lessons = not (await read_identity(session, user)).is_viewer
+    except Exception:
+        logger.exception("dashboard: lessons identity failed")
+        lessons = False
+    return {"decisions": writes, "missions": writes, "lessons": lessons}
 
 
 async def _exec_summary(session: AsyncSession) -> dict | None:

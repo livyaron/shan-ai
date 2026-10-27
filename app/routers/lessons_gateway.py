@@ -72,14 +72,39 @@ async def _session_user(request: Request, session: AsyncSession) -> User:
     return user
 
 
+_PROFILE_COLS = ("id, name, email, role, assigned_projects, email_preferences, "
+                 "assigned_equipment_ids, assigned_stage_indexes, shan_user_id, is_login")
+
+
+async def _read_profile(session: AsyncSession, user: User) -> dict | None:
+    rows = (await session.execute(
+        text(f"SELECT {_PROFILE_COLS} FROM lessons.profiles WHERE shan_user_id = :uid"), {"uid": user.id},
+    )).mappings().all()
+    return la.pick_profile([dict(r) for r in rows])
+
+
+async def _read_groups(session: AsyncSession, user: User) -> tuple[dict, ...]:
+    groups = (await session.execute(text(
+        f"SELECT {', '.join('p.' + c.strip() for c in _PROFILE_COLS.split(','))} "
+        "FROM lessons.referent_members m JOIN lessons.profiles p ON p.id = m.profile_id "
+        "WHERE m.shan_user_id = :uid AND p.role = 'referent' ORDER BY p.name"
+    ), {"uid": user.id})).mappings().all()
+    return tuple(dict(g) for g in groups)
+
+
+async def read_identity(session: AsyncSession, user: User) -> la.Identity:
+    """Like load_identity, but read-only: no profile yet reads as the lazy viewer
+    without creating its row (the dashboard asks this on every page view)."""
+    profile = await _read_profile(session, user)
+    if profile is None:
+        profile = {**la.viewer_profile_row(user.id, user.username, user.email), "is_login": True}
+    return la.Identity(shan_user_id=user.id, profile=profile, groups=await _read_groups(session, user))
+
+
 async def load_identity(session: AsyncSession, user: User) -> la.Identity:
     """The caller's module profile (lazily a viewer) and their referent groups."""
-    cols = ("id, name, email, role, assigned_projects, email_preferences, "
-            "assigned_equipment_ids, assigned_stage_indexes, shan_user_id, is_login")
-    rows = (await session.execute(
-        text(f"SELECT {cols} FROM lessons.profiles WHERE shan_user_id = :uid"), {"uid": user.id},
-    )).mappings().all()
-    profile = la.pick_profile([dict(r) for r in rows])
+    cols = _PROFILE_COLS
+    profile = await _read_profile(session, user)
     if profile is None:
         # Module data only: a Shan-AI user with no profile reads as a viewer.
         row = la.viewer_profile_row(user.id, user.username, user.email)
@@ -92,12 +117,7 @@ async def load_identity(session: AsyncSession, user: User) -> la.Identity:
             text(f"SELECT {cols} FROM lessons.profiles WHERE id = :id"), {"id": row["id"]},
         )).mappings().first()
         profile = dict(got) if got else {**row, "is_login": True}
-    groups = (await session.execute(text(
-        f"SELECT {', '.join('p.' + c.strip() for c in cols.split(','))} "
-        "FROM lessons.referent_members m JOIN lessons.profiles p ON p.id = m.profile_id "
-        "WHERE m.shan_user_id = :uid AND p.role = 'referent' ORDER BY p.name"
-    ), {"uid": user.id})).mappings().all()
-    return la.Identity(shan_user_id=user.id, profile=profile, groups=tuple(dict(g) for g in groups))
+    return la.Identity(shan_user_id=user.id, profile=profile, groups=await _read_groups(session, user))
 
 
 async def current_identity(request: Request, session: AsyncSession = Depends(get_db_session)) -> la.Identity:
