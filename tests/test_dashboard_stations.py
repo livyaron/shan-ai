@@ -122,7 +122,10 @@ def test_every_station_has_a_tile_a_tab_and_a_view():
         assert re.search(rf"\n    {key}\(a\) \{{", TEMPLATE), f"STATION_DRAW.{key}"
 
 
-def _render(stations, scope="all", decisions_all=True):
+ALL_RIGHTS = {"decisions": True, "missions": True, "lessons": True}
+
+
+def _render(stations, scope="all", decisions_all=True, can_create=ALL_RIGHTS):
     ctx = dict(
         request=SimpleNamespace(url=SimpleNamespace(path="/dashboard/")),
         current_user=SimpleNamespace(id=1, username="u", is_admin=False, role=None, full_name="u"),
@@ -130,7 +133,7 @@ def _render(stations, scope="all", decisions_all=True):
         daily_labels=["01/01"] * DASHBOARD_DAYS, daily_data=[0] * DASHBOARD_DAYS, week_total=0,
         recent_decisions=[], role_counts={}, pending_approvals=0, raci_counts={}, written_count=0,
         type_labels_he={}, status_labels_he={}, stations=stations,
-        scope=scope, decisions_all=decisions_all, scope_labels=dd.SCOPES,
+        scope=scope, decisions_all=decisions_all, scope_labels=dd.SCOPES, can_create=can_create,
     )
     return templates.env.get_template("dashboard.html").render(ctx)
 
@@ -389,3 +392,19 @@ def test_each_view_opens_its_own_create_form_and_the_header_all_three():
     for key in ("decisions", "missions", "lessons"):
         assert re.findall(r'href="([^"]+)"', views[key]) == [links[key]], key
     assert set(re.findall(r'href="([^"]+)"', views["projects"])) == set(links.values())
+
+
+def test_no_create_right_no_button():
+    off = {"missions": {"ok": False}, "projects": {"ok": False}, "lessons": {"ok": False}}
+    none = _render(off, can_create={"decisions": False, "missions": False, "lessons": False})
+    assert "zv-new" not in none.split("<style")[0] + none.split("</style>")[-1]
+    for href in ("/dashboard/decisions?new=1", "/dashboard/war-room?new=1", "/lessons/m/new"):
+        assert href not in none
+    # a lessons-only user (e.g. a viewer who is a lessons referent) gets exactly the lesson button
+    only = _render(off, can_create={"decisions": False, "missions": False, "lessons": True})
+    sections = dict(re.findall(r'data-view="(\w+)"(.*?)</section>', only, re.S))
+    views = {k: m.group(1) for k, v in sections.items() if (m := re.search(r'<div class="zv-new">(.*?)</div>', v, re.S))}
+    assert set(views) == {"projects", "lessons"}
+    assert re.findall(r'href="([^"]+)"', views["projects"]) == ["/lessons/m/new"]
+    head = only.split('class="st-grid"')[0]
+    assert "/lessons/m/new" in head and "?new=1" not in head

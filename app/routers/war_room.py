@@ -13,10 +13,11 @@ from sqlalchemy.orm import selectinload
 from pydantic import BeforeValidator
 
 from app.database import get_db_session
-from app.models import Mission, MissionStatusEnum, MissionUpdate, User, RoleEnum
+from app.models import Mission, MissionStatusEnum, MissionUpdate, User
 from app.routers.login import get_current_user
 from app.services import missions_menu_service as oms
 from app.services import project_links
+from app.services import user_access
 from app.services import war_room_chain as chain
 from app.services import war_room_kpis as kpis
 from app.services import war_room_styles as wrs
@@ -53,7 +54,7 @@ BlankableIntForm = Annotated[int | None, _BLANK_TO_NONE]
 
 def _require_editor(user: User) -> None:
     """Write actions are blocked for viewer-role users (mirrors the Telegram rule)."""
-    if user.role == RoleEnum.VIEWER:
+    if not user_access.can_write(user):
         raise HTTPException(status_code=403, detail="חדר המבצעים במצב צפייה בלבד עבורך")
 
 
@@ -216,7 +217,7 @@ async def war_room_page(
         "project_labels": await project_links.labels_for(session, {m.project_id for m in missions}),
         "postpone_label": oms.postpone_label,
         "fmt_due": oms.format_due,
-        "is_viewer": current_user.role == RoleEnum.VIEWER,
+        "is_viewer": not user_access.can_write(current_user),
         "fmt_stamp": oms.format_stamp_il,
         # Creation stamp + "is this mission brand new?" — both come from
         # missions_menu_service so every layout paints the same missions "new".

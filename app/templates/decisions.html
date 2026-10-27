@@ -511,9 +511,11 @@
             <h4 class="mb-0 fw-bold" style="color:#d8e0fa;">📋 ניהול החלטות</h4>
             <div class="text-muted small mt-1">כל ההחלטות שלי ושל הצוות</div>
         </div>
+        {% if can_create %}
         <button class="btn btn-primary px-4" style="border-radius:10px;font-weight:600;" data-bs-toggle="modal" data-bs-target="#addDecisionModal">
             ➕ החלטה חדשה
         </button>
+        {% endif %}
     </div>
 
     <!-- Stats -->
@@ -1813,7 +1815,7 @@ function checkAutoOpenRaci() {
 
 document.addEventListener('DOMContentLoaded', checkAutoOpenRaci);
 
-if (new URLSearchParams(window.location.search).get('new') === '1') {
+if ({{ 'true' if can_create else 'false' }} && new URLSearchParams(window.location.search).get('new') === '1') {
     window.addEventListener('load', () => {
         new bootstrap.Modal(document.getElementById('addDecisionModal')).show();
         history.replaceState(null, '', window.location.pathname);
