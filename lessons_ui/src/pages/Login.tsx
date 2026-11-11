@@ -102,6 +102,11 @@ const Login = () => {
       });
       const body = await r.json().catch(() => ({}));
       if (!r.ok || !body.ok) {
+        // The initial password only starts "set your own password" (code by Telegram).
+        if (typeof body.change_password === "string" && body.change_password.startsWith("/login/")) {
+          window.location.assign(body.change_password);
+          return;
+        }
         setError(body.error || "הכניסה נכשלה. נסה שוב.");
         return;
       }

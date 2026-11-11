@@ -25,6 +25,16 @@ def format_eval_summary(cur: dict, prev: Optional[dict], newly_failing: list) ->
 _scheduler = None
 
 
+# The Israeli work week. NOT "sun-thu": APScheduler counts mon=0..sun=6, so that
+# range is inverted and CronTrigger raises — which aborted start_scheduler before
+# sch.start() and silently left every job below unscheduled (found 2026-11-11).
+WORK_WEEK = "sun,mon,tue,wed,thu"
+
+
+def scheduler_running() -> bool:
+    return _scheduler is not None and _scheduler.running
+
+
 def start_scheduler() -> None:
     global _scheduler
     if _scheduler is not None:
@@ -64,7 +74,7 @@ def start_scheduler() -> None:
     # Operations room: morning digest (work week only) + overdue alerts.
     sch.add_job(
         _missions_daily_digest,
-        CronTrigger(day_of_week="sun-thu", hour=7, minute=0, timezone="Asia/Jerusalem"),
+        CronTrigger(day_of_week=WORK_WEEK, hour=7, minute=0, timezone="Asia/Jerusalem"),
         id="missions_daily_digest", replace_existing=True,
     )
     sch.add_job(_missions_overdue_check, "interval", minutes=30,
@@ -89,7 +99,7 @@ def start_scheduler() -> None:
     # don't land together. Sends the artifact prepared at 04:10.
     sch.add_job(
         _missions_daily_xlsx,
-        CronTrigger(day_of_week="sun-thu", hour=7, minute=10, timezone="Asia/Jerusalem"),
+        CronTrigger(day_of_week=WORK_WEEK, hour=7, minute=10, timezone="Asia/Jerusalem"),
         id="missions_daily_xlsx", replace_existing=True,
     )
     # Second brain: drip-regenerate dirty project dossiers (K per cycle,

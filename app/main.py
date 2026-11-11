@@ -45,7 +45,7 @@ for _h in logging.getLogger().handlers:
     _h.addFilter(_RedactKeys())
 from app.database import engine  # noqa: E402
 from app.models import Base  # noqa: E402
-from app.routers import auth, telegram, dashboard, login  # noqa: E402
+from app.routers import telegram, dashboard, login  # noqa: E402
 from app.routers.dashboard import profile_router  # noqa: E402
 from app.routers import files as files_router  # noqa: E402
 from app.routers import ask as ask_router  # noqa: E402
@@ -66,17 +66,33 @@ from app.services.feedback_service import run_feedback_scheduler  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
+# The interactive API docs list every route and schema to anyone who asks; on
+# Railway they are off. Locally (no public domain) they stay at /docs.
+_ON_RAILWAY = bool(settings.RAILWAY_PUBLIC_DOMAIN)
 app = FastAPI(
     title=settings.PROJECT_NAME,
     version=settings.PROJECT_VERSION,
-    docs_url="/docs",
+    docs_url=None if _ON_RAILWAY else "/docs",
+    redoc_url=None,
+    openapi_url=None if _ON_RAILWAY else "/openapi.json",
 )
+
+
+@app.middleware("http")
+async def _security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    # SAMEORIGIN, not DENY: the file preview embeds its own PDFs.
+    response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
+    response.headers.setdefault("Referrer-Policy", "same-origin")
+    if request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https":
+        response.headers.setdefault("Strict-Transport-Security", "max-age=31536000")
+    return response
 
 # Add this line after your app = FastAPI() definition
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # Register routers
-app.include_router(auth.router)
 app.include_router(login.router)
 app.include_router(telegram.router)
 app.include_router(dashboard.router)
@@ -487,6 +503,12 @@ async def startup():
             for _idx_name, _tbl in _VECTOR_INDEXES:
                 try:
                     async with engine.begin() as _vconn:
+                        # A parallel build allocates its workspace in /dev/shm,
+                        # which the Railway Postgres container caps at 64MB — the
+                        # knowledge_chunks build died there with DiskFullError on
+                        # every boot (seen 2026-11-10). A serial build uses plain
+                        # process memory instead.
+                        await _vconn.execute(_vtext("SET LOCAL max_parallel_maintenance_workers = 0"))
                         await _vconn.execute(_vtext(
                             f"CREATE INDEX IF NOT EXISTS {_idx_name} "
                             f"ON {_tbl} USING hnsw (embedding vector_cosine_ops)"
@@ -590,7 +612,7 @@ async def startup():
         from app.services.eval_cron import start_scheduler as start_eval_scheduler
         start_eval_scheduler()
     except Exception as e:
-        logger.warning(f"Eval cron scheduler failed to start: {e}")
+        logger.error(f"Eval cron scheduler failed to start: {e}", exc_info=True)
 
 @app.on_event("shutdown")
 async def shutdown():
@@ -628,6 +650,11 @@ async def root(request: Request):
         return RedirectResponse(url="/dashboard", status_code=303)
     return RedirectResponse(url="/login", status_code=303)
 
+def _scheduler_running() -> bool:
+    from app.services.eval_cron import scheduler_running
+    return scheduler_running()
+
+
 @app.get("/health")
 async def health_check():
     """Liveness + build provenance.
@@ -648,6 +675,9 @@ async def health_check():
         "uptime_seconds": (
             int((_dt.datetime.utcnow() - started).total_seconds()) if started else None
         ),
+        # False = no digest, no overdue alerts, no weekly report: the scheduler
+        # failed to start for weeks with the site green and nothing saying so.
+        "scheduler_running": _scheduler_running(),
     }
 
 @app.get("/api/v1/status")

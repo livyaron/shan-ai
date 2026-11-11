@@ -8,7 +8,9 @@ from jose import JWTError, jwt
 # Must be set in the environment (.env locally, service vars on Railway).
 # Fallback is a random per-process key: app still works, but sessions
 # reset on every restart until JWT_SECRET_KEY is configured.
-SECRET_KEY = os.getenv("JWT_SECRET_KEY") or secrets.token_hex(32)
+# SECRET_KEY is the name the Railway service has carried all along; reading only
+# JWT_SECRET_KEY left production on the random key (every deploy logged everyone out).
+SECRET_KEY = os.getenv("JWT_SECRET_KEY") or os.getenv("SECRET_KEY") or secrets.token_hex(32)
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_DAYS = 7
 

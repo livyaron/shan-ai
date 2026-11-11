@@ -74,4 +74,40 @@ jobs:
             tests/test_project_visual.py \
             tests/test_lessons_app_login.py \
             tests/test_login_page.py \
-            tests/test_files_open.py
+            tests/test_files_open.py \
+            tests/test_conversation_context.py \
+            tests/test_disambiguation.py \
+            tests/test_eval_uses_ask_router.py \
+            tests/test_eval_weekly_summary.py \
+            tests/test_fact_based_compare.py \
+            tests/test_feedback_cause.py \
+            tests/test_inventory_api.py \
+            tests/test_is_relevant.py \
+            tests/test_judge_tightening.py \
+            tests/test_missions_api.py \
+            tests/test_project_learning.py \
+            tests/test_project_report_service.py \
+            tests/test_viewer_role.py \
+            tests/test_scheduler_start.py \
+            tests/test_login_security.py \
+            tests/test_security_guards.py
+
+  lessons-ui:
+    # The Docker build only runs `vite build`, which checks no types and runs no
+    # tests — a type error or a broken test in lessons_ui/ used to ship unnoticed.
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: lessons_ui
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: lessons_ui/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - name: Type check
+        run: npx tsc --noEmit -p tsconfig.app.json
+      - name: Unit tests
+        run: npx vitest run

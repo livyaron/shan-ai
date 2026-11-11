@@ -93,6 +93,19 @@ class Settings(BaseSettings):
         return self.BASE_URL
 
     @property
+    def webhook_secret(self) -> str:
+        """The secret Telegram must send with every webhook call. Never empty
+        while a bot token exists: without WEBHOOK_SECRET_TOKEN it is derived from
+        the bot token, so an unset variable cannot leave /telegram/webhook open to
+        forged updates (anyone could post "a message from the division manager")."""
+        if self.WEBHOOK_SECRET_TOKEN:
+            return self.WEBHOOK_SECRET_TOKEN
+        if not self.TELEGRAM_BOT_TOKEN:
+            return ""
+        import hashlib
+        return hashlib.sha256(f"shan-ai-webhook:{self.TELEGRAM_BOT_TOKEN}".encode()).hexdigest()
+
+    @property
     def effective_webhook_url(self) -> str:
         """Telegram webhook URL. Railway's current domain wins over the
         (possibly stale) explicit env vars so a domain change self-heals."""

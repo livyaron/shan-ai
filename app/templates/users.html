@@ -318,16 +318,18 @@
                                     {% if user.telegram_id %}
                                     <span class="text-muted small">—</span>
                                     {% else %}
-                                        {% if user.registration_code %}
+                                        {% if user.registration_code and (current_user.is_admin or current_user.id == user.id) %}
                                         <span class="code-badge">{{ user.registration_code }}</span>
                                         <button class="btn btn-sm btn-outline-info ms-1" title="הצג QR להצטרפות"
                                                 onclick="showQr({{ user.id }}, '{{ user.username }}', '{{ user.registration_code }}')">📱</button>
                                         {% else %}
                                         <span class="text-muted small">—</span>
                                         {% endif %}
+                                        {% if current_user.is_admin %}
                                         <form method="POST" action="/dashboard/users/{{ user.id }}/regen-code" class="d-inline">
                                             <button type="submit" class="btn btn-sm btn-outline-secondary ms-1" title="צור קוד חדש">🔄</button>
                                         </form>
+                                        {% endif %}
                                     {% endif %}
                                 </td>
                                 <td>

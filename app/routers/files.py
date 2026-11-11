@@ -20,6 +20,21 @@ router = APIRouter(prefix="/dashboard/files", tags=["files"])
 templates = Jinja2Templates(directory="app/templates")
 
 
+def _require_writer(user: User) -> None:
+    """The knowledge base (and the master file that re-syncs every project) is
+    not a viewer's to change — same rule as every other create/edit endpoint."""
+    from app.services.user_access import can_write
+
+    if not can_write(user):
+        raise HTTPException(status_code=403, detail="משתמש צפייה בלבד אינו רשאי לשנות קבצים")
+
+
+def _stored_name(filename: str | None) -> str:
+    """The client's file name with any directory part removed: "../../x" must
+    never steer where the upload is written."""
+    return Path((filename or "").replace("\\", "/")).name or "file"
+
+
 def _ext(filename: str) -> str:
     return filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
 
@@ -72,6 +87,7 @@ async def upload_file(
     session: AsyncSession = Depends(get_db_session),
     current_user: User = Depends(get_current_user),
 ):
+    _require_writer(current_user)
     ext = _ext(file.filename or "")
     if ext not in ALLOWED_EXTENSIONS:
         return RedirectResponse(
@@ -80,7 +96,7 @@ async def upload_file(
         )
 
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-    safe_name = f"{uuid.uuid4().hex}_{file.filename}"
+    safe_name = f"{uuid.uuid4().hex}_{_stored_name(file.filename)}"
     file_path = UPLOAD_DIR / safe_name
 
     contents = await file.read()
@@ -134,6 +150,7 @@ async def set_master_file(
     Previous master versions are kept and archived automatically once this one
     finishes processing (see process_master_file → archive_old_masters).
     """
+    _require_writer(current_user)
     kf = await session.get(KnowledgeFile, file_id)
     if not kf:
         raise HTTPException(status_code=404, detail="קובץ לא נמצא")
@@ -163,6 +180,7 @@ async def unset_master_file(
     current_user: User = Depends(get_current_user),
 ):
     """Remove the master flag from this file."""
+    _require_writer(current_user)
     kf = await session.get(KnowledgeFile, file_id)
     if kf:
         kf.is_master = False
@@ -362,6 +380,7 @@ async def edit_file(
     current_user: User = Depends(get_current_user),
 ):
     """Update editable metadata: display name and summary."""
+    _require_writer(current_user)
     kf = await session.get(KnowledgeFile, file_id)
     if not kf:
         raise HTTPException(status_code=404, detail="קובץ לא נמצא")
@@ -387,6 +406,7 @@ async def replace_file(
     current_user: User = Depends(get_current_user),
 ):
     """Replace the stored file with a new upload and re-run extraction/embedding."""
+    _require_writer(current_user)
     kf = await session.get(KnowledgeFile, file_id)
     if not kf:
         raise HTTPException(status_code=404, detail="קובץ לא נמצא")
@@ -407,7 +427,7 @@ async def replace_file(
 
     # Write the new file to disk
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-    safe_name = f"{uuid.uuid4().hex}_{file.filename}"
+    safe_name = f"{uuid.uuid4().hex}_{_stored_name(file.filename)}"
     new_path = UPLOAD_DIR / safe_name
     contents = await file.read()
     new_path.write_bytes(contents)
@@ -450,6 +470,7 @@ async def reprocess_file(
     current_user: User = Depends(get_current_user),
 ):
     """Re-run extraction/embedding on the existing stored file (no new upload)."""
+    _require_writer(current_user)
     kf = await session.get(KnowledgeFile, file_id)
     if not kf:
         raise HTTPException(status_code=404, detail="קובץ לא נמצא")
@@ -481,6 +502,7 @@ async def delete_file(
     session: AsyncSession = Depends(get_db_session),
     current_user: User = Depends(get_current_user),
 ):
+    _require_writer(current_user)
     kf = await session.get(KnowledgeFile, file_id)
     if kf:
         # Remove file from disk

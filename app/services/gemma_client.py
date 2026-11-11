@@ -1,6 +1,7 @@
 """Google AI Studio (Gemma 4) client — mirrors groq_chat signature."""
 
 import asyncio
+import time
 import logging
 import re
 
@@ -149,6 +150,19 @@ def _strip_thinking(text: str) -> str:
     return text  # nothing to strip — return as-is
 
 
+# A model that just answered 429/500/503 goes to the back of the line for a
+# while. Without this every call paid for the same dead first model before
+# reaching the one that works (a whole brief run, 2026-11-10: gemma-4-31b failed
+# on every single call and each brief waited for it).
+MODEL_COOLDOWN_SECONDS = 120
+_cooling: dict[str, float] = {}
+
+
+def _healthy_first(models: list[str]) -> list[str]:
+    now = time.monotonic()
+    return sorted(models, key=lambda m: _cooling.get(m, 0.0) > now)  # stable: order kept within each group
+
+
 async def gemma_chat(
     messages: list,
     max_tokens: int = 1024,
@@ -194,7 +208,8 @@ async def gemma_chat(
 
     # `models` comes through llm_router for BOTH providers; a Groq model name
     # (llama-3.1-8b-instant) sent here is a guaranteed 404 on every fallback.
-    model_list = [m for m in (models or []) if m.startswith(("gemma", "gemini"))] or GEMMA_MODELS
+    model_list = _healthy_first(
+        [m for m in (models or []) if m.startswith(("gemma", "gemini"))] or GEMMA_MODELS)
     last_error: Exception | None = None
 
     async with httpx.AsyncClient(timeout=60.0) as client:
@@ -232,6 +247,7 @@ async def gemma_chat(
             except httpx.HTTPStatusError as e:
                 if e.response.status_code in (429, 503, 500):
                     last_error = e
+                    _cooling[model] = time.monotonic() + MODEL_COOLDOWN_SECONDS
                     logger.warning(
                         f"gemma_chat: quota/error on {model}"
                         + (", trying next..." if i < len(model_list) - 1 else "")

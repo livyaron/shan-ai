@@ -45,6 +45,7 @@ Maintainer notes (stripped before Claude sees this file — they cost no tokens)
 - **No local database or Docker stack, anywhere** — not even a throwaway Postgres in a remote session. A local instance running Telegram polling deletes the production webhook and double-sends the 07:00 digest and overdue alerts. Real-data checks happen in production only.
 - Never run destructive SQL (DROP / TRUNCATE / DELETE without WHERE) or touch the Railway Postgres volume without the user's explicit confirmation.
 - The repo is **public**: never commit a secret, a `.env`, or a DB URL with a password. `.claude/hooks/secret_guard.py` blocks such commits/pushes; if it fires, fix the content — don't bypass it.
+- The cron work week is `eval_cron.WORK_WEEK` — never `"sun-thu"` (an inverted range in APScheduler; it kept the whole scheduler from starting). `/health` → `scheduler_running`.
 - Never hardcode the public URL in `app/` — use `settings.public_base_url` (a test enforces it).
 
 ## Ship: build → merge → deploy → verify
