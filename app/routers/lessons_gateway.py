@@ -437,6 +437,9 @@ async def _classify_feedback(body: dict, identity: la.Identity, session: AsyncSe
                   "extracted_public": public, "extracted_personal": personal})
 
 
+INLINE_SAFE_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".gif", ".webp", ".pdf"})
+
+
 def storage_path(key: str) -> Path | None:
     """The file for a storage key, or None when the key escapes the bucket dir."""
     base = Path(settings.LESSONS_UPLOAD_DIR).resolve()
@@ -455,7 +458,14 @@ async def storage_read(bucket: str, key: str, identity: la.Identity = Depends(cu
     target = storage_path(key)
     if target is None or not target.is_file():
         return _json({"error": "Object not found"}, 404)
-    return FileResponse(target, headers={"Cache-Control": "private, max-age=3600"})
+    headers = {"Cache-Control": "private, max-age=3600", "X-Content-Type-Options": "nosniff"}
+    # Uploads are users' files served from the site's own origin: an .html or
+    # .svg opened as a page would run its script with the reader's session.
+    # Only pictures and PDFs open in the browser; everything else downloads.
+    if target.suffix.lower() not in INLINE_SAFE_SUFFIXES:
+        return FileResponse(target, headers=headers, filename=target.name,
+                            content_disposition_type="attachment")
+    return FileResponse(target, headers=headers)
 
 
 @router.api_route("/storage/v1/object/{bucket}/{key:path}", methods=["POST", "PUT"])

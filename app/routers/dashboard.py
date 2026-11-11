@@ -367,6 +367,9 @@ async def create_user(
 ):
     from app.utils.auth import get_default_password_hash
 
+    if not current_user.is_admin:
+        return RedirectResponse("/dashboard/users?error=רק+מנהל+מערכת+רשאי+לבצע+פעולה+זו", status_code=303)
+
     # Check duplicate username
     existing = await session.scalar(select(User).where(User.username == username))
     if existing:
@@ -455,6 +458,8 @@ async def set_role(
     session: AsyncSession = Depends(get_db_session),
     current_user: User = Depends(get_current_user),
 ):
+    if not current_user.is_admin:
+        return RedirectResponse("/dashboard/users?error=רק+מנהל+מערכת+רשאי+לבצע+פעולה+זו", status_code=303)
     user = await session.get(User, user_id)
     if user:
         user.role = RoleEnum(role)
@@ -470,6 +475,8 @@ async def delete_user(
     session: AsyncSession = Depends(get_db_session),
     current_user: User = Depends(get_current_user),
 ):
+    if not current_user.is_admin:
+        return RedirectResponse("/dashboard/users?error=רק+מנהל+מערכת+רשאי+לבצע+פעולה+זו", status_code=303)
     user = await session.get(User, user_id)
     if user:
         # Nullify nullable FKs pointing to this user
@@ -513,6 +520,8 @@ async def regen_code(
     session: AsyncSession = Depends(get_db_session),
     current_user: User = Depends(get_current_user),
 ):
+    if not current_user.is_admin:
+        return RedirectResponse("/dashboard/users?error=רק+מנהל+מערכת+רשאי+לבצע+פעולה+זו", status_code=303)
     user = await session.get(User, user_id)
     if user:
         for _ in range(10):
@@ -538,6 +547,9 @@ async def user_registration_qr(
     from fastapi.responses import StreamingResponse
     from app.config import settings as _settings
 
+    # The code binds a Telegram account to this user — whoever holds it becomes them in the bot.
+    if not current_user.is_admin and current_user.id != user_id:
+        return JSONResponse({"error": "אין הרשאה"}, status_code=403)
     user = await session.get(User, user_id)
     if not user or not user.registration_code:
         return JSONResponse({"error": "no registration code"}, status_code=404)
@@ -578,6 +590,9 @@ async def edit_user(
         return RedirectResponse("/dashboard/users?error=משתמש+לא+נמצא", status_code=303)
 
     user.username = username
+    # A user may edit their own details, never their own role (the form posts it either way).
+    if not current_user.is_admin:
+        role = ""
     role_changed = bool(role) and (user.role is None or user.role.value != role)
     if role:
         user.role = RoleEnum(role)

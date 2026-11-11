@@ -3702,7 +3702,7 @@ class TelegramPollingBot:
         try:
             await self.application.bot.set_webhook(
                 url=webhook_url,
-                secret_token=settings.WEBHOOK_SECRET_TOKEN or None,
+                secret_token=settings.webhook_secret or None,
                 allowed_updates=["message", "callback_query", "edited_message"],
                 drop_pending_updates=drop_pending_updates,
             )

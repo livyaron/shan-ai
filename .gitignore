@@ -74,3 +74,6 @@ static/project_reports/
 lessons_ui/node_modules/
 lessons_ui/dist/
 static/lessons/
+
+# Uploaded knowledge files live on the Railway volume, never in git.
+uploads/
