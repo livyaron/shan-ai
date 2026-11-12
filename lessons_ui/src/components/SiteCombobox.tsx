@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 import { findSite } from "@/lib/siteName";
+import { sharedLoad } from "@/lib/sharedLoad";
 
 interface SiteOption {
   id: number;
@@ -24,6 +25,29 @@ interface SiteComboboxProps {
   suggestedNew?: string;
 }
 
+/** The site list, fetched once for every picker on the screen (a table renders one per row). */
+const siteData = sharedLoad(async (): Promise<{ configId: number | null; options: SiteOption[] }> => {
+  const { data: configs } = await supabase
+    .from("form_field_configs")
+    .select("id")
+    .eq("form_type", "project")
+    .eq("field_key", "site")
+    .limit(1);
+  if (!configs || configs.length === 0) return { configId: null, options: [] };
+
+  const configId = configs[0].id;
+  const { data: opts } = await supabase
+    .from("form_field_options")
+    .select("*")
+    .eq("field_config_id", configId)
+    .eq("is_active", true)
+    .order("sort_order");
+  return {
+    configId,
+    options: (opts ?? []).map((o: any) => ({ id: o.id, label: o.label, value: o.value, isActive: o.is_active })),
+  };
+});
+
 /** Searchable autocomplete for site selection with partial matching */
 const SiteCombobox = ({ value, onValueChange, disabled, allowCreate, suggestedNew }: SiteComboboxProps) => {
   const [open, setOpen] = useState(false);
@@ -33,36 +57,13 @@ const SiteCombobox = ({ value, onValueChange, disabled, allowCreate, suggestedNe
   const [creating, setCreating] = useState(false);
 
   useEffect(() => {
-    const load = async () => {
-      // Get site field config id
-      const { data: configs } = await supabase
-        .from("form_field_configs")
-        .select("id")
-        .eq("form_type", "project")
-        .eq("field_key", "site")
-        .limit(1);
-
-      if (!configs || configs.length === 0) return;
-
-      const configId = configs[0].id;
-      setConfigId(configId);
-      const { data: opts } = await supabase
-        .from("form_field_options")
-        .select("*")
-        .eq("field_config_id", configId)
-        .eq("is_active", true)
-        .order("sort_order");
-
-      if (opts) {
-        setOptions(opts.map((o: any) => ({
-          id: o.id,
-          label: o.label,
-          value: o.value,
-          isActive: o.is_active,
-        })));
-      }
-    };
-    load();
+    let alive = true;
+    siteData.load().then((d) => {
+      if (!alive) return;
+      setConfigId(d.configId);
+      setOptions(d.options);
+    }).catch(() => { /* the picker stays empty; the next mount tries again */ });
+    return () => { alive = false; };
   }, []);
 
   // Partial match filter — case insensitive, trimmed, matches anywhere in string
@@ -97,6 +98,7 @@ const SiteCombobox = ({ value, onValueChange, disabled, allowCreate, suggestedNe
       toast({ title: "הוספת האתר נכשלה", description: error?.message, variant: "destructive" });
       return;
     }
+    siteData.invalidate();   // the next picker to open must see the new site
     setOptions((prev) => [...prev, { id: data.id, label: data.label, value: data.value, isActive: true }]);
     onValueChange(data.value);
     setOpen(false);
