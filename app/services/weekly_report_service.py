@@ -80,6 +80,12 @@ _FALLBACK_SECTIONS = {
 }
 
 
+def report_failed(sections: dict) -> bool:
+    """True when generation fell back to the error text — nothing worth sending."""
+    return (sections.get("prologue") == _FALLBACK_SECTIONS["prologue"]
+            and not any(sections.get(k) for k in ("decisions", "summary", "delta")))
+
+
 def _sanitize_json_string(s: str) -> str:
     """Escape literal control characters inside JSON string values."""
     result = []
@@ -172,6 +178,11 @@ async def generate_report_for_user(
             messages=[{"role": "user", "content": prompt}],
             max_tokens=2500,
             temperature=0.3,
+            # Without these the reasoning model spent the budget thinking and the
+            # JSON came back cut mid-string: on the first scheduled run in weeks
+            # (2026-11-12 17:00) nearly every user's report failed to parse.
+            reasoning_effort="low",
+            json_mode=True,
         )
         cleaned = raw_response.strip()
         if cleaned.startswith("```"):
@@ -237,6 +248,11 @@ async def send_weekly_reports_cron(bot) -> None:
         try:
             async with _app_database.async_session_maker() as user_session:
                 sections = await generate_report_for_user(user, user_session, sent_via="cron")
+            if report_failed(sections):
+                # An unrequested "⚠️ שגיאה בייצור הדוח" to the whole division is worse
+                # than no message: on a failed run the user simply gets no report.
+                logger.warning(f"Weekly cron report NOT sent to user {user.id}: generation failed")
+                continue
             await send_report_to_user(bot, user.telegram_id, sections)
             logger.info(f"Weekly cron report sent to user {user.id} ({user.username})")
         except Exception as exc:

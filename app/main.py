@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from starlette.middleware.gzip import GZipMiddleware
 from fastapi.responses import RedirectResponse
 from fastapi.requests import Request
 import logging
@@ -76,6 +77,33 @@ app = FastAPI(
     redoc_url=None,
     openapi_url=None if _ON_RAILWAY else "/openapi.json",
 )
+
+
+class _TextGZip(GZipMiddleware):
+    """gzip for what compresses — pages, JSON, scripts, styles. Nothing was
+    compressed before: the lessons app alone is a 3.2MB script on a phone.
+    Pictures, PDFs, spreadsheets and fonts are already compressed (gzip would
+    only burn CPU), and event streams must not be buffered."""
+
+    SKIP_SUFFIXES = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico", ".woff", ".woff2",
+                     ".pdf", ".xlsx", ".docx", ".pptx", ".zip", ".mp3", ".mp4", ".ogg")
+    SKIP_PREFIXES = ("/telegram/", "/lessons/api/storage/", "/dashboard/files/")
+    STREAM_MARKERS = ("stream", "/functions/v1/")
+
+    @classmethod
+    def compresses(cls, path: str) -> bool:
+        p = path.lower()
+        return not (p.endswith(cls.SKIP_SUFFIXES) or p.startswith(cls.SKIP_PREFIXES)
+                    or any(m in p for m in cls.STREAM_MARKERS))
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http" and not self.compresses(scope.get("path", "")):
+            await self.app(scope, receive, send)
+            return
+        await super().__call__(scope, receive, send)
+
+
+app.add_middleware(_TextGZip, minimum_size=1024, compresslevel=5)
 
 
 @app.middleware("http")
@@ -577,6 +605,21 @@ async def startup():
             else:
                 print(f"Warning: חדר מבצעים cache warmup failed: {e}")
     asyncio.create_task(_warm_missions_cache())
+
+    # Warm the pattern engine: the main dashboard, the patterns page and the
+    # projects page all read it, and the first visitor after a deploy used to wait
+    # for the whole computation (about two seconds) before the page appeared.
+    async def _warm_patterns():
+        try:
+            from app.database import async_session_maker
+            from app.services import pattern_service
+            _t = __import__("time").perf_counter()
+            async with async_session_maker() as session:
+                await pattern_service.compute_cached(session)
+            print(f"Pattern engine warmed in {int((__import__('time').perf_counter() - _t) * 1000)}ms")
+        except Exception as e:
+            print(f"Warning: pattern engine warmup failed: {e}")
+    asyncio.create_task(_warm_patterns())
 
     # Migrate user passwords (set default for users without password_hash)
     try:

@@ -13,6 +13,7 @@ run without a database.
 """
 from __future__ import annotations
 
+import asyncio
 import math
 import re
 from dataclasses import dataclass
@@ -660,7 +661,19 @@ async def compute(session: AsyncSession) -> dict:
 
 
 _CACHE: dict[str, Any] = {"key": None, "at": 0.0, "p": None}
-CACHE_SECONDS = 600     # an upper bound only — any change in the data busts it at once
+# An upper bound only — any change in the data busts the cache at once, and the
+# engine reads nothing but the data (no "today"). At 600s the bound itself was
+# the cost: every ten minutes the next visitor paid the whole computation again
+# (GET /dashboard/ ≈ 2s on a first load vs 0.3s on a repeat, 2026-11-12), with
+# nothing having changed since the last weekly file.
+CACHE_SECONDS = 6 * 3600
+_BUILD_LOCK = asyncio.Lock()
+
+
+def _cached(key: tuple, now: float) -> dict | None:
+    if _CACHE["p"] is not None and _CACHE["key"] == key and now - _CACHE["at"] < CACHE_SECONDS:
+        return _CACHE["p"]
+    return None
 
 
 async def compute_cached(session: AsyncSession) -> dict:
@@ -674,12 +687,19 @@ async def compute_cached(session: AsyncSession) -> dict:
         "(SELECT count(*) FROM project_weekly_entries), (SELECT max(id) FROM project_weekly_entries), "
         "(SELECT max(last_updated) FROM projects), (SELECT count(*) FROM projects WHERE is_active)"
     ))).one())
-    now = time.monotonic()
-    if _CACHE["p"] is not None and _CACHE["key"] == key and now - _CACHE["at"] < CACHE_SECONDS:
-        return _CACHE["p"]
-    p = _plain(compute_patterns(await load_frames(session)))
-    _CACHE.update(key=key, at=now, p=p)
-    return p
+    hit = _cached(key, time.monotonic())
+    if hit is not None:
+        return hit
+    async with _BUILD_LOCK:                     # two cold visitors build it once, not twice
+        hit = _cached(key, time.monotonic())
+        if hit is not None:
+            return hit
+        frames = await load_frames(session)
+        # pandas over every snapshot is seconds of pure CPU: in a worker thread, so
+        # the event loop (the Telegram webhook, /health, every other page) keeps going.
+        p = await asyncio.to_thread(lambda: _plain(compute_patterns(frames)))
+        _CACHE.update(key=key, at=time.monotonic(), p=p)
+        return p
 
 
 async def data_health(session: AsyncSession, frames: Frames) -> dict:
