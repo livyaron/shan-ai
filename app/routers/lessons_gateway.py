@@ -150,6 +150,56 @@ async def status(identity: la.Identity = Depends(current_identity)):
     return _json({**SCHEMA_STATUS, "postgrest": reachable})
 
 
+# What the app reads the moment it opens — exactly the nine queries
+# UserContext.tsx used to send one by one (each a separate request through this
+# gateway: nine identity lookups, nine round trips, 0.2-0.5s each on a phone).
+BOOTSTRAP_READS: tuple[tuple[str, list[tuple[str, str]]], ...] = (
+    ("profiles", [("select", "*")]),
+    ("projects", [("select", "*")]),
+    ("lessons", [("select", "*"), ("order", "id.desc")]),
+    ("equipment", [("select", "*")]),
+    ("notifications", [("select", "*"), ("order", "id.desc")]),
+    ("lesson_implementations", [("select", "*")]),
+    ("lesson_categories", [("select", "*"), ("order", "id.asc")]),
+    ("feedback", [("select", "*"), ("order", "created_at.desc")]),
+    ("referent_reviews", [("select", "*")]),
+)
+
+
+@router.get("/_bootstrap")
+async def bootstrap(identity: la.Identity = Depends(current_identity)):
+    """Everything the app needs to start, in ONE request: /me + the nine tables.
+
+    Each read passes the same `la.check_request` as a direct /rest/v1 call and
+    goes to PostgREST with the same headers, so this can never show a row the
+    table-by-table path would not. A table that fails comes back under `errors`
+    (the app falls back to asking for that table directly); the rest still load.
+    """
+    import asyncio
+
+    base = settings.LESSONS_POSTGREST_URL.rstrip("/") + "/"
+    headers = la.forward_headers({"accept": "application/json"})
+
+    async def read(table: str, params: list[tuple[str, str]]):
+        verdict = la.check_request("GET", "/" + table, params, None, identity)
+        if verdict:
+            return table, None, verdict[1]
+        try:
+            r = await _client().get(base + table, params=params, headers=headers)
+        except httpx.HTTPError as e:
+            return table, None, f"unreachable: {type(e).__name__}"
+        if r.status_code != 200:
+            return table, None, f"status {r.status_code}"
+        return table, r.json(), None
+
+    results = await asyncio.gather(*(read(t, p) for t, p in BOOTSTRAP_READS))
+    return _json({
+        "me": la.me_payload(identity),
+        "tables": {t: rows for t, rows, err in results if err is None},
+        "errors": {t: err for t, rows, err in results if err is not None},
+    })
+
+
 @router.api_route("/rest/v1/{path:path}", methods=["GET", "HEAD", "POST", "PATCH", "PUT", "DELETE"])
 async def rest(path: str, request: Request, identity: la.Identity = Depends(current_identity)):
     method = request.method.upper()
