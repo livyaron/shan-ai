@@ -77,7 +77,7 @@ def test_the_forced_decision_runs_before_shortcuts_and_classifier():
         else inspect.getsource(type(tp.telegram_bot).handle_message)
     forced = src.index("take_new_decision(telegram_id")
     assert forced < src.index("extract_remember_content(text)")
-    assert forced < src.index("# Decisions menu keyword shortcut")
+    assert forced < src.index("_menu_shortcut(text)")
     assert forced < src.index("classify(text)")
     assert src.index("user.role == _RE.VIEWER") < forced  # a viewer never records a decision
 
