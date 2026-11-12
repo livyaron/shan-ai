@@ -1051,8 +1051,13 @@ class TelegramPollingBot:
                     from app.services.ask_router import route as _ask_route
                     from app.services.telegram_state import _awaiting_disambiguation
                     _ask_t0 = _tt.perf_counter()
+                    # The routing call above already extracted the project intent —
+                    # pass it on instead of paying for a second detection call.
+                    _pre = routing if ai_route == "project" else {}
                     result = await _ask_route(text, session, user.id, log_to_db=True,
-                                              conversation_context=conv_ctx)
+                                              conversation_context=conv_ctx,
+                                              precomputed_intent=_pre.get("intent"),
+                                              precomputed_param=_pre.get("param"))
                     logger.info(f"⏱ ask_router.route ({result.path}): "
                                 f"{int((_tt.perf_counter() - _ask_t0) * 1000)}ms")
 

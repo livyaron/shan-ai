@@ -2,6 +2,8 @@
 
 import asyncio
 import logging
+import re
+import time
 from groq import AsyncGroq, RateLimitError
 from app.config import settings
 
@@ -45,6 +47,36 @@ def get_client() -> AsyncGroq:
     return _shared_client
 
 
+# A 429 says when the bucket reopens ("Please try again in 7m44.4s"). Until then
+# the model is skipped instead of being asked again: with the day budget spent,
+# every call used to walk both models twice (plus the SDK's own retries) before
+# llm_router could fail over — the routing call of one real question took 33s
+# and intent detection up to 107s that morning (2026-11-12).
+MIN_COOLDOWN_SECONDS = 5          # shorter waits are the per-minute bucket: round 2 handles them
+MAX_COOLDOWN_SECONDS = 30 * 60    # re-probe at least every half hour
+_RETRY_IN = re.compile(r"try again in\s+(?:(\d+)h)?(?:(\d+)m)?(?:([\d.]+)s)?", re.IGNORECASE)
+_cooling: dict[str, tuple[float, Exception]] = {}
+
+
+def retry_after_seconds(error: Exception) -> float:
+    """Seconds until the bucket reopens, read from Groq's own 429 text; 0 if it does not say."""
+    m = _RETRY_IN.search(str(error))
+    if not m or not any(m.groups()):
+        return 0.0
+    h, mnt, sec = m.groups()
+    return int(h or 0) * 3600 + int(mnt or 0) * 60 + float(sec or 0)
+
+
+def _cooling_error(model: str, now: float) -> Exception | None:
+    entry = _cooling.get(model)
+    if entry is None:
+        return None
+    if now >= entry[0]:
+        _cooling.pop(model, None)
+        return None
+    return entry[1]
+
+
 async def groq_chat(
     messages: list,
     max_tokens: int = 1024,
@@ -82,9 +114,15 @@ async def groq_chat(
     # it again on round 2 only burns latency.
     dead: set[str] = set()
     for rnd in range(MAX_ROUNDS):
+        tried = False
         for i, model in enumerate(model_list):
             if model in dead:
                 continue
+            cooled = _cooling_error(model, time.monotonic())
+            if cooled is not None:
+                last_error = cooled
+                continue
+            tried = True
             try:
                 resp = await _client.chat.completions.create(model=model, **kwargs)
                 if i > 0 or rnd > 0:
@@ -92,7 +130,13 @@ async def groq_chat(
                 return resp.choices[0].message.content.strip()
             except RateLimitError as e:
                 last_error = e
-                logger.warning(f"Rate limit on {model} (round {rnd})")
+                wait = retry_after_seconds(e)
+                if wait >= MIN_COOLDOWN_SECONDS:
+                    cooldown = min(wait, MAX_COOLDOWN_SECONDS)
+                    _cooling[model] = (time.monotonic() + cooldown, e)
+                    logger.warning(f"Rate limit on {model}: skipping it for {int(cooldown)}s")
+                else:
+                    logger.warning(f"Rate limit on {model} (round {rnd})")
                 # No sleep between models — different buckets, retrying the next
                 # one immediately is free.
             except Exception as e:
@@ -105,7 +149,10 @@ async def groq_chat(
                 last_error = e
                 dead.add(model)
                 logger.warning(f"Model {model} failed ({type(e).__name__}: {str(e)[:120]}) — trying the next")
-        if rnd < MAX_ROUNDS - 1 and len(dead) < len(model_list):
+        _now = time.monotonic()
+        if not tried or all(m in dead or _cooling_error(m, _now) is not None for m in model_list):
+            break   # every model is dead or cooling — fail over now, nothing to wait for
+        if rnd < MAX_ROUNDS - 1:
             await asyncio.sleep(1)   # brief pause before one more full pass
     raise last_error
 

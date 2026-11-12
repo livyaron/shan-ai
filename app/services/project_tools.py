@@ -572,9 +572,12 @@ async def answer_project_query(
         elif intent == "count_by_type":
             if param:
                 result = await count_by_type(param, session)
-                context_str = (
-                    f"מספר פרויקטי {result['type']} פעילים במסד: {result['count']}."
-                )
+                # One number from the database — written by code, not restated by a
+                # model (no LLM computes a number; and it costs no tokens).
+                import html as _html_mod
+                answer = f"יש {result['count']} פרויקטי {_html_mod.escape(str(result['type']))} פעילים."
+                log_id = await _log_query(text, answer, intent, None, session, user_id)
+                return answer, log_id
             else:
                 # Total count
                 context_str = await _projects_summary(session)
@@ -625,11 +628,17 @@ async def answer_project_query(
             # Project-first: if the param matches a project, prefer the project card.
             project_first = await find_projects_by_identifier(param, session)
             if len(project_first) == 1:
+                # The "manager" turned out to be a project: same direct card as the
+                # by_identifier branch above (was: a model call re-typing the card).
                 data_p = project_first[0]
                 user_data["last_project"] = data_p["project_identifier"]
-                current_project_id = data_p["project_identifier"]
-                context_str = json.dumps(data_p, ensure_ascii=False, indent=2)
-                intent = "by_identifier"
+                answer = _format_project_card(data_p, 1, 1)
+                if memory_context:
+                    import html as _html_mod
+                    facts = memory_context.split("\n", 1)[1] if "\n" in memory_context else memory_context
+                    answer += "\n\n🧠 <b>מהזיכרון הארגוני:</b>\n" + _html_mod.escape(facts)
+                log_id = await _log_query(text, answer, "by_identifier", data_p["project_identifier"], session, user_id)
+                return answer, log_id
             elif 2 <= len(project_first) <= 4:
                 project_first = sorted(project_first, key=_type_sort_key)
                 candidates = [

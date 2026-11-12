@@ -48,6 +48,8 @@ async def route(
     log_to_db: bool = True,
     snapshot_mode: bool = False,
     conversation_context: list[dict] | None = None,
+    precomputed_intent: str | None = None,
+    precomputed_param: str | None = None,
 ) -> AnswerResult:
     """Route a question to the right answerer and return a uniform AnswerResult.
 
@@ -58,6 +60,10 @@ async def route(
 
     Phase 1 will insert correction-pin lookup, alias resolve, and intent-override
     BEFORE step 1. This task ports existing behavior only.
+
+    precomputed_intent / precomputed_param: what the Telegram routing call already
+    extracted from this message. Handed to project_tools so step 2 does not ask
+    the model for the same intent a second time. Dispatch itself is unchanged.
     """
     # Lazy imports keep the module light and avoid cycles.
     from app.services import knowledge_service as ks
@@ -196,6 +202,8 @@ async def route(
             import json as _json
             answer, log_id = await project_tools.answer_project_query(
                 question, session, {}, user_id=user_id,
+                precomputed_intent=precomputed_intent,
+                precomputed_param=precomputed_param,
                 memory_context=memory_context,
             )
             if isinstance(answer, str) and answer.startswith("__DISAMBIG__:"):
