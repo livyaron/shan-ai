@@ -72,10 +72,14 @@ def _mgr_approval_keyboard() -> InlineKeyboardMarkup:
 
 
 def _decision_preview_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([[
-        InlineKeyboardButton("✅ אשר ותעד", callback_data="dec_prev_y:0"),
-        InlineKeyboardButton("❌ בטל", callback_data="dec_prev_n:0"),
-    ]])
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("✅ אשר ותעד", callback_data="dec_prev_y:0"),
+            InlineKeyboardButton("❌ בטל", callback_data="dec_prev_n:0"),
+        ],
+        # The recommended action is the AI's suggestion — the decision is the user's.
+        [InlineKeyboardButton("✏️ שנה פעולה מומלצת", callback_data="dec_prev_e:0")],
+    ])
 
 
 def _build_preview_text(result: dict) -> str:
@@ -97,7 +101,8 @@ def _build_preview_text(result: dict) -> str:
         f"‏\U0001f50d <b>ניתוח ראשוני — לפני תיעוד</b>\n{degraded_note}\n"
         f"<b>סוג:</b> {type_label}\n"
         f"<b>סיכום:</b> {e(result.get('summary') or '—')}\n"
-        f"<b>פעולה מומלצת:</b> {e(result.get('recommended_action') or '—')}\n"
+        f"<b>פעולה מומלצת{' (נערכה על ידך)' if result.get('action_edited') else ''}:</b> "
+        f"{e(result.get('recommended_action') or '—')}\n"
         f"<b>דורש אישור:</b> {approval}\n\n"
         f"האם לתעד ולעבד החלטה זו?"
     )
@@ -925,6 +930,25 @@ class TelegramPollingBot:
             # keyboard or a command is not a decision — it just ends the wait.
             import time as _t
             from app.services.telegram_state import take_new_decision
+
+            # "✏️ שנה פעולה מומלצת" was pressed on a decision preview: this message
+            # is the action in the user's words. The preview comes back with it, and
+            # only "אשר ותעד" records the decision.
+            from app.services.telegram_state import apply_action_edit, take_action_edit
+            from app.services.telegram_routing import menu_shortcut as _is_menu_button
+            if (take_action_edit(telegram_id, _t.monotonic()) and telegram_id in _awaiting_decision_preview
+                    and _is_menu_button(text) is None):      # a keyboard tap is not an action text
+                _preview = _awaiting_decision_preview[telegram_id]
+                if text.strip():
+                    _preview["result"] = apply_action_edit(_preview["result"], text)
+                    logger.info("decision preview: user %s rewrote the recommended action", user.id)
+                await update.message.reply_text(
+                    _build_preview_text(_preview["result"]),
+                    parse_mode="HTML",
+                    reply_markup=_decision_preview_keyboard(),
+                )
+                return
+
             if take_new_decision(telegram_id, _t.monotonic()):
                 _menu_labels = {label for row in _main_reply_keyboard(user).keyboard for label in
                                 (getattr(b, "text", b) for b in row)}
@@ -1327,8 +1351,9 @@ class TelegramPollingBot:
             from app.services.telegram_state import _project_link_state
             _project_link_state.pop(telegram_id, None)
         # Likewise a pending "➕ הוספת החלטה": pressing anything else cancels it.
-        from app.services.telegram_state import _awaiting_new_decision
+        from app.services.telegram_state import _awaiting_action_edit, _awaiting_new_decision
         _awaiting_new_decision.pop(telegram_id, None)
+        _awaiting_action_edit.pop(telegram_id, None)
         if data.startswith("pl:"):
             async with async_session_maker() as _pl_session:
                 _pl_user = await _pl_session.scalar(select(User).where(User.telegram_id == telegram_id))
@@ -1916,6 +1941,32 @@ class TelegramPollingBot:
                             chat_id=update.effective_chat.id, text=reply, parse_mode="HTML",
                             reply_markup=get_menu_shortcut_keyboard(),
                         )
+                return
+
+            # --- Decision preview: the user writes their own recommended action ---
+            if action == "dec_prev_e":
+                if telegram_id not in _awaiting_decision_preview:
+                    await query.edit_message_text("‏⚠️ פג תוקף התצוגה. שלח את ההחלטה מחדש.")
+                    return
+                import time as _t
+                from app.services.telegram_state import expect_action_edit
+                expect_action_edit(telegram_id, _t.monotonic())
+                await context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text=("‏✏️ <b>שינוי הפעולה המומלצת</b>\n\n"
+                          "כתוב בהודעה הבאה את הפעולה כפי שאתה רוצה שתירשם."),
+                    parse_mode="HTML",
+                    # A button, not "/skip": commands never reach handle_message.
+                    reply_markup=InlineKeyboardMarkup([[
+                        InlineKeyboardButton("↩️ השאר את הצעת ה-AI", callback_data="dec_prev_k:0"),
+                    ]]),
+                )
+                return
+
+            if action == "dec_prev_k":
+                # The wait was already cleared at the top of handle_callback.
+                await query.edit_message_text(
+                    "‏↩️ הפעולה המומלצת נשארה כפי שהיא. אפשר לאשר או לבטל בהודעת הניתוח.")
                 return
 
             # --- Decision preview approve/dismiss ---

@@ -588,7 +588,10 @@ function appendDecisionPreview(problem, data) {
             <div style="color:#36e273; font-weight:700; margin-bottom:6px;">✅ זוהתה החלטה — אישור לתיעוד</div>
             <div><b>סוג:</b> ${typeBadge}</div>
             <div><b>סיכום:</b> ${escapeHtml(a.summary || '—')}</div>
-            <div><b>פעולה מומלצת:</b> ${escapeHtml(a.recommended_action || '—')}</div>
+            <div style="margin:6px 0;">
+                <label for="action-${uid}"><b>פעולה מומלצת</b> <span style="color:#8b9cf4; font-size:.8rem;">(הצעת ה-AI — אפשר לשנות לפני התיעוד)</span></label>
+                <textarea id="action-${uid}" rows="3" dir="rtl" style="width:100%; margin-top:4px; background:#07100c; color:inherit; border:1px solid rgba(54,226,115,.35); border-radius:8px; padding:8px; font:inherit;">${escapeHtml(a.recommended_action || '')}</textarea>
+            </div>
             ${assumptionsStr ? `<div><b>הנחות:</b> ${escapeHtml(assumptionsStr)}</div>` : ''}
             ${risksStr ? `<div><b>סיכונים:</b> ${escapeHtml(risksStr)}</div>` : ''}
             <div><b>מדידות:</b> ${escapeHtml(a.measurability || '—')}</div>
@@ -660,7 +663,10 @@ async function submitDecisionFromAsk(uid, btn) {
     form.append('problem_description', payload.problem || '');
     form.append('type', a.type || '');
     form.append('summary', a.summary || '');
-    form.append('recommended_action', a.recommended_action || '');
+    // The user's wording wins; an emptied field keeps the AI's suggestion.
+    const actionField = document.getElementById(`action-${uid}`);
+    const editedAction = actionField ? actionField.value.trim() : '';
+    form.append('recommended_action', editedAction || a.recommended_action || '');
     form.append('requires_approval', a.requires_approval ? 'true' : 'false');
     form.append('measurability', a.measurability || '');
     form.append('assumptions', JSON.stringify(a.self_critique?.assumptions || a.assumptions || []));

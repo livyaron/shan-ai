@@ -69,6 +69,32 @@ def take_new_decision(telegram_id: int, now: float) -> bool:
     return deadline is not None and now <= deadline
 
 
+# { telegram_id (int): monotonic deadline (float) }  — pressed "✏️ שנה פעולה מומלצת"
+# on a decision preview; the next text message replaces the AI's recommended action.
+_awaiting_action_edit: dict[int, float] = {}
+
+
+def expect_action_edit(telegram_id: int, now: float) -> None:
+    _awaiting_action_edit[telegram_id] = now + NEW_DECISION_WAIT_SECONDS
+
+
+def take_action_edit(telegram_id: int, now: float) -> bool:
+    deadline = _awaiting_action_edit.pop(telegram_id, None)
+    return deadline is not None and now <= deadline
+
+
+def apply_action_edit(result: dict, text: str) -> dict:
+    """The preview's analysis with the user's own recommended action in place of
+    the AI's. The AI's first wording stays in the dict (ai_recommended_action);
+    only recommended_action is what gets recorded."""
+    edited = dict(result)
+    if not edited.get("action_edited"):
+        edited["ai_recommended_action"] = result.get("recommended_action")
+    edited["recommended_action"] = text.strip()
+    edited["action_edited"] = True
+    return edited
+
+
 # { telegram_id (int): {"question": str} }  — manager mid /gold edit
 _awaiting_gold_text: dict[int, dict] = {}
 
