@@ -51,6 +51,24 @@ _awaiting_disambiguation: dict[int, list] = {}
 # { telegram_id (int): (decision_id, back_page) }  — rated via feedback menu, awaiting text note
 _awaiting_fb_menu_text: dict[int, tuple[int, int]] = {}
 
+# { telegram_id (int): monotonic deadline (float) }  — pressed "➕ הוספת החלטה";
+# the next text message IS a decision (no classification, no "is this a decision?").
+_awaiting_new_decision: dict[int, float] = {}
+NEW_DECISION_WAIT_SECONDS = 10 * 60
+
+
+def expect_new_decision(telegram_id: int, now: float) -> None:
+    _awaiting_new_decision[telegram_id] = now + NEW_DECISION_WAIT_SECONDS
+
+
+def take_new_decision(telegram_id: int, now: float) -> bool:
+    """True once, when the user's next message should be recorded as a decision.
+    A press older than NEW_DECISION_WAIT_SECONDS is forgotten: a message sent an
+    hour later is an ordinary message again."""
+    deadline = _awaiting_new_decision.pop(telegram_id, None)
+    return deadline is not None and now <= deadline
+
+
 # { telegram_id (int): {"question": str} }  — manager mid /gold edit
 _awaiting_gold_text: dict[int, dict] = {}
 

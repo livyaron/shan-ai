@@ -81,10 +81,11 @@ def test_build_custom_filter_keyboard_marks_active_status():
     assert any("7" in b and "✓" in b for b in flat)
 
 
-def test_get_menu_keyboard_has_seven_buttons():
+def test_get_menu_keyboard_has_eight_buttons():
     kb = get_menu_keyboard()
     all_buttons = [btn for row in kb.inline_keyboard for btn in row]
-    assert len(all_buttons) == 7
+    assert len(all_buttons) == 8
+    assert kb.inline_keyboard[0][0].callback_data == "dm:add"  # "➕ הוספת החלטה" leads the menu
 
 
 def test_shortcut_presets_all_keys_present():

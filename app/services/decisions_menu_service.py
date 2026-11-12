@@ -48,6 +48,9 @@ def get_menu_keyboard(feedback_count: int = 0) -> InlineKeyboardMarkup:
     feedback_label = f"⭐ ממתין למשוב ({feedback_count})" if feedback_count else "⭐ ממתין למשוב"
     return InlineKeyboardMarkup([
         [
+            InlineKeyboardButton("➕ הוספת החלטה", callback_data="dm:add"),
+        ],
+        [
             InlineKeyboardButton("🕐 אחרונות",  callback_data="dm:recent:0"),
             InlineKeyboardButton("🚨 קריטיות",  callback_data="dm:critical:0"),
             InlineKeyboardButton("⏳ ממתינות",  callback_data="dm:pending:0"),

@@ -886,6 +886,19 @@ class TelegramPollingBot:
                 await self._handle_viewer_message(update, context, user, text.strip())
                 return
 
+            # "➕ הוספת החלטה" was pressed: this message is the decision itself, so it
+            # skips the keyword shortcuts and the classifier (a decision that mentions
+            # "החלטות" or "פרויקטים" must not open a menu instead). A tap on the reply
+            # keyboard or a command is not a decision — it just ends the wait.
+            import time as _t
+            from app.services.telegram_state import take_new_decision
+            if take_new_decision(telegram_id, _t.monotonic()):
+                _menu_labels = {label for row in _main_reply_keyboard(user).keyboard for label in
+                                (getattr(b, "text", b) for b in row)}
+                if text.strip() not in _menu_labels and not text.strip().startswith("/"):
+                    await self._preview_decision(update, session, user, telegram_id, text, conv_ctx)
+                    return
+
             # Second brain — must run BEFORE keyword shortcuts and LLM routing:
             # a fact like "זכור שההחלטות..." must not be hijacked by the
             # "החלטות" menu shortcut or fall into the decision-confirm flow.
@@ -1197,38 +1210,45 @@ class TelegramPollingBot:
                 return
 
             # DECISION — show AI preview; user must approve before commit
-            decision_svc = DecisionService(session, self.application)
-            try:
-                pre_result = await decision_svc.analyze_only(user, text, conversation_context=conv_ctx)
-            except Exception as _err:
-                logger.error(f"analyze_only failed: {_err}", exc_info=True)
-                from app.services.llm_router import is_overload_error
-                if is_overload_error(_err):
-                    from app.services.pending_queue_service import enqueue
-                    await enqueue(session, user=user, telegram_id=telegram_id,
-                                  raw_text=text, conv_ctx=conv_ctx)
-                    await update.message.reply_text(
-                        "‏⏳ המערכת עמוסה כרגע. ההחלטה נשמרה ותנותח "
-                        "אוטומטית כשהמערכת תתפנה — אשלח לך את הניתוח לאישור. אין צורך לשלוח שוב.",
-                        parse_mode="HTML",
-                    )
-                    return
+            await self._preview_decision(update, session, user, telegram_id, text, conv_ctx)
+
+    async def _preview_decision(self, update: Update, session, user, telegram_id: int,
+                                text: str, conv_ctx) -> None:
+        """Analyze `text` as a decision and show the preview the user approves or
+        dismisses. The one path into a new decision: the classifier's DECISION
+        verdict and the menu's "➕ הוספת החלטה" both end here."""
+        decision_svc = DecisionService(session, self.application)
+        try:
+            pre_result = await decision_svc.analyze_only(user, text, conversation_context=conv_ctx)
+        except Exception as _err:
+            logger.error(f"analyze_only failed: {_err}", exc_info=True)
+            from app.services.llm_router import is_overload_error
+            if is_overload_error(_err):
+                from app.services.pending_queue_service import enqueue
+                await enqueue(session, user=user, telegram_id=telegram_id,
+                              raw_text=text, conv_ctx=conv_ctx)
                 await update.message.reply_text(
-                    "‏⚠️ שגיאה בניתוח. נסה שוב.", parse_mode="HTML"
+                    "‏⏳ המערכת עמוסה כרגע. ההחלטה נשמרה ותנותח "
+                    "אוטומטית כשהמערכת תתפנה — אשלח לך את הניתוח לאישור. אין צורך לשלוח שוב.",
+                    parse_mode="HTML",
                 )
                 return
-            _awaiting_decision_preview[telegram_id] = {
-                "text": text,
-                "result": pre_result,
-                "user_has_manager": _user_has_manager(user),
-            }
-            preview_text = _build_preview_text(pre_result)
             await update.message.reply_text(
-                preview_text,
-                parse_mode="HTML",
-                reply_markup=_decision_preview_keyboard(),
+                "‏⚠️ שגיאה בניתוח. נסה שוב.", parse_mode="HTML"
             )
-            append_context(telegram_id, "assistant", preview_text[:300])
+            return
+        _awaiting_decision_preview[telegram_id] = {
+            "text": text,
+            "result": pre_result,
+            "user_has_manager": _user_has_manager(user),
+        }
+        preview_text = _build_preview_text(pre_result)
+        await update.message.reply_text(
+            preview_text,
+            parse_mode="HTML",
+            reply_markup=_decision_preview_keyboard(),
+        )
+        append_context(telegram_id, "assistant", preview_text[:300])
 
     # ------------------------------------------------------------------
     # Callback handler — approve / reject inline keyboard buttons
@@ -1248,6 +1268,9 @@ class TelegramPollingBot:
         if not data.startswith("pl:"):
             from app.services.telegram_state import _project_link_state
             _project_link_state.pop(telegram_id, None)
+        # Likewise a pending "➕ הוספת החלטה": pressing anything else cancels it.
+        from app.services.telegram_state import _awaiting_new_decision
+        _awaiting_new_decision.pop(telegram_id, None)
         if data.startswith("pl:"):
             async with async_session_maker() as _pl_session:
                 _pl_user = await _pl_session.scalar(select(User).where(User.telegram_id == telegram_id))
@@ -2191,6 +2214,20 @@ class TelegramPollingBot:
 
         # ── dm:noop — page indicator button, do nothing ──────────────────────
         if data == "dm:noop":
+            return
+
+        # ── dm:add — the next message is a decision ──────────────────────────
+        if data == "dm:add":
+            import time as _t
+            from app.services.telegram_state import expect_new_decision
+            expect_new_decision(telegram_id, _t.monotonic())
+            await query.message.reply_text(
+                "‏➕ <b>הוספת החלטה</b>\n\nכתוב את ההחלטה בהודעה הבאה — אנתח אותה ואציג לך לאישור לפני השמירה.",
+                parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("❌ ביטול", callback_data="dm:menu"),
+                ]]),
+            )
             return
 
         # ── dm:menu — return to main menu ────────────────────────────────────

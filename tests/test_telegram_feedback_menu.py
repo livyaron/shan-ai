@@ -39,10 +39,10 @@ def _make_decision(**kwargs):
 from app.services.decisions_menu_service import get_menu_keyboard, build_feedback_results_keyboard
 
 
-def test_get_menu_keyboard_has_seven_buttons_with_feedback():
+def test_get_menu_keyboard_has_eight_buttons_with_feedback():
     kb = get_menu_keyboard(feedback_count=0)
     all_buttons = [btn for row in kb.inline_keyboard for btn in row]
-    assert len(all_buttons) == 7
+    assert len(all_buttons) == 8  # "➕ הוספת החלטה" + the seven views
 
 
 def test_get_menu_keyboard_shows_badge_when_count_positive():
