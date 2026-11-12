@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useEffect, ReactNode, useCallback, useRef, useMemo } from "react";
 import { supabase, SUPABASE_URL, SHAN_LOGIN_URL } from "@/integrations/supabase/client";
+import { fetchBootstrap, type StartupTable } from "@/lib/startupData";
 import { isLoginPath, isStandalone } from "@/lib/standalone";
 import {
   DRAFT_STATUS,
@@ -626,22 +627,34 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
       setIsLoading(true);
       try {
         // Identity is the Shan-AI session (PLAN-lessons-module.md decision 1).
-        const me = await fetchMe();
-        if (!me) {
+        // One request for /me and all nine tables (startupData.ts). Anything the
+        // bundle did not bring — an older server, one table that failed — is
+        // asked for directly, exactly as before.
+        const boot = await fetchBootstrap(SUPABASE_URL);
+        if (boot.unauthorized) {
           // The login page itself loads this provider too — never loop on it.
           if (!isLoginPath(window.location.pathname)) window.location.href = SHAN_LOGIN_URL;
           return;
         }
+        const me = boot.me
+          ? { self: mapDbUser(boot.me.profile), groups: (boot.me.groups || []).map(mapDbUser) }
+          : await fetchMe();
+        if (!me) {
+          if (!isLoginPath(window.location.pathname)) window.location.href = SHAN_LOGIN_URL;
+          return;
+        }
+        const table = (name: StartupTable, direct: () => PromiseLike<{ data: any[] | null }>) =>
+          name in boot.tables ? Promise.resolve({ data: boot.tables[name]! }) : direct();
         const [profilesRes, projectsRes, lessonsRes, equipmentRes, notificationsRes, implRes, catRes, feedbackRes, refReviewsRes] = await Promise.all([
-          supabase.from("profiles").select("*"),
-          supabase.from("projects").select("*"),
-          supabase.from("lessons").select("*").order("id", { ascending: false }),
-          supabase.from("equipment").select("*"),
-          supabase.from("notifications").select("*").order("id", { ascending: false }),
-          supabase.from("lesson_implementations").select("*"),
-          supabase.from("lesson_categories").select("*").order("id", { ascending: true }),
-          supabase.from("feedback").select("*").order("created_at", { ascending: false }),
-          supabase.from("referent_reviews" as any).select("*"),
+          table("profiles", () => supabase.from("profiles").select("*")),
+          table("projects", () => supabase.from("projects").select("*")),
+          table("lessons", () => supabase.from("lessons").select("*").order("id", { ascending: false })),
+          table("equipment", () => supabase.from("equipment").select("*")),
+          table("notifications", () => supabase.from("notifications").select("*").order("id", { ascending: false })),
+          table("lesson_implementations", () => supabase.from("lesson_implementations").select("*")),
+          table("lesson_categories", () => supabase.from("lesson_categories").select("*").order("id", { ascending: true })),
+          table("feedback", () => supabase.from("feedback").select("*").order("created_at", { ascending: false })),
+          table("referent_reviews", () => supabase.from("referent_reviews" as any).select("*") as any),
         ]);
 
         const mapped = (profilesRes.data || []).map(mapDbUser);
