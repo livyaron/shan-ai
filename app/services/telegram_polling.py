@@ -1105,7 +1105,7 @@ class TelegramPollingBot:
                 routing = {"route": None, "intent": None, "param": None}
             else:
                 if await _agent.engine_on(session, user):
-                    plan = await _agent.make_plan(text, conversation_context=conv_ctx)
+                    plan = await _agent.make_plan(text, conversation_context=conv_ctx, session=session)
                 routing = plan.as_routing() if plan is not None else \
                     await _ai_route_message(text, conversation_context=conv_ctx)
             ai_route = routing["route"]

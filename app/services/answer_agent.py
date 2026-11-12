@@ -71,6 +71,8 @@ _BY_NAME = {t.name: t for t in TOOLS}
 
 _EXAMPLES: tuple[tuple[str, dict], ...] = (
     ("רעות", {"tool": "project", "arg": "רעות"}),
+    ("טרומן", {"tool": "project", "arg": "טרומן"}),
+    ("רמת חובב", {"tool": "project", "arg": "רמת חובב"}),
     ("מה סטטוס רעות?", {"tool": "project", "arg": "רעות"}),
     ("מי מנהל את פרויקט רמת חובב?", {"tool": "project", "arg": "רמת חובב"}),
     ("מה העדכון השבועי של טרומן?", {"tool": "project", "arg": "טרומן"}),
@@ -124,7 +126,8 @@ def build_prompt(text: str) -> str:
         'פורמט מחייב: {"tool": "...", "arg": ...}\n\n'
         f"הכלים:\n{tools}\n\n"
         "כללים:\n"
-        "- הצהרה, הנחיה או תיאור של מה שיקרה (לא שאלה) → record_decision, גם אם מוזכר שם פרויקט.\n"
+        "- שם בלבד (מילה אחת עד שלוש, בלי פועל) הוא שם של פרויקט → project. לעולם לא record_decision.\n"
+        "- משפט שלם שהוא הצהרה, הנחיה או תיאור של מה שיקרה (לא שאלה) → record_decision, גם אם מוזכר שם פרויקט.\n"
         "- שמות פרויקטים ומנהלים: העתק בדיוק כפי שנכתבו, בלי להוסיף או להסיר מילים.\n"
         '- לכלי knowledge בלבד הוסף "search": מילות חיפוש — מונחי השאלה עם מילים נרדפות וקיצורים רלוונטיים.\n'
         '- לכלי chat בלבד הוסף "reply": תשובה קצרה ומנומסת בעברית.\n\n'
@@ -190,8 +193,32 @@ def shortcut_plan(text: str) -> Plan | None:
     return None
 
 
-async def make_plan(text: str, conversation_context: list[dict] | None = None) -> Plan | None:
-    """One model call (usage "message_routing"). None when it failed or made no sense."""
+async def bare_name_plan(text: str, session) -> Plan | None:
+    """A project name typed on its own → that project's card, with no model call.
+
+    The most-used gesture in the bot, and the model is the wrong tool for it: the
+    first version of this engine asked the model, which read "צחר" as a statement
+    and planned record_decision — the user got a decision analysis instead of the
+    card (2026-11-12). The database knows whether it is a project; ask it."""
+    from app.services.telegram_routing import looks_like_bare_name
+    if session is None or not looks_like_bare_name(text):
+        return None
+    try:
+        from app.services.project_tools import find_projects_by_identifier
+        found = await find_projects_by_identifier(text.strip(), session)
+    except Exception:
+        logger.warning("bare-name lookup failed", exc_info=True)
+        return None
+    return Plan("project", text.strip()) if found else None
+
+
+async def make_plan(text: str, conversation_context: list[dict] | None = None,
+                    session=None) -> Plan | None:
+    """At most one model call (usage "message_routing"). None when it failed or made no sense."""
+    named = await bare_name_plan(text, session)
+    if named is not None:
+        logger.info("answer plan: bare project name → project(%r), no model call", named.arg)
+        return named
     quick = shortcut_plan(text)
     if quick is not None:
         return quick
@@ -214,6 +241,10 @@ async def make_plan(text: str, conversation_context: list[dict] | None = None) -
             reasoning_effort="low",
         )
         plan = parse_plan(raw)
+        # Nobody records a decision in one or two words. A model that says so has
+        # misread a name: look it up as a project instead of opening a decision.
+        if plan is not None and plan.tool == "record_decision" and len(text.split()) <= 2:
+            plan = Plan("project", text.strip())
         logger.info("⏱ answer plan: %dms → %s", int((time.perf_counter() - t0) * 1000),
                     f"{plan.tool}({plan.arg!r})" if plan else f"unparsed {raw[:120]!r}")
         return plan

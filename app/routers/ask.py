@@ -43,7 +43,7 @@ async def ask_query(
     from app.services.telegram_routing import _ai_route_message
     plan = None
     if await answer_agent.engine_on(session, current_user):
-        plan = await answer_agent.make_plan(body.question)
+        plan = await answer_agent.make_plan(body.question, session=session)
     routing = plan.as_routing() if plan is not None else await _ai_route_message(body.question)
     if routing.get("route") == "decision":
         decision_payload = await _try_classify_as_decision(

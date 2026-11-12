@@ -234,3 +234,72 @@ def test_the_plan_search_terms_replace_the_expansion_call():
     from app.services import knowledge_service as ks
     src = inspect.getsource(ks.answer_with_full_context)
     assert src.index("elif search_terms:") < src.index("await _expand_query(search_question)")
+
+
+# ------------------------------------------------------------------ a project name on its own
+
+@pytest.mark.parametrize("text", ["צחר", "רמת חובב", "תחנת משנה רעות", "  טרומן  "])
+def test_a_short_name_is_a_bare_name(text):
+    from app.services.telegram_routing import looks_like_bare_name
+    assert looks_like_bare_name(text)
+
+
+@pytest.mark.parametrize("text", [
+    "שלום", "תודה", "כן", "ok", "צחר?", "מה סטטוס צחר", "מתי מסתיים טרומן",
+    "החלטנו לדחות את צחר", "יש לסגור את הפרויקט", "", "123",
+    "זה משפט ארוך מדי בשביל להיות שם של פרויקט",
+])
+def test_everything_else_is_not(text):
+    from app.services.telegram_routing import looks_like_bare_name
+    assert not looks_like_bare_name(text)
+
+
+@pytest.mark.asyncio
+async def test_a_project_name_gets_its_card_without_asking_the_model(monkeypatch):
+    """The regression: "צחר" was planned as record_decision by the model."""
+    found = AsyncMock(return_value=[{"project_identifier": "WBE-1", "name": "צחר"}])
+    monkeypatch.setattr("app.services.project_tools.find_projects_by_identifier", found)
+    llm = AsyncMock(return_value='{"tool":"record_decision","arg":null}')
+    monkeypatch.setattr("app.services.llm_router.llm_chat", llm)
+
+    plan = await agent.make_plan("צחר", session=object())
+
+    assert plan == Plan("project", "צחר") and plan.intent == "by_identifier"
+    llm.assert_not_awaited()
+    found.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_a_short_text_that_is_no_project_still_goes_to_the_model(monkeypatch):
+    monkeypatch.setattr("app.services.project_tools.find_projects_by_identifier", AsyncMock(return_value=[]))
+    llm = AsyncMock(return_value='{"tool":"chat","arg":null,"reply":"בוקר טוב!"}')
+    monkeypatch.setattr("app.services.llm_router.llm_chat", llm)
+    assert await agent.make_plan("בוקר אור", session=object()) == Plan("chat", reply="בוקר טוב!")
+    llm.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_one_or_two_words_are_never_a_decision_whatever_the_model_says(monkeypatch):
+    monkeypatch.setattr("app.services.project_tools.find_projects_by_identifier", AsyncMock(return_value=[]))
+    monkeypatch.setattr("app.services.llm_router.llm_chat",
+                        AsyncMock(return_value='{"tool":"record_decision","arg":null}'))
+    assert await agent.make_plan("צחרר", session=object()) == Plan("project", "צחרר")
+    # a real sentence is still a decision
+    assert await agent.make_plan("צריך להחליף שנאי ישן בתחנה חמש בהקדם", session=object()) \
+        == Plan("record_decision")
+
+
+@pytest.mark.asyncio
+async def test_a_failed_lookup_does_not_cost_the_answer(monkeypatch):
+    monkeypatch.setattr("app.services.project_tools.find_projects_by_identifier",
+                        AsyncMock(side_effect=RuntimeError("db")))
+    monkeypatch.setattr("app.services.llm_router.llm_chat",
+                        AsyncMock(return_value='{"tool":"project","arg":"צחר"}'))
+    assert await agent.make_plan("צחר", session=object()) == Plan("project", "צחר")
+
+
+def test_both_callers_hand_the_session_to_the_planner():
+    from app.routers import ask
+    from app.services import telegram_polling as tp
+    assert "session=session)" in inspect.getsource(type(tp.telegram_bot).handle_message).split("_agent.make_plan(")[1][:120]
+    assert "make_plan(body.question, session=session)" in inspect.getsource(ask.ask_query)

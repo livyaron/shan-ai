@@ -159,18 +159,26 @@ def _is_project_query(text: str) -> bool:
         return True
     if any(kw in t for kw in _PROJECT_COUNT_TRIGGERS):
         return True
+    # The keyword dispatch keeps its old reach: "מה עם צחר" is a project query too.
+    return looks_like_bare_name(text, allow_question_words=True)
+
+
+def looks_like_bare_name(text: str, allow_question_words: bool = False) -> bool:
+    """A short message that can only be a name: 1-5 words, not a question, no
+    decision verb, not a greeting. "צחר" or "רמת חובב" → the user wants that
+    project's card. The ONE definition — the keyword dispatch and the answer
+    plan both read it."""
+    t = (text or "").lower().strip()
     words = t.split()
-    if 1 <= len(words) <= 5:
-        if t in _BARE_NAME_SKIP:
-            return False
-        if t.endswith("?"):
-            return False
-        if any(verb in t for verb in _DECISION_VERBS):
-            return False
-        hebrew_chars = sum(1 for c in t if "\u05d0" <= c <= "\u05ea")
-        if hebrew_chars >= 2:
-            return True
-    return False
+    if not 1 <= len(words) <= 5:
+        return False
+    if t in _BARE_NAME_SKIP or t.endswith("?"):
+        return False
+    if not allow_question_words and any(t.startswith(q) for q in _QUESTION_PREFIXES):
+        return False
+    if any(verb in t for verb in _DECISION_VERBS):
+        return False
+    return sum(1 for c in t if "\u05d0" <= c <= "\u05ea") >= 2
 
 
 def _parse_routing_response(response: str) -> dict:
