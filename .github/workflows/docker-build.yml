@@ -93,7 +93,8 @@ jobs:
             tests/test_security_guards.py \
             tests/test_telegram_add_decision.py \
             tests/test_answer_path_stage_a.py \
-            tests/test_answer_agent.py
+            tests/test_answer_agent.py \
+            tests/test_menu_shortcuts.py
 
   lessons-ui:
     # The Docker build only runs `vite build`, which checks no types and runs no

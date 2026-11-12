@@ -951,8 +951,13 @@ class TelegramPollingBot:
                 await self._handle_dossier_request(update, session, user, _dossier_req)
                 return
 
+            # Menu buttons: exact match only (telegram_routing.menu_shortcut) — a
+            # question that merely mentions "פרויקטים" or "החלטות" is a question.
+            from app.services.telegram_routing import menu_shortcut as _menu_shortcut
+            _menu = _menu_shortcut(text)
+
             # Report shortcut — "📊 דוח שלי"
-            if "דוח שלי" in text.strip():
+            if _menu == "my_report":
                 await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
                 from app.services.weekly_report_service import generate_report_for_user, send_report_to_user
                 sections = await generate_report_for_user(
@@ -964,7 +969,7 @@ class TelegramPollingBot:
                 return
 
             # Project report shortcut — "📊 דוח פרויקטים" — sends last saved report
-            if "דוח פרויקטים" in text.strip():
+            if _menu == "projects_report":
                 await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
                 from app.services.project_report_service import _telegram_send_report
                 from app.models import ProjectReport as _PR
@@ -983,7 +988,7 @@ class TelegramPollingBot:
                 return
 
             # Team report shortcut — "👥 דוח צוות" (managers only)
-            if "דוח צוות" in text.strip():
+            if _menu == "team_report":
                 from app.models import RoleEnum as _RE2
                 from app.services.telegram_state import _awaiting_team_report
                 _MANAGER_ROLES_RPT = {_RE2.DEPARTMENT_MANAGER, _RE2.DEPUTY_DIVISION_MANAGER, _RE2.DIVISION_MANAGER}
@@ -1018,8 +1023,8 @@ class TelegramPollingBot:
                 )
                 return
 
-            # Decisions menu keyword shortcut
-            if "החלטות" in text.strip():
+            # Decisions menu button
+            if _menu == "decisions":
                 if user.role:
                     from app.services.decisions_menu_service import get_menu_keyboard, get_menu_text, get_menu_counts
                     async with async_session_maker() as _cnt_s:
@@ -1031,7 +1036,7 @@ class TelegramPollingBot:
                     )
                 return
 
-            if "פרוייקטים" in text.strip() or "פרויקטים" in text.strip():
+            if _menu == "projects":
                 if user.role:
                     from app.services.projects_menu_service import (
                         get_menu_keyboard as pm_get_menu_keyboard,
@@ -1047,9 +1052,8 @@ class TelegramPollingBot:
                     )
                 return
 
-            # Operations room keyword shortcut. Bare "משימות" must match by
-            # equality — containment would hijack questions like "מה המשימות בפרויקט X?"
-            if "חדר מבצעים" in text.strip() or text.strip() == "משימות":
+            # Operations room button
+            if _menu == "missions":
                 if user.role:
                     from app.services.missions_menu_service import (
                         get_menu_keyboard as om_get_menu_keyboard,

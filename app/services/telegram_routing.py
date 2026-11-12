@@ -120,6 +120,29 @@ intent (רק כש-route="project", אחרת "general"):
 JSON:"""
 
 
+# The reply-keyboard buttons. A message opens a menu only when it IS the button
+# (with or without its emoji) — never because it merely contains the word:
+# "כמה פרויקטים מנהל איתן אוחיון?" used to get the projects menu instead of an
+# answer, and any question mentioning "החלטות" got the decisions menu (2026-11-12).
+_MENU_WORDS = {
+    "פרוייקטים": "projects", "פרויקטים": "projects",
+    "החלטות": "decisions",
+    "דוח שלי": "my_report",
+    "דוח פרויקטים": "projects_report", "דוח פרוייקטים": "projects_report",
+    "דוח צוות": "team_report",
+    "חדר מבצעים": "missions", "משימות": "missions",
+}
+
+
+def menu_shortcut(text: str) -> str | None:
+    """Which menu this message asks for, or None when it is a real message."""
+    import re as _re
+    bare = " ".join(_re.findall(r"[א-ת]+", text or ""))
+    if _re.search(r"[A-Za-z0-9?]", text or ""):
+        return None
+    return _MENU_WORDS.get(bare)
+
+
 def _is_data_question(text: str) -> bool:
     """Return True if this looks like a data/info query rather than a decision."""
     t = text.strip()
