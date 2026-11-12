@@ -50,6 +50,7 @@ async def route(
     conversation_context: list[dict] | None = None,
     precomputed_intent: str | None = None,
     precomputed_param: str | None = None,
+    plan=None,
 ) -> AnswerResult:
     """Route a question to the right answerer and return a uniform AnswerResult.
 
@@ -64,6 +65,10 @@ async def route(
     precomputed_intent / precomputed_param: what the Telegram routing call already
     extracted from this message. Handed to project_tools so step 2 does not ask
     the model for the same intent a second time. Dispatch itself is unchanged.
+
+    plan: an answer_agent.Plan. When given it is authoritative for steps 1-3:
+    the tool it chose runs, and the keyword lists are not consulted. The
+    pre-rules (pins, overrides, aliases) still come first.
     """
     # Lazy imports keep the module light and avoid cycles.
     from app.services import knowledge_service as ks
@@ -173,8 +178,15 @@ async def route(
                 ), [f"project_alias:project={project_id}"] + memory_rule_ids)
     # ── End pre-rules ─────────────────────────────────────────────────────
 
+    plan_ids: list = [f"plan:{plan.tool}"] if plan is not None else []
+    if plan is not None and plan.intent:
+        precomputed_intent, precomputed_param = plan.intent, plan.arg
+    wants_decisions = (plan.kind == "decisions") if plan is not None \
+        else any(kw in question for kw in _DECISION_KEYWORDS)
+    wants_project = (plan.kind == "project") if plan is not None else _is_project_query(question)
+
     # 1. Decision history queries
-    if any(kw in question for kw in _DECISION_KEYWORDS):
+    if wants_decisions:
         decisions_ctx = await ks.get_decisions_context(session, user_id)
         if decisions_ctx or memory_context:
             combined_ctx = "\n\n".join(p for p in (memory_context, decisions_ctx) if p)
@@ -194,10 +206,10 @@ async def route(
             has_decisions=bool(decisions_ctx),
             file_names=[],
             sources_text="📋 מסד ההחלטות" if decisions_ctx else "",
-        ), memory_rule_ids)
+        ), memory_rule_ids + plan_ids)
 
     # 2. Project queries
-    if _is_project_query(question):
+    if wants_project:
         try:
             import json as _json
             answer, log_id = await project_tools.answer_project_query(
@@ -205,6 +217,7 @@ async def route(
                 precomputed_intent=precomputed_intent,
                 precomputed_param=precomputed_param,
                 memory_context=memory_context,
+                intent_is_final=plan is not None,
             )
             if isinstance(answer, str) and answer.startswith("__DISAMBIG__:"):
                 candidates = _json.loads(answer[len("__DISAMBIG__:"):])
@@ -231,7 +244,7 @@ async def route(
                 has_decisions=False,
                 file_names=[],
                 sources_text="📂 מסד הפרויקטים",
-            ), memory_rule_ids)
+            ), memory_rule_ids + plan_ids)
         except Exception:
             logger.warning("project_tools failed, falling through to RAG", exc_info=True)
 
@@ -240,6 +253,7 @@ async def route(
         question, session, user_id, log_to_db=log_to_db,
         conversation_context=conversation_context,
         memory_context=memory_context,
+        search_terms=plan.search if plan is not None else None,
     )
     return await _finish(AnswerResult(
         answer=result.get("answer", ""),
@@ -252,7 +266,7 @@ async def route(
         has_decisions=bool(result.get("has_decisions")),
         file_names=list(result.get("file_names", []) or []),
         sources_text=result.get("sources_text", "") or "",
-    ), memory_rule_ids)
+    ), memory_rule_ids + plan_ids)
 
 
 async def _log_query(

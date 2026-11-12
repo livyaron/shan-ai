@@ -159,6 +159,7 @@ class TelegramPollingBot:
         self.application.add_handler(CommandHandler("report", self.handle_report))
         self.application.add_handler(CommandHandler("gold", self.handle_gold))
         self.application.add_handler(CommandHandler("llm", self.handle_llm))
+        self.application.add_handler(CommandHandler("engine", self.handle_engine))
         self.application.add_handler(CallbackQueryHandler(self.handle_callback))
         self.application.add_handler(
             MessageHandler(filters.Document.ALL, self.handle_document)
@@ -461,6 +462,38 @@ class TelegramPollingBot:
                   f"‏<b>הצעה:</b> {_html.escape(proposal['answer'])}"),
             parse_mode="HTML",
             reply_markup=gtg.gold_keyboard(cand["id"]),
+        )
+
+    async def handle_engine(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """/engine [off|admins|all] — who gets the answer-plan engine. Admin only.
+
+        Bare /engine shows the current setting. The engine replaces routing +
+        intent detection + query expansion with one planning call (answer_agent);
+        "admins" lets the admins compare real answers before everyone moves over.
+        """
+        from app.services import answer_agent as agent
+
+        labels = {"off": "כבוי — כולם במנוע הישן", "admins": "מנהלי מערכת בלבד", "all": "כל המשתמשים"}
+        words = {"off": "off", "כבוי": "off", "admins": "admins", "מנהלים": "admins",
+                 "all": "all", "כולם": "all"}
+        telegram_id = update.effective_user.id
+        async with async_session_maker() as session:
+            user = await session.scalar(select(User).where(User.telegram_id == telegram_id))
+            if not user or not user.is_admin:
+                await update.message.reply_text("‏🔒 פקודה זו זמינה למנהלי מערכת בלבד.")
+                return
+            arg = (context.args[0].strip().lower() if context.args else "")
+            if arg and arg not in words:
+                await update.message.reply_text(
+                    "‏לא הבנתי. אפשרויות: /engine off · /engine admins · /engine all")
+                return
+            if arg:
+                await agent.set_engine_mode(session, words[arg])
+            mode = await agent.engine_mode(session)
+        await update.message.reply_text(
+            f"‏⚙️ <b>מנוע התשובות החדש:</b> {labels[mode]}\n\n"
+            "‏לשינוי: /engine off · /engine admins · /engine all",
+            parse_mode="HTML",
         )
 
     async def handle_llm(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1035,11 +1068,26 @@ class TelegramPollingBot:
 
             # Hard bypass: single-word or clearly non-work messages skip LLM routing entirely
             _NON_WORK_WORDS = {"בדיחה", "בדיחות", "שלום", "היי", "הי", "תודה", "להתראות", "ביי", "בוקר טוב", "ערב טוב", "לילה טוב"}
+            # Answer-plan engine (answer_agent): ONE call picks the tool and its
+            # argument, and ask_router runs exactly that. Off for this user, or the
+            # plan could not be made → the old routing below, unchanged.
+            from app.services import answer_agent as _agent
+            plan = None
             if text.strip() in _NON_WORK_WORDS:
                 routing = {"route": None, "intent": None, "param": None}
             else:
-                routing = await _ai_route_message(text, conversation_context=conv_ctx)
+                if await _agent.engine_on(session, user):
+                    plan = await _agent.make_plan(text, conversation_context=conv_ctx)
+                routing = plan.as_routing() if plan is not None else \
+                    await _ai_route_message(text, conversation_context=conv_ctx)
             ai_route = routing["route"]
+
+            if plan is not None and plan.kind == "chat":
+                # Small talk used to fall into the knowledge search and its model call.
+                reply = "‏" + _html.escape(plan.reply or _agent.CHAT_REPLY)
+                await update.message.reply_text(reply, parse_mode="HTML")
+                append_context(telegram_id, "assistant", reply[:300])
+                return
 
             # All non-decision routes go through the shared ask_router.
             # decision-route falls through to ClaudeService().classify() below.
@@ -1057,7 +1105,8 @@ class TelegramPollingBot:
                     result = await _ask_route(text, session, user.id, log_to_db=True,
                                               conversation_context=conv_ctx,
                                               precomputed_intent=_pre.get("intent"),
-                                              precomputed_param=_pre.get("param"))
+                                              precomputed_param=_pre.get("param"),
+                                              plan=plan)
                     logger.info(f"⏱ ask_router.route ({result.path}): "
                                 f"{int((_tt.perf_counter() - _ask_t0) * 1000)}ms")
 

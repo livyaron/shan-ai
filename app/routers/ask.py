@@ -39,8 +39,12 @@ async def ask_query(
     # Mirrors Telegram: _ai_route_message → if route="decision" → ClaudeService.classify
     # → if verdict="DECISION" → return decision payload (analysis + RACI + users),
     # client opens decision-confirm UI. Otherwise fall through to ask_router Q&A.
+    from app.services import answer_agent
     from app.services.telegram_routing import _ai_route_message
-    routing = await _ai_route_message(body.question)
+    plan = None
+    if await answer_agent.engine_on(session, current_user):
+        plan = await answer_agent.make_plan(body.question)
+    routing = plan.as_routing() if plan is not None else await _ai_route_message(body.question)
     if routing.get("route") == "decision":
         decision_payload = await _try_classify_as_decision(
             body.question, session, current_user,
@@ -48,8 +52,20 @@ async def ask_query(
         if decision_payload is not None:
             return JSONResponse(decision_payload)
 
+    if plan is not None and plan.kind == "chat":
+        return JSONResponse({
+            "is_decision": False, "answer": plan.reply or answer_agent.CHAT_REPLY,
+            "sources_text": "", "has_files": False, "has_decisions": False,
+            "file_names": [], "log_id": None,
+        })
+
     from app.services.ask_router import route
-    result = await route(body.question, session, current_user.id)
+    # The routing call already extracted the project intent — pass it on (as Telegram does).
+    _pre = routing if routing.get("route") == "project" else {}
+    result = await route(body.question, session, current_user.id,
+                         precomputed_intent=_pre.get("intent"),
+                         precomputed_param=_pre.get("param"),
+                         plan=plan)
     return JSONResponse({
         "is_decision":   False,
         "answer":        result.answer,

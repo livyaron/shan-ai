@@ -519,6 +519,7 @@ async def answer_project_query(
     precomputed_intent: Optional[str] = None,
     precomputed_param: Optional[str] = None,
     memory_context: str = "",
+    intent_is_final: bool = False,
 ) -> tuple[str, Optional[int]]:
     """
     Main function: detect intent, fetch data, and generate Hebrew summary via AI.
@@ -528,7 +529,9 @@ async def answer_project_query(
     If precomputed_intent is provided (from the top-level router), use it directly
     and skip the second LLM call. Falls back to _ai_detect_intent → _detect_intent.
     """
-    if precomputed_intent and precomputed_intent != "general":
+    # intent_is_final: the answer plan chose this intent — "general" included, so
+    # the overview is not sent back to the model to be detected again.
+    if precomputed_intent and (intent_is_final or precomputed_intent != "general"):
         intent, param = precomputed_intent, precomputed_param
         logger.info(f"answer_project_query: using precomputed intent={intent!r}, param={param!r}")
     else:

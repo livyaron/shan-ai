@@ -1960,8 +1960,12 @@ async def answer_with_full_context(
     log_to_db: bool = True,
     conversation_context: list[dict] | None = None,
     memory_context: str | None = None,
+    search_terms: str | None = None,
 ) -> dict:
     """Search knowledge base + decisions, then answer with two-step retrieval.
+
+    search_terms: expansion words the answer plan already produced for this
+    question — used instead of the separate query-expansion model call.
 
     Step 0: Hebrew abbreviation expansion + learned synonyms
     Step 1: LLM query expansion for better semantic understanding
@@ -2007,6 +2011,9 @@ async def answer_with_full_context(
     if full_list:
         expanded_query = search_question
         logger.info(f"Full-list query — skipping expansion, using search version: {repr(search_question)}")
+    elif search_terms:
+        expanded_query = f"{search_question} {search_terms}"
+        logger.info(f"Search question: {repr(search_question)} + plan terms: {repr(search_terms)}")
     else:
         expanded_query = await _expand_query(search_question)
         logger.info(f"Search question: {repr(search_question)} → Expanded: {repr(expanded_query)}")
