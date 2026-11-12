@@ -76,7 +76,7 @@ async def submit_feedback(
     log.user_feedback = body.feedback
 
     # Phase 2: also write a per-click AnswerFeedback row. For 👍, the service
-    # may also create an auto_user_confirmed gold answer when eligible.
+    # links the vote to the question's gold answer when one exists (never creates one).
     from app.services.answer_feedback_service import record_thumbs_up
     from app.models import AnswerFeedback
     if body.feedback == 1:

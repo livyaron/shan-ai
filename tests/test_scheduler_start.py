@@ -28,8 +28,11 @@ def test_start_scheduler_registers_every_job_and_starts(monkeypatch):
         assert started, "sch.start() was never reached"
         ids = {j.id for j in started[0].get_jobs()}
         assert {"missions_daily_digest", "missions_overdue_check", "weekly_report",
-                "pending_queue", "eval_nightly", "missions_daily_xlsx"} <= ids
-        assert len(ids) == 15
+                "pending_queue", "dossier_drip", "missions_daily_xlsx"} <= ids
+        assert len(ids) == 12
+        # The unattended gold-eval jobs stay off (they spent the whole Groq day budget).
+        assert eval_cron.EVAL_JOBS_ENABLED is False
+        assert not ids & {"eval_nightly", "batch_eval", "weekly_eval_summary"}
     finally:
         monkeypatch.setattr(eval_cron, "_scheduler", None)
 

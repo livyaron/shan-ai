@@ -26,7 +26,7 @@ async def test_thumbs_up_writes_feedback_row(db_session):
 
 
 @pytest.mark.asyncio
-async def test_thumbs_up_creates_auto_gold_when_none_exists(db_session):
+async def test_thumbs_up_never_creates_gold(db_session):
     log = await _seed_log(db_session, question="auto-gold-q-002", answer="auto-gold-answer")
     fb = await record_thumbs_up(db_session, log.id, user_id=None)
 
@@ -34,10 +34,8 @@ async def test_thumbs_up_creates_auto_gold_when_none_exists(db_session):
     h = question_hash("auto-gold-q-002")
     gold = await db_session.scalar(
         select(EvalGoldAnswer).where(EvalGoldAnswer.question_hash == h))
-    assert gold is not None
-    assert gold.source == "auto_user_confirmed"
-    assert gold.gold_answer == "auto-gold-answer"
-    assert fb.gold_id == gold.id
+    assert gold is None, "a 👍 must not freeze the bot's answer as gold"
+    assert fb.gold_id is None
 
 
 @pytest.mark.asyncio
@@ -78,10 +76,9 @@ async def test_thumbs_down_writes_feedback_row_and_gold(db_session):
 
 
 @pytest.mark.asyncio
-async def test_rate_limit_skips_auto_gold_after_5_in_60s(db_session):
-    """6th 👍 within a minute must skip the auto-gold conversion (the row
-    still inserts; only the gold side-effect is suppressed). We need a real
-    user row to exist because AnswerFeedback.user_id has FK to users.id."""
+async def test_a_burst_of_thumbs_up_still_records_the_vote(db_session):
+    """6th 👍 within a minute: the row still inserts and no gold appears. We need
+    a real user row to exist because AnswerFeedback.user_id has FK to users.id."""
     # Seed a user row so the FK on user_id resolves
     await db_session.execute(text(
         "INSERT INTO users (id, telegram_id, username, role, password_hash, is_admin) "
@@ -99,7 +96,7 @@ async def test_rate_limit_skips_auto_gold_after_5_in_60s(db_session):
 
     log6 = await _seed_log(db_session, question="burst-q-006", answer="ans-006")
     fb = await record_thumbs_up(db_session, log6.id, user_id=42)
-    assert fb.gold_id is None, "expected auto-gold skipped under rate limit"
+    assert fb.gold_id is None
 
     from app.services.gold_truth_service import question_hash
     h = question_hash("burst-q-006")

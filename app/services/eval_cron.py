@@ -31,6 +31,17 @@ _scheduler = None
 WORK_WEEK = "sun,mon,tue,wed,thu"
 
 
+# The three unattended gold-eval jobs (nightly repair loop, 6-hourly batch,
+# Sunday summary) are OFF (user decision 2026-11-12). The first night the
+# scheduler actually ran, the nightly loop spent the whole Groq day budget
+# (200K tokens) by 05:50 and the bot answered from the fallback provider all
+# morning. By design it cannot fit: every failing question re-answers the entire
+# gold set twice per repair attempt, its judge scores 0 whenever the judge call
+# itself fails, and gold answers are fixed text about project fields that change
+# with every weekly master file. A manual run from /eval still works.
+EVAL_JOBS_ENABLED = False
+
+
 def scheduler_running() -> bool:
     return _scheduler is not None and _scheduler.running
 
@@ -47,7 +58,8 @@ def start_scheduler() -> None:
         return
 
     sch = AsyncIOScheduler(timezone="UTC")
-    sch.add_job(_nightly_run, CronTrigger(hour=3, minute=0), id="eval_nightly", replace_existing=True)
+    if EVAL_JOBS_ENABLED:
+        sch.add_job(_nightly_run, CronTrigger(hour=3, minute=0), id="eval_nightly", replace_existing=True)
     sch.add_job(
         _weekly_report_run,
         CronTrigger(day_of_week="thu", hour=17, minute=0, timezone="Asia/Jerusalem"),
@@ -59,15 +71,13 @@ def start_scheduler() -> None:
         "interval", minutes=15,
         id="project_report_cron", replace_existing=True,
     )
-    sch.add_job(
-        _weekly_eval_summary,
-        CronTrigger(day_of_week="sun", hour=7, minute=0, timezone="Asia/Jerusalem"),
-        id="weekly_eval_summary", replace_existing=True,
-    )
-    # 6h (was 3h): batch eval is the biggest periodic Groq consumer (8 questions ×
-    # multi-call pipeline × runs/day). Halving frequency keeps the daily TPD budget
-    # available for interactive decisions; full gold refresh ~2 days, fine on free tier.
-    sch.add_job(_batch_eval_run, "interval", hours=6, id="batch_eval", replace_existing=True)
+    if EVAL_JOBS_ENABLED:
+        sch.add_job(
+            _weekly_eval_summary,
+            CronTrigger(day_of_week="sun", hour=7, minute=0, timezone="Asia/Jerusalem"),
+            id="weekly_eval_summary", replace_existing=True,
+        )
+        sch.add_job(_batch_eval_run, "interval", hours=6, id="batch_eval", replace_existing=True)
     # Retry decisions that were queued when all LLM providers were exhausted.
     sch.add_job(_pending_queue_run, "interval", minutes=5,
                 id="pending_queue", replace_existing=True)
@@ -121,16 +131,15 @@ def start_scheduler() -> None:
                 id="session_summaries", replace_existing=True)
     sch.start()
     _scheduler = sch
-    logger.info("eval_cron: scheduler started (03:00 UTC nightly)")
+    logger.info("eval_cron: scheduler started (%d jobs; gold-eval jobs %s)",
+                len(sch.get_jobs()), "on" if EVAL_JOBS_ENABLED else "off")
     logger.info("eval_cron: weekly_report job registered (Thu 17:00 Asia/Jerusalem)")
     logger.info("eval_cron: project_report_cron job registered (every 15 min)")
-    logger.info("eval_cron: weekly_eval_summary job registered (Sun 07:00 Asia/Jerusalem)")
     logger.info("eval_cron: missions_daily_digest job registered (Sun-Thu 07:00 Asia/Jerusalem)")
     logger.info("eval_cron: missions_overdue_check job registered (every 30 min, sends 07-20 IL)")
     logger.info("eval_cron: missions_daily_prewarm job registered (daily 04:10 Asia/Jerusalem)")
     logger.info("eval_cron: missions_cache_watchdog job registered (hourly)")
     logger.info("eval_cron: missions_daily_xlsx job registered (Sun-Thu 07:10 Asia/Jerusalem)")
-    logger.info("eval_cron: batch_eval job registered (every 3h)")
 
 
 def stop_scheduler() -> None:

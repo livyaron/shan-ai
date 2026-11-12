@@ -1,9 +1,7 @@
 """Per-click answer feedback orchestration.
 
-record_thumbs_up: writes AnswerFeedback row; auto-converts question into an
-EvalGoldAnswer (source='auto_user_confirmed') only when no existing gold row
-points to the same question_hash AND the user is not currently rate-limited
-(>5 feedback clicks in the last 60s).
+record_thumbs_up: writes AnswerFeedback row and links it to the existing gold
+answer for that question, if any. It never creates one (2026-11-12).
 
 record_thumbs_down: writes AnswerFeedback row with correction_text; calls
 save_gold() with the correction as the new gold (source='user_correction').
@@ -48,8 +46,12 @@ async def record_thumbs_up(
     log_id: int,
     user_id: int | None,
 ) -> AnswerFeedback:
-    """Insert AnswerFeedback row. Attempt auto-gold conversion when
-    eligible (no existing gold for this question + not rate-limited)."""
+    """Insert AnswerFeedback row, linked to the question's gold answer when one exists.
+
+    A 👍 no longer CREATES a gold answer (user decision 2026-11-12): it froze the
+    bot's answer of that moment as "the truth" about a project field that changes
+    with the next master file, and grew the gold set without anyone curating it.
+    Gold comes from an admin (/gold, /eval) or from a 👎 with a correction."""
     fb = AnswerFeedback(query_log_id=log_id, user_id=user_id, vote="up")
     session.add(fb)
     await session.flush()
@@ -68,19 +70,6 @@ async def record_thumbs_up(
         await session.commit()
         return fb
 
-    if await _is_rate_limited(session, user_id):
-        logger.info(f"auto-gold skipped (rate-limited) user_id={user_id} log_id={log_id}")
-        await session.commit()
-        return fb
-
-    gold = await save_gold(
-        session,
-        question=log.question,
-        gold_answer=log.ai_response or "",
-        user_id=user_id,
-        source="auto_user_confirmed",
-    )
-    fb.gold_id = gold.id
     await session.commit()
     return fb
 
