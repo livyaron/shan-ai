@@ -143,7 +143,58 @@ async def search_by_manager(manager_name: str, session: AsyncSession) -> list[di
     # Nickname fallback: "רחלי" → "רחל", "דני" → "דן", etc.
     if not projects and manager_name.endswith("י") and len(manager_name) > 2:
         projects = await _search_tokens(manager_name[:-1])
+    # The master file spells managers its own way (a short name, initials, another
+    # order of words). The asker uses the person's name as the system knows it, so
+    # go through the admin-confirmed chain: system user → manager_aliases → projects.
+    if not projects:
+        aliases = await _confirmed_aliases_for(manager_name, session)
+        if aliases:
+            stmt = select(Project).where(Project.manager.in_(aliases), Project.is_active).order_by(Project.name)
+            projects = (await session.execute(stmt)).scalars().all()
     return [_project_to_dict(p) for p in projects]
+
+
+def _name_tokens(name: str) -> list[str]:
+    return [t for t in (name or "").split() if t]
+
+
+async def _confirmed_aliases_for(name: str, session: AsyncSession) -> list[str]:
+    """Master-file spellings an admin linked to the system user called `name`.
+    Only a single matching user counts — two users sharing the words is a guess."""
+    from app.models import ManagerAlias, User
+    tokens = _name_tokens(name)
+    if not tokens:
+        return []
+    users = (await session.execute(
+        select(User.id).where(and_(*[User.username.ilike(f"%{t}%") for t in tokens]))
+    )).scalars().all()
+    if len(users) != 1:
+        return []
+    return list((await session.execute(
+        select(ManagerAlias.alias).where(ManagerAlias.user_id == users[0])
+    )).scalars().all())
+
+
+async def similar_manager_names(name: str, session: AsyncSession, limit: int = 6) -> list[str]:
+    """Manager names of active projects that share a word with `name` — what to
+    offer when the name as typed matches nobody."""
+    tokens = [t for t in _name_tokens(name) if len(t) >= 3]
+    if not tokens:
+        return []
+    stmt = (select(Project.manager)
+            .where(Project.is_active, Project.manager.isnot(None),
+                   or_(*[Project.manager.ilike(f"%{t}%") for t in tokens]))
+            .distinct().order_by(Project.manager).limit(limit))
+    return [m for m in (await session.execute(stmt)).scalars().all() if m]
+
+
+def manager_not_found_text(name: str, similar: list[str]) -> str:
+    import html as _h
+    text = f"לא נמצאו פרויקטים פעילים שהמנהל שלהם הוא '{_h.escape(name)}'."
+    if similar:
+        text += "\n\nמנהלים עם שם דומה בקובץ הפרויקטים:\n" + "\n".join(f"• {_h.escape(m)}" for m in similar)
+        text += "\n\nאפשר לשאול שוב עם השם כפי שהוא מופיע כאן."
+    return text
 
 
 async def list_risks(session: AsyncSession) -> list[dict]:
@@ -675,7 +726,7 @@ async def answer_project_query(
                         current_project_id = project["project_identifier"]
                         context_str = json.dumps(project, ensure_ascii=False, indent=2)
                     else:
-                        answer = f"לא נמצאו תוצאות עבור '{param}'."
+                        answer = manager_not_found_text(param, await similar_manager_names(param, session))
                         log_id = await _log_query(text, answer, intent, None, session, user_id)
                         return answer, log_id
 
