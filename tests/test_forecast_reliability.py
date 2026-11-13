@@ -142,3 +142,47 @@ def test_the_page_is_gated_scoped_and_built_without_the_html_parser():
     assert "innerHTML" not in page and "{{ data|tojson }}" in page
     assert "'/dashboard/projects/p/' + encodeURIComponent(p.id)" in page       # the drill ends at the project page
     assert "prefers-reduced-motion" in page
+
+
+# ── the added analyses ────────────────────────────────────────────────────
+
+def test_when_the_postponements_are_declared():
+    assert R["timeline"] == [
+        {"report": "2026-07-08", "later": 1, "earlier": 0, "later_months": 5.9, "earlier_months": 0.0, "measured": 2},
+        {"report": "2026-09-16", "later": 1, "earlier": 0, "later_months": 6.0, "earlier_months": 0.0, "measured": 2},
+    ]
+
+
+def test_sizes_repeats_plan_gap_years_and_stage_change():
+    assert R["move_sizes"]["4–6 חודשים"] == 2 and sum(R["move_sizes"].values()) == R["all"]["moved_later"]
+    assert R["postponements_per_project"] == {"0": 1, "1": 0, "2": 1, "3+": 0}
+    assert R["plan_gap"]["בזמן"] == 1 and R["plan_gap"]["עד חצי שנה"] == 1          # P2 on plan, P1 six months behind it
+    assert R["target_years"] == [{"from": 2026, "to": 2027, "projects": 1}, {"from": 2027, "to": 2027, "projects": 1}]
+    assert R["at_stage_change"] == {"moves": 2, "with_stage_change": 1, "pct": 50}   # P1's second move came with תכנון → בדיקות
+    assert R["past_due"] == {"projects": 0, "pct": 0}
+
+
+def test_every_new_figure_is_the_number_of_rows_behind_it():
+    rows = DETAIL["projects"]
+    for label, n in DETAIL["plan_gap"].items():
+        assert n == sum(1 for p in rows if p["plan_gap"] == label), label
+    for label, n in DETAIL["move_sizes"].items():
+        assert n == sum(1 for p in rows for e in p["events"] if e["size"] == label), label
+    for wave in DETAIL["timeline"]:
+        assert wave["later"] == sum(1 for p in rows for e in p["events"] if e["to_report"] == wave["report"] and e["months"] > 0)
+    for flow in DETAIL["target_years"]:
+        assert flow["projects"] == sum(1 for p in rows if int(p["fc_first"][:4]) == flow["from"] and int(p["fc_last"][:4]) == flow["to"])
+    assert DETAIL["past_due"]["projects"] == sum(1 for p in rows if p["past_due"])
+    assert DETAIL["order"]["plan"] == list(DETAIL["plan_gap"]) and DETAIL["order"]["sizes"] == list(DETAIL["move_sizes"])
+
+
+def test_manager_names_reach_the_page_but_never_the_log():
+    assert set(DETAIL["by_manager"]) == {"מנהל 1", "מנהל 2"}
+    assert "by_manager" not in R and "order" not in R
+
+
+def test_the_page_has_no_all_projects_table():
+    page = (Path(fr.__file__).resolve().parents[2] / "app/templates/project_delays.html").read_text(encoding="utf-8")
+    assert "כל הפרויקטים" not in page.split("<script>")[0]            # no such section in the page body
+    for chart in ("pipe", "years", "timeline", "sizes", "plan", "dots", "cuts"):
+        assert f'data-build="{chart}"' in page and f"BUILD.{chart} = " in page

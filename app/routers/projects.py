@@ -297,7 +297,8 @@ async def project_insights_page(
         "sector_labels": stage_sectors.SECTORS,
         "preview_label": preview_label,
         "preview_options": options,
-        "ai": {k: insight_ai.for_display(v) for k, v in ai_rows.items()},
+        # the prose calls a project by its name, not only "WBE-087" (insight_ai.name_projects)
+        "ai": {k: insight_ai.for_display(v, view.get("names")) for k, v in ai_rows.items()},
         "ai_status": insight_ai.STATUS,
         "ai_started": ai_started,
         "master_loaded": {"at": master.created_at, "name": master.original_name} if master else None,

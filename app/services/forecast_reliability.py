@@ -28,6 +28,13 @@ logger = logging.getLogger(__name__)
 
 LOG_PREFIX = "FORECAST_RELIABILITY "
 YEAR_DAYS = 365.25
+SIZES: tuple[tuple[str, float], ...] = (                 # a postponement's size, in months (upper bound)
+    ("עד חודש", 1.5), ("2–3 חודשים", 3.5), ("4–6 חודשים", 6.5), ("7–12 חודשים", 12.5), ("מעל שנה", float("inf")),
+)
+PLAN_GAPS: tuple[tuple[str, float], ...] = (              # current forecast against the development plan, months
+    ("בזמן", ps.LATE_MONTHS), ("עד חצי שנה", 6), ("חצי שנה עד שנה", 12), ("מעל שנה", float("inf")),
+)
+NO_PLAN = "ללא יעד תכנית"
 HORIZONS: tuple[tuple[str, float, float], ...] = (      # months ahead the first forecast looked
     ("כבר עבר", float("-inf"), 0), ("עד 6 חודשים", 0, 6), ("6–12 חודשים", 6, 12),
     ("12–24 חודשים", 12, 24), ("מעל 24 חודשים", 24, float("inf")),
@@ -64,6 +71,10 @@ def _horizon(months: float) -> str:
     return HORIZONS[-1][0]
 
 
+def _bucket(value: float, scale: tuple[tuple[str, float], ...]) -> str:
+    return next(label for label, top in scale if value <= top)
+
+
 def analyse(frames: ps.Frames, allowed: set | None = None, with_projects: bool = False) -> dict[str, Any]:
     """The figures, over every project or only the `allowed` project ids.
 
@@ -83,7 +94,16 @@ def analyse(frames: ps.Frames, allowed: set | None = None, with_projects: bool =
     by_stage: dict[str, list] = defaultdict(list)
     by_sector: dict[str, list] = defaultdict(list)
     by_type: dict[str, list] = defaultdict(list)
+    by_manager: dict[str, list] = defaultdict(list)
     everything: list = []
+    timeline: dict[Any, dict[str, float]] = {d: {"later": 0, "earlier": 0, "later_months": 0.0, "earlier_months": 0.0, "measured": 0}
+                                             for d in rdates[1:]}
+    sizes = dict.fromkeys((label for label, _ in SIZES), 0)
+    repeats = {"0": 0, "1": 0, "2": 0, "3+": 0}
+    gaps = dict.fromkeys([label for label, _ in PLAN_GAPS] + [NO_PLAN], 0)
+    years: dict[tuple[int, int], int] = defaultdict(int)
+    at_change = {"moves": 0, "with_stage_change": 0}
+    past_due = 0
     first_last: list[tuple[float, float, float, bool]] = []   # horizon_m, drift_days, observed_days, baseline_moved_later
     projects: list[dict[str, Any]] = []
 
@@ -95,7 +115,8 @@ def analyse(frames: ps.Frames, allowed: set | None = None, with_projects: bool =
         ptype = (info.get(pid) or {}).get("project_type") or "ללא סוג"
         in_stage: dict[str, float] = defaultdict(float)
         events = []
-        for (d0, fc0, stage0, _), (d1, fc1, _, _) in zip(rows, rows[1:]):
+        manager = (info.get(pid) or {}).get("manager") or "ללא מנהל פרויקט"
+        for (d0, fc0, stage0, _), (d1, fc1, stage1, _) in zip(rows, rows[1:]):
             stage = stage0 or "ללא סטטוס"
             move = (fc1 - fc0).days
             item = (move, (d1 - d0).days, pid)
@@ -104,18 +125,40 @@ def analyse(frames: ps.Frames, allowed: set | None = None, with_projects: bool =
             for sector in ss.sectors_for(stage0):
                 by_sector[ss.SECTORS.get(sector, sector)].append(item)
             by_type[ptype].append(item)
+            by_manager[manager].append(item)
             in_stage[stage] += 0.0                                # the project was measured in this stage
+            wave = timeline.get(d1)
+            if wave is not None:
+                wave["measured"] += 1
             if abs(move) > ps.MOVE_DAYS:
                 in_stage[stage] += move
+                months = round(move / ps.MONTH_DAYS, 1)
+                changed = bool(stage1) and stage1 != stage0
                 events.append({"from_report": d0.isoformat(), "to_report": d1.isoformat(), "stage": stage,
                                "fc_from": fc0.date().isoformat(), "fc_to": fc1.date().isoformat(),
-                               "months": round(move / ps.MONTH_DAYS, 1)})
+                               "months": months, "stage_changed": changed,
+                               "size": _bucket(months, SIZES) if move > 0 else None})
+                if wave is not None:
+                    wave["later" if move > 0 else "earlier"] += 1
+                    wave["later_months" if move > 0 else "earlier_months"] += abs(months)
+                if move > 0:
+                    sizes[_bucket(months, SIZES)] += 1
+                    at_change["moves"] += 1
+                    at_change["with_stage_change"] += changed
         if len(rows) < 2:
             continue
         (d0, fc0, _, dev0), (d1, fc1, _, dev1) = rows[0], rows[-1]
         base_later = bool(pd.notna(dev0) and pd.notna(dev1) and (dev1 - dev0).days > ps.MOVE_DAYS)
         horizon_m = (fc0 - pd.Timestamp(d0)).days / ps.MONTH_DAYS
         first_last.append((horizon_m, (fc1 - fc0).days, (d1 - d0).days, base_later))
+        n_later = sum(1 for e in events if e["months"] > 0)
+        repeats[str(n_later) if n_later < 3 else "3+"] += 1
+        gap_m = round((fc1 - dev1).days / ps.MONTH_DAYS, 1) if pd.notna(dev1) else None
+        gap_label = NO_PLAN if gap_m is None else _bucket(gap_m, PLAN_GAPS)
+        gaps[gap_label] += 1
+        years[(fc0.year, fc1.year)] += 1
+        overdue = bool(fc1 < pd.Timestamp(rdates[-1]))
+        past_due += overdue
         if with_projects:
             p = info.get(pid) or {}
             stage_now = current_stage.get(pid) or "ללא סטטוס"
@@ -129,6 +172,7 @@ def analyse(frames: ps.Frames, allowed: set | None = None, with_projects: bool =
                 "fc_first": fc0.date().isoformat(), "fc_last": fc1.date().isoformat(),
                 "observed_months": round((d1 - d0).days / ps.MONTH_DAYS, 1),
                 "horizon": _horizon(horizon_m), "baseline_later": base_later,
+                "plan_gap_months": gap_m, "plan_gap": gap_label, "past_due": overdue,
                 "stages": {k: round(v / ps.MONTH_DAYS, 1) for k, v in in_stage.items()},
                 "events": events,
                 "series": [[d.isoformat(), fc.date().isoformat()] for d, fc, _, _ in rows],
@@ -167,12 +211,30 @@ def analyse(frames: ps.Frames, allowed: set | None = None, with_projects: bool =
             "pct": round(100 * sum(1 for r in slipped if r[3]) / len(slipped)) if slipped else None,
         },
     }
+    n_proj = len(first_last)
+    out.update({
+        # when the postponements are declared: one entry per weekly report
+        "timeline": [{"report": d.isoformat(), "later": int(w["later"]), "earlier": int(w["earlier"]),
+                      "later_months": round(w["later_months"], 1), "earlier_months": round(w["earlier_months"], 1),
+                      "measured": int(w["measured"])} for d, w in sorted(timeline.items())],
+        "move_sizes": sizes,                                   # postponements only, by size
+        "postponements_per_project": repeats,
+        "plan_gap": gaps,                                      # the current forecast against the development plan
+        "target_years": [{"from": a, "to": b, "projects": n} for (a, b), n in sorted(years.items())],
+        "past_due": {"projects": int(past_due), "pct": round(100 * past_due / n_proj) if n_proj else None},
+        "at_stage_change": {**{k: int(v) for k, v in at_change.items()},
+                            "pct": round(100 * at_change["with_stage_change"] / at_change["moves"]) if at_change["moves"] else None},
+    })
     if with_projects:
+        out["by_manager"] = order({k: _rate(v) for k, v in by_manager.items()})    # names: the page only, never the log
         out["projects"] = sorted(projects, key=lambda r: -r["net_months"])
         # where each stage sits on the way to energization (stage_sectors.STAGE_RANK); off-ladder = None
         out["stage_rank"] = {k: ss.STAGE_RANK.get(k) for k in out["by_stage"]}
         out["stage_sectors"] = {k: [ss.SECTORS.get(x, x) for x in ss.sectors_for(k)] for k in out["by_stage"]}
         out["move_days"] = ps.MOVE_DAYS
+        # the template's tojson sorts keys, so the scales' own order travels as lists
+        out["order"] = {"sizes": [label for label, _ in SIZES], "plan": [label for label, _ in PLAN_GAPS] + [NO_PLAN],
+                        "horizons": [label for label, _lo, _hi in HORIZONS]}
     return out
 
 

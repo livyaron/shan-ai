@@ -521,10 +521,46 @@ async def generate_project(session, frames, p: dict, identifier: str) -> dict | 
     return {"payload": payload, "provider": provider, "created_at": None}
 
 
-def for_display(row: dict | None) -> dict | None:
-    """The stored reply with PM names restored, ready for the template."""
+SHORT_NAME_CHARS = 38       # a project's name inside a sentence
+
+
+def short_name(name: object) -> str:
+    """A project's name short enough to read inside a sentence (cut on a word)."""
+    n = _clean(name)
+    if len(n) <= SHORT_NAME_CHARS:
+        return n
+    cut = n[:SHORT_NAME_CHARS].rsplit(" ", 1)[0].rstrip(" -–—,·:")
+    return (cut or n[:SHORT_NAME_CHARS]) + "…"
+
+
+def name_projects(obj: object, names: dict[str, str]) -> object:
+    """Write a project's NAME wherever the text shows only its identifier:
+    "WBE-087" / "[WBE-087]" → "שם הפרויקט (WBE-087)". A reader knows projects by
+    name; the identifier stays, in brackets, for an exact reference. A string
+    that already carries the name is left as it is. Display only — the stored
+    reply and what `validate` checked are untouched."""
+    known = {i: short_name(n) for i, n in names.items() if i and _clean(n)}
+    if not known:
+        return obj
+    pattern = re.compile(r"\[?(?<![A-Za-z0-9])(" + "|".join(re.escape(i) for i in sorted(known, key=len, reverse=True))
+                         + r")(?!-?[A-Za-z0-9])\]?")       # "ב-WBE-087" is a match; "WBE-0871" / "XWBE-087" are other tokens
+
+    def one(text: str) -> str:
+        def sub(m: re.Match) -> str:
+            ident = m.group(1)
+            head = known[ident].rstrip("…")[:14]
+            return m.group(0) if head and head in text else f"{known[ident]} ({ident})"
+        return pattern.sub(sub, text)
+
+    return _walk_strings(obj, one)
+
+
+def for_display(row: dict | None, names: dict[str, str] | None = None) -> dict | None:
+    """The stored reply with PM names restored and projects called by name
+    (`names`: identifier → name), ready for the template."""
     if not row:
         return None
     payload = dict(row["payload"])
     aliases = payload.pop("_aliases", {}) or {}
-    return {**row, "payload": restore_names(payload, aliases)}
+    payload = restore_names(payload, aliases)
+    return {**row, "payload": name_projects(payload, names) if names else payload}
