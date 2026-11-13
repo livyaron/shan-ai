@@ -64,6 +64,7 @@ Maintainer notes (stripped before Claude sees this file — they cost no tokens)
 | Pattern engine, access/drill, taxonomy, project page, AI analysis | `.claude/rules/patterns-engine.md` |
 | Visual report + 3D digital twin | `.claude/rules/project-visual.md` |
 | Main dashboard ("תחנה חיה") | `.claude/rules/dashboard.md` |
+| Shared motion layer (navbar, buttons, cards, page transitions), login page | `.claude/rules/ui-motion.md` |
 | Groq / Gemma limits, key redaction in logs | `.claude/rules/llm-providers.md` |
 | Lessons module | `.claude/rules/lessons.md` |
 | Linking missions/decisions to projects | `.claude/rules/project-links.md` |

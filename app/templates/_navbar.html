@@ -91,7 +91,11 @@
 
     .shan-nav-dd { position: relative; }
     .shan-nav-dd-menu {
-        display: none;
+        visibility: hidden;
+        opacity: 0;
+        transform: translateY(-6px) scale(0.98);
+        transform-origin: top right;
+        transition: opacity 0.18s, transform 0.22s cubic-bezier(.22,1,.36,1), visibility 0s 0.18s;
         position: absolute;
         top: 100%;
         right: 0;
@@ -104,7 +108,7 @@
         z-index: 1001;
     }
     .shan-nav-dd:hover .shan-nav-dd-menu,
-    .shan-nav-dd:focus-within .shan-nav-dd-menu { display: block; }
+    .shan-nav-dd:focus-within .shan-nav-dd-menu { visibility: visible; opacity: 1; transform: none; transition-delay: 0s; }
     .shan-nav-dd-menu .shan-nav-link { display: flex; width: 100%; padding: 0.42rem 0.7rem; }
     .shan-nav-caret { font-size: 0.6rem; opacity: 0.6; }
 
@@ -150,6 +154,12 @@
         .shan-nav-links { order: 3; width: 100%; }
     }
 </style>
+{# Shared motion layer (static/css/shan_ui.css + static/js/shan_ui.js). Not inside
+   the lessons app: it draws this navbar into its own page and has its own UI kit. #}
+{% if not _path.startswith('/lessons') %}
+<link rel="stylesheet" href="/static/css/shan_ui.css?v={{ asset_v|default('1') }}">
+<script defer src="/static/js/shan_ui.js?v={{ asset_v|default('1') }}"></script>
+{% endif %}
 <nav class="shan-nav">
     <a href="/dashboard/" class="shan-nav-brand">
         <span class="shan-nav-pulse"></span>
