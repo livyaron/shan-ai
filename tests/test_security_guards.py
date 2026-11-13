@@ -153,3 +153,15 @@ async def test_security_headers_on_every_response():
     assert r.headers["x-content-type-options"] == "nosniff"
     assert r.headers["x-frame-options"] == "SAMEORIGIN"
     assert "scheduler_running" in r.json()
+
+
+def test_site_icons_exist_and_are_routed():
+    """Browsers ask for these at the root on every first visit; they used to 404."""
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parent.parent
+    assert (root / "static/favicon.ico").stat().st_size > 500
+    assert (root / "static/apple-touch-icon.png").stat().st_size > 500
+    src = (root / "app/main.py").read_text(encoding="utf-8")
+    for path in ("/favicon.ico", "/apple-touch-icon.png", "/apple-touch-icon-precomposed.png"):
+        assert f'@app.get("{path}"' in src

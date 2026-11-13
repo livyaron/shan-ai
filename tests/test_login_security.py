@@ -129,7 +129,7 @@ async def test_code_plus_a_personal_password_gets_in(world):
         assert session.commits == 0
 
         r = await c.post("/login/new-password", data=form, follow_redirects=False)
-        assert r.status_code == 303 and r.headers["location"] == "/dashboard"
+        assert r.status_code == 303 and r.headers["location"] == "/dashboard/"
         cookie = r.headers["set-cookie"].lower()
         assert "access_token" in cookie and "httponly" in cookie and "samesite=lax" in cookie
     user = session.users[1]

@@ -154,3 +154,11 @@
   .intro * { animation-duration: 0s !important; animation-delay: 0s !important; }
   .intro .intro-pen { display: none; }
 }
+
+/* Moving between the lessons app and the rest of Shan-AI: the same soft
+   page-to-page transition the site uses (static/css/shan_ui.css). Browsers
+   without view transitions simply navigate. */
+@view-transition { navigation: auto; }
+@media (prefers-reduced-motion: reduce) {
+  @view-transition { navigation: none; }
+}
