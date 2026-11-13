@@ -639,6 +639,8 @@ async def startup():
             import json as _json
             from app.services import exec_summary
             async with async_session_maker() as session:
+                if await exec_summary.reread_if_unresolved(session):
+                    print("exec_summary: re-read the master file — more summary cards now open their projects")
                 summary = await exec_summary.latest(session) or {}
             print("EXEC_SUMMARY_CARDS " + _json.dumps(
                 {"sheet": summary.get("sheet"), "cards": [
