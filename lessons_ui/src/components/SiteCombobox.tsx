@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { Check, ChevronsUpDown, Plus, Search } from "lucide-react";
+import { fieldConfigs, findField } from "@/lib/fieldConfigs";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
@@ -27,15 +28,10 @@ interface SiteComboboxProps {
 
 /** The site list, fetched once for every picker on the screen (a table renders one per row). */
 const siteData = sharedLoad(async (): Promise<{ configId: number | null; options: SiteOption[] }> => {
-  const { data: configs } = await supabase
-    .from("form_field_configs")
-    .select("id")
-    .eq("form_type", "project")
-    .eq("field_key", "site")
-    .limit(1);
-  if (!configs || configs.length === 0) return { configId: null, options: [] };
+  const site = findField(await fieldConfigs.load(), "project", "site");
+  if (!site) return { configId: null, options: [] };
 
-  const configId = configs[0].id;
+  const configId = site.id;
   const { data: opts } = await supabase
     .from("form_field_options")
     .select("*")

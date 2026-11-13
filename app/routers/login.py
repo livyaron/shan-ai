@@ -150,7 +150,7 @@ async def login(
     if error:
         return RedirectResponse("/login?error=" + error.replace(" ", "+") + _next_qs(next), status_code=303)
 
-    response = RedirectResponse(url=safe_next(next) or "/dashboard", status_code=303)
+    response = RedirectResponse(url=safe_next(next) or "/dashboard/", status_code=303)
     _set_session(response, user, ACCESS_TOKEN_EXPIRE_DAYS)
     return response
 
@@ -240,7 +240,7 @@ async def new_password(
     _codes.pop(user_id, None)
     logger.info("password setup: user %s set a personal password", user.id)
 
-    response = RedirectResponse(url=safe_next(next) or "/dashboard", status_code=303)
+    response = RedirectResponse(url=safe_next(next) or "/dashboard/", status_code=303)
     _set_session(response, user, ACCESS_TOKEN_EXPIRE_DAYS)
     return response
 

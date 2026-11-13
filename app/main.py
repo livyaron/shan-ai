@@ -683,6 +683,18 @@ async def shutdown():
         pass
 
 
+@app.get("/favicon.ico", include_in_schema=False)
+@app.get("/apple-touch-icon.png", include_in_schema=False)
+@app.get("/apple-touch-icon-precomposed.png", include_in_schema=False)
+async def site_icon(request: Request):
+    """The tab / home-screen icon (the logo's emblem). Browsers ask for these at
+    the site root on every first visit; they used to get a 404 each time."""
+    from fastapi.responses import FileResponse
+
+    name = "favicon.ico" if request.url.path.endswith(".ico") else "apple-touch-icon.png"
+    return FileResponse(f"static/{name}", headers={"Cache-Control": "public, max-age=604800"})
+
+
 @app.get("/")
 async def root(request: Request):
     """Redirect to login or dashboard depending on authentication."""
@@ -690,7 +702,7 @@ async def root(request: Request):
 
     token = request.cookies.get("access_token")
     if token and verify_token(token):
-        return RedirectResponse(url="/dashboard", status_code=303)
+        return RedirectResponse(url="/dashboard/", status_code=303)   # the route itself — "/dashboard" costs one more redirect
     return RedirectResponse(url="/login", status_code=303)
 
 def _scheduler_running() -> bool:

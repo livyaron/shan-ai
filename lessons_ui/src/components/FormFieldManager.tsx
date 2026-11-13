@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { fieldConfigs } from "@/lib/fieldConfigs";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
@@ -89,12 +90,14 @@ const FormFieldManager = ({ formType, title, description }: FormFieldManagerProp
   // Toggle field visibility
   const toggleVisibility = async (fieldId: number, currentValue: boolean) => {
     await supabase.from("form_field_configs").update({ is_visible: !currentValue }).eq("id", fieldId);
+    fieldConfigs.invalidate();
     setFields((prev) => prev.map((f) => f.id === fieldId ? { ...f, isVisible: !currentValue } : f));
   };
 
   // Toggle field required
   const toggleRequired = async (fieldId: number, currentValue: boolean) => {
     await supabase.from("form_field_configs").update({ is_required: !currentValue }).eq("id", fieldId);
+    fieldConfigs.invalidate();
     setFields((prev) => prev.map((f) => f.id === fieldId ? { ...f, isRequired: !currentValue } : f));
   };
 
@@ -102,6 +105,7 @@ const FormFieldManager = ({ formType, title, description }: FormFieldManagerProp
   const saveDisplayName = async () => {
     if (!editingFieldId || !editDisplayName.trim()) return;
     await supabase.from("form_field_configs").update({ display_name: editDisplayName.trim() }).eq("id", editingFieldId);
+    fieldConfigs.invalidate();
     setFields((prev) => prev.map((f) => f.id === editingFieldId ? { ...f, displayName: editDisplayName.trim() } : f));
     setEditingFieldId(null);
     toast({ title: "שם התצוגה עודכן ✓" });
@@ -122,6 +126,7 @@ const FormFieldManager = ({ formType, title, description }: FormFieldManagerProp
       supabase.from("form_field_configs").update({ sort_order: sorted[index].sortOrder }).eq("id", sorted[index].id),
       supabase.from("form_field_configs").update({ sort_order: sorted[swapIndex].sortOrder }).eq("id", sorted[swapIndex].id),
     ]);
+    fieldConfigs.invalidate();
     setFields([...sorted]);
   };
 

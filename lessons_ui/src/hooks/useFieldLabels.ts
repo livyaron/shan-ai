@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { fieldConfigs, labelsFor } from "@/lib/fieldConfigs";
 
 /** Map of field_key → display_name from form_field_configs */
 type FieldLabels = Record<string, string>;
@@ -32,21 +32,11 @@ export function useFieldLabels(formType: "lesson" | "project") {
   const [labels, setLabels] = useState<FieldLabels>({});
 
   useEffect(() => {
-    const load = async () => {
-      const { data } = await supabase
-        .from("form_field_configs")
-        .select("field_key, display_name")
-        .eq("form_type", formType);
-
-      if (data) {
-        const map: FieldLabels = {};
-        for (const row of data) {
-          map[row.field_key] = row.display_name;
-        }
-        setLabels(map);
-      }
-    };
-    load();
+    let alive = true;
+    fieldConfigs.load()
+      .then((rows) => { if (alive) setLabels(labelsFor(rows, formType)); })
+      .catch(() => { /* the hardcoded defaults stay */ });
+    return () => { alive = false; };
   }, [formType]);
 
   /** Get the display label for a field key, with fallback */

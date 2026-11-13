@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { Plus } from "lucide-react";
+import { fieldConfigs, findField } from "@/lib/fieldConfigs";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -8,7 +9,6 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { useUser, PROJECT_STAGES, roleLabels } from "@/context/UserContext";
 import type { ProjectType, StationType } from "@/context/UserContext";
 import { toast } from "@/hooks/use-toast";
-import { supabase } from "@/integrations/supabase/client";
 import SiteCombobox from "@/components/SiteCombobox";
 import MultiStageSelect from "@/components/MultiStageSelect";
 import SearchableSelect from "@/components/ui/searchable-select";
@@ -34,18 +34,12 @@ const AddProjectDialog = ({ trigger }: AddProjectDialogProps) => {
   // Load site field config to check visibility/required
   const [siteFieldConfig, setSiteFieldConfig] = useState<{ isVisible: boolean; isRequired: boolean; displayName: string } | null>(null);
   useEffect(() => {
-    const loadConfig = async () => {
-      const { data } = await supabase
-        .from("form_field_configs")
-        .select("is_visible, is_required, display_name")
-        .eq("form_type", "project")
-        .eq("field_key", "site")
-        .limit(1);
-      if (data && data.length > 0) {
-        setSiteFieldConfig({ isVisible: data[0].is_visible, isRequired: data[0].is_required, displayName: data[0].display_name });
-      }
-    };
-    loadConfig();
+    let alive = true;
+    fieldConfigs.load().then((rows) => {
+      const site = findField(rows, "project", "site");
+      if (alive && site) setSiteFieldConfig({ isVisible: site.is_visible, isRequired: site.is_required, displayName: site.display_name });
+    }).catch(() => { /* the field keeps its default */ });
+    return () => { alive = false; };
   }, []);
 
   const toggleEquipment = (eqId: number) => {

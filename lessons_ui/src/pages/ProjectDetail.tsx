@@ -1,5 +1,6 @@
 import { useMemo, useState, useEffect } from "react";
 import AIFeedbackDialog from "@/components/AIFeedbackDialog";
+import { fieldConfigs, findField } from "@/lib/fieldConfigs";
 import { useParams, useNavigate } from "react-router-dom";
 import { ArrowRight, FolderKanban, BookOpen, CheckCircle2, ChevronLeft, Brain, Loader2, MessageSquare, ThumbsUp, ThumbsDown, Wrench, Pencil, TrendingUp, TrendingDown, Lightbulb, Shield, Plus, Presentation, FileDown } from "lucide-react";
 import LessonsPresentationDialog from "@/components/LessonsPresentationDialog";
@@ -20,7 +21,6 @@ import { useActionRequired } from "@/hooks/useActionRequired";
 import { Zap } from "lucide-react";
 import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert";
 import SiteCombobox from "@/components/SiteCombobox";
-import { supabase } from "@/integrations/supabase/client";
 import MultiStageSelect from "@/components/MultiStageSelect";
 import SearchableSelect from "@/components/ui/searchable-select";
 import { isLinked, missingLabel, projectProblems } from "@/lib/projectProblems";
@@ -55,18 +55,12 @@ const ProjectDetail = () => {
   // Load site field config
   const [siteFieldConfig, setSiteFieldConfig] = useState<{ isVisible: boolean; isRequired: boolean; displayName: string } | null>(null);
   useEffect(() => {
-    const loadConfig = async () => {
-      const { data } = await supabase
-        .from("form_field_configs")
-        .select("is_visible, is_required, display_name")
-        .eq("form_type", "project")
-        .eq("field_key", "site")
-        .limit(1);
-      if (data && data.length > 0) {
-        setSiteFieldConfig({ isVisible: data[0].is_visible, isRequired: data[0].is_required, displayName: data[0].display_name });
-      }
-    };
-    loadConfig();
+    let alive = true;
+    fieldConfigs.load().then((rows) => {
+      const site = findField(rows, "project", "site");
+      if (alive && site) setSiteFieldConfig({ isVisible: site.is_visible, isRequired: site.is_required, displayName: site.display_name });
+    }).catch(() => { /* the field keeps its default */ });
+    return () => { alive = false; };
   }, []);
 
   const actionableLessonIds = useMemo(() => {

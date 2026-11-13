@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
+import { fieldConfigs, findField } from "@/lib/fieldConfigs";
 import { FolderKanban, BookOpen, ChevronLeft, Eye, EyeOff, Filter, Search, ArrowUpAZ, ArrowDownAZ, Zap } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -38,19 +39,13 @@ const Projects = () => {
   // Load site options from managed form_field_options
   useEffect(() => {
     const loadSiteOptions = async () => {
-      const { data: configs } = await supabase
-        .from("form_field_configs")
-        .select("id")
-        .eq("form_type", "project")
-        .eq("field_key", "site")
-        .limit(1);
-
-      if (!configs || configs.length === 0) return;
+      const site = findField(await fieldConfigs.load().catch(() => []), "project", "site");
+      if (!site) return;
 
       const { data: opts } = await supabase
         .from("form_field_options")
         .select("label, value")
-        .eq("field_config_id", configs[0].id)
+        .eq("field_config_id", site.id)
         .eq("is_active", true)
         .order("sort_order");
 
