@@ -6,38 +6,47 @@
     <title>Shan-AI — חסמים</title>
     <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500;700;900&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
     <style>
-        /* חסמים — a film in seven scenes. Every number is computed on the server
-           (app/services/blockers.py, no LLM); the order of the blockers is a rule.
-           This page only stages it: a letterboxed frame, one scene per screen, a
-           player that runs them. With motion off (prefers-reduced-motion) every
-           scene is simply there, complete, and the page scrolls like any other. */
+        /* חסמים — a film. Every number is computed on the server (app/services/blockers.py,
+           no LLM); the order of the blockers is a rule. This page only stages it.
+
+           One canvas holds every blocker as a particle for the whole film. A scene is a
+           FORMATION: a function from a blocker to a place, size and colour. Changing scene
+           re-targets every particle at once — they fly, in a wave, along curved paths with
+           motion trails, while the camera pushes in and the words of the new scene rise.
+           Nothing is replaced; the same points re-form. The DOM layer holds the words and
+           the click targets, and the canvas reads its lanes (owners / long-standing / queue)
+           straight from the DOM, so the dots ride with their rows.
+           With motion off (prefers-reduced-motion) every cut is instant and nothing drifts. */
         :root {
-            --ink: #050505; --paper: #f3eee4; --dim: #9a9388; --faint: #5d584f; --line: #26231e;
-            --amber: #ffb020; --red: #ff4d3d; --cyan: #36d6ff;
-            --lv0: #ff4d3d; --lv1: #ff8a2a; --lv2: #f2d03a; --lv3: #35c48a;
+            --ink: #040404; --paper: #f3eee4; --dim: #a29b8f; --faint: #615b51; --line: #26231e;
+            --amber: #ffb020; --red: #ff4d3d; --cyan: #36d6ff; --green: #35c48a;
             --ui: 'Heebo', sans-serif; --mono: 'IBM Plex Mono', monospace;
-            --ease: cubic-bezier(.22, 1, .36, 1); --spring: cubic-bezier(.34, 1.56, .64, 1);
-            --bar: 46px;                                   /* the letterbox */
+            --ease: cubic-bezier(.16, 1, .3, 1); --spring: cubic-bezier(.34, 1.56, .64, 1);
+            --bar: 46px;
         }
         * { box-sizing: border-box; }
         @view-transition { navigation: auto; }
-        html { scroll-snap-type: y mandatory; scroll-behavior: smooth; background: var(--ink); }
-        html, body { margin: 0; overflow-x: clip; }
-        body { background: var(--ink); color: var(--paper); font-family: var(--ui); }
+        html, body { margin: 0; height: 100%; overflow: hidden; background: var(--ink); color: var(--paper); font-family: var(--ui); }
         bdi.ltr, .ltr { direction: ltr; unicode-bidi: isolate; }
         a { color: inherit; }
         button { font-family: inherit; }
+        #cine { position: fixed; inset: 0; width: 100%; height: 100%; z-index: 1; display: block; }
 
-        /* ── the frame: letterbox, grain, a vignette, the camera's HUD ── */
+        /* ── the frame ── */
+        .grain { position: fixed; inset: -50%; z-index: 30; pointer-events: none; opacity: .06; mix-blend-mode: screen;
+                 background-image: repeating-radial-gradient(circle at 17% 32%, #fff 0 .6px, transparent .7px 3px), repeating-radial-gradient(circle at 73% 61%, #fff 0 .5px, transparent .6px 4px);
+                 animation: grain 1.1s steps(6) infinite; }
+        .vig { position: fixed; inset: 0; z-index: 29; pointer-events: none; background: radial-gradient(ellipse at center, transparent 50%, rgba(0,0,0,.78) 100%); }
+        .sweep { position: fixed; inset: 0; z-index: 28; pointer-events: none; opacity: 0; mix-blend-mode: screen;
+                 background: linear-gradient(105deg, transparent 38%, rgba(255,190,90,.0) 43%, rgba(255,205,130,.20) 50%, rgba(255,176,32,0) 57%, transparent 62%); background-size: 320% 100%; }
+        .sweep.go { animation: sweep 1.25s var(--ease); }
+        .flash { position: fixed; inset: 0; z-index: 27; pointer-events: none; opacity: 0; background: radial-gradient(ellipse at 50% 50%, rgba(255,176,32,.16), transparent 60%); }
+        .flash.go { animation: flash 1s ease-out; }
         .lb { position: fixed; left: 0; right: 0; height: var(--bar); background: #000; z-index: 40; display: flex; align-items: center; padding: 0 1.1rem; gap: 1rem; }
         .lb.top { top: 0; border-bottom: 1px solid var(--line); justify-content: space-between; }
         .lb.bot { bottom: 0; border-top: 1px solid var(--line); height: calc(var(--bar) + 10px); }
-        .grain { position: fixed; inset: -50%; z-index: 30; pointer-events: none; opacity: .07; mix-blend-mode: screen;
-                 background-image: repeating-radial-gradient(circle at 17% 32%, #fff 0 .6px, transparent .7px 3px), repeating-radial-gradient(circle at 73% 61%, #fff 0 .5px, transparent .6px 4px);
-                 animation: grain 1.1s steps(6) infinite; }
-        .vig { position: fixed; inset: 0; z-index: 29; pointer-events: none; background: radial-gradient(ellipse at center, transparent 48%, rgba(0,0,0,.72) 100%); }
         .hud { font-family: var(--mono); font-size: .74rem; letter-spacing: .14em; color: var(--dim); display: flex; align-items: center; gap: .9rem; direction: ltr; }
-        .hud .rec { display: inline-flex; align-items: center; gap: .4rem; color: var(--red); }
+        .hud .rec { display: inline-flex; align-items: center; gap: .4rem; color: var(--red); font-family: var(--ui); letter-spacing: .05em; }
         .hud .rec::before { content: ''; width: 8px; height: 8px; border-radius: 50%; background: var(--red); animation: blink 1.4s steps(2) infinite; }
         .hud b { color: var(--paper); font-weight: 500; }
         .nav { display: flex; gap: .5rem; align-items: center; }
@@ -46,148 +55,140 @@
         .pill.on { color: #000; background: var(--amber); border-color: var(--amber); font-weight: 700; }
 
         /* ── the player ── */
-        .play { width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--faint); background: transparent; color: var(--paper); cursor: pointer; font-size: .8rem; flex: none; transition: border-color .2s, transform .2s var(--spring), background-color .2s; }
+        .play { width: 36px; height: 36px; border-radius: 50%; border: 1px solid var(--faint); background: transparent; color: var(--paper); cursor: pointer; font-size: .8rem; flex: none; transition: border-color .2s, transform .2s var(--spring), background-color .2s; }
         .play:hover, .play:focus-visible { border-color: var(--amber); transform: scale(1.1); outline: none; }
         .play.on { background: var(--amber); color: #000; border-color: var(--amber); }
         .chapters { flex: 1; display: flex; gap: 5px; align-items: center; min-width: 0; }
-        .chap { flex: 1; min-width: 0; background: transparent; border: 0; padding: 6px 0 0; cursor: pointer; text-align: right; color: var(--faint); transition: color .2s; }
+        .chap { flex: 1; min-width: 0; background: transparent; border: 0; padding: 6px 0 0; cursor: pointer; text-align: right; color: var(--faint); transition: color .25s; }
         .chap i { display: block; height: 3px; border-radius: 2px; background: var(--line); position: relative; overflow: hidden; }
-        .chap i::after { content: ''; position: absolute; inset: 0; background: var(--amber); transform-origin: right; transform: scaleX(var(--p, 0)); }
+        .chap i::after { content: ''; position: absolute; inset: 0; background: var(--amber); transform-origin: right; transform: scaleX(var(--p, 0)); box-shadow: 0 0 8px var(--amber); }
         .chap span { display: block; font-size: .7rem; margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .chap.on { color: var(--paper); } .chap.done i::after { transform: scaleX(1); opacity: .45; }
+        .chap.on { color: var(--paper); } .chap.done i::after { transform: scaleX(1); opacity: .4; box-shadow: none; }
         .chap:hover { color: var(--amber); } .chap:focus-visible { outline: 1px solid var(--amber); outline-offset: 3px; }
 
-        /* ── a scene ── */
-        .scene { position: relative; min-height: 100vh; min-height: 100svh; scroll-snap-align: start; scroll-snap-stop: always; display: flex; flex-direction: column; justify-content: center;
-                 padding: calc(var(--bar) + 1.6rem) clamp(1rem, 5vw, 5rem) calc(var(--bar) + 2.2rem); overflow: hidden; }
-        .scene > .in { position: relative; z-index: 2; width: 100%; max-width: 1240px; margin: 0 auto; }
-        .scene::before { content: ''; position: absolute; inset: 0; z-index: 0; background: radial-gradient(ellipse 70% 55% at 70% 40%, var(--glow, rgba(255,176,32,.10)), transparent 70%); }
-        .slate { font-size: .8rem; letter-spacing: .12em; color: var(--amber); margin-bottom: .6rem; font-weight: 500; }
-        h2.title { font-weight: 900; font-size: clamp(2.2rem, 6.2vw, 5.2rem); line-height: 1.02; letter-spacing: -.025em; margin: 0 0 .5rem; }
-        h2.title .w { display: inline-block; overflow: hidden; vertical-align: bottom; }
-        h2.title .w > span { display: inline-block; }
-        .lead { color: var(--dim); font-size: clamp(.95rem, 1.5vw, 1.15rem); max-width: 62ch; margin: 0 0 1.4rem; }
-        .note { color: var(--faint); font-size: .8rem; margin-top: .9rem; }
-        /* the cut: when a scene is on, the camera pushes in and the words rise */
-        .scene.on > .in { animation: push 1.6s var(--ease) backwards; }
-        .scene.on h2.title .w > span { animation: rise .9s var(--ease) backwards; animation-delay: calc(var(--i, 0) * 90ms + 120ms); }
-        .scene.on .slate, .scene.on .lead { animation: fade 1s ease backwards; animation-delay: .5s; }
-        .scene.on .slate { animation-delay: 0s; }
+        /* ── a scene: an overlay on the canvas; only one is on ── */
+        .scene { position: fixed; left: 0; right: 0; top: var(--bar); bottom: calc(var(--bar) + 10px); z-index: 10; display: flex;
+                 padding: clamp(.9rem, 2.4vh, 1.8rem) clamp(1rem, 4vw, 4rem) clamp(.6rem, 1.6vh, 1.2rem); visibility: hidden; pointer-events: none; }
+        .scene.on, .scene.out { visibility: visible; }
+        .scene > .in { position: relative; width: 100%; max-width: 1320px; margin: 0 auto; display: flex; flex-direction: column; min-height: 0; }
+        .scene button, .scene a, .scene form, .scene input, .scene .ai-scroll { pointer-events: auto; }
+        .scene:not(.on) button, .scene:not(.on) a, .scene:not(.on) form, .scene:not(.on) .ai-scroll { pointer-events: none; }
+        .plot { position: relative; flex: 1; min-height: 0; }
+        .head { flex: none; }
+        /* every word and block rises in, and lifts away on the cut */
+        .rv { opacity: 0; transform: translateY(36px); filter: blur(10px);
+              transition: opacity .9s var(--ease), transform 1.2s var(--ease), filter 1s var(--ease); transition-delay: calc(var(--d, 0) * 1ms); }
+        .scene.on .rv { opacity: 1; transform: none; filter: none; }
+        .scene.out .rv { opacity: 0; transform: translateY(-28px) scale(.985); filter: blur(12px); transition-duration: .5s; transition-delay: 0s; }
+        h2.title { font-weight: 900; font-size: clamp(1.9rem, 4.8vw, 4.3rem); line-height: 1.02; letter-spacing: -.025em; margin: .1rem 0 .35rem; }
+        h2.title .w { display: inline-block; overflow: hidden; vertical-align: bottom; padding-bottom: .06em; }
+        h2.title .w > span { display: inline-block; transform: translateY(112%) rotate(4deg); transition: transform 1.05s var(--ease); transition-delay: calc(var(--i, 0) * 85ms + 180ms); }
+        .scene.on h2.title .w > span { transform: none; }
+        .scene.out h2.title .w > span { transform: translateY(-112%); transition-duration: .5s; transition-delay: calc(var(--i, 0) * 30ms); }
+        .scene:not(.on):not(.out) .rv, .scene:not(.on):not(.out) h2.title .w > span, .scene:not(.on):not(.out) .wm { transition: none !important; }
+        .slate { font-size: .8rem; letter-spacing: .14em; color: var(--amber); font-weight: 500; }
+        .lead { color: var(--dim); font-size: clamp(.9rem, 1.35vw, 1.08rem); max-width: 66ch; margin: 0 0 .8rem; }
+        .note { color: var(--faint); font-size: .8rem; margin-top: .5rem; flex: none; }
+        .wm { position: absolute; left: -1vw; bottom: -6vh; z-index: -1; font-family: var(--mono); font-weight: 600; font-size: clamp(9rem, 30vw, 26rem); line-height: 1; color: #fff;
+              opacity: 0; transform: translateX(90px); transition: opacity 1.6s var(--ease), transform 2.4s var(--ease); pointer-events: none; direction: ltr; }
+        .scene.on .wm { opacity: .035; transform: none; }
+        .scene.out .wm { opacity: 0; transform: translateX(-70px); transition-duration: .6s; }
 
-        /* ── scene 1: the cold open ── */
-        .open-num { font-family: var(--mono); font-weight: 600; font-size: clamp(6rem, 22vw, 17rem); line-height: .86; letter-spacing: -.05em; color: var(--amber); text-shadow: 0 0 90px rgba(255,176,32,.45); }
-        .open-row { display: flex; flex-wrap: wrap; align-items: flex-end; gap: .4rem 2.2rem; }
-        .open-say { font-weight: 900; font-size: clamp(1.7rem, 4.4vw, 3.6rem); line-height: 1.05; padding-bottom: .6rem; }
-        .open-say small { display: block; font-weight: 400; font-size: clamp(.95rem, 1.5vw, 1.2rem); color: var(--dim); margin-top: .5rem; }
-        .facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); margin-top: 1.8rem; }
-        .fact { background: #0a0a09; padding: 1rem 1.1rem; text-align: right; border: 0; color: inherit; cursor: pointer; transition: background-color .25s; }
-        .fact:hover, .fact:focus-visible { background: #15130f; outline: none; }
-        .fact b { display: block; font-family: var(--mono); font-size: clamp(1.8rem, 3.4vw, 2.7rem); font-weight: 600; color: var(--tone, var(--paper)); line-height: 1; }
-        .fact span { display: block; color: var(--dim); font-size: .9rem; margin-top: .4rem; }
-        .scene.on .fact { animation: rise 1s var(--ease) backwards; animation-delay: calc(var(--i, 0) * 110ms + 900ms); }
-        .filters { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: 1.5rem; align-items: center; }
+        /* ── 1 · the cold open ── */
+        .open-center { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; pointer-events: none; }
+        .open-num { font-family: var(--mono); font-weight: 600; font-size: clamp(6rem, 21vw, 16rem); line-height: .86; letter-spacing: -.05em; color: var(--amber);
+                    text-shadow: 0 0 80px rgba(255,176,32,.55), 0 0 160px rgba(255,120,20,.25); }
+        .open-say { font-weight: 900; font-size: clamp(1.5rem, 3.6vw, 3rem); line-height: 1.05; margin-top: .3rem; }
+        .open-say small { display: block; font-weight: 400; font-size: clamp(.9rem, 1.4vw, 1.1rem); color: var(--dim); margin-top: .45rem; }
+        .facts { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); flex: none; }
+        .fact { background: rgba(10,10,9,.82); padding: .8rem 1rem; text-align: right; border: 0; color: inherit; cursor: pointer; transition: background-color .25s, opacity .9s var(--ease), transform 1.2s var(--ease), filter 1s var(--ease); backdrop-filter: blur(4px); }
+        .fact:hover, .fact:focus-visible { background: rgba(28,24,18,.9); outline: none; }
+        .fact b { display: block; font-family: var(--mono); font-size: clamp(1.5rem, 2.8vw, 2.4rem); font-weight: 600; color: var(--tone, var(--paper)); line-height: 1; }
+        .fact span { display: block; color: var(--dim); font-size: .84rem; margin-top: .35rem; }
+        .filters { display: flex; flex-wrap: wrap; gap: .35rem; margin-top: .7rem; align-items: center; flex: none; }
         .filters .lab { color: var(--faint); font-size: .8rem; margin-inline-end: .3rem; }
-        #embers { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 1; pointer-events: none; }
 
-        /* ── canvases and charts ── */
-        .stage { position: relative; width: 100%; height: min(58vh, 560px); min-height: 340px; }
-        .stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; cursor: pointer; }
-        .keys { display: flex; flex-wrap: wrap; gap: .3rem 1.2rem; color: var(--dim); font-size: .82rem; margin-top: .6rem; }
+        /* ── legends ── */
+        .keys { display: flex; flex-wrap: wrap; gap: .3rem 1.2rem; color: var(--dim); font-size: .82rem; margin-top: .4rem; flex: none; }
         .keys i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-inline-end: .35rem; vertical-align: middle; background: var(--c); box-shadow: 0 0 10px var(--c); }
-        svg.chart { width: 100%; display: block; overflow: visible; }
-        svg.chart text { fill: var(--dim); font-family: var(--mono); font-size: 11px; }
-        svg.chart text.big { fill: var(--paper); font-size: 13px; }
-        .scroll-x { overflow-x: auto; }
-        .tl-area { opacity: 0; } .scene.on .tl-area { animation: fade 1.6s ease .5s forwards; }
-        .tl-line { fill: none; stroke: var(--amber); stroke-width: 3; stroke-linejoin: round; stroke-dasharray: 1; stroke-dashoffset: 1; filter: drop-shadow(0 0 8px rgba(255,176,32,.7)); }
-        .scene.on .tl-line { animation: draw 2.4s var(--ease) .3s forwards; }
-        .tl-bar { cursor: pointer; transform-box: fill-box; transition: filter .2s; }
-        .tl-bar.up { transform-origin: bottom; } .tl-bar.dn { transform-origin: top; }
-        .scene.on .tl-bar { animation: growY .8s var(--ease) backwards; animation-delay: calc(var(--i, 0) * 70ms + 600ms); }
-        .tl-bar:hover, .tl-bar:focus-visible { filter: brightness(1.5); outline: none; }
-        .tl-head { fill: var(--paper); transform-box: fill-box; }
-        .scene.on .tl-head { animation: headRun 2.4s var(--ease) .3s backwards; }
 
-        /* ── scene 4: who holds them ── */
-        .reels { display: grid; gap: .15rem; }
-        .reel { display: grid; grid-template-columns: minmax(150px, 1.1fr) minmax(0, 3fr) 70px 110px; gap: 1rem; align-items: center; background: transparent; border: 0; border-bottom: 1px solid var(--line); color: inherit; padding: .28rem .2rem .4rem; text-align: right; cursor: pointer; transition: background-color .2s; }
-        .reel:hover, .reel:focus-visible { background: rgba(255,255,255,.03); outline: none; }
-        .reel .nm { font-weight: 700; font-size: clamp(.95rem, 1.5vw, 1.2rem); line-height: 1.2; }
-        .reel .nm small { display: block; font-weight: 400; color: var(--faint); font-size: .76rem; }
-        .reel .tr { height: 18px; background: #0f0e0c; position: relative; overflow: hidden; }
-        .reel .tr i { position: absolute; inset: 0 0 0 auto; width: var(--w); background: repeating-linear-gradient(90deg, var(--tone) 0 10px, color-mix(in srgb, var(--tone) 55%, #000) 10px 12px); transform-origin: right; }
-        .scene.on .reel .tr i { animation: growX 1.3s var(--ease) backwards; animation-delay: calc(var(--i, 0) * 110ms + 500ms); }
-        .scene.on .reel { animation: fade .8s ease backwards; animation-delay: calc(var(--i, 0) * 110ms + 350ms); }
+        /* ── 4 · who holds them: one row per handler, the dots are the blockers ── */
+        .reels { position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: center; gap: 2px; }
+        .reel { flex: 0 1 50px; min-height: 26px; display: grid; grid-template-columns: minmax(150px, 1fr) minmax(0, 3.2fr) 64px; gap: 1rem; align-items: center; background: transparent; border: 0;
+                border-bottom: 1px solid rgba(38,35,30,.7); color: inherit; padding: 0 .2rem; text-align: right; cursor: pointer; transition: background-color .2s, opacity .9s var(--ease), transform 1.2s var(--ease), filter 1s var(--ease); }
+        .reel:hover, .reel:focus-visible { background: rgba(255,255,255,.035); outline: none; }
+        .reel .nm { font-weight: 700; font-size: clamp(.9rem, 1.4vw, 1.15rem); line-height: 1.15; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .reel .nm small { display: block; font-weight: 400; color: var(--faint); font-size: .74rem; }
+        .reel .lane { height: 100%; position: relative; }
+        .reel .lane::after { content: ''; position: absolute; left: 0; right: 0; top: 50%; height: 1px; background: linear-gradient(270deg, rgba(255,176,32,.25), transparent); }
         .reel .n { font-family: var(--mono); font-size: 1.35rem; font-weight: 600; color: var(--tone); text-align: left; }
-        .reel .m { font-size: .8rem; color: var(--dim); text-align: left; }
 
-        /* ── scene 5: the long-standing ones ── */
-        .gantt { display: grid; gap: .5rem; }
-        .g-row { display: grid; grid-template-columns: minmax(140px, 1.2fr) minmax(0, 3.4fr) 64px; gap: .9rem; align-items: center; background: transparent; border: 0; color: inherit; padding: .12rem 0; text-align: right; cursor: pointer; }
+        /* ── 5 · the long-standing: the streaks are drawn by the particles ── */
+        .gantt { position: absolute; inset: 0 0 1.4rem 0; display: flex; flex-direction: column; justify-content: center; gap: 2px; }
+        .g-row { flex: 0 1 40px; min-height: 24px; display: grid; grid-template-columns: minmax(150px, 1.15fr) minmax(0, 3.4fr) 64px; gap: .9rem; align-items: center; background: transparent; border: 0; color: inherit; padding: 0; text-align: right; cursor: pointer; transition: opacity .9s var(--ease), transform 1.2s var(--ease), filter 1s var(--ease); }
         .g-row .nm { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
         .g-row .nm small { color: var(--faint); font-size: .74rem; margin-inline-start: .4rem; }
-        .g-row .tr { height: 16px; position: relative; background: linear-gradient(90deg, transparent, #0f0e0c 12%); }
-        .g-row .tr i { position: absolute; top: 0; bottom: 0; right: var(--r); width: var(--w); background: var(--tone); border-radius: 2px; transform-origin: right; box-shadow: 0 0 16px color-mix(in srgb, var(--tone) 55%, transparent); }
-        .g-row .tr i.lb-open::before { content: '›'; position: absolute; right: -14px; top: -5px; color: var(--tone); font-size: 1.1rem; }
-        .scene.on .g-row .tr i { animation: growX 1.5s var(--ease) backwards; animation-delay: calc(var(--i, 0) * 90ms + 500ms); }
-        .scene.on .g-row { animation: fade .8s ease backwards; animation-delay: calc(var(--i, 0) * 90ms + 300ms); }
+        .g-row .lane { height: 100%; position: relative; }
         .g-row:hover .nm, .g-row:focus-visible .nm { color: var(--amber); } .g-row:focus-visible { outline: none; }
         .g-row .n { font-family: var(--mono); font-weight: 600; color: var(--tone); text-align: left; }
-        .g-axis { display: grid; grid-template-columns: minmax(140px, 1.2fr) minmax(0, 3.4fr) 64px; gap: .9rem; color: var(--faint); font-size: .72rem; margin-top: .4rem; }
-        .g-axis div:nth-child(2) { display: flex; justify-content: space-between; direction: ltr; }
+        .g-axis { position: absolute; left: 0; right: 0; bottom: 0; display: grid; grid-template-columns: minmax(150px, 1.15fr) minmax(0, 3.4fr) 64px; gap: .9rem; color: var(--faint); font-size: .74rem; }
+        .g-axis div:nth-child(2) { display: flex; justify-content: space-between; }
 
-        /* ── scene 6: yours to handle — the queue rolls like credits ── */
-        .queue { display: grid; gap: .6rem; }
-        .q { display: grid; grid-template-columns: 62px minmax(0, 1fr) auto; gap: 1rem; align-items: center; background: linear-gradient(90deg, rgba(255,255,255,.035), transparent 70%); border: 0; border-inline-start: 3px solid var(--tone); color: inherit; padding: .7rem 1rem; text-align: right; cursor: pointer; transition: background-color .2s, transform .25s var(--ease); }
-        .q:hover, .q:focus-visible { background-color: rgba(255,255,255,.05); transform: translateX(-6px); outline: none; }
-        .scene.on .q { animation: credit .9s var(--ease) backwards; animation-delay: calc(var(--i, 0) * 130ms + 450ms); }
-        .q .rk { font-family: var(--mono); font-size: 2.1rem; font-weight: 600; color: var(--tone); line-height: 1; }
-        .q .t { font-weight: 700; font-size: 1.12rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .q .x { color: var(--dim); font-size: .88rem; display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; }
-        .q .meta { display: flex; gap: .5rem; flex-wrap: wrap; justify-content: flex-end; }
-        .tag { font-size: .74rem; border: 1px solid var(--line); border-radius: 4px; padding: .1rem .45rem; color: var(--dim); white-space: nowrap; }
+        /* ── 6 · yours to handle ── */
+        .queue { position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: center; gap: .5rem; }
+        .q { flex: 0 1 64px; min-height: 44px; display: grid; grid-template-columns: 44px 56px minmax(0, 1fr) auto; gap: .9rem; align-items: center; background: linear-gradient(270deg, rgba(255,255,255,.045), transparent 75%);
+             border: 0; border-inline-start: 3px solid var(--tone); color: inherit; padding: .4rem 1rem; text-align: right; cursor: pointer;
+             transition: background-color .2s, opacity .9s var(--ease), transform 1.2s var(--ease), filter 1s var(--ease); }
+        .q:hover, .q:focus-visible { background-color: rgba(255,255,255,.05); outline: none; }
+        .q .slot { width: 30px; height: 30px; border-radius: 50%; border: 1px dashed color-mix(in srgb, var(--tone) 50%, transparent); justify-self: center; }
+        .q .rk { font-family: var(--mono); font-size: 2rem; font-weight: 600; color: var(--tone); line-height: 1; }
+        .q .t { font-weight: 700; font-size: 1.08rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .q .x { color: var(--dim); font-size: .86rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .q .meta { display: flex; gap: .4rem; flex-wrap: wrap; justify-content: flex-end; max-width: 380px; }
+        .tag { font-size: .74rem; border: 1px solid var(--line); border-radius: 4px; padding: .08rem .45rem; color: var(--dim); white-space: nowrap; background: rgba(0,0,0,.4); }
         .tag.lv { color: var(--tone); border-color: color-mix(in srgb, var(--tone) 50%, transparent); }
 
-        /* ── scene 7: the AI's recommendations ── */
-        .ai-head { font-weight: 900; font-size: clamp(1.5rem, 3.4vw, 2.6rem); line-height: 1.15; margin: 0 0 .6rem; min-height: 1.2em; }
+        /* ── 7 · what to do ── */
+        .ai-scroll { overflow-y: auto; min-height: 0; flex: 1; padding-inline-end: .3rem; overscroll-behavior: contain; }
+        .ai-head { font-weight: 900; font-size: clamp(1.3rem, 2.8vw, 2.2rem); line-height: 1.15; margin: 0 0 .5rem; min-height: 1.2em; max-width: 34ch; }
         .ai-head.typing::after { content: '▌'; color: var(--amber); animation: blink 1s steps(2) infinite; }
-        .ai-sit { color: var(--dim); max-width: 78ch; margin: 0 0 1.2rem; }
-        .ai-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 330px), 1fr)); gap: .8rem; }
-        .ai-card { border: 1px solid var(--line); background: #0b0a09; padding: .9rem 1rem 1rem; position: relative; }
-        .ai-card::before { content: ''; position: absolute; inset: 0 0 auto 0; height: 2px; background: var(--amber); transform-origin: right; }
-        .scene.on .ai-card { animation: rise .9s var(--ease) backwards; animation-delay: calc(var(--i, 0) * 160ms + 700ms); }
-        .scene.on .ai-card::before { animation: growX 1.2s var(--ease) backwards; animation-delay: calc(var(--i, 0) * 160ms + 900ms); }
-        .ai-card h4 { margin: 0 0 .35rem; font-size: 1.05rem; font-weight: 700; }
-        .ai-card p { margin: 0 0 .5rem; color: var(--dim); font-size: .9rem; }
-        .ai-card .act { color: var(--paper); font-size: .92rem; border-inline-start: 2px solid var(--amber); padding-inline-start: .6rem; }
+        .ai-sit { color: var(--dim); max-width: 74ch; margin: 0 0 1rem; }
+        .ai-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap: .7rem; }
+        .ai-card { border: 1px solid var(--line); background: rgba(11,10,9,.86); backdrop-filter: blur(6px); padding: .85rem 1rem .95rem; position: relative; overflow: hidden; }
+        .ai-card::before { content: ''; position: absolute; inset: 0 0 auto 0; height: 2px; background: var(--amber); transform-origin: right; transform: scaleX(0); transition: transform 1.2s var(--ease); transition-delay: calc(var(--d, 0) * 1ms + 300ms); }
+        .scene.on .ai-card::before { transform: none; }
+        .ai-card h4 { margin: 0 0 .35rem; font-size: 1.02rem; font-weight: 700; }
+        .ai-card p { margin: 0 0 .5rem; color: var(--dim); font-size: .88rem; }
+        .ai-card .act { color: var(--paper); font-size: .9rem; border-inline-start: 2px solid var(--amber); padding-inline-start: .6rem; }
         .ai-card .who { color: var(--faint); font-size: .78rem; margin-top: .4rem; }
         .ai-card .pj { display: flex; flex-wrap: wrap; gap: .3rem; margin-top: .5rem; }
         .ai-card .pj a { font-size: .76rem; color: var(--cyan); text-decoration: none; border: 1px solid #12323c; border-radius: 4px; padding: .08rem .4rem; }
         .ai-card .pj a:hover { border-color: var(--cyan); }
-        .ai-list { color: var(--dim); font-size: .9rem; margin: .9rem 0 0; padding-inline-start: 1.1rem; }
-        .ai-list li { margin-bottom: .25rem; }
-        .ai-sub { font-size: .8rem; letter-spacing: .1em; color: var(--amber); margin-top: 1.1rem; font-weight: 500; }
-        .cta { display: inline-flex; align-items: center; gap: .6rem; font-size: 1.1rem; font-weight: 700; color: #000; background: var(--amber); border: 0; padding: .8rem 1.6rem; cursor: pointer; transition: transform .2s var(--spring), box-shadow .3s; }
+        .ai-list { color: var(--dim); font-size: .9rem; margin: .5rem 0 0; padding-inline-start: 1.1rem; }
+        .ai-sub { font-size: .8rem; letter-spacing: .1em; color: var(--amber); margin-top: 1rem; font-weight: 500; }
+        .cta { display: inline-flex; align-items: center; gap: .6rem; font-size: 1.05rem; font-weight: 700; color: #000; background: var(--amber); border: 0; padding: .75rem 1.5rem; cursor: pointer; transition: transform .2s var(--spring), box-shadow .3s; }
         .cta:hover, .cta:focus-visible { transform: translateY(-2px) scale(1.02); box-shadow: 0 10px 50px rgba(255,176,32,.45); outline: none; }
         .cta[disabled] { opacity: .65; cursor: progress; }
         .cta.ghost { background: transparent; color: var(--dim); border: 1px solid var(--line); font-size: .85rem; font-weight: 400; padding: .4rem .9rem; }
-        .err { color: var(--red); margin: 0 0 .9rem; }
+        .err { color: var(--red); margin: 0 0 .8rem; }
 
-        /* ── the sheet ── */
-        .tip { position: fixed; z-index: 70; pointer-events: none; background: #000; border: 1px solid var(--faint); padding: .35rem .65rem; font-size: .82rem; opacity: 0; transition: opacity .15s; max-width: 300px; white-space: pre-line; }
-        .tip.on { opacity: 1; }
-        .backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.72); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); opacity: 0; visibility: hidden; transition: opacity .35s, visibility 0s .35s; z-index: 50; }
+        /* ── tooltip + sheet ── */
+        .tip { position: fixed; z-index: 70; pointer-events: none; background: rgba(0,0,0,.92); border: 1px solid var(--faint); padding: .4rem .7rem; font-size: .82rem; opacity: 0; transform: translateY(4px); transition: opacity .15s, transform .15s; max-width: 320px; white-space: pre-line; }
+        .tip.on { opacity: 1; transform: none; }
+        .backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.66); backdrop-filter: blur(7px); -webkit-backdrop-filter: blur(7px); opacity: 0; visibility: hidden; transition: opacity .4s, visibility 0s .4s; z-index: 50; }
         .backdrop.on { opacity: 1; visibility: visible; transition-delay: 0s; }
-        .sheet { position: fixed; inset: 0 auto 0 0; width: min(760px, 100vw); background: #0a0908; border-inline-start: 1px solid var(--faint); z-index: 60; display: flex; flex-direction: column; transform: translateX(-102%); visibility: hidden; transition: transform .55s var(--ease), visibility 0s .55s; }
+        .sheet { position: fixed; inset: 0 auto 0 0; width: min(760px, 100vw); background: #0a0908; border-inline-start: 1px solid var(--faint); z-index: 60; display: flex; flex-direction: column;
+                 transform: translateX(-102%); visibility: hidden; transition: transform .6s var(--ease), visibility 0s .6s; box-shadow: 40px 0 120px rgba(0,0,0,.8); }
         .sheet.on { transform: none; visibility: visible; transition-delay: 0s; }
         .sheet header { padding: 1.2rem 1.3rem 1rem; border-bottom: 1px solid var(--line); position: relative; }
+        .sheet header::after { content: ''; position: absolute; inset: auto 0 -1px 0; height: 2px; background: linear-gradient(90deg, transparent, var(--amber), transparent); background-size: 200% 100%; animation: shine 3.4s linear infinite; }
         .sheet .crumb { font-size: .76rem; letter-spacing: .1em; color: var(--amber); }
         .sheet h3 { margin: .2rem 0 .2rem; font-size: 1.5rem; font-weight: 900; line-height: 1.15; }
         .sheet .sub { color: var(--dim); font-size: .86rem; }
         .sheet .x { position: absolute; left: 1rem; top: 1rem; width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--faint); background: transparent; color: var(--dim); cursor: pointer; transition: transform .3s var(--spring), color .2s, border-color .2s; }
         .sheet .x:hover, .sheet .x:focus-visible { transform: rotate(90deg); color: var(--paper); border-color: var(--amber); outline: none; }
         .sheet .body { overflow-y: auto; padding: .8rem 1rem 2.5rem; flex: 1; overscroll-behavior: contain; }
-        .card { border-bottom: 1px solid var(--line); padding: .8rem .3rem 1rem; animation: fade .5s ease backwards; animation-delay: calc(min(var(--i, 0), 14) * 40ms + 150ms); }
+        .card { border-bottom: 1px solid var(--line); padding: .8rem .3rem 1rem; animation: cardIn .6s var(--ease) backwards; animation-delay: calc(min(var(--i, 0), 14) * 45ms + 180ms); }
         .card .top { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; }
         .card .top b { font-size: 1.05rem; }
         .card .top .wk { color: var(--tone); font-weight: 700; white-space: nowrap; }
@@ -200,31 +201,30 @@
 
         @keyframes grain { 0% { transform: translate(0, 0); } 20% { transform: translate(-3%, 2%); } 40% { transform: translate(2%, -4%); } 60% { transform: translate(-4%, -1%); } 80% { transform: translate(3%, 3%); } 100% { transform: translate(0, 0); } }
         @keyframes blink { 50% { opacity: 0; } }
-        @keyframes push { from { transform: scale(1.07); filter: blur(6px); opacity: 0; } }
-        @keyframes rise { from { transform: translateY(110%); opacity: 0; } }
-        @keyframes fade { from { opacity: 0; } }
-        @keyframes credit { from { transform: translateY(60px); opacity: 0; } }
-        @keyframes growX { from { transform: scaleX(0); } }
-        @keyframes growY { from { transform: scaleY(0); } }
-        @keyframes draw { to { stroke-dashoffset: 0; } }
-        @keyframes headRun { from { transform: translateX(var(--from)); opacity: 0; } 15% { opacity: 1; } }
+        @keyframes sweep { 0% { opacity: 0; background-position: 130% 0; } 18% { opacity: 1; } 100% { opacity: 0; background-position: -130% 0; } }
+        @keyframes flash { 0% { opacity: 0; } 25% { opacity: 1; } 100% { opacity: 0; } }
+        @keyframes shine { from { background-position: 100% 0; } to { background-position: -100% 0; } }
+        @keyframes cardIn { from { opacity: 0; transform: translateX(-40px); filter: blur(6px); } }
 
+        @media (max-width: 900px) { .facts { grid-template-columns: repeat(2, minmax(0, 1fr)); } .fact:last-child { grid-column: 1 / -1; } }
         @media (max-width: 760px) {
             :root { --bar: 40px; }
-            .hud .tc, .hud .sc-name, .chap span { display: none; }
-            .reel { grid-template-columns: minmax(0, 1fr) 56px; } .reel .tr { grid-column: 1 / -1; grid-row: 2; } .reel .m { display: none; }
-            .g-row, .g-axis { grid-template-columns: minmax(0, 1fr) 48px; } .g-row .tr { grid-column: 1 / -1; grid-row: 2; } .g-axis div:first-child, .g-axis div:last-child { display: none; }
-            .q { grid-template-columns: 44px minmax(0, 1fr); } .q .meta { grid-column: 2; justify-content: flex-start; }
+            .hud .tc, .chap span { display: none; }
+            .lead { display: none; }
+            .reel, .g-row, .g-axis { grid-template-columns: minmax(96px, .9fr) minmax(0, 2.2fr) 40px; gap: .5rem; }
+            .q { grid-template-columns: 30px 36px minmax(0, 1fr); } .q .meta { display: none; } .q .rk { font-size: 1.4rem; }
         }
         @media (prefers-reduced-motion: reduce) {
-            html { scroll-snap-type: none; scroll-behavior: auto; }
             @view-transition { navigation: none; }
             *, *::before, *::after { animation: none !important; transition: none !important; }
-            .tl-line { stroke-dashoffset: 0; } .tl-area { opacity: 1; } .grain { display: none; }
+            .rv, h2.title .w > span { opacity: 1 !important; transform: none !important; filter: none !important; }
+            .grain, .sweep, .flash { display: none; }
         }
     </style>
 </head>
 <body>
+<canvas id="cine" aria-hidden="true"></canvas>
+<div class="flash" id="flash"></div><div class="sweep" id="sweep"></div>
 <div class="grain" aria-hidden="true"></div><div class="vig" aria-hidden="true"></div>
 
 <div class="lb top">
@@ -233,79 +233,98 @@
         <a class="pill" href="/dashboard/projects/delays">⏱ ניתוח עיכובים</a>
         <a class="pill" href="/dashboard/">דשבורד</a>
     </div>
-    <div class="hud" aria-hidden="true"><span class="rec">חי</span><span class="sc-name" id="hud-name"></span><span><b id="hud-sc">01</b>/<b id="hud-n">07</b></span><span class="tc" id="hud-tc">00:00:00</span></div>
+    <div class="hud" aria-hidden="true"><span class="rec">חי</span><span><b id="hud-sc">01</b>/<b id="hud-n">07</b></span><span class="tc" id="hud-tc">00:00:00</span></div>
 </div>
 
 <main id="film">
-    <section class="scene" data-scene="open" data-name="פתיחה" style="--glow: rgba(255,176,32,.14)">
-        <canvas id="embers" aria-hidden="true"></canvas>
+    <section class="scene" data-scene="open" data-name="פתיחה">
+        <div class="wm">01</div>
         <div class="in">
-            <div class="slate">חסמים · נכון לדוח <span id="asof"></span></div>
-            <div class="open-row">
-                <div class="open-num"><bdi class="ltr" id="n-open">0</bdi></div>
-                <div class="open-say"><span id="say-main">חסמים פתוחים</span><small id="say-sub"></small></div>
+            <div class="head"><div class="slate rv">חסמים · נכון לדוח <span id="asof"></span></div></div>
+            <div class="plot" id="plot-open">
+                <div class="open-center">
+                    <div class="open-num rv" style="--d:120"><bdi class="ltr" id="n-open">0</bdi></div>
+                    <div class="open-say rv" style="--d:380"><span id="say-main">חסמים פתוחים</span><small id="say-sub"></small></div>
+                </div>
             </div>
             <div class="facts" id="facts"></div>
-            <div class="filters" id="filters"></div>
+            <div class="filters rv" id="filters" style="--d:1250"></div>
         </div>
     </section>
 
-    <section class="scene" data-scene="map" data-name="המפה" style="--glow: rgba(255,77,61,.10)">
+    <section class="scene" data-scene="map" data-name="השדה">
+        <div class="wm">02</div>
         <div class="in">
-            <div class="slate">סצנה 02 · השדה</div>
-            <h2 class="title" data-words="כל החסמים, במבט אחד"></h2>
-            <p class="lead">כל עיגול הוא חסם פתוח. הגודל: כמה זמן הוא עומד. הצבע: דרגת הטיפול שנקבעה בכללים. הם מתקבצים לפי נושא. לחיצה על עיגול פותחת את החסם.</p>
-            <div class="stage"><canvas id="map" role="img" aria-label="החסמים הפתוחים לפי נושא, משך ודרגת טיפול"></canvas></div>
-            <div class="keys" id="map-keys"></div>
+            <div class="head">
+                <div class="slate rv">סצנה 02 · השדה</div>
+                <h2 class="title" data-words="כל החסמים, במבט אחד"></h2>
+                <p class="lead rv" style="--d:420">כל נקודת אור היא חסם פתוח. הגודל: כמה זמן הוא עומד. הצבע: דרגת הטיפול שנקבעה בכללים. הם מתקבצים לפי נושא. לחיצה על נקודה פותחת את החסם.</p>
+            </div>
+            <div class="plot" id="plot-map"></div>
+            <div class="keys rv" id="map-keys" style="--d:700"></div>
         </div>
     </section>
 
-    <section class="scene" data-scene="time" data-name="ציר הזמן" style="--glow: rgba(54,214,255,.08)">
+    <section class="scene" data-scene="time" data-name="עבר והווה">
+        <div class="wm">03</div>
         <div class="in">
-            <div class="slate">סצנה 03 · עבר והווה</div>
-            <h2 class="title" data-words="מה נפתח, מה נסגר"></h2>
-            <p class="lead">הקו: כמה חסמים עמדו פתוחים בכל דוח שבועי. מעל הקו האמצעי: חסמים שנפתחו באותו דוח. מתחתיו: חסמים שנסגרו. הזמן מתקדם מימין לשמאל.</p>
-            <div class="scroll-x"><svg class="chart" id="time" role="img" aria-label="חסמים פתוחים, שנפתחו ושנסגרו בכל דוח" style="min-width:560px"></svg></div>
-            <div class="note" id="time-note"></div>
+            <div class="head">
+                <div class="slate rv">סצנה 03 · עבר והווה</div>
+                <h2 class="title" data-words="מה נפתח, מה נסגר"></h2>
+                <p class="lead rv" style="--d:420">כל עמודה היא דוח שבועי, והנקודות בה הן החסמים שנפתחו באותו דוח: בצבע — עדיין פתוחים, בירוק — נסגרו מאז. הקו למעלה: כמה חסמים עמדו פתוחים בכל דוח. הזמן מתקדם מימין לשמאל.</p>
+            </div>
+            <div class="plot" id="plot-time"></div>
+            <div class="note rv" id="time-note" style="--d:900"></div>
         </div>
     </section>
 
-    <section class="scene" data-scene="owners" data-name="מי מחזיק" style="--glow: rgba(255,176,32,.10)">
+    <section class="scene" data-scene="owners" data-name="מי מחזיק">
+        <div class="wm">04</div>
         <div class="in">
-            <div class="slate">סצנה 04 · מי מחזיק</div>
-            <h2 class="title" data-words="אצל מי הם עומדים"></h2>
-            <p class="lead">לפי העמודה ״לטיפול״ בקובץ. לחיצה על גורם פותחת את החסמים שלו.</p>
-            <div class="reels" id="owners"></div>
+            <div class="head">
+                <div class="slate rv">סצנה 04 · מי מחזיק</div>
+                <h2 class="title" data-words="אצל מי הם עומדים"></h2>
+                <p class="lead rv" style="--d:420">לפי העמודה ״לטיפול״ בקובץ. כל נקודה היא חסם, לפי סדר העדיפות. לחיצה על שורה פותחת את החסמים שלה.</p>
+            </div>
+            <div class="plot" id="plot-owners"><div class="reels" id="owners"></div></div>
         </div>
     </section>
 
-    <section class="scene" data-scene="old" data-name="הוותיקים" style="--glow: rgba(255,77,61,.12)">
+    <section class="scene" data-scene="old" data-name="הוותיקים">
+        <div class="wm">05</div>
         <div class="in">
-            <div class="slate">סצנה 05 · הוותיקים</div>
-            <h2 class="title" data-words="אלה שלא זזים"></h2>
-            <p class="lead">החסמים שעומדים הכי הרבה זמן, מהדוח שבו הופיעו ועד היום. חץ בקצה הימני: החסם כבר היה שם בדוח הראשון שבידינו, כך שגילו האמיתי גדול יותר.</p>
-            <div class="gantt" id="old"></div>
-            <div class="g-axis" id="old-axis"></div>
+            <div class="head">
+                <div class="slate rv">סצנה 05 · הוותיקים</div>
+                <h2 class="title" data-words="אלה שלא זזים"></h2>
+                <p class="lead rv" style="--d:420">החסמים שעומדים הכי הרבה זמן, מהדוח שבו הופיעו ועד היום. פס שמתחיל בקצה הימני: החסם כבר היה שם בדוח הראשון שבידינו, וגילו האמיתי גדול יותר.</p>
+            </div>
+            <div class="plot" id="plot-old"><div class="gantt" id="old"></div><div class="g-axis rv" id="old-axis" style="--d:900"></div></div>
         </div>
     </section>
 
-    <section class="scene" data-scene="queue" data-name="לטיפולך" style="--glow: rgba(255,138,42,.12)">
+    <section class="scene" data-scene="queue" data-name="לטיפולך">
+        <div class="wm">06</div>
         <div class="in">
-            <div class="slate">סצנה 06 · התור שלך</div>
-            <h2 class="title" data-words="לטיפולך, לפי הסדר"></h2>
-            <p class="lead">הסדר נקבע בכללים, לא על ידי מודל: דרגת הטיפול, אחריה הסלמה לסמנכ״ל, אחריה כמה זז היעד מאז שהחסם עומד, ואחריה הוותק.</p>
-            <div class="queue" id="queue"></div>
-            <div style="margin-top:1rem"><button class="cta ghost" id="queue-all" type="button"></button></div>
+            <div class="head">
+                <div class="slate rv">סצנה 06 · התור שלך</div>
+                <h2 class="title" data-words="לטיפולך, לפי הסדר"></h2>
+                <p class="lead rv" style="--d:420">הסדר נקבע בכללים, לא על ידי מודל: דרגת הטיפול, אחריה הסלמה לסמנכ״ל, אחריה כמה זז היעד מאז שהחסם עומד, ואחריה הוותק.</p>
+            </div>
+            <div class="plot" id="plot-queue"><div class="queue" id="queue"></div></div>
+            <div style="margin-top:.6rem;flex:none"><button class="cta ghost rv" id="queue-all" type="button" style="--d:1300"></button></div>
         </div>
     </section>
 
-    <section class="scene" id="ai" data-scene="ai" data-name="המלצות" style="--glow: rgba(54,214,255,.10)">
+    <section class="scene" id="ai" data-scene="ai" data-name="המלצות">
+        <div class="wm">07</div>
         <div class="in">
-            <div class="slate">סצנה 07 · מה עושים</div>
-            <h2 class="title" data-words="מה עושים מחר בבוקר"></h2>
-            {% if ai_error %}<p class="err">המודל לא החזיר תשובה תקינה הפעם. אפשר לנסות שוב בעוד דקה.</p>{% endif %}
-            <div id="ai-body"></div>
-            <form method="post" action="/dashboard/projects/blockers/ai" id="ai-form" style="margin-top:1.1rem">
+            <div class="head">
+                <div class="slate rv">סצנה 07 · מה עושים</div>
+                <h2 class="title" data-words="מה עושים מחר בבוקר"></h2>
+                {% if ai_error %}<p class="err">המודל לא החזיר תשובה תקינה הפעם. אפשר לנסות שוב בעוד דקה.</p>{% endif %}
+            </div>
+            <div class="ai-scroll rv" id="ai-body" style="--d:500"></div>
+            <form method="post" action="/dashboard/projects/blockers/ai" id="ai-form" class="rv" style="--d:800;margin-top:.8rem;flex:none">
                 <input type="hidden" name="owner" value="{{ data.owner or '' }}">
                 <button class="cta{% if ai %} ghost{% endif %}" id="ai-go">{{ '↻ נסח מחדש' if ai else '✨ הפק המלצות לטיפול' }}</button>
             </form>
@@ -316,7 +335,7 @@
 </main>
 
 <div class="lb bot">
-    <button class="play" id="play" type="button" aria-label="הפעלה אוטומטית" title="הפעלה אוטומטית של הסצנות (רווח)">▶</button>
+    <button class="play" id="play" type="button" aria-label="הפעלה והשהיה" title="הפעלה / השהיה (רווח) · מעבר בין סצנות: גלגלת, חיצים או החלקה">▶</button>
     <div class="chapters" id="chapters"></div>
 </div>
 
@@ -345,44 +364,49 @@
     var still = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     var $ = function (id) { return document.getElementById(id); };
     var el = function (tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined && text !== null) e.textContent = text; return e; };
-    var svg = function (tag, attrs) { var e = document.createElementNS('http://www.w3.org/2000/svg', tag); for (var k in attrs) e.setAttribute(k, attrs[k]); return e; };
     var clear = function (n) { while (n.firstChild) n.removeChild(n.firstChild); };
+    var clamp = function (v, a, b) { return Math.max(a, Math.min(b, v)); };
     var ilDate = function (iso) { var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso || ''); return m ? m[3] + '/' + m[2] + '/' + m[1] : '—'; };
     var ltr = function (text, cls) { return el('bdi', 'ltr' + (cls ? ' ' + cls : ''), text); };
-    var LV = ['#ff4d3d', '#ff8a2a', '#f2d03a', '#35c48a'];
-    var tone = function (level) { var i = (D.order.levels || []).indexOf(level); return LV[i < 0 ? 3 : i]; };
+    var day = function (iso) { return Date.parse(iso) / 864e5; };
+
+    var OPEN = D.open || [], CLOSED = D.closed || [], FLOW = D.flow || [], LEVELS = (D.order && D.order.levels) || [];
+    var NO_OWNER = 'ללא גורם מטפל';
+    var empty = !D.reports || !OPEN.length;
+    // palette: 0–3 the handling levels (escalate → fyi), 4 amber, 5 cyan, 6 dust
+    var PAL = [[255, 77, 61], [255, 138, 42], [242, 208, 58], [53, 196, 138], [255, 176, 32], [54, 214, 255], [150, 142, 128]];
+    var LVK = function (lv) { var i = LEVELS.indexOf(lv); return i < 0 ? 3 : i; };
+    var css = function (k) { return 'rgb(' + PAL[k].join(',') + ')'; };
+    var tone = function (lv) { return css(LVK(lv)); };
     var weeksText = function (e) { return (e.lower_bound ? 'לפחות ' : '') + e.weeks + ' שבועות'; };
     var countUp = function (node, v, delay) {
-        if (still) { node.textContent = String(v); return; }
-        var t0 = performance.now() + (delay || 0), dur = 1600; node.textContent = '0';
-        var tick = function (now) { var t = Math.min(1, Math.max(0, (now - t0) / dur)), e = 1 - Math.pow(1 - t, 4); node.textContent = t >= 1 ? String(v) : String(Math.round(v * e)); if (t < 1) requestAnimationFrame(tick); };
+        var dec = Math.round(v) === v ? 0 : 1, done = v.toFixed(dec);
+        if (still) { node.textContent = done; return; }
+        var t0 = performance.now() + (delay || 0), dur = 1700; node.textContent = (0).toFixed(dec);
+        var tick = function (now) { var t = clamp((now - t0) / dur, 0, 1), e = 1 - Math.pow(1 - t, 4); node.textContent = t >= 1 ? done : (v * e).toFixed(dec); if (t < 1) requestAnimationFrame(tick); };
         requestAnimationFrame(tick);
     };
     var tip = $('tip');
-    var showTip = function (text, x, y) { tip.textContent = text; tip.style.left = Math.min(window.innerWidth - 310, Math.max(8, x + 14)) + 'px'; tip.style.top = (y + 16) + 'px'; tip.classList.add('on'); };
+    var showTip = function (text, x, y) { tip.textContent = text; tip.style.left = clamp(x + 14, 8, window.innerWidth - 330) + 'px'; tip.style.top = (y + 18) + 'px'; tip.classList.add('on'); };
     var hideTip = function () { tip.classList.remove('on'); };
-    var hint = function (node, text) { node.addEventListener('pointermove', function (e) { showTip(text, e.clientX, e.clientY); }); node.addEventListener('pointerleave', hideTip); node.setAttribute('aria-label', text.replace(/\n/g, ' · ')); };
-    var press = function (node, fn) { node.tabIndex = 0; node.setAttribute('role', 'button'); node.addEventListener('click', fn); node.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); fn(); } }); };
 
-    // headlines: one word after another
+    // headlines: word by word
     Array.prototype.forEach.call(document.querySelectorAll('h2.title[data-words]'), function (h) {
         h.dataset.words.split(' ').forEach(function (w, i) { var o = el('span', 'w'), s = el('span', '', w); o.style.setProperty('--i', i); o.appendChild(s); h.appendChild(o); h.appendChild(document.createTextNode(' ')); });
     });
-
     var scenes = Array.prototype.slice.call(document.querySelectorAll('.scene'));
-    var empty = !D.reports || !D.open;
-    $('asof').textContent = D.as_of ? ilDate(D.as_of) : '';
+    var NAMES = scenes.map(function (s) { return s.dataset.scene; });
     $('hud-n').textContent = ('0' + scenes.length).slice(-2);
 
     // ───────────────────────── the sheet
     var sheet = $('sheet'), backdrop = $('backdrop'), lastFocus = null;
     var blockerCard = function (e, i) {
-        var c = el('div', 'card'); c.style.setProperty('--i', i); c.style.setProperty('--tone', e.level ? tone(e.level) : '#9a9388');
+        var c = el('div', 'card'); c.style.setProperty('--i', i); c.style.setProperty('--tone', e.level ? tone(e.level) : 'var(--green)');
         var top = el('div', 'top'); top.appendChild(el('b', '', e.name || e.id));
         top.appendChild(el('span', 'wk', e.closed ? 'נסגר אחרי ' + e.weeks + ' שבועות' : weeksText(e))); c.appendChild(top);
         c.appendChild(el('div', 'txt', e.text));
         var row = el('div', 'row');
-        if (e.level) { var lv = el('span', 'tag lv', D.levels[e.level].icon + ' ' + D.levels[e.level].label); row.appendChild(lv); }
+        if (e.level) row.appendChild(el('span', 'tag lv', D.levels[e.level].icon + ' ' + D.levels[e.level].label));
         [e.id, e.stage, 'לטיפול: ' + e.owner, 'מאז ' + ilDate(e.opened) + (e.closed ? ' עד ' + ilDate(e.closed) : '')].concat(e.topics || []).forEach(function (t) { row.appendChild(el('span', 'tag', t)); });
         if (e.slip_months) row.appendChild(el('span', 'tag', 'היעד זז ' + e.slip_months + ' חודשים מאז'));
         if (e.changes) row.appendChild(el('span', 'tag', 'המלל עודכן ' + e.changes + ' פעמים'));
@@ -393,34 +417,45 @@
         return c;
     };
     var openSheet = function (crumb, title, sub, list) {
-        lastFocus = document.activeElement; hideTip(); stopPlay();
+        lastFocus = document.activeElement; hideTip(); setPlaying(false);
         $('sheet-crumb').textContent = crumb; $('sheet-title').textContent = title; $('sheet-sub').textContent = sub || '';
         var body = $('sheet-body'); clear(body);
         if (!list.length) body.appendChild(el('div', 'empty', 'אין חסמים ברשימה הזו'));
         list.forEach(function (e, i) { body.appendChild(blockerCard(e, i)); });
-        body.scrollTop = 0; sheet.classList.add('on'); backdrop.classList.add('on'); sheet.setAttribute('aria-hidden', 'false');
-        document.documentElement.style.overflow = 'hidden'; $('sheet-x').focus();
+        body.scrollTop = 0; sheet.classList.add('on'); backdrop.classList.add('on'); sheet.setAttribute('aria-hidden', 'false'); $('sheet-x').focus();
     };
-    var closeSheet = function () { sheet.classList.remove('on'); backdrop.classList.remove('on'); sheet.setAttribute('aria-hidden', 'true'); document.documentElement.style.overflow = ''; if (lastFocus && lastFocus.focus) lastFocus.focus(); };
+    var closeSheet = function () { sheet.classList.remove('on'); backdrop.classList.remove('on'); sheet.setAttribute('aria-hidden', 'true'); if (lastFocus && lastFocus.focus) lastFocus.focus(); };
+    var sheetOpen = function () { return sheet.classList.contains('on'); };
     $('sheet-x').addEventListener('click', closeSheet); backdrop.addEventListener('click', closeSheet);
 
-    var BUILD = {};
+    // ───────────────────────── the cast: one particle per blocker, for the whole film
+    var PS = [];
+    var mk = function (e, open, i) {
+        return { e: e, open: open, idx: i, k: open ? LVK(e.level) : 3, ring: open ? LVK(e.level) : 0, seed: Math.random(), ph: Math.random() * 6.283,
+                 dx: Math.random(), dy: Math.random(), cur: null, from: null, t0: 0, dur: 0, ctrl: null };
+    };
+    OPEN.forEach(function (e, i) { PS.push(mk(e, true, i)); });
+    CLOSED.forEach(function (e, i) { PS.push(mk(e, false, i)); });
+
+    var BUILD = {}, ENTER = {};
 
     // ───────────────────────── 1 the cold open
+    var factNums = [];
     BUILD.open = function () {
-        if (empty) { $('say-main').textContent = 'אין חסמים פתוחים'; $('say-sub').textContent = D.reports ? 'בתחום שלך, נכון לדוח האחרון.' : 'אין עדיין דוחות שבועיים.'; return; }
-        countUp($('n-open'), D.now.open, 300);
+        $('asof').textContent = D.as_of ? ilDate(D.as_of) : '';
+        if (empty) { $('say-main').textContent = 'אין חסמים פתוחים'; $('say-sub').textContent = D.reports ? 'בתחום שלך, נכון לדוח האחרון.' : 'אין עדיין דוחות שבועיים.'; $('n-open').textContent = '0'; return; }
         $('say-sub').textContent = 'על ' + D.now.projects + ' פרויקטים' + (D.owner ? ' · לטיפול: ' + D.owner : '') + ' · נכון לדוח ' + ilDate(D.as_of);
         [
-            { n: D.now.unowned, t: 'בלי גורם מטפל', c: LV[0], f: function (e) { return e.owner === 'ללא גורם מטפל'; } },
-            { n: D.now.chronic, t: 'עומדים ' + D.chronic_weeks + ' שבועות ומעלה', c: LV[1], f: function (e) { return e.weeks >= D.chronic_weeks; } },
-            { n: D.now.top, t: 'הוסלמו לסמנכ״ל', c: LV[0], f: function (e) { return e.top; } },
-            { n: D.now.slip_months, t: 'חודשי הזזת יעד מאז שנפתחו', c: '#ffb020', f: function (e) { return (e.slip_months || 0) > 0; } },
-            { n: D.history.closed, t: 'חסמים שנסגרו בתקופה' + (D.history.median_weeks_closed !== null ? ' · חציון ' + D.history.median_weeks_closed + ' שבועות' : ''), c: LV[3], closed: true },
+            { n: D.now.unowned, t: 'בלי גורם מטפל', k: 0, f: function (e) { return e.owner === NO_OWNER; } },
+            { n: D.now.chronic, t: 'עומדים ' + D.chronic_weeks + ' שבועות ומעלה', k: 1, f: function (e) { return e.weeks >= D.chronic_weeks; } },
+            { n: D.now.top, t: 'הוסלמו לסמנכ״ל', k: 0, f: function (e) { return e.top; } },
+            { n: D.now.slip_months, t: 'חודשי הזזת יעד מאז שנפתחו', k: 4, f: function (e) { return (e.slip_months || 0) > 0; } },
+            { n: D.history.closed, t: 'נסגרו בתקופה' + (D.history.median_weeks_closed !== null ? ' · חציון ' + D.history.median_weeks_closed + ' שבועות' : ''), k: 3, closed: true },
         ].forEach(function (k, i) {
-            var b = el('button', 'fact'); b.type = 'button'; b.style.setProperty('--i', i); b.style.setProperty('--tone', k.c);
-            var num = el('b'); num.appendChild(ltr(String(k.n))); b.appendChild(num); b.appendChild(el('span', '', k.t));
-            b.addEventListener('click', function () { k.closed ? openSheet('עבר', 'חסמים שנסגרו', 'מהחדש לישן', D.closed) : openSheet('עכשיו', k.t, '', D.open.filter(k.f)); });
+            var b = el('button', 'fact rv'); b.type = 'button'; b.style.setProperty('--d', 900 + i * 110); b.style.setProperty('--tone', css(k.k));
+            var num = el('b'), v = ltr(String(k.n)); num.appendChild(v); b.appendChild(num); b.appendChild(el('span', '', k.t));
+            factNums.push({ node: v, v: k.n });
+            b.addEventListener('click', function () { k.closed ? openSheet('עבר', 'חסמים שנסגרו', 'מהחדש לישן', CLOSED) : openSheet('עכשיו', k.t, '', OPEN.filter(k.f)); });
             $('facts').appendChild(b);
         });
         var f = $('filters'); f.appendChild(el('span', 'lab', 'הצג:'));
@@ -430,174 +465,130 @@
         };
         chip('כל מה שבתחומי', null);
         (D.owners || []).forEach(function (o) { chip((o.owner === MINE ? '★ לטיפולי: ' : '') + o.owner + ' · ' + o.open, o.owner); });
-
-        if (still) return;                                            // embers: one per open blocker, drifting up
-        var cv = $('embers'), g = cv.getContext('2d'), W = 0, H = 0, parts = [], last = performance.now();
-        var size = function () { var r = cv.getBoundingClientRect(), dpr = Math.min(window.devicePixelRatio || 1, 2); W = r.width; H = r.height; cv.width = W * dpr; cv.height = H * dpr; g.setTransform(dpr, 0, 0, dpr, 0, 0); };
-        size(); window.addEventListener('resize', size);
-        D.open.slice(0, 160).forEach(function (e) { parts.push({ x: Math.random(), y: Math.random(), v: .012 + Math.random() * .03, r: 1 + Math.min(4, e.weeks / 12), c: tone(e.level), ph: Math.random() * 6 }); });
-        var frame = function (now) {
-            var dt = Math.min(.05, (now - last) / 1000); last = now;
-            if (scenes[0].classList.contains('on')) {
-                g.clearRect(0, 0, W, H);
-                parts.forEach(function (p) {
-                    p.y -= p.v * dt; p.ph += dt; if (p.y < -.05) { p.y = 1.05; p.x = Math.random(); }
-                    var x = (p.x + Math.sin(p.ph) * .012) * W, y = p.y * H;
-                    g.globalAlpha = .18 + .5 * Math.max(0, Math.sin(p.ph * 1.7)); g.fillStyle = p.c; g.shadowColor = p.c; g.shadowBlur = 14;
-                    g.beginPath(); g.arc(x, y, p.r, 0, 6.283); g.fill();
-                });
-                g.globalAlpha = 1; g.shadowBlur = 0;
-            }
-            requestAnimationFrame(frame);
-        };
-        requestAnimationFrame(frame);
+    };
+    ENTER.open = function () {
+        if (empty) return;
+        countUp($('n-open'), D.now.open, 300);
+        factNums.forEach(function (f, i) { countUp(f.node, f.v, 1000 + i * 110); });
     };
 
-    // ───────────────────────── 2 the field: every open blocker, clustered by topic
+    // ───────────────────────── 2 the field (layout in layoutMap)
     BUILD.map = function () {
-        var cv = $('map'), g = cv.getContext('2d'), W = 0, H = 0, nodes = [], hubs = [], t0 = performance.now(), hover = null;
-        var topicOf = function (e) { return (e.topics && e.topics[0]) || 'ללא נושא מזוהה'; };
-        var names = D.by_topic.map(function (r) { return r.topic; });
-        var layout = function () {
-            var r = cv.getBoundingClientRect(), dpr = Math.min(window.devicePixelRatio || 1, 2); W = r.width; H = r.height; cv.width = W * dpr; cv.height = H * dpr; g.setTransform(dpr, 0, 0, dpr, 0, 0);
-            var n = Math.max(1, names.length), cols = Math.ceil(Math.sqrt(n * W / H)), rows = Math.ceil(n / cols);
-            hubs = names.map(function (name, i) { var c = i % cols, rw = Math.floor(i / cols); return { name: name, x: W - (c + .5) * W / cols, y: (rw + .5) * H / rows, n: 0 }; });
-            var scale = Math.max(.55, Math.min(1.25, Math.sqrt(W * H / 520000) * Math.sqrt(60 / Math.max(20, D.open.length))));
-            nodes = D.open.map(function (e) {
-                var hub = hubs[names.indexOf(topicOf(e))] || hubs[0]; hub.n++;
-                var a = Math.random() * 6.283, d = Math.random() * 30;
-                return { e: e, hub: hub, r: (5 + Math.sqrt(e.weeks + 1) * 2.6) * scale, x: hub.x + Math.cos(a) * d, y: hub.y + Math.sin(a) * d, c: tone(e.level), ph: Math.random() * 6 };
-            });
-            for (var it = 0; it < 140; it++) {                        // settle: pull to the hub, push apart
-                nodes.forEach(function (a) { a.x += (a.hub.x - a.x) * .04; a.y += (a.hub.y - a.y) * .04; });
-                for (var i = 0; i < nodes.length; i++) for (var j = i + 1; j < nodes.length; j++) {
-                    var p = nodes[i], q = nodes[j], dx = q.x - p.x, dy = q.y - p.y, dist = Math.sqrt(dx * dx + dy * dy) || .01, min = p.r + q.r + 2;
-                    if (dist < min) { var push = (min - dist) / 2; dx /= dist; dy /= dist; p.x -= dx * push; p.y -= dy * push; q.x += dx * push; q.y += dy * push; }
-                }
-            }
-            nodes.forEach(function (a) { a.x = Math.max(a.r, Math.min(W - a.r, a.x)); a.y = Math.max(a.r + 16, Math.min(H - a.r, a.y)); });
-            t0 = performance.now(); draw(performance.now());
-        };
-        var draw = function (now) {
-            var age = (now - t0) / 1000; g.clearRect(0, 0, W, H);
-            g.font = '600 13px Heebo, sans-serif'; g.textAlign = 'center';
-            hubs.forEach(function (h) { if (!h.n) return; var ys = nodes.filter(function (n) { return n.hub === h; }).map(function (n) { return n.y - n.r; }); g.fillStyle = 'rgba(243,238,228,.75)'; g.fillText(h.name + ' · ' + h.n, h.x, Math.max(13, Math.min.apply(null, ys) - 8)); });
-            nodes.forEach(function (a, i) {
-                var k = still ? 1 : Math.min(1, Math.max(0, (age - i * .012) / .9)), e = 1 - Math.pow(1 - k, 3);
-                var x = a.hub.x + (a.x - a.hub.x) * e + (still ? 0 : Math.sin(now / 1400 + a.ph) * 1.8), y = a.hub.y + (a.y - a.hub.y) * e + (still ? 0 : Math.cos(now / 1700 + a.ph) * 1.8);
-                a.sx = x; a.sy = y;
-                g.globalAlpha = e * (hover && hover !== a ? .35 : .9); g.fillStyle = a.c; g.shadowColor = a.c; g.shadowBlur = hover === a ? 30 : 12;
-                g.beginPath(); g.arc(x, y, a.r * e * (hover === a ? 1.15 : 1), 0, 6.283); g.fill();
-                if (a.e.top) { g.shadowBlur = 0; g.strokeStyle = '#fff'; g.lineWidth = 1.5; g.beginPath(); g.arc(x, y, a.r * e + 3, 0, 6.283); g.stroke(); }
-            });
-            g.globalAlpha = 1; g.shadowBlur = 0;
-            if (!still && $('map').closest('.scene').classList.contains('on')) requestAnimationFrame(draw);
-        };
-        var pick = function (ev) { var r = cv.getBoundingClientRect(), x = ev.clientX - r.left, y = ev.clientY - r.top, best = null; nodes.forEach(function (a) { var d = Math.hypot(a.sx - x, a.sy - y); if (d <= a.r + 3 && (!best || d < best.d)) best = { a: a, d: d }; }); return best && best.a; };
-        cv.addEventListener('pointermove', function (ev) { hover = pick(ev); if (hover) showTip((hover.e.name || hover.e.id) + '\n' + weeksText(hover.e) + ' · לטיפול: ' + hover.e.owner + '\n' + D.levels[hover.e.level].label, ev.clientX, ev.clientY); else hideTip(); if (still) draw(performance.now()); });
-        cv.addEventListener('pointerleave', function () { hover = null; hideTip(); if (still) draw(performance.now()); });
-        cv.addEventListener('click', function (ev) { var a = pick(ev); if (a) openSheet('חסם', a.e.name || a.e.id, topicOf(a.e), [a.e]); });
-        D.order.levels.forEach(function (lv, i) { var k = el('span'); var dot = el('i'); dot.style.setProperty('--c', LV[i]); k.appendChild(dot); k.appendChild(document.createTextNode(D.levels[lv].label + ' · ' + (D.now.levels[lv] || 0))); $('map-keys').appendChild(k); });
+        LEVELS.forEach(function (lv, i) { var k = el('span'), dot = el('i'); dot.style.setProperty('--c', css(i)); k.appendChild(dot); k.appendChild(document.createTextNode(D.levels[lv].label + ' · ' + ((D.now && D.now.levels[lv]) || 0))); $('map-keys').appendChild(k); });
         $('map-keys').appendChild(el('span', '', 'טבעת לבנה: הוסלם לסמנכ״ל'));
-        layout(); window.addEventListener('resize', layout);
-        BUILD.map.wake = function () { t0 = performance.now(); requestAnimationFrame(draw); };
+    };
+    var mapLabels = [];
+    var layoutMap = function () {
+        var r = $('plot-map').getBoundingClientRect(); if (!r.width || !OPEN.length) return;
+        var names = (D.by_topic || []).map(function (t) { return t.topic; });
+        var topicOf = function (e) { return (e.topics && e.topics[0]) || 'ללא נושא מזוהה'; };
+        var n = Math.max(1, names.length), cols = clamp(Math.round(Math.sqrt(n * r.width / Math.max(1, r.height))), 1, n), rows = Math.ceil(n / cols);
+        var hubs = names.map(function (name, i) { return { name: name, x: r.right - ((i % cols) + .5) * r.width / cols, y: r.top + 22 + (Math.floor(i / cols) + .5) * (r.height - 22) / rows, n: 0 }; });
+        var nodes = PS.filter(function (p) { return p.open; });
+        var area = nodes.reduce(function (a, p) { var r0 = 4 + Math.sqrt(p.e.weeks + 1) * 1.9; return a + Math.PI * r0 * r0; }, 0);
+        var scale = clamp(Math.sqrt(.26 * r.width * r.height / Math.max(1, area)), .45, 2.2);
+        nodes.forEach(function (p) {
+            var hub = hubs[names.indexOf(topicOf(p.e))] || hubs[0]; hub.n++;
+            var a = p.seed * 6.283, d = p.ph * 6;
+            p.hub = hub; p.mr = (4 + Math.sqrt(p.e.weeks + 1) * 1.9) * scale; p.mx = hub.x + Math.cos(a) * d; p.my = hub.y + Math.sin(a) * d;
+        });
+        for (var it = 0; it < 160; it++) {
+            nodes.forEach(function (a) { a.mx += (a.hub.x - a.mx) * .05; a.my += (a.hub.y - a.my) * .05; });
+            for (var i = 0; i < nodes.length; i++) for (var j = i + 1; j < nodes.length; j++) {
+                var p = nodes[i], q = nodes[j], dx = q.mx - p.mx, dy = q.my - p.my, dist = Math.sqrt(dx * dx + dy * dy) || .01, min = p.mr + q.mr + 3;
+                if (dist < min) { var push = (min - dist) / 2; dx /= dist; dy /= dist; p.mx -= dx * push; p.my -= dy * push; q.mx += dx * push; q.my += dy * push; }
+            }
+        }
+        nodes.forEach(function (a) { a.mx = clamp(a.mx, r.left + a.mr, r.right - a.mr); a.my = clamp(a.my, r.top + 22 + a.mr, r.bottom - a.mr); });
+        mapLabels = hubs.filter(function (h) { return h.n; }).map(function (h) {
+            var mine = nodes.filter(function (p) { return p.hub === h; });
+            return { text: h.name + ' · ' + h.n, x: h.x, y: Math.min.apply(null, mine.map(function (p) { return p.my - p.mr; })) - 12 };
+        });
     };
 
-    // ───────────────────────── 3 past and present
+    // ───────────────────────── 3 past and present (columns by the report a blocker opened in)
+    var maxStack = 1, maxOpenLine = 1;
     BUILD.time = function () {
-        var F = D.flow, host = $('time'), W = 1000, H = 400, L = 20, R = 20, TOP = 26, LINE_H = 150, MID = 300, BAR = 70, n = F.length;
-        host.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
-        var step = (W - L - R) / Math.max(1, n), X = function (i) { return W - R - (i + .5) * step; };
-        var maxOpen = Math.max.apply(null, F.map(function (f) { return f.open; }).concat([1])), maxBar = Math.max.apply(null, F.map(function (f) { return Math.max(f.opened, f.closed); }).concat([1]));
-        var Y = function (v) { return TOP + LINE_H - v / maxOpen * LINE_H; };
-        var d = '', area = '';
-        F.forEach(function (f, i) { d += (i ? ' L' : 'M') + X(i).toFixed(1) + ' ' + Y(f.open).toFixed(1); });
-        area = d + ' L' + X(n - 1).toFixed(1) + ' ' + (TOP + LINE_H) + ' L' + X(0).toFixed(1) + ' ' + (TOP + LINE_H) + ' Z';
-        var defs = svg('defs', {}), grad = svg('linearGradient', { id: 'tl-fill', x1: 0, y1: 0, x2: 0, y2: 1 });
-        grad.appendChild(svg('stop', { offset: 0, 'stop-color': '#ffb020', 'stop-opacity': .35 })); grad.appendChild(svg('stop', { offset: 1, 'stop-color': '#ffb020', 'stop-opacity': 0 })); defs.appendChild(grad); host.appendChild(defs);
-        host.appendChild(svg('path', { d: area, fill: 'url(#tl-fill)', class: 'tl-area' }));
-        host.appendChild(svg('path', { d: d, class: 'tl-line', pathLength: 1 }));
-        host.appendChild(svg('line', { x1: L, x2: W - R, y1: MID, y2: MID, stroke: '#26231e' }));
-        F.forEach(function (f, i) {
-            var x = X(i), bw = Math.min(34, step * .5);
-            var open = function () {
-                var list = D.open.concat(D.closed).filter(function (e) { return e.opened === f.report || e.closed === f.report; });
-                openSheet('דוח ' + ilDate(f.report), 'מה קרה בדוח ' + ilDate(f.report), f.opened + ' נפתחו · ' + f.closed + ' נסגרו · ' + f.open + ' עמדו פתוחים', list);
-            };
-            var text = 'דוח ' + ilDate(f.report) + '\n' + f.open + ' פתוחים · ' + f.opened + ' נפתחו · ' + f.closed + ' נסגרו';
-            if (f.opened) { var u = svg('rect', { x: x - bw / 2, y: MID - f.opened / maxBar * BAR, width: bw, height: f.opened / maxBar * BAR, fill: '#ff4d3d', class: 'tl-bar up' }); u.style.setProperty('--i', i); hint(u, text); press(u, open); host.appendChild(u); }
-            if (f.closed) { var c = svg('rect', { x: x - bw / 2, y: MID + 1, width: bw, height: f.closed / maxBar * BAR, fill: '#35c48a', class: 'tl-bar dn' }); c.style.setProperty('--i', i); hint(c, text); press(c, open); host.appendChild(c); }
-            var dot = svg('circle', { cx: x, cy: Y(f.open), r: 3.5, fill: '#ffb020' }); hint(dot, text); host.appendChild(dot);
-            if (i === 0 || i === n - 1 || f.open === maxOpen) { var t = svg('text', { x: x, y: Y(f.open) - 10, 'text-anchor': 'middle', class: 'big' }); t.textContent = String(f.open); host.appendChild(t); }
-            if (n <= 10 || i % 2 === 0) { var lab = svg('text', { x: x, y: H - 6, 'text-anchor': 'middle', direction: 'ltr' }); lab.textContent = ilDate(f.report).slice(0, 5); host.appendChild(lab); }
+        var idx = {}; FLOW.forEach(function (f, i) { idx[f.report] = i; });
+        var stacks = FLOW.map(function () { return 0; });
+        PS.slice().sort(function (a, b) { return a.open === b.open ? a.k - b.k : (a.open ? -1 : 1); }).forEach(function (p) {
+            var c = idx[p.e.opened]; if (c === undefined) return; p.col = c; p.stack = stacks[c]++;
         });
-        if (!still && n > 1) { var head = svg('circle', { cx: X(n - 1), cy: Y(F[n - 1].open), r: 7, class: 'tl-head' }); head.style.setProperty('--from', (X(0) - X(n - 1)) + 'px'); head.style.filter = 'drop-shadow(0 0 12px #ffb020)'; host.appendChild(head); }
-        var first = F[0], lastF = F[n - 1];
-        $('time-note').textContent = 'בדוח הראשון (' + ilDate(first.report) + ') עמדו ' + first.open + ' חסמים פתוחים; בדוח האחרון ' + lastF.open + '. בסך הכול נפתחו בתקופה ' + D.history.ever + ' חסמים ו-' + D.history.closed + ' מהם נסגרו. חסם נחשב סגור כשתא הסיכונים של הפרויקט מתרוקן.';
+        maxStack = Math.max.apply(null, stacks.concat([1]));
+        maxOpenLine = Math.max.apply(null, FLOW.map(function (f) { return f.open; }).concat([1]));
+        if (FLOW.length) {
+            var first = FLOW[0], last = FLOW[FLOW.length - 1];
+            $('time-note').textContent = 'בדוח הראשון (' + ilDate(first.report) + ') עמדו ' + first.open + ' חסמים פתוחים; בדוח האחרון ' + last.open + '. בסך הכול היו בתקופה ' + D.history.ever + ' חסמים, ' + D.history.closed + ' מהם נסגרו (מוצגים עד ' + CLOSED.length + ' האחרונים). חסם נחשב סגור כשתא הסיכונים של הפרויקט מתרוקן.';
+        }
     };
 
     // ───────────────────────── 4 who holds them
+    var ownerLanes = [], maxOwnerN = 1;
     BUILD.owners = function () {
-        var max = Math.max.apply(null, D.by_owner.map(function (r) { return r.open; }).concat([1]));
-        D.by_owner.forEach(function (r, i) {
-            var b = el('button', 'reel'); b.type = 'button'; b.style.setProperty('--i', i); b.style.setProperty('--tone', r.owner === 'ללא גורם מטפל' ? LV[0] : (r.owner === MINE ? '#36d6ff' : '#ffb020'));
-            var nm = el('span', 'nm', (r.owner === MINE ? '★ ' : '') + r.owner); nm.appendChild(el('small', '', 'הוותיק ביותר: ' + r.oldest_weeks + ' שבועות' + (r.slip_months ? ' · ' + r.slip_months + ' חודשי הזזת יעד' : ''))); b.appendChild(nm);
-            var tr = el('span', 'tr'), fill = el('i'); fill.style.setProperty('--w', (r.open / max * 100).toFixed(1) + '%'); tr.appendChild(fill); b.appendChild(tr);
-            b.appendChild(ltr(String(r.open), 'n')); b.appendChild(el('span', 'm', 'חציון ' + r.median_weeks + ' שב׳'));
-            b.addEventListener('click', function () { openSheet('גורם מטפל', r.owner, r.open + ' חסמים פתוחים · לפי סדר העדיפות', D.open.filter(function (e) { return e.owner === r.owner; })); });
+        var rows = D.by_owner || [], index = {}, slots = {};
+        rows.forEach(function (r, i) { index[r.owner] = i; });
+        maxOwnerN = Math.max.apply(null, rows.map(function (r) { return r.open; }).concat([1]));
+        PS.filter(function (p) { return p.open; }).sort(function (a, b) { return a.e.rank - b.e.rank; }).forEach(function (p) {
+            var row = index[p.e.owner]; if (row === undefined) return; p.orow = row; p.oslot = slots[row] = (slots[row] === undefined ? 0 : slots[row] + 1);
+        });
+        rows.forEach(function (r, i) {
+            var b = el('button', 'reel rv'); b.type = 'button'; b.style.setProperty('--d', 380 + i * 80);
+            b.style.setProperty('--tone', r.owner === NO_OWNER ? css(0) : (r.owner === MINE ? css(5) : css(4)));
+            var nm = el('span', 'nm', (r.owner === MINE ? '★ ' : '') + r.owner); nm.appendChild(el('small', '', 'חציון ' + r.median_weeks + ' שב׳ · הוותיק: ' + r.oldest_weeks + (r.slip_months ? ' · ' + r.slip_months + ' ח׳ הזזת יעד' : ''))); b.appendChild(nm);
+            var lane = el('span', 'lane'); b.appendChild(lane); ownerLanes.push(lane);
+            b.appendChild(ltr(String(r.open), 'n'));
+            b.addEventListener('click', function () { openSheet('גורם מטפל', r.owner, r.open + ' חסמים פתוחים · לפי סדר העדיפות', OPEN.filter(function (e) { return e.owner === r.owner; })); });
             $('owners').appendChild(b);
         });
     };
 
     // ───────────────────────── 5 the long-standing
+    var oldLanes = [];
     BUILD.old = function () {
-        var list = D.open.slice().sort(function (a, b) { return b.weeks - a.weeks; }).slice(0, 10);
-        var day = function (iso) { return Date.parse(iso) / 864e5; }, x0 = day(D.first_report), x1 = day(D.as_of), span = Math.max(1, x1 - x0);
-        list.forEach(function (e, i) {
-            var b = el('button', 'g-row'); b.type = 'button'; b.style.setProperty('--i', i); b.style.setProperty('--tone', tone(e.level));
+        var list = PS.filter(function (p) { return p.open; }).sort(function (a, b) { return b.e.weeks - a.e.weeks; }).slice(0, 10);
+        list.forEach(function (p, i) {
+            var e = p.e; p.grow = i;
+            var b = el('button', 'g-row rv'); b.type = 'button'; b.style.setProperty('--d', 380 + i * 70); b.style.setProperty('--tone', tone(e.level));
             var nm = el('span', 'nm', e.name || e.id); nm.appendChild(el('small', '', e.owner)); b.appendChild(nm);
-            var tr = el('span', 'tr'), bar = el('i', e.lower_bound ? 'lb-open' : ''); bar.style.setProperty('--r', ((day(e.opened) - x0) / span * 100).toFixed(1) + '%'); bar.style.setProperty('--w', Math.max(1.5, (x1 - day(e.opened)) / span * 100).toFixed(1) + '%'); tr.appendChild(bar); b.appendChild(tr);
+            var lane = el('span', 'lane'); b.appendChild(lane); oldLanes.push(lane);
             b.appendChild(ltr((e.lower_bound ? '≥' : '') + e.weeks, 'n'));
-            hint(b, (e.name || e.id) + '\n' + weeksText(e) + ' · מאז ' + ilDate(e.opened));
             b.addEventListener('click', function () { openSheet('חסם', e.name || e.id, weeksText(e), [e]); });
             $('old').appendChild(b);
         });
-        var ax = $('old-axis'); ax.appendChild(el('div')); var mid = el('div'); mid.appendChild(el('span', '', ilDate(D.as_of))); mid.appendChild(el('span', '', ilDate(D.first_report))); ax.appendChild(mid); ax.appendChild(el('div', '', 'שבועות'));
+        var ax = $('old-axis'); ax.appendChild(el('div')); var mid = el('div'); mid.appendChild(el('span', '', ilDate(D.first_report))); mid.appendChild(el('span', '', ilDate(D.as_of) + ' · היום')); ax.appendChild(mid); ax.appendChild(el('div', '', 'שבועות'));
     };
 
     // ───────────────────────── 6 yours to handle
+    var qSlots = [];
     BUILD.queue = function () {
-        D.open.slice(0, 6).forEach(function (e, i) {
-            var b = el('button', 'q'); b.type = 'button'; b.style.setProperty('--i', i); b.style.setProperty('--tone', tone(e.level));
+        PS.filter(function (p) { return p.open && p.e.rank <= 6; }).sort(function (a, b) { return a.e.rank - b.e.rank; }).forEach(function (p, i) {
+            var e = p.e; p.qrow = i;
+            var b = el('button', 'q rv'); b.type = 'button'; b.style.setProperty('--d', 380 + i * 120); b.style.setProperty('--tone', tone(e.level));
+            var slot = el('span', 'slot'); b.appendChild(slot); qSlots.push(slot);
             b.appendChild(ltr(('0' + e.rank).slice(-2), 'rk'));
-            var mid = el('span'); mid.appendChild(el('div', 't', e.name || e.id)); mid.appendChild(el('div', 'x', e.text)); b.appendChild(mid);
+            var mid = el('span'); mid.style.minWidth = '0'; mid.appendChild(el('div', 't', e.name || e.id)); mid.appendChild(el('div', 'x', e.text)); b.appendChild(mid);
             var meta = el('span', 'meta'); meta.appendChild(el('span', 'tag lv', D.levels[e.level].icon + ' ' + D.levels[e.level].label)); meta.appendChild(el('span', 'tag', weeksText(e))); meta.appendChild(el('span', 'tag', e.owner));
             if (e.slip_months) meta.appendChild(el('span', 'tag', 'יעד +' + e.slip_months + ' ח׳')); b.appendChild(meta);
             b.addEventListener('click', function () { openSheet('מקום ' + e.rank, e.name || e.id, 'מקום ' + e.rank + ' בתור', [e]); });
             $('queue').appendChild(b);
         });
-        var all = $('queue-all'); all.textContent = 'כל ' + D.open.length + ' החסמים בתור ←';
-        all.addEventListener('click', function () { openSheet('התור', 'התור המלא', D.open.length + ' חסמים פתוחים, לפי סדר העדיפות', D.open); });
+        var all = $('queue-all'); all.textContent = 'כל ' + OPEN.length + ' החסמים בתור ←';
+        all.addEventListener('click', function () { openSheet('התור', 'התור המלא', OPEN.length + ' חסמים פתוחים, לפי סדר העדיפות', OPEN); });
     };
 
     // ───────────────────────── 7 what to do
+    var aiHead = null;
     BUILD.ai = function () {
         var body = $('ai-body');
         if (!AI) { body.appendChild(el('p', 'ai-sit', empty ? 'אין חסמים פתוחים לנסח עליהם המלצות.' : 'עוד לא נוסחו המלצות לדוח הזה. לחיצה על הכפתור שולחת למודל את החסמים הראשונים בתור שלך, והוא מחזיר לכל אחד מה לעשות, מי, ועד מתי.')); if (empty) $('ai-form').hidden = true; return; }
-        var head = el('div', 'ai-head'); body.appendChild(head);
-        var full = AI.headline || '';
-        if (still || !full) head.textContent = full; else {                // the headline is typed, then stays
-            head.classList.add('typing'); var i = 0;
-            var type = function () { head.textContent = full.slice(0, ++i); if (i < full.length) setTimeout(type, 26); else setTimeout(function () { head.classList.remove('typing'); }, 900); };
-            setTimeout(type, 500);
-        }
+        aiHead = el('div', 'ai-head'); aiHead.textContent = AI.headline || ''; body.appendChild(aiHead);
         if (AI.situation) body.appendChild(el('p', 'ai-sit', AI.situation));
         var grid = el('div', 'ai-grid');
         (AI.findings || []).forEach(function (f, i) {
-            var c = el('div', 'ai-card'); c.style.setProperty('--i', i);
+            var c = el('div', 'ai-card'); c.style.setProperty('--d', i * 140);
             c.appendChild(el('h4', '', f.title || '')); if (f.analysis) c.appendChild(el('p', '', f.analysis));
             if (f.action) c.appendChild(el('div', 'act', '👉 ' + f.action)); if (f.owner) c.appendChild(el('div', 'who', 'בעלים: ' + f.owner));
-            if ((f.projects || []).length) { var pj = el('div', 'pj'); f.projects.forEach(function (id) { var e = D.open.filter(function (x) { return x.id === id; })[0]; var a = el('a', '', (e && e.name) ? e.name.slice(0, 34) : id); a.href = '/dashboard/projects/p/' + encodeURIComponent(id); pj.appendChild(a); }); c.appendChild(pj); }
+            if ((f.projects || []).length) { var pj = el('div', 'pj'); f.projects.forEach(function (id) { var e = OPEN.filter(function (x) { return x.id === id; })[0]; var a = el('a', '', (e && e.name) ? e.name.slice(0, 34) : id); a.href = '/dashboard/projects/p/' + encodeURIComponent(id); pj.appendChild(a); }); c.appendChild(pj); }
             grid.appendChild(c);
         });
         body.appendChild(grid);
@@ -605,54 +596,246 @@
             if (!s[1] || !s[1].length) return; body.appendChild(el('div', 'ai-sub', s[0])); var ul = el('ul', 'ai-list'); s[1].forEach(function (t) { ul.appendChild(el('li', '', t)); }); body.appendChild(ul);
         });
     };
+    ENTER.ai = function () {
+        if (!aiHead || still) return;
+        var full = AI.headline || '', i = 0; aiHead.textContent = ''; aiHead.classList.add('typing');
+        var type = function () { if (!aiHead.classList.contains('typing')) return; aiHead.textContent = full.slice(0, ++i); if (i < full.length) setTimeout(type, 24); else setTimeout(function () { aiHead.classList.remove('typing'); }, 900); };
+        setTimeout(type, 700);
+    };
     $('ai-form').addEventListener('submit', function () { var b = $('ai-go'); b.disabled = true; b.textContent = 'המודל מנסח… עד חצי דקה'; });
 
-    // ───────────────────────── the player: scenes come on as they fill the frame
-    var current = 0, playing = false, timer = 0, started = performance.now(), SCENE_MS = 9000, progress = 0, lastTick = 0;
+    NAMES.forEach(function (n) { BUILD[n](); });
+
+    // ───────────────────────── formations: where each blocker stands in each scene
+    var cv = $('cine'), g = cv.getContext('2d'), W = 0, H = 0, dpr = 1;
+    var SPR = PAL.map(function (c) {                                   // a soft glow per colour, drawn additively
+        var s = document.createElement('canvas'); s.width = s.height = 64; var x = s.getContext('2d'), gr = x.createRadialGradient(32, 32, 0, 32, 32, 32);
+        gr.addColorStop(0, 'rgba(' + c.join(',') + ',1)'); gr.addColorStop(.22, 'rgba(' + c.join(',') + ',.38)'); gr.addColorStop(1, 'rgba(' + c.join(',') + ',0)');
+        x.fillStyle = gr; x.fillRect(0, 0, 64, 64); return s;
+    });
+    var rectOf = function (node) { return node.getBoundingClientRect(); };
+    var dust = function (p, T) { return { x: p.dx * W + Math.sin(T / 4200 + p.ph) * 18, y: p.dy * H + Math.cos(T / 5100 + p.ph) * 14, r: 1 + p.seed * .7, a: .13, k: 6, len: 0 }; };
+    var frameCtx = {};
+    var ctxFor = function (name) {
+        if (frameCtx[name]) return frameCtx[name];
+        var c = {}, plot = $('plot-' + name);
+        c.r = plot ? rectOf(plot) : { left: 0, top: 0, right: W, bottom: H, width: W, height: H };
+        if (name === 'open') { var n = rectOf($('n-open')); c.cx = n.left + n.width / 2; c.cy = n.top + n.height / 2 + 6; c.rx = Math.min(c.r.width * .47, 640); }
+        if (name === 'time') { c.n = Math.max(1, FLOW.length); c.step = (c.r.width - 20) / c.n; c.x0 = c.r.right - 10; c.base = c.r.bottom - 26; c.top = c.r.top + 8; c.lineH = c.r.height * .26; c.sp = Math.min(12, (c.r.height * .6) / maxStack); }
+        if (name === 'owners') c.lanes = ownerLanes.map(rectOf);
+        if (name === 'old') { c.lanes = oldLanes.map(rectOf); c.d0 = day(D.first_report); c.span = Math.max(1, day(D.as_of) - c.d0); }
+        if (name === 'queue') c.slots = qSlots.map(rectOf);
+        if (name === 'ai') { c.cx = W * (W < 760 ? .5 : .2); c.cy = H * .55; c.R = Math.min(W * .2, H * .38, 320); }
+        frameCtx[name] = c; return c;
+    };
+    var F = {
+        open: function (p, T, c) {                                     // a tilted ring orbiting the number, deeper = dimmer
+            if (!p.open) return dust(p, T);
+            var ang = p.seed * 6.283 + T * .00017 * (1 - p.ring * .1), rx = c.rx * (.58 + p.ring * .13 + ((p.seed * 7) % 1) * .14), ry = rx * .27;
+            var ox = Math.cos(ang) * rx, oy = Math.sin(ang) * ry, tl = -.17, z = (Math.sin(ang) + 1) / 2;
+            return { x: c.cx + ox * Math.cos(tl) - oy * Math.sin(tl), y: c.cy + ox * Math.sin(tl) + oy * Math.cos(tl), r: (1.6 + Math.sqrt(p.e.weeks + 1) * .45) * (.55 + .6 * z), a: .25 + .7 * z, k: p.k, len: 0 };
+        },
+        map: function (p, T) {
+            if (!p.open || p.mx === undefined) return dust(p, T);
+            return { x: p.mx + Math.sin(T / 1300 + p.ph) * 1.8, y: p.my + Math.cos(T / 1500 + p.ph) * 1.8, r: p.mr, a: .93, k: p.k, len: 0, ring: p.e.top };
+        },
+        time: function (p, T, c) {
+            if (p.col === undefined) return dust(p, T);
+            return { x: c.x0 - (p.col + .5) * c.step + Math.sin(T / 1700 + p.ph) * .6, y: c.base - (p.stack + .5) * c.sp, r: c.sp * .4, a: p.open ? .95 : .62, k: p.open ? p.k : 3, len: 0 };
+        },
+        owners: function (p, T, c) {
+            if (!p.open || p.orow === undefined || !c.lanes[p.orow]) return dust(p, T);
+            var L = c.lanes[p.orow], sp = Math.min(26, (L.width - 8) / maxOwnerN);
+            return { x: L.right - 4 - (p.oslot + .5) * sp, y: L.top + L.height / 2 + Math.sin(T / 900 + p.ph) * .8, r: Math.min(7, sp * .36), a: .95, k: p.k, len: 0 };
+        },
+        old: function (p, T, c) {
+            if (p.grow === undefined || !c.lanes[p.grow]) return dust(p, T);
+            var L = c.lanes[p.grow], f = clamp((day(p.e.opened) - c.d0) / c.span, 0, 1), x = L.right - f * L.width;
+            return { x: x, y: L.top + L.height / 2, r: Math.max(3, Math.min(7, L.height * .2)), a: .96, k: p.k, len: Math.max(2, x - L.left) };
+        },
+        queue: function (p, T, c) {
+            if (p.qrow === undefined || !c.slots[p.qrow]) return dust(p, T);
+            var S = c.slots[p.qrow];
+            return { x: S.left + S.width / 2, y: S.top + S.height / 2, r: 9 + Math.sin(T / 520 + p.qrow) * 1.6, a: 1, k: p.k, len: 0 };
+        },
+        ai: function (p, T, c) {                                       // a slow galaxy behind the words
+            var arm = p.idx % 3, t = p.open ? p.e.rank / (OPEN.length + 1) : .25 + .75 * p.seed, ang = arm * 2.094 + t * 4.6 + T * .00009 + (p.seed - .5) * .35;
+            var rad = 26 + t * c.R;
+            return { x: c.cx + Math.cos(ang) * rad, y: c.cy + Math.sin(ang) * rad * .56, r: p.open ? 2.3 : 1.3, a: p.open ? .62 : .3, k: p.open ? p.k : 6, len: 0 };
+        },
+    };
+    // what the canvas draws besides the cast, per scene (fades with the scene)
+    var enterT = {};
+    var DECOR = {
+        map: function (c, a) {
+            g.font = '600 13px Heebo, sans-serif'; g.textAlign = 'center'; g.direction = 'rtl'; g.fillStyle = 'rgba(243,238,228,' + (.8 * a) + ')';
+            mapLabels.forEach(function (l) { g.fillText(l.text, l.x, l.y); });
+        },
+        time: function (c, a, T) {
+            if (!FLOW.length) return;
+            var pts = FLOW.map(function (f, i) { return { x: c.x0 - (i + .5) * c.step, y: c.top + 16 + (1 - f.open / maxOpenLine) * c.lineH, v: f.open }; });
+            var prog = still ? 1 : clamp((T - (enterT.time || 0) - 500) / 2200, 0, 1), e = 1 - Math.pow(1 - prog, 3), upto = e * (pts.length - 1);
+            var path = function () { g.beginPath(); g.moveTo(pts[0].x, pts[0].y); for (var i = 1; i <= Math.floor(upto); i++) g.lineTo(pts[i].x, pts[i].y); var j = Math.floor(upto), f = upto - j; if (j < pts.length - 1) g.lineTo(pts[j].x + (pts[j + 1].x - pts[j].x) * f, pts[j].y + (pts[j + 1].y - pts[j].y) * f); };
+            g.lineJoin = 'round'; g.lineCap = 'round';
+            g.globalCompositeOperation = 'lighter'; g.strokeStyle = 'rgba(255,176,32,' + (.18 * a) + ')'; g.lineWidth = 9; path(); g.stroke();
+            g.globalCompositeOperation = 'source-over'; g.strokeStyle = 'rgba(255,176,32,' + a + ')'; g.lineWidth = 2.5; path(); g.stroke();
+            var j = Math.floor(upto), f = upto - j, hx = j < pts.length - 1 ? pts[j].x + (pts[j + 1].x - pts[j].x) * f : pts[j].x, hy = j < pts.length - 1 ? pts[j].y + (pts[j + 1].y - pts[j].y) * f : pts[j].y;
+            g.globalAlpha = a; g.drawImage(SPR[4], hx - 22, hy - 22, 44, 44); g.globalAlpha = 1;
+            g.font = '600 12px "IBM Plex Mono", monospace'; g.textAlign = 'center'; g.direction = 'ltr'; g.fillStyle = 'rgba(243,238,228,' + (.85 * a) + ')';
+            var maxI = pts.reduce(function (m, p, i) { return p.v > pts[m].v ? i : m; }, 0);
+            [0, maxI, pts.length - 1].forEach(function (i) { if (i <= upto + .01) g.fillText(String(pts[i].v), pts[i].x, pts[i].y - 11); });
+            g.fillStyle = 'rgba(162,155,143,' + (.8 * a) + ')'; g.font = '11px "IBM Plex Mono", monospace';
+            var every = c.step < 46 ? 2 : 1;
+            FLOW.forEach(function (fl, i) { if (i % every === 0 || i === FLOW.length - 1) g.fillText(ilDate(fl.report).slice(0, 5), c.x0 - (i + .5) * c.step, c.base + 20); });
+            g.strokeStyle = 'rgba(97,91,81,' + (.6 * a) + ')'; g.lineWidth = 1; g.beginPath(); g.moveTo(c.r.left, c.base + 3); g.lineTo(c.r.right, c.base + 3); g.stroke();
+        },
+    };
+
+    // ───────────────────────── the director
+    var current = -1, prevScene = -1, camT0 = -1e9, camDir = 1, pres = {}, hover = null, moving = false, startT = performance.now();
+    var playing = false, progress = 0, outTimer = 0;
+    NAMES.forEach(function (n) { pres[n] = 0; });
+    var resize = function () {
+        dpr = Math.min(window.devicePixelRatio || 1, 2); W = window.innerWidth; H = window.innerHeight;
+        cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.fillStyle = '#040404'; g.fillRect(0, 0, W, H);
+        layoutMap();
+    };
+    var ease = function (t) { return t < .5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2; };
+    var mix = function (a, b, m) { return a + (b - a) * m; };
+    var stateOf = function (p, T, name, c) {
+        var tg = F[name](p, T, c);
+        if (still || !p.from || T >= p.t0 + p.dur) return tg;
+        if (T < p.t0) return p.from;
+        var k = ease((T - p.t0) / p.dur), fr = p.from;
+        if (!p.ctrl) {                                                  // a curved flight: bend off the straight line, each its own way
+            var dx = tg.x - fr.x, dy = tg.y - fr.y, len = Math.sqrt(dx * dx + dy * dy) || 1, off = (p.seed - .5) * Math.min(.9 * len, 420);
+            p.ctrl = { x: (fr.x + tg.x) / 2 - dy / len * off, y: (fr.y + tg.y) / 2 + dx / len * off };
+        }
+        var u = 1 - k, flight = Math.sin(Math.PI * k);
+        return { x: u * u * fr.x + 2 * u * k * p.ctrl.x + k * k * tg.x, y: u * u * fr.y + 2 * u * k * p.ctrl.y + k * k * tg.y,
+                 r: mix(fr.r, tg.r, k) * (1 + .35 * flight), a: Math.min(1, mix(fr.a, tg.a, k) + .25 * flight), k: tg.k, kf: fr.k, m: k, len: mix(fr.len, tg.len, k), ring: tg.ring && k > .9 };
+    };
+    var draw = function (s, hot) {
+        if (s.a <= .01) return;
+        var r = s.r * (hot ? 1.55 : 1), m = s.m === undefined ? 1 : s.m, kf = s.kf === undefined ? s.k : s.kf;
+        var A = PAL[kf], B = PAL[s.k], color = 'rgb(' + Math.round(mix(A[0], B[0], m)) + ',' + Math.round(mix(A[1], B[1], m)) + ',' + Math.round(mix(A[2], B[2], m)) + ')';
+        var G = r + Math.min(r * 2.6, 22), glow = .5 * clamp(9 / r, .22, 1);   // a big bubble glows at its rim, not into a blob
+        g.globalCompositeOperation = 'lighter';
+        if (m < 1) { g.globalAlpha = s.a * glow * (1 - m); g.drawImage(SPR[kf], s.x - G, s.y - G, G * 2, G * 2); }
+        g.globalAlpha = s.a * glow * m; g.drawImage(SPR[s.k], s.x - G, s.y - G, G * 2, G * 2);
+        if (s.len > 1) { g.globalAlpha = s.a * .28; g.strokeStyle = color; g.lineCap = 'round'; g.lineWidth = r * 3.4; g.beginPath(); g.moveTo(s.x, s.y); g.lineTo(s.x - s.len, s.y); g.stroke(); }
+        g.globalCompositeOperation = 'source-over'; g.globalAlpha = s.a; g.fillStyle = color;
+        if (s.len > 1) { g.strokeStyle = color; g.lineCap = 'round'; g.lineWidth = r * 2; g.beginPath(); g.moveTo(s.x, s.y); g.lineTo(s.x - s.len, s.y); g.stroke(); }
+        else { g.beginPath(); g.arc(s.x, s.y, r, 0, 6.283); g.fill(); }
+        if (s.ring || hot) { g.strokeStyle = hot ? '#fff' : 'rgba(255,255,255,.85)'; g.lineWidth = hot ? 2 : 1.4; g.beginPath(); g.arc(s.x, s.y, r + 3.5, 0, 6.283); g.stroke(); }
+        g.globalAlpha = 1;
+    };
     var chapters = $('chapters');
+    var last = performance.now();
+    var frame = function (now) {
+        var dt = Math.min(.05, (now - last) / 1000); last = now; frameCtx = {};
+        var name = NAMES[Math.max(0, current)], T = still ? 0 : now;
+        NAMES.forEach(function (n) { pres[n] = still ? (n === name ? 1 : 0) : clamp(pres[n] + (n === name ? 1 : -1) * dt * 2.2, 0, 1); });
+        moving = !still && PS.some(function (p) { return p.from && now < p.t0 + p.dur; });
+        // the camera: a push-in and a small roll on every cut
+        var ck = clamp((now - camT0) / 1700, 0, 1), cs = still ? 1 : 1 + .06 * Math.sin(Math.PI * ck), cr = still ? 0 : .02 * Math.sin(Math.PI * ck) * camDir;
+        g.setTransform(dpr, 0, 0, dpr, 0, 0); g.globalCompositeOperation = 'source-over'; g.globalAlpha = 1;
+        g.fillStyle = still ? '#040404' : 'rgba(4,4,4,' + (moving ? .17 : .45) + ')'; g.fillRect(0, 0, W, H);   // the trails are the motion blur
+        var cx = W / 2, cy = H / 2, ca = cs * Math.cos(cr), cb = cs * Math.sin(cr);
+        g.setTransform(dpr * ca, dpr * cb, -dpr * cb, dpr * ca, dpr * (cx - ca * cx + cb * cy), dpr * (cy - cb * cx - ca * cy));
+        NAMES.forEach(function (n) { if (pres[n] > .01 && DECOR[n]) DECOR[n](ctxFor(n), pres[n], now); });
+        var c = ctxFor(name);
+        for (var i = 0; i < PS.length; i++) { var p = PS[i], s = stateOf(p, T, name, c); p.cur = s; draw(s, p === hover); }
+        // the clock and the chapter in progress
+        var secs = Math.floor((now - startT) / 1000);
+        $('hud-tc').textContent = [Math.floor(secs / 3600), Math.floor(secs / 60) % 60, secs % 60].map(function (v) { return ('0' + v).slice(-2); }).join(':');
+        if (playing && !sheetOpen()) {
+            progress = Math.min(1, progress + dt * 1000 / (current === 0 ? 8000 : 11000));
+            if (chapters.children[current]) chapters.children[current].firstChild.style.setProperty('--p', progress);
+            if (progress >= 1) { if (current < scenes.length - 1) go(current + 1); else setPlaying(false); }
+        }
+        requestAnimationFrame(frame);
+    };
+
+    // ───────────────────────── cuts
     scenes.forEach(function (s, i) {
         var c = el('button', 'chap'); c.type = 'button'; c.appendChild(el('i')); c.appendChild(el('span', '', (i + 1) + ' · ' + s.dataset.name));
         c.addEventListener('click', function () { go(i); }); chapters.appendChild(c);
     });
-    var mark = function () {
-        Array.prototype.forEach.call(chapters.children, function (c, i) { c.classList.toggle('on', i === current); c.classList.toggle('done', i < current); c.firstChild.style.setProperty('--p', i === current ? progress : 0); });
-        $('hud-sc').textContent = ('0' + (current + 1)).slice(-2); $('hud-name').textContent = '';
-    };
-    var activate = function (i) {
-        current = i; progress = 0;
-        scenes.forEach(function (s, j) { s.classList.toggle('on', j === i); });
-        var s = scenes[i], name = s.dataset.scene;
-        if (!s.dataset.done) { s.dataset.done = '1'; if (!(empty && name !== 'open' && name !== 'ai')) BUILD[name](); else s.querySelector('.in').appendChild(el('p', 'lead', 'אין חסמים פתוחים להציג כאן.')); }
-        else if (BUILD[name].wake) BUILD[name].wake();
-        mark();
-    };
-    var go = function (i) { i = Math.max(0, Math.min(scenes.length - 1, i)); scenes[i].scrollIntoView({ behavior: still ? 'auto' : 'smooth' }); };
-    if (still || !('IntersectionObserver' in window)) { scenes.forEach(function (s, i) { activate(i); }); scenes.forEach(function (s) { s.classList.add('on'); }); current = 0; mark(); }
-    else {
-        var io = new IntersectionObserver(function (entries) { entries.forEach(function (en) { if (en.isIntersecting && en.intersectionRatio >= .55) activate(scenes.indexOf(en.target)); }); }, { threshold: [.55] });
-        scenes.forEach(function (s) { io.observe(s); });
-        if (location.hash === '#ai') setTimeout(function () { go(scenes.length - 1); }, 60); else activate(0);
-    }
-    function stopPlay() { playing = false; $('play').classList.remove('on'); $('play').textContent = '▶'; }
-    var tick = function (now) {
-        var dt = now - (lastTick || now); lastTick = now;
-        var s = Math.floor((now - started) / 1000); $('hud-tc').textContent = [Math.floor(s / 3600), Math.floor(s / 60) % 60, s % 60].map(function (v) { return ('0' + v).slice(-2); }).join(':');
-        if (playing) {
-            progress = Math.min(1, progress + dt / SCENE_MS);
-            if (chapters.children[current]) chapters.children[current].firstChild.style.setProperty('--p', progress);
-            if (progress >= 1) { if (current < scenes.length - 1) { progress = 0; go(current + 1); } else stopPlay(); }
+    var retrigger = function (node) { node.classList.remove('go'); void node.offsetWidth; node.classList.add('go'); };
+    function go(i) {
+        i = clamp(i, 0, scenes.length - 1);
+        if (i === current) return;
+        prevScene = current; current = i; progress = 0; hover = null; hideTip();
+        var now = performance.now(); camT0 = now; camDir = i > prevScene ? 1 : -1; enterT[NAMES[i]] = now;
+        if (prevScene >= 0) {
+            var out = scenes[prevScene]; out.classList.remove('on'); out.classList.add('out');
+            clearTimeout(outTimer); outTimer = setTimeout(function () { scenes.forEach(function (s, j) { if (j !== current) s.classList.remove('out'); }); }, 650);
         }
-        requestAnimationFrame(tick);
-    };
-    requestAnimationFrame(tick);
-    $('play').addEventListener('click', function () { playing = !playing; $('play').classList.toggle('on', playing); $('play').textContent = playing ? '❚❚' : '▶'; if (playing && current === scenes.length - 1) go(0); });
+        var inn = scenes[i];
+        if (prevScene >= 0 && !still) setTimeout(function () { if (current === i) inn.classList.add('on'); }, 260); else inn.classList.add('on');
+        if (!still) { retrigger($('sweep')); retrigger($('flash')); }
+        // every particle flies to its place in the new scene, in a wave from right to left
+        frameCtx = {}; var name = NAMES[i], c = ctxFor(name);
+        var targets = PS.map(function (p) { return F[name](p, now, c); });
+        var order = PS.map(function (_, j) { return j; }).sort(function (a, b) { return targets[b].x - targets[a].x; }), rank = [];
+        order.forEach(function (j, n) { rank[j] = n; });
+        PS.forEach(function (p, j) {
+            var s = p.cur || dust(p, now);
+            p.from = { x: s.x, y: s.y, r: s.r, a: s.a, k: (s.m === undefined || s.m > .5) ? s.k : s.kf, len: s.len || 0 };
+            p.t0 = now + (still ? 0 : 60 + rank[j] / Math.max(1, PS.length) * 560 + p.seed * 140); p.dur = still ? 0 : 1300 + p.seed * 520; p.ctrl = null;
+        });
+        if (ENTER[name]) ENTER[name]();
+        Array.prototype.forEach.call(chapters.children, function (ch, j) { ch.classList.toggle('on', j === i); ch.classList.toggle('done', j < i); ch.firstChild.style.setProperty('--p', 0); });
+        $('hud-sc').textContent = ('0' + (i + 1)).slice(-2);
+    }
+    function setPlaying(on) { playing = on; $('play').classList.toggle('on', on); $('play').textContent = on ? '❚❚' : '▶'; }
+    $('play').addEventListener('click', function () { if (!playing && current === scenes.length - 1) go(0); setPlaying(!playing); });
+
+    // the viewer moves through the film: wheel, keys, swipe — each a cut, never a scroll
+    var wheelAcc = 0, wheelLock = 0;
+    window.addEventListener('wheel', function (e) {
+        if (sheetOpen()) return;
+        var sc = e.target.closest && e.target.closest('.ai-scroll');
+        if (sc && sc.scrollHeight > sc.clientHeight + 2) { var atTop = sc.scrollTop <= 0, atBot = sc.scrollTop + sc.clientHeight >= sc.scrollHeight - 2; if ((e.deltaY < 0 && !atTop) || (e.deltaY > 0 && !atBot)) return; }
+        var now = performance.now(); if (now < wheelLock) return;
+        wheelAcc += e.deltaY;
+        if (Math.abs(wheelAcc) > 45) { go(current + (wheelAcc > 0 ? 1 : -1)); wheelAcc = 0; wheelLock = now + 1150; }
+    }, { passive: true });
+    var touchY = null;
+    window.addEventListener('touchstart', function (e) { touchY = e.target.closest('.ai-scroll, .sheet') ? null : e.touches[0].clientY; }, { passive: true });
+    window.addEventListener('touchend', function (e) { if (touchY === null) return; var d = touchY - e.changedTouches[0].clientY; if (Math.abs(d) > 60) go(current + (d > 0 ? 1 : -1)); touchY = null; }, { passive: true });
     document.addEventListener('keydown', function (e) {
-        if (sheet.classList.contains('on')) { if (e.key === 'Escape') closeSheet(); return; }
-        if (/INPUT|TEXTAREA|SELECT/.test((e.target.tagName || ''))) return;
+        if (sheetOpen()) { if (e.key === 'Escape') closeSheet(); return; }
+        if (/INPUT|TEXTAREA|SELECT/.test(e.target.tagName || '')) return;
         if (e.key === ' ') { e.preventDefault(); $('play').click(); }
         else if (e.key === 'ArrowDown' || e.key === 'PageDown' || e.key === 'ArrowLeft') { e.preventDefault(); go(current + 1); }
         else if (e.key === 'ArrowUp' || e.key === 'PageUp' || e.key === 'ArrowRight') { e.preventDefault(); go(current - 1); }
     });
+
+    // the cast answers the pointer: hover names the blocker, a click opens it
+    var pick = function (x, y) {
+        if (moving) return null; var best = null;
+        PS.forEach(function (p) { var s = p.cur; if (!s || s.a < .45) return; var d = Math.hypot(s.x - x, s.y - y), hitR = s.r + 5; if (s.len > 1 && y > s.y - s.r - 4 && y < s.y + s.r + 4 && x <= s.x + 4 && x >= s.x - s.len) d = 0; if (d <= hitR && (!best || d < best.d)) best = { p: p, d: d }; });
+        return best && best.p;
+    };
+    var blocked = function (t) { return t.closest && t.closest('button, a, input, form, .sheet, .lb, .ai-scroll, .tip'); };
+    window.addEventListener('pointermove', function (e) {
+        if (sheetOpen() || blocked(e.target)) { if (hover) { hover = null; hideTip(); document.body.style.cursor = ''; } return; }
+        hover = pick(e.clientX, e.clientY); document.body.style.cursor = hover ? 'pointer' : '';
+        if (hover) { var x = hover.e; showTip((x.name || x.id) + '\n' + (hover.open ? weeksText(x) + ' · לטיפול: ' + x.owner + '\n' + D.levels[x.level].icon + ' ' + D.levels[x.level].label : 'נסגר אחרי ' + x.weeks + ' שבועות'), e.clientX, e.clientY); } else hideTip();
+    });
+    window.addEventListener('click', function (e) {
+        if (sheetOpen() || blocked(e.target)) return;
+        var p = pick(e.clientX, e.clientY); if (p) openSheet(p.open ? 'חסם' : 'חסם שנסגר', p.e.name || p.e.id, p.open ? weeksText(p.e) + ' · מקום ' + p.e.rank + ' בתור' : 'נסגר ב-' + ilDate(p.e.closed), [p.e]);
+    });
+
+    resize(); window.addEventListener('resize', resize);
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(layoutMap);
+    PS.forEach(function (p) { p.cur = dust(p, performance.now()); });
+    go(location.hash === '#ai' ? scenes.length - 1 : 0);
+    requestAnimationFrame(frame);
+    if (!still && location.hash !== '#ai') setTimeout(function () { setPlaying(true); }, 1600);
 })();
 </script>
 </body>
