@@ -631,6 +631,9 @@ async def startup():
             from app.services import lessons_process_metrics
             async with async_session_maker() as session:
                 await lessons_process_metrics.snapshot(session)
+            from app.services import forecast_reliability      # same idea, for the projects' forecasts
+            async with async_session_maker() as session:
+                await forecast_reliability.snapshot(session)
         except Exception as e:
             print(f"Warning: lessons process metrics failed: {e}")
     asyncio.create_task(_log_lessons_process())
