@@ -660,7 +660,7 @@ async def compute(session: AsyncSession) -> dict:
     return _plain(result)
 
 
-_CACHE: dict[str, Any] = {"key": None, "at": 0.0, "p": None}
+_CACHE: dict[str, Any] = {"key": None, "at": 0.0, "p": None, "frames": None}
 # An upper bound only — any change in the data busts the cache at once, and the
 # engine reads nothing but the data (no "today"). At 600s the bound itself was
 # the cost: every ten minutes the next visitor paid the whole computation again
@@ -698,8 +698,21 @@ async def compute_cached(session: AsyncSession) -> dict:
         # pandas over every snapshot is seconds of pure CPU: in a worker thread, so
         # the event loop (the Telegram webhook, /health, every other page) keeps going.
         p = await asyncio.to_thread(lambda: _plain(compute_patterns(frames)))
-        _CACHE.update(key=key, at=time.monotonic(), p=p)
+        _CACHE.update(key=key, at=time.monotonic(), p=p, frames=frames)
         return p
+
+
+async def frames_and_patterns(session: AsyncSession) -> tuple[Frames, dict]:
+    """(frames, engine output) from the same cache as `compute_cached` — for the
+    pages that used to load every snapshot and re-run the whole engine on each
+    request (the project page took 1.6–2.2s every time, on the event loop; a
+    click looked dead and was pressed again). Both are read-only to callers."""
+    p = await compute_cached(session)
+    frames = _CACHE["frames"]
+    if frames is None:                          # the cache was filled before this field existed
+        frames = await load_frames(session)
+        _CACHE["frames"] = frames
+    return frames, p
 
 
 async def data_health(session: AsyncSession, frames: Frames) -> dict:

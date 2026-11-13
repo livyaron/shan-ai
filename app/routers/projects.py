@@ -227,7 +227,7 @@ async def project_delays_page(
     scope = await insight_access.scope_for(session, current_user)
     if not scope.allowed:
         raise HTTPException(status_code=403, detail="אין לך עדיין שיוך לתצוגת הדפוסים — פנה למנהל המערכת")
-    frames = await pattern_service.load_frames(session)
+    frames, _ = await pattern_service.frames_and_patterns(session)
     allowed = None if insight_access.sees_all(scope) else forecast_reliability.visible_ids(
         frames, lambda sectors, manager: insight_access.sees_project(scope, sectors, manager))
     data = pattern_service._plain(forecast_reliability.analyse(frames, allowed=allowed, with_projects=True))
@@ -332,8 +332,7 @@ async def _visible_project(session: AsyncSession, current_user: User, identifier
     scope = await insight_access.scope_for(session, current_user)
     if not scope.allowed:
         raise HTTPException(status_code=403, detail="אין לך עדיין שיוך לתצוגת הדפוסים — פנה למנהל המערכת")
-    frames = await pattern_service.load_frames(session)
-    p = pattern_service._plain(pattern_service.compute_patterns(frames))
+    frames, p = await pattern_service.frames_and_patterns(session)
     view = insight_access.view_for(scope, p)
     full = scope.admin or scope.sector == stage_sectors.PM_DEPT
     if not full and identifier not in {x["identifier"] for x in view["projects"]}:

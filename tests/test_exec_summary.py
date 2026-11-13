@@ -175,6 +175,67 @@ def test_a_column_name_that_appears_twice_is_refused():
     assert es.resolve('=COUNTA(T[סיכון])', SHEET, rows, 0) is None
 
 
-def test_unresolved_counts_only_cards_that_have_a_formula():
+def test_unresolved_counts_every_card_that_opens_no_list():
     payload = {"kpis": [{"formula": None, "ids": None}, {"formula": "=COUNTIF(x)", "ids": None}, {"formula": "=COUNTA(y)", "ids": ["A"]}]}
-    assert es.unresolved(payload) == 1 and es.unresolved(None) == 0
+    assert es.unresolved(payload) == 2 and es.unresolved(None) == 0
+
+
+# ── a card the file gives as a typed number gets its definition in code ───
+
+import datetime as _dt   # noqa: E402
+
+_D = _dt.datetime
+RULE_RECORD = [
+    ["junk"],
+    ["זיהוי", "שם פרויקט", "יעד תכנית פיתוח ", "יעד חשמול מסתמן", 'יעד חשמול מאושר ע"י מנהל האגף', "פירוט שבועי 04/11/2026",
+     "פירוט שבועי 11/11/2026", "פירוט סיכונים וחסמים עיקריים ", "לטיפול", "לטיפול נוסף (במידה ונדרש)", "חוסר בבודקים ",
+     "פרויקטים קריטים ", "יעד מסתמן לחישוב"],
+    #        name      dev               fc                approved          w04   w11     risk     handle   handle2  testers critical calc
+    ["A-1", "תחנה א", _D(2026, 12, 31), _D(2027, 6, 30),  _D(2027, 3, 31),  "x",  "עדכון", "קבלן",  "מנה״פ", None,    "כן",   "קריטי", _D(2027, 6, 30)],
+    ["A-2", "תחנה ב", _D(2026, 12, 31), _D(2026, 12, 31), _D(2026, 12, 31), "x",  None,    "היתר",  None,    "סמנכ״ל", "לא",  "קריטי", _D(2026, 12, 31)],
+    ["A-3", "תחנה ג", _D(2026, 12, 31), _D(2027, 1, 10),  None,             None, "עדכון", "רכש",   None,    None,    None,   None,    _D(2027, 1, 10)],
+    ["A-4", "תחנה ד", _D(2026, 12, 31), "לא ידוע",        None,             None, "עדכון", None,    None,    None,    "כן",   None,    _D(2027, 9, 1)],
+    [None, "סה״כ", None, None, None, None, None, "x", None, None, "כן", "x", None],
+]
+
+
+@pytest.mark.parametrize("label, value, ids", [
+    ("סה״כ פרויקטים", 4, ["A-1", "A-2", "A-3", "A-4"]),
+    ("עם סיכון/חסם", 3, ["A-1", "A-2", "A-3"]),
+    ("מסומנים קריטיים", 2, ["A-1", "A-2"]),
+    ("קריטי + סיכון", 2, ["A-1", "A-2"]),
+    ("סיכון ללא טיפול מוגדר", 2, ["A-2", "A-3"]),                       # the earlier files' card: one handling column
+    ("סיכון ללא גורם בשני שדות הטיפול", 1, ["A-3"]),                    # the 10.11.26 card: both columns empty
+    ("קריטי ללא עדכון 11.11", 1, ["A-2"]),                              # the week named in the label
+    ("קריטי ללא עדכון 04.11", 0, []),
+    ("מחסור בבודקים", 2, ["A-1", "A-4"]),                               # "לא" is not a shortage
+])
+def test_a_typed_number_card_is_listed_by_its_definition(label, value, ids):
+    found, how = es.rule_ids(label, value, RULE_RECORD, 0)
+    assert found == ids and how
+
+
+def test_the_delay_cards_take_the_candidate_that_matches_the_files_number():
+    # the forecast column: A-1 (+6 months) and A-3 (+10 days) → 2; more than a month → 1;
+    # the "for calculation" column also dates A-4 → 3
+    assert es.rule_ids("דחייה מול תכנית פיתוח", 2, RULE_RECORD, 0)[0] == ["A-1", "A-3"]
+    assert es.rule_ids("דחייה מול תכנית פיתוח", 1, RULE_RECORD, 0)[0] == ["A-1"]
+    ids, how = es.rule_ids("דחייה מול תכנית פיתוח", 3, RULE_RECORD, 0)
+    assert ids == ["A-1", "A-3", "A-4"] and "לחישוב" in how
+    assert es.rule_ids("דחייה מול תכנית פיתוח", 99, RULE_RECORD, 0)[0] == ["A-1", "A-3"]     # no match → the plain definition
+    assert es.rule_ids("דחייה מול יעד מאושר", 1, RULE_RECORD, 0)[0] == ["A-1"]
+
+
+def test_an_unknown_label_or_a_missing_column_is_left_unlisted():
+    assert es.rule_ids("כרטיס שלא הכרנו", 5, RULE_RECORD, 0) is None
+    no_risk = [[c for i, c in enumerate(r) if i != 7] if len(r) > 7 else r for r in RULE_RECORD]
+    assert es.rule_ids("עם סיכון/חסם", 3, no_risk, 0) is None
+
+
+def test_the_rule_is_used_only_when_no_formula_could_be_re_run_and_is_shown_on_the_list():
+    from app.services import project_kpis
+    payload = {"sheet": "תקציר הנהלה 10.11.26", "kpis": [{"label": "עם סיכון/חסם", "value": 3, "ids": ["A-1"], "rule": "העמודה מלאה"}]}
+    label, help_, rows = project_kpis.rows_for("f0", [{"identifier": "A-1"}, {"identifier": "A-9"}], "2026-11-11", payload)
+    assert label == "עם סיכון/חסם" and "ההגדרה: העמודה מלאה" in help_ and [r["identifier"] for r in rows] == ["A-1"]
+    src = (Path(es.__file__)).read_text(encoding="utf-8")
+    assert 'if k["ids"] is None:' in src and src.index('k["ids"] = resolve(') < src.index("found = rule_ids(")
