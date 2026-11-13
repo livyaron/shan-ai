@@ -72,8 +72,9 @@ def rows_for(key: str, rows: list[dict], as_of: str | None, exec_payload: dict |
         i = int(key[len(FILE_PREFIX):])
         if i < len(kpis) and kpis[i].get("ids") is not None:
             ids = set(kpis[i]["ids"])
+            how = f" · ההגדרה: {kpis[i]['rule']}" if kpis[i].get("rule") else ""
             return (kpis[i]["label"], f"מתוך ״{(exec_payload or {}).get('sheet', 'תקציר הנהלה')}״ — "
-                    "נספר מחדש על הפרויקטים הפעילים בלבד",
+                    f"נספר מחדש על הפרויקטים הפעילים בלבד{how}",
                     [x for x in rows if x["identifier"] in ids])
     return None
 

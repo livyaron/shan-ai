@@ -285,6 +285,120 @@ def _table_column(rows: list[list], column: str) -> tuple[int, int, int] | None:
     return None
 
 
+# ── A card the file gives as a typed number: its definition, in code ───────
+# From the 10.11.26 file most summary cards are plain numbers, no formula, so
+# there is nothing to re-run. Their definitions are the file's own, read from
+# the formulas of the earlier summaries (03.11 … 07.10), restated here over the
+# record sheet's column NAMES (letters shift whenever a column is added). The
+# two "דחייה מול…" cards never had a formula; each has a short list of candidate
+# definitions and the one whose count equals the file's number is taken.
+COL_NAME = "שם פרויקט"
+COL_RISK = "פירוט סיכונים וחסמים עיקריים"
+COL_HANDLE = "לטיפול"
+COL_HANDLE_2 = "לטיפול נוסף (במידה ונדרש)"
+COL_CRITICAL = "פרויקטים קריטים"
+COL_TESTERS = "חוסר בבודקים"
+COL_SUPERVISORS = "חוסר במשגיחים"
+COL_STORAGE = "פרויקטים התלויים בחיבור למתקני אגירה"
+COL_COMMS = "האם נדרש תכנון תקשורת?"
+COL_DEV = "יעד תכנית פיתוח"
+COL_FC = "יעד חשמול מסתמן"
+COL_FC_CALC = "יעד מסתמן לחישוב"
+COL_APPROVED = 'יעד חשמול מאושר ע"י מנהל האגף'
+WEEKLY_PREFIX = "פירוט שבועי"
+_LABEL_DATE = re.compile(r"(\d{1,2})[./](\d{1,2})\s*$")
+
+
+def _norm_label(t: object) -> str:
+    return re.sub(r"\s+", " ", str(t or "").replace("״", '"').replace("”", '"')).strip()
+
+
+def _yes(v) -> bool:
+    return _filled(v) and str(v).strip() != "לא"
+
+
+def _as_date(v) -> datetime.date | None:
+    if isinstance(v, datetime.datetime):
+        return v.date()
+    return v if isinstance(v, datetime.date) else None
+
+
+def _later(a, b, days: int = 0) -> bool:
+    x, y = _as_date(a), _as_date(b)
+    return x is not None and y is not None and (x - y).days > days
+
+
+def rule_ids(label: str, value, rows: list[list], ident_col: int) -> tuple[list[str], str] | None:
+    """(identifiers, the definition in words) for a card that has no formula to
+    re-run; None = a label this module has no definition for."""
+    head_i = next((h for h, r in enumerate(rows[:6]) if any(isinstance(v, str) and v.strip() == "זיהוי" for v in r)), None)
+    if head_i is None:
+        return None
+    header = [_norm_label(v) if isinstance(v, str) else "" for v in rows[head_i]]
+
+    def col(name: str) -> int | None:
+        hits = [i for i, h in enumerate(header) if h == _norm_label(name)]
+        return hits[0] if len(hits) == 1 else None
+
+    data = [r for r in rows[head_i + 1:] if ident_col < len(r) and _filled(r[ident_col])]
+
+    def pick(test) -> list[str]:
+        return [str(r[ident_col]).strip() for r in data if test(lambda i: r[i] if i is not None and i < len(r) else None)]
+
+    name = _norm_label(label)
+    risk, handle, handle2, critical = col(COL_RISK), col(COL_HANDLE), col(COL_HANDLE_2), col(COL_CRITICAL)
+    need = lambda *cols: all(c is not None for c in cols)   # noqa: E731
+
+    if name.startswith('סה"כ פרויקטים') and need(col(COL_NAME)):
+        return pick(lambda c: _filled(c(col(COL_NAME)))), "כל שורה בגיליון הרשומות שיש לה שם פרויקט"
+    if name == "עם סיכון/חסם" and need(risk):
+        return pick(lambda c: _filled(c(risk))), f"העמודה ״{COL_RISK}״ מלאה"
+    if name == "מסומנים קריטיים" and need(critical):
+        return pick(lambda c: _filled(c(critical))), f"העמודה ״{COL_CRITICAL}״ מלאה"
+    if name == "קריטי + סיכון" and need(critical, risk):
+        return pick(lambda c: _filled(c(critical)) and _filled(c(risk))), "מסומן קריטי וגם יש לו סיכון/חסם"
+    if name.startswith("סיכון ללא") and need(risk, handle):
+        if "שני" in name and handle2 is not None:
+            return (pick(lambda c: _filled(c(risk)) and not _filled(c(handle)) and not _filled(c(handle2))),
+                    "יש סיכון/חסם, ושתי עמודות הטיפול ריקות")
+        return pick(lambda c: _filled(c(risk)) and not _filled(c(handle))), "יש סיכון/חסם, והעמודה ״לטיפול״ ריקה"
+    if name.startswith("קריטי ללא עדכון") and need(critical):
+        weekly = [i for i, h in enumerate(header) if h.startswith(WEEKLY_PREFIX)]
+        m = _LABEL_DATE.search(name)
+        dated = [i for i in weekly if m and re.search(rf"\b0?{int(m.group(1))}/0?{int(m.group(2))}/", header[i])]
+        week = (dated or weekly[-1:] or [None])[-1]
+        if week is not None:
+            return (pick(lambda c: _filled(c(critical)) and not _filled(c(week))),
+                    f"מסומן קריטי, והעמודה ״{header[week]}״ ריקה")
+    if name == "מחסור בבודקים" and need(col(COL_TESTERS)):
+        return pick(lambda c: _yes(c(col(COL_TESTERS)))), f"העמודה ״{COL_TESTERS}״ מסומנת"
+    if name == "מחסור במשגיחים" and need(col(COL_SUPERVISORS)):
+        return pick(lambda c: _yes(c(col(COL_SUPERVISORS)))), f"העמודה ״{COL_SUPERVISORS}״ מסומנת"
+    if name == "תלויים במתקני אגירה" and need(col(COL_STORAGE)):
+        return pick(lambda c: _filled(c(col(COL_STORAGE)))), f"העמודה ״{COL_STORAGE}״ מלאה"
+    if name == "נדרש תכנון תקשורת" and need(col(COL_COMMS)):
+        return pick(lambda c: _yes(c(col(COL_COMMS)))), f"העמודה ״{COL_COMMS}״ מסומנת"
+    target = {"דחייה מול תכנית פיתוח": (COL_DEV, "יעד תכנית הפיתוח"), "דחייה מול יעד מאושר": (COL_APPROVED, "היעד המאושר")}.get(name)
+    if target and need(col(target[0])):
+        base, fc, calc = col(target[0]), col(COL_FC), col(COL_FC_CALC)
+        options = []                    # the file's own number picks among these; the first is the default
+        for source, source_name in ((fc, "יעד החשמול המסתמן"), (calc, "היעד המסתמן לחישוב")):
+            if source is None:
+                continue
+            for days, words in ((0, ""), (ps_month_days(), " ביותר מחודש")):
+                options.append((pick(lambda c, s=source, d=days: _later(c(s), c(base), d)),
+                                f"{source_name} מאוחר מ{target[1]}{words}"))
+        if options:
+            return next((o for o in options if isinstance(value, (int, float)) and len(o[0]) == value), options[0])
+    return None
+
+
+def ps_month_days() -> int:
+    """One month in days — pattern_service's constant, not a second copy."""
+    from app.services import pattern_service
+    return int(pattern_service.MONTH_DAYS)
+
+
 def _ident_col(rows: list[list]) -> int | None:
     for row in rows[:6]:
         for i, v in enumerate(row):
@@ -325,6 +439,10 @@ def read_file(file_path: str) -> dict | None:
     for k in payload["kpis"]:
         if record and ident_col is not None:
             k["ids"] = resolve(k["formula"], record, record_rows, ident_col)
+            if k["ids"] is None:        # no formula (or one we do not re-run): the definition in code
+                found = rule_ids(k["label"], k.get("value"), record_rows, ident_col)
+                if found:
+                    k["ids"], k["rule"] = found
         if k["ids"] is not None and len(k["ids"]) != k["value"]:
             logger.warning(f"exec_summary: '{k['label']}' — file says {k['value']}, re-count found "
                            f"{len(k['ids'])} rows with an identifier")
@@ -362,8 +480,8 @@ async def save_from_file(file_path: str, source_file: str | None) -> None:
 
 
 def unresolved(payload: dict | None) -> int:
-    """How many of the summary's cards have a formula that was not re-run."""
-    return sum(1 for k in (payload or {}).get("kpis") or [] if k.get("formula") and k.get("ids") is None)
+    """How many of the summary's cards open no project list."""
+    return sum(1 for k in (payload or {}).get("kpis") or [] if k.get("ids") is None)
 
 
 async def reread_if_unresolved(session: AsyncSession) -> bool:
