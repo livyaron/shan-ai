@@ -14,6 +14,8 @@
       --ink4:  #3a4540;
       --panel: #131a16;
       --acc:   #00a86b;
+      --acc-hi: #3ee39a;
+      --trip:  #ef4444;
     }
 
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -22,16 +24,11 @@
 
     body { display: flex; flex-direction: column; position: relative; }
 
-    /* SVG electrical diagram background */
+    /* Live single-line diagram behind the page (canvas, drawn by the script at the end) */
     .sl-bg {
       position: fixed; inset: 0; width: 100%; height: 100%;
       pointer-events: none; z-index: 0;
     }
-    .sl-bg .bus  { stroke: var(--ink2); stroke-width: 4; fill: none; opacity: 0.55; }
-    .sl-bg .feed { stroke: var(--ink3); stroke-width: 1.5; fill: none; opacity: 0.45; }
-    .sl-bg .hot  { stroke: var(--acc); stroke-width: 2; fill: none; stroke-dasharray: 6 4; opacity: 0.6; animation: dashFlow 1.5s linear infinite; }
-    .sl-bg text  { font-family: 'JetBrains Mono', monospace; font-size: 10px; fill: var(--ink3); opacity: 0.5; }
-    .sl-bg .equip { fill: #0b100d; stroke: var(--ink3); opacity: 0.45; }
 
     /* Radial glow overlay */
     .bg-glow {
@@ -47,38 +44,77 @@
       min-height: 100vh;
     }
 
-    /* ── LOGO ── */
+    /* ── LOGO ── the emblem is cut out of /static/logo.png (same crop as the intro);
+       the name is real text below it, so nothing is clipped by the circle. */
     .logo-wrap {
+      --D: 204px; --rx: 0deg; --ry: 0deg;
       position: relative;
-      width: 240px; height: 240px;
-      margin-bottom: 28px;
+      width: 210px; height: 210px;
+      margin-bottom: 30px;
       flex-shrink: 0;
+      perspective: 900px;
+    }
+    .logo-tilt {
+      position: absolute; inset: 0;
+      transform-style: preserve-3d;
+      transform: rotateX(var(--rx)) rotateY(var(--ry));
+      transition: transform 0.5s cubic-bezier(.22,1,.36,1);
     }
 
     .logo-core {
       position: absolute; inset: 0;
       border-radius: 50%; overflow: hidden;
-      display: flex; align-items: center; justify-content: center;
       background: #000;
       border: 3px solid #0a0d0b;
       box-shadow: 0 0 0 6px var(--bg), 0 0 0 7px var(--acc), 0 0 50px color-mix(in oklab, var(--acc) 45%, transparent);
       animation: bob 5s ease-in-out infinite, glowSoft 2.8s ease-in-out infinite;
     }
-
-    .logo-core img { width: 100%; height: 100%; object-fit: cover; display: block; }
-
-    .ring {
-      position: absolute; inset: -18px; border-radius: 50%;
-      border: 1px dashed var(--acc); opacity: 0.6;
-      animation: spin 36s linear infinite;
-      pointer-events: none;
+    .logo-emblem {
+      position: absolute; inset: 0; border-radius: 50%;
+      background-image: url("/static/logo.png"); background-repeat: no-repeat;
+      background-size: calc(var(--D) * 2.7608) auto;
+      background-position: calc(var(--D) * -0.88627) calc(var(--D) * -0.03333);
+    }
+    /* a slow sweep of light across the emblem */
+    .logo-core::after {
+      content: ''; position: absolute; inset: 0; border-radius: 50%;
+      background: linear-gradient(115deg, transparent 38%, rgba(255,255,255,0.16) 50%, transparent 62%);
+      background-size: 280% 100%;
+      animation: sheen 6.5s ease-in-out infinite;
     }
 
+    .ring, .ring2 { position: absolute; border-radius: 50%; pointer-events: none; }
+    .ring {
+      inset: -18px;
+      border: 1px dashed var(--acc); opacity: 0.6;
+      animation: spin 36s linear infinite;
+      transform: translateZ(26px);
+    }
     .ring2 {
-      position: absolute; inset: -34px; border-radius: 50%;
+      inset: -34px;
       border: 1px solid color-mix(in oklab, var(--acc) 26%, transparent);
       animation: spinR 70s linear infinite;
-      pointer-events: none;
+      transform: translateZ(-30px);
+    }
+    /* a live node riding each ring */
+    .ring::before, .ring2::before {
+      content: ''; position: absolute; top: -4px; left: 50%;
+      width: 7px; height: 7px; margin-left: -3.5px; border-radius: 50%;
+      background: var(--acc-hi);
+      box-shadow: 0 0 10px var(--acc-hi), 0 0 22px var(--acc);
+    }
+    .ring2::before { top: auto; bottom: -3px; width: 5px; height: 5px; margin-left: -2.5px; opacity: 0.8; }
+
+    .wordmark {
+      direction: ltr; font-weight: 800; font-size: clamp(34px, 5vw, 46px); line-height: 1;
+      letter-spacing: -0.01em; color: var(--ink); margin-bottom: 6px;
+      animation: fadeIn 0.8s ease-out 0.1s both;
+    }
+    .wordmark .ai { color: var(--acc-hi); text-shadow: 0 0 22px color-mix(in oklab, var(--acc) 70%, transparent); }
+    .wordmark-sub {
+      direction: ltr; font-family: 'JetBrains Mono', monospace; font-size: 10px;
+      letter-spacing: 3px; color: var(--ink3); margin-bottom: 18px; text-transform: uppercase;
+      animation: fadeIn 0.8s ease-out 0.2s both;
     }
 
     /* ── HERO ── */
@@ -107,6 +143,7 @@
       padding: 8px 14px; font-size: 12px; color: #fca5a5;
       margin-bottom: 10px; direction: rtl;
       font-family: 'JetBrains Mono', monospace; border-radius: 2px;
+      animation: tripShake 0.45s cubic-bezier(.36,.07,.19,.97) 0.15s both;
     }
 
     /* ── FORM ── */
@@ -117,8 +154,19 @@
       padding: 14px 18px;
       display: flex; gap: 12px; align-items: flex-end;
       direction: rtl;
+      position: relative;
       animation: slideUp 0.6s ease-out 0.5s both;
     }
+    .form-panel::before {
+      content: ''; position: absolute; inset: -1px; padding: 1px; pointer-events: none;
+      background: conic-gradient(from var(--ang), transparent 0 62%, var(--acc) 80%, var(--acc-hi) 86%, transparent 94%);
+      -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+      -webkit-mask-composite: xor; mask-composite: exclude;
+      animation: edgeRun 5s linear infinite;
+      opacity: 0.9;
+    }
+    .form-panel:focus-within::before { animation-duration: 2.2s; }
+    .form-panel.tripped::before { background: conic-gradient(from var(--ang), transparent 0 62%, var(--trip) 82%, transparent 94%); }
 
     .form-panel .col { flex: 1; }
 
@@ -133,10 +181,10 @@
       color: var(--ink); font-family: 'Heebo', sans-serif; font-size: 13px;
       border-radius: 2px; box-shadow: inset 0 2px 4px rgba(0,0,0,0.6);
       -webkit-appearance: none; appearance: none; direction: rtl;
-      transition: border-color 0.15s;
+      transition: border-color 0.15s, box-shadow 0.2s;
     }
 
-    .field-ctl:focus { outline: none; border-color: var(--acc); box-shadow: inset 0 2px 4px rgba(0,0,0,0.6), 0 0 0 1px var(--acc); }
+    .field-ctl:focus { outline: none; border-color: var(--acc); box-shadow: inset 0 2px 4px rgba(0,0,0,0.6), 0 0 0 1px var(--acc), 0 0 18px color-mix(in oklab, var(--acc) 35%, transparent); }
     .field-ctl option { background: var(--panel); }
 
     .btn-energize {
@@ -149,9 +197,21 @@
       box-shadow: 0 0 16px color-mix(in oklab, var(--acc) 40%, transparent);
       transition: transform 0.18s, box-shadow 0.18s;
       white-space: nowrap; align-self: flex-end; flex-shrink: 0;
+      position: relative; overflow: hidden;
     }
 
     .btn-energize:hover { transform: translateY(-1px); box-shadow: 0 0 28px color-mix(in oklab, var(--acc) 60%, transparent); }
+    .btn-energize:active { transform: scale(0.97); }
+    .btn-energize:focus-visible { outline: 2px solid var(--acc-hi); outline-offset: 3px; }
+    /* light crossing the button on hover; a charge running through it while the server checks the password */
+    .btn-energize::after {
+      content: ''; position: absolute; inset: 0;
+      background: linear-gradient(105deg, transparent 35%, rgba(255,255,255,0.55) 50%, transparent 65%);
+      transform: translateX(-120%);
+    }
+    .btn-energize:hover::after { transition: transform 0.6s ease; transform: translateX(120%); }
+    .btn-energize.busy { pointer-events: none; box-shadow: 0 0 34px color-mix(in oklab, var(--acc) 75%, transparent); }
+    .btn-energize.busy::after { animation: charge 0.9s linear infinite; }
 
     .hint {
       font-size: 10px; font-family: 'JetBrains Mono', monospace;
@@ -229,23 +289,20 @@
     @keyframes flickerDot { 0%,60%,100% { opacity: 1; } 70%,90% { opacity: 0.3; } }
     @keyframes slideUp    { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
     @keyframes fadeIn     { from { opacity: 0; } to { opacity: 1; } }
-    @keyframes vibrate    {
-      0%,100% { transform: translate(0,0) rotate(0deg); }
-      15%     { transform: translate(-3px, 1px) rotate(-1deg); }
-      30%     { transform: translate(3px, -1px) rotate(1deg); }
-      45%     { transform: translate(-2px, 2px) rotate(-0.5deg); }
-      60%     { transform: translate(2px, -2px) rotate(0.5deg); }
-      75%     { transform: translate(-1px, 1px) rotate(-0.3deg); }
-      90%     { transform: translate(1px, -1px) rotate(0.3deg); }
-    }
+    @keyframes sheen      { 0%,55% { background-position: 130% 0; } 85%,100% { background-position: -40% 0; } }
+    @keyframes edgeRun    { to { --ang: 360deg; } }
+    @keyframes charge     { from { transform: translateX(-120%); } to { transform: translateX(120%); } }
+    @keyframes tripShake  { 10%,90% { transform: translateX(-1px); } 20%,80% { transform: translateX(3px); } 30%,50%,70% { transform: translateX(-5px); } 40%,60% { transform: translateX(5px); } }
+    @property --ang { syntax: '<angle>'; inherits: false; initial-value: 0deg; }
 
-    .logo-wrap:hover .logo-core {
-      animation: vibrate 0.18s linear infinite, glowSoft 2.8s ease-in-out infinite;
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation: none !important; transition: none !important; }
     }
 
     /* ── RESPONSIVE ── */
     @media (max-width: 640px) {
-      .logo-wrap { width: 180px; height: 180px; }
+      .logo-wrap { width: 170px; height: 170px; --D: 164px; }
+      .wordmark-sub { font-size: 8px; letter-spacing: 1.5px; text-align: center; }
       .ring  { inset: -14px; }
       .ring2 { inset: -26px; }
       .form-panel { flex-direction: column; align-items: stretch; }
@@ -254,38 +311,26 @@
     }
   </style>
 </head>
-<body>
+<body{% if error %} data-trip="1"{% endif %}>
 {% include "_intro_splash.html" %}
 
-<!-- Electrical single-line diagram background -->
-<svg class="sl-bg" viewBox="0 0 1040 680" preserveAspectRatio="xMidYMid slice" xmlns="http://www.w3.org/2000/svg">
-  <line class="bus" x1="0" y1="110" x2="1040" y2="110"/>
-  <text x="30" y="102">BUS-A · 161 kV</text>
-  <line class="feed" x1="120" y1="110" x2="120" y2="540"/>
-  <rect class="equip" x="112" y="330" width="16" height="16"/>
-  <circle cx="120" cy="190" r="8" fill="none" stroke="#5a6560" stroke-width="1.2" opacity="0.45"/>
-  <text x="120" y="560" text-anchor="middle">F-01</text>
-  <line class="feed" x1="920" y1="110" x2="920" y2="540"/>
-  <rect class="equip" x="912" y="330" width="16" height="16"/>
-  <circle cx="920" cy="190" r="8" fill="none" stroke="#5a6560" stroke-width="1.2" opacity="0.45"/>
-  <text x="920" y="560" text-anchor="middle">F-02</text>
-  <line class="bus" x1="0" y1="540" x2="1040" y2="540"/>
-  <text x="30" y="560">BUS-B · 22 kV</text>
-  <line class="hot" x1="520" y1="110" x2="520" y2="200"/>
-</svg>
+<!-- Live single-line diagram: decoration only — no data, no text a user needs -->
+<canvas class="sl-bg" id="sld" aria-hidden="true"></canvas>
 
 <div class="bg-glow"></div>
 
 <div class="main">
 
   <!-- Logo with spinning rings -->
-  <div class="logo-wrap">
-    <div class="ring2"></div>
-    <div class="ring"></div>
-    <div class="logo-core">
-      <img src="/static/logo.png" alt="Shan-AI">
+  <div class="logo-wrap" id="logo">
+    <div class="logo-tilt">
+      <div class="ring2"></div>
+      <div class="logo-core"><div class="logo-emblem" role="img" aria-label="Shan-AI"></div></div>
+      <div class="ring"></div>
     </div>
   </div>
+  <div class="wordmark">Shan-<span class="ai">AI</span></div>
+  <div class="wordmark-sub">Substation Projects · Decision Learning System</div>
 
   <!-- Hero text -->
   <div class="hero">
@@ -315,7 +360,7 @@
   <div class="form-wrap">
     <form method="POST" action="/login">
       {% if next_url %}<input type="hidden" name="next" value="{{ next_url }}">{% endif %}
-      <div class="form-panel">
+      <div class="form-panel{% if error %} tripped{% endif %}">
         <div class="col">
           <div class="field-lbl">OPERATOR · משתמש</div>
           <input type="search" id="user-search" class="field-ctl user-search" placeholder="‏הקלד שם לחיפוש…" autocomplete="off" aria-label="חיפוש משתמש">
@@ -427,10 +472,190 @@
 <div class="telem">
   <span><b class="ok">●</b> SCADA · ONLINE</span>
   <span>RAG · <b class="ok">READY</b></span>
-  <span>GROQ · llama-3.3-70b</span>
   <span>PGVECTOR · 384</span>
-  <span>v2.4.1 · UTC+3</span>
+  <span>v2.4.1 · <b id="telem-clock">--:--:--</b> IL</span>
 </div>
+
+<script>
+/* Motion for the login page — decoration only: no data, no request, and the
+   form works exactly the same without it.
+   1. The single-line diagram behind the page is live: the yard energises when
+      the page opens (bus A → breakers close → feeders → bus B) and current then
+      flows; a wrong password shows as a trip (red, breakers open) that recloses;
+      pressing ENERGIZE sends a surge while the server checks the password.
+   2. The emblem leans toward the pointer.
+   3. The clock in the bottom bar is Israel time. */
+(function () {
+  const still = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const cv = document.getElementById('sld');
+  const logo = document.getElementById('logo');
+  const ACC = [0, 168, 107], HI = [62, 227, 154], TRIP = [239, 68, 68], DIM = [90, 101, 96];
+  const rgba = (c, a) => 'rgba(' + c[0] + ',' + c[1] + ',' + c[2] + ',' + a + ')';
+  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+  const ease = t => 1 - Math.pow(1 - clamp(t, 0, 1), 3);
+
+  if (cv && cv.getContext) {
+    const g = cv.getContext('2d');
+    let W = 0, H = 0, dpr = 1, feeders = [], yA = 0, yB = 0, tapY = 0, labelX = 22;
+    let t0 = performance.now(), tripUntil = 0, surgeUntil = 0, last = t0, flow = 0, raf = 0;
+
+    function layout() {
+      dpr = Math.min(window.devicePixelRatio || 1, 2);
+      W = window.innerWidth; H = window.innerHeight;
+      cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
+      g.setTransform(dpr, 0, 0, dpr, 0, 0);
+      yB = H - 32 - Math.max(26, Math.min(44, H * 0.05));
+      const xs = W < 900 ? [] : W < 1100 ? [0.06, 0.94] : [0.055, 0.135, 0.865, 0.945];   // a phone has no margin for feeders
+      feeders = xs.map((f, i) => ({ x: Math.round(W * f), i }));
+      // bus A runs above the emblem's outer ring, and a short tap feeds the emblem from it
+      const r = logo ? logo.getBoundingClientRect() : null;
+      const ringTop = r ? r.top - 34 : 72;
+      yA = clamp(ringTop - 16, 28, 72);
+      tapY = Math.max(yA, ringTop - 2);
+      labelX = feeders.length ? Math.max.apply(null, feeders.filter(f => f.x < W / 2).map(f => f.x)) + 16 : 16;
+      if (still) draw(performance.now());
+    }
+
+    // A horizontal bus: bright at the edges, faint behind the content in the middle.
+    function bus(y, col, a, lit) {
+      const grad = g.createLinearGradient(0, 0, W, 0);
+      const mid = a * 0.22;
+      grad.addColorStop(0, rgba(col, a)); grad.addColorStop(0.22, rgba(col, a));
+      grad.addColorStop(0.38, rgba(col, mid)); grad.addColorStop(0.62, rgba(col, mid));
+      grad.addColorStop(0.78, rgba(col, a)); grad.addColorStop(1, rgba(col, a));
+      g.strokeStyle = grad; g.lineWidth = 3;
+      g.beginPath(); g.moveTo(W * (1 - lit), y); g.lineTo(W, y); g.stroke();     // RTL: lights from the right
+    }
+
+    function pulse(x, y, vertical, len, col, a) {
+      const grad = vertical ? g.createLinearGradient(x, y - len, x, y) : g.createLinearGradient(x + len, y, x, y);
+      grad.addColorStop(0, rgba(col, 0)); grad.addColorStop(1, rgba(col, a));
+      g.strokeStyle = grad; g.lineWidth = 2.5; g.lineCap = 'round';
+      g.beginPath();
+      if (vertical) { g.moveTo(x, y - len); g.lineTo(x, y); } else { g.moveTo(x + len, y); g.lineTo(x, y); }
+      g.stroke();
+      g.fillStyle = rgba(HI, a); g.shadowColor = rgba(col, 1); g.shadowBlur = 12;
+      g.beginPath(); g.arc(x, y, 2.4, 0, 6.283); g.fill(); g.shadowBlur = 0;
+    }
+
+    function draw(now) {
+      const dt = Math.min(0.05, (now - last) / 1000); last = now;
+      const tripped = now < tripUntil;
+      const surge = now < surgeUntil ? 1 : 0;
+      // seconds since energising began (after a trip: since it recloses)
+      const e = still ? 9 : (now - Math.max(t0, tripUntil)) / 1000;
+      const live = tripped ? TRIP : ACC;
+      flow += dt * (tripped ? 0 : 1 + surge * 3.2);
+
+      g.clearRect(0, 0, W, H);
+      g.font = '10px "JetBrains Mono", monospace'; g.textBaseline = 'alphabetic';
+
+      // resting yard
+      bus(yA, DIM, 0.5, 1); bus(yB, DIM, 0.5, 1);
+      g.fillStyle = rgba(DIM, 0.75); g.textAlign = 'left';
+      g.fillText('BUS-A · 161 kV', labelX, yA - 9); g.fillText('BUS-B · 22 kV', labelX, yB - 9);
+
+      const litA = tripped ? 1 : ease(e / 0.55);
+      const litB = tripped ? 0 : ease((e - 1.25) / 0.5);
+      bus(yA, live, tripped ? 0.75 : 0.85 + surge * 0.15, litA);
+      if (litB > 0) bus(yB, live, 0.8 + surge * 0.2, litB);
+
+      feeders.forEach(f => {
+        const yBr = yA + (yB - yA) * 0.3, yTx = yA + (yB - yA) * 0.62;
+        const reached = (W - f.x) / W <= litA;                              // has bus A's light got here yet?
+        const closed = !tripped && reached && e > 0.5 + f.i * 0.12;        // breakers close one after another
+        const down = closed ? ease((e - 0.62 - f.i * 0.12) / 0.6) : 0;     // the feeder energises top → bottom
+        // conductor
+        g.strokeStyle = rgba(DIM, 0.55); g.lineWidth = 1.5;
+        g.beginPath(); g.moveTo(f.x, yA); g.lineTo(f.x, yB); g.stroke();
+        if (reached) {
+          g.strokeStyle = rgba(live, 0.8); g.lineWidth = 1.8;
+          g.beginPath(); g.moveTo(f.x, yA); g.lineTo(f.x, closed ? yA + (yB - yA) * down : yBr - 9); g.stroke();
+        }
+        // circuit breaker: a filled square when closed, an open frame with a gap when open
+        g.fillStyle = '#0b100d'; g.fillRect(f.x - 9, yBr - 9, 18, 18);
+        g.lineWidth = 1.6; g.strokeStyle = closed ? rgba(HI, 0.95) : rgba(tripped ? TRIP : DIM, 0.9);
+        g.strokeRect(f.x - 9, yBr - 9, 18, 18);
+        if (closed) { g.fillStyle = rgba(ACC, 0.55 + surge * 0.3); g.fillRect(f.x - 5, yBr - 5, 10, 10); }
+        else { g.beginPath(); g.moveTo(f.x - 5, yBr + 5); g.lineTo(f.x + 5, yBr - 5); g.stroke(); }
+        // power transformer: two coupled windings
+        const txOn = down > 0.62;
+        g.fillStyle = '#0b100d'; g.strokeStyle = txOn ? rgba(live, 0.9) : rgba(DIM, 0.8); g.lineWidth = 1.5;
+        [-7, 7].forEach(dy => { g.beginPath(); g.arc(f.x, yTx + dy, 10, 0, 6.283); g.fill(); g.stroke(); });
+        g.fillStyle = rgba(DIM, 0.75); g.textAlign = 'center';
+        g.fillText('F-0' + (f.i + 1), f.x, yB + 18);
+        // current
+        if (down >= 1 && !still) {
+          const span = yB - yA;
+          for (let k = 0; k < 2; k++) {
+            const y = yA + ((flow * 150 + k * span / 2 + f.i * 71) % span);
+            pulse(f.x, y, true, 46, live, 0.9);
+          }
+        }
+      });
+
+      // the tap that feeds the emblem from bus A
+      const cx = W / 2;
+      if (tapY > yA + 6) {
+        g.setLineDash([6, 4]); g.lineDashOffset = -flow * 40;
+        g.strokeStyle = rgba(live, litA >= 0.5 ? 0.7 : 0.15); g.lineWidth = 2;
+        g.beginPath(); g.moveTo(cx, yA); g.lineTo(cx, tapY); g.stroke();
+        g.setLineDash([]);
+      }
+      // current along the buses
+      if (!tripped && !still && litA >= 1) {
+        for (let k = 0; k < 3; k++) pulse(W - ((flow * 190 + k * W / 3) % W), yA, false, 70, ACC, 0.85);
+        if (litB >= 1) for (let k = 0; k < 2; k++) pulse(W - ((flow * 160 + k * W / 2 + 120) % W), yB, false, 60, ACC, 0.75);
+      }
+      if (tripped) {
+        g.fillStyle = rgba(TRIP, 0.55 + 0.35 * Math.sin(now / 90)); g.textAlign = 'right';
+        g.fillText('PROTECTION TRIP · 86', W - 22, yA - 9);
+      }
+      if (!still) raf = requestAnimationFrame(draw);
+    }
+
+    layout();
+    window.addEventListener('resize', layout);
+    window.addEventListener('scroll', layout, { passive: true });
+    if (document.body.dataset.trip && !still) tripUntil = t0 + 1500;         // a wrong password trips the yard
+    if (!still) {
+      raf = requestAnimationFrame(draw);
+      document.addEventListener('visibilitychange', () => {
+        cancelAnimationFrame(raf);
+        if (!document.hidden) { last = performance.now(); raf = requestAnimationFrame(draw); }
+      });
+    }
+    window.shanYardSurge = () => { surgeUntil = performance.now() + 4000; };
+  }
+
+  // The emblem leans toward the pointer (fine pointers only — no gyroscope games on a phone).
+  if (logo && !still && window.matchMedia('(pointer: fine)').matches) {
+    window.addEventListener('pointermove', e => {
+      const r = logo.getBoundingClientRect();
+      const dx = (e.clientX - (r.left + r.width / 2)) / window.innerWidth;
+      const dy = (e.clientY - (r.top + r.height / 2)) / window.innerHeight;
+      logo.style.setProperty('--ry', clamp(dx * 34, -16, 16).toFixed(2) + 'deg');
+      logo.style.setProperty('--rx', clamp(-dy * 30, -14, 14).toFixed(2) + 'deg');
+    }, { passive: true });
+    document.addEventListener('pointerleave', () => { logo.style.setProperty('--ry', '0deg'); logo.style.setProperty('--rx', '0deg'); });
+  }
+
+  // ENERGIZE: the button charges and the yard surges while the server checks the password.
+  const btn = document.querySelector('.btn-energize');
+  const form = btn && btn.form;
+  if (form && btn) {
+    form.addEventListener('submit', () => { btn.classList.add('busy'); if (window.shanYardSurge) window.shanYardSurge(); });
+    window.addEventListener('pageshow', () => btn.classList.remove('busy'));   // back button restores the page
+  }
+
+  const clock = document.getElementById('telem-clock');
+  if (clock) {
+    const fmt = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Jerusalem', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+    const tick = () => { clock.textContent = fmt.format(new Date()); };
+    tick(); setInterval(tick, 1000);
+  }
+})();
+</script>
 
 </body>
 </html>

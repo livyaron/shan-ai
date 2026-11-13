@@ -1,0 +1,122 @@
+/* Shan-AI shared motion layer — loaded once, from _navbar.html, on every page
+   that has the navbar. Decoration only: it never hides content (every
+   animation ends at the page's own resting style) and never adds a transform
+   that outlives its animation to a card (a lasting transform would re-anchor a
+   fixed modal inside it). Colours stay the pages' own. */
+:root {
+    --shan-cyan: #00d4ff;
+    --shan-violet: #8b9cf4;
+    --shan-ease: cubic-bezier(.22, 1, .36, 1);
+    scrollbar-color: #1e3a5f #070b12;
+}
+
+/* ── 1. Page-to-page: the old page lifts out, the new one settles in, and the
+        navbar stays put (browsers without view transitions just navigate). ── */
+@view-transition { navigation: auto; }
+.shan-nav { view-transition-name: shan-nav; }
+::view-transition-old(root) { animation: shanPageOut .16s ease-in both; }
+::view-transition-new(root) { animation: shanPageIn .34s var(--shan-ease) both; }
+::view-transition-group(shan-nav) { z-index: 2; }
+@keyframes shanPageOut { to { opacity: 0; transform: translateY(-8px); } }
+@keyframes shanPageIn { from { opacity: 0; transform: translateY(12px); } }
+
+/* ── 2. Navbar ── */
+.shan-nav::after {
+    background: linear-gradient(90deg, transparent 0%, var(--shan-cyan) 20%, var(--shan-violet) 35%, transparent 50%, transparent 100%);
+    background-size: 200% 100%;
+    opacity: .55;
+    animation: shanNavFlow 7s linear infinite;
+}
+@keyframes shanNavFlow { from { background-position: 100% 0; } to { background-position: -100% 0; } }
+
+/* The marker under the links: rests on the current page, follows the pointer. */
+.shan-nav-links { position: relative; }
+.shan-nav-ink {
+    position: absolute; left: 0; top: 0; height: 2px; width: 0;
+    border-radius: 2px;
+    background: linear-gradient(90deg, var(--shan-cyan), var(--shan-violet));
+    box-shadow: 0 0 10px var(--shan-cyan), 0 0 22px rgba(0, 212, 255, .45);
+    opacity: 0; pointer-events: none;
+    transition: transform .34s var(--shan-ease), width .34s var(--shan-ease), opacity .2s;
+}
+.shan-nav-ink.on { opacity: 1; }
+.shan-nav-link { transition: color .18s, background-color .18s; }
+.shan-nav-link.active { text-shadow: 0 0 14px rgba(0, 212, 255, .45); }
+.shan-nav-brand { transition: text-shadow .25s, opacity .2s; }
+.shan-nav-brand:hover { text-shadow: 0 0 16px rgba(0, 212, 255, .7); }
+
+/* Loading line: runs along the navbar's edge from the click until the next page arrives. */
+.shan-nav-progress {
+    position: absolute; right: 0; bottom: -2px; height: 2px; width: 0;
+    background: linear-gradient(270deg, var(--shan-cyan), var(--shan-violet));
+    box-shadow: 0 0 12px var(--shan-cyan);
+    opacity: 0; pointer-events: none; z-index: 2;
+}
+.shan-nav-progress.go { opacity: 1; animation: shanNavLoad 6s cubic-bezier(.05, .7, .1, 1) forwards; }
+@keyframes shanNavLoad { from { width: 0; } 30% { width: 62%; } to { width: 94%; } }
+
+/* ── 3. Buttons: one feel everywhere — lift, press, a clear focus ring.
+        The list is every button family the pages use; none of them positions itself with a transform. ── */
+:is(.btn:not(.btn-close), .btn-cyan, .btn-outline-dim, .wr-btn, .fc-btn, .tb-btn, .ab) {
+    transition: transform .16s var(--shan-ease), box-shadow .2s, background-color .18s, border-color .18s, color .18s, filter .18s;
+}
+:is(.btn:not(.btn-close), .btn-cyan, .btn-outline-dim, .wr-btn, .fc-btn, .tb-btn, .ab):hover { transform: translateY(-1px); }
+:is(.btn:not(.btn-close), .btn-cyan, .btn-outline-dim, .wr-btn, .fc-btn, .tb-btn, .ab):active { transform: translateY(0) scale(.97); transition-duration: .06s; }
+:is(.btn:not(.btn-close), .btn-cyan, .btn-outline-dim, .wr-btn, .fc-btn, .tb-btn, .ab, .shan-nav-link):focus-visible {
+    outline: 2px solid var(--shan-cyan); outline-offset: 2px;
+    box-shadow: 0 0 0 5px rgba(0, 212, 255, .16);
+}
+.btn-primary:hover, .btn-cyan:hover { box-shadow: 0 6px 22px rgba(0, 212, 255, .28); }
+
+/* ── 4. Cards: a live edge under the pointer; a staggered rise when the page opens
+        (the dashboard's stations have their own choreography — left alone). ── */
+.card, .card-x, .stat-card, .section-card, .kb-card {
+    transition: border-color .25s, box-shadow .3s;
+}
+.card:hover, .card-x:hover, .stat-card:hover, .section-card:hover, .kb-card:hover {
+    border-color: rgba(0, 212, 255, .38);
+    box-shadow: 0 0 0 1px rgba(0, 212, 255, .10), 0 10px 30px rgba(0, 0, 0, .38), 0 0 26px rgba(0, 212, 255, .07);
+}
+body:not(:has(.zm)) :is(.card, .card-x, .stat-card, .section-card, .kb-card) {
+    animation: shanRise .5s var(--shan-ease) backwards;
+    animation-delay: calc(var(--shan-i, 0) * 45ms);
+}
+@keyframes shanRise { from { opacity: 0; transform: translateY(14px); } }
+
+/* ── 5. Fields, tables, dialogs ── */
+.form-control, .form-select { transition: border-color .18s, box-shadow .18s; }
+.form-control:focus, .form-select:focus {
+    border-color: var(--shan-cyan);
+    box-shadow: 0 0 0 3px rgba(0, 212, 255, .16);
+}
+/* Tables follow the dark page. Bootstrap 5.3 paints every cell with its own white
+   body colour unless told otherwise, so a table on a dark card came out white with
+   dark text. Only the variables are set here: a page's own cell colours still win. */
+.table {
+    --bs-table-bg: transparent;
+    --bs-table-color: inherit;
+    --bs-table-border-color: rgba(30, 58, 95, .65);
+    --bs-table-striped-bg: rgba(255, 255, 255, .025);
+    --bs-table-striped-color: inherit;
+    --bs-table-hover-bg: rgba(0, 212, 255, .05);
+    --bs-table-hover-color: inherit;
+    --bs-table-active-bg: rgba(0, 212, 255, .08);
+    --bs-table-active-color: inherit;
+}
+.table > tbody > tr > * { transition: background-color .14s; }
+.table > tbody > tr:hover > * { --bs-table-bg-state: rgba(0, 212, 255, .045); }
+a.btn-outline-dim, a.btn-cyan { text-decoration: none; }
+.modal.fade .modal-dialog { transform: translateY(14px) scale(.98); transition: transform .3s var(--shan-ease); }
+.modal.show .modal-dialog { transform: none; }
+.modal-backdrop.show { backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px); }
+
+@media (max-width: 900px) { .shan-nav-ink { display: none; } }
+
+@media (prefers-reduced-motion: reduce) {
+    @view-transition { navigation: none; }
+    .shan-nav::after, .shan-nav-progress.go,
+    body:not(:has(.zm)) :is(.card, .card-x, .stat-card, .section-card, .kb-card) { animation: none; }
+    .shan-nav-ink, .modal.fade .modal-dialog,
+    :is(.btn:not(.btn-close), .btn-cyan, .btn-outline-dim, .wr-btn, .fc-btn, .tb-btn, .ab) { transition: none; }
+    :is(.btn:not(.btn-close), .btn-cyan, .btn-outline-dim, .wr-btn, .fc-btn, .tb-btn, .ab):is(:hover, :active) { transform: none; }
+}
