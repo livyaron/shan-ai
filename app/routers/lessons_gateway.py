@@ -150,6 +150,17 @@ async def status(identity: la.Identity = Depends(current_identity)):
     return _json({**SCHEMA_STATUS, "postgrest": reachable})
 
 
+@router.get("/_process_metrics")
+async def process_metrics(identity: la.Identity = Depends(current_identity),
+                          session: AsyncSession = Depends(get_db_session)):
+    """How the lessons process is doing (waits per step, answers after distribution).
+    Module admins only; numbers only — see lessons_process_metrics."""
+    if not identity.is_admin:
+        return _json({"message": "למנהלי מערכת הלקחים בלבד"}, 403)
+    from app.services import lessons_process_metrics
+    return _json(await lessons_process_metrics.snapshot(session))
+
+
 # What the app reads the moment it opens — exactly the nine queries
 # UserContext.tsx used to send one by one (each a separate request through this
 # gateway: nine identity lookups, nine round trips, 0.2-0.5s each on a phone).
