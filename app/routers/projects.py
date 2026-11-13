@@ -237,6 +237,74 @@ async def project_delays_page(
     })
 
 
+def _blockers_scope_key(scope) -> str:
+    """Whose list an AI reading belongs to — one per scope, never per person."""
+    import hashlib
+    from app.services import insight_access
+    if insight_access.sees_all(scope):
+        return "all"
+    if scope.sector:
+        return scope.sector
+    return "m:" + hashlib.md5("|".join(sorted(scope.managers)).encode()).hexdigest()[:10]
+
+
+async def _blockers_data(session: AsyncSession, current_user: User, owner: str | None):
+    from app.services import blockers, insight_access, pattern_service
+    scope = await insight_access.scope_for(session, current_user)
+    if not scope.allowed:
+        raise HTTPException(status_code=403, detail="אין לך עדיין שיוך לתצוגת הדפוסים — פנה למנהל המערכת")
+    frames, p = await pattern_service.frames_and_patterns(session)
+    data = pattern_service._plain(blockers.analyse(
+        frames, p, lambda sectors, manager, own: insight_access.sees_blocker(scope, sectors, manager, own), owner or None))
+    mine = next((r["owner"] for r in data.get("owners", []) if insight_access.owns_blocker(scope, r["owner"])), None)
+    return scope, data, mine
+
+
+@router.get("/blockers", response_class=HTMLResponse)
+async def project_blockers_page(
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+    current_user: User = Depends(get_current_user),
+):
+    """חסמים: every blocker the weekly file reported, past and present, in the
+    viewer's scope (their projects + the blockers the file assigns to their
+    role), in a rule-set order, with AI recommendations on request."""
+    from app.services import blockers, il_format, insight_access, insight_ai
+    owner = request.query_params.get("owner") or None
+    scope, data, mine = await _blockers_data(session, current_user, owner)
+    kind = blockers.ai_kind(_blockers_scope_key(scope), owner)
+    ai_row = (await insight_ai.load(session, [kind], data.get("as_of"))).get(kind) if data.get("reports") else None
+    names = {e["id"]: e["name"] for e in data.get("open", [])}
+    shown = insight_ai.for_display(ai_row, names) if ai_row else None
+    return templates.TemplateResponse("project_blockers.html", {
+        "request": request, "current_user": current_user, "data": data, "mine": mine,
+        "whole_division": insight_access.sees_all(scope),
+        "ai": {"payload": shown["payload"], "provider": shown.get("provider"),
+               "created": il_format.il_datetime(shown["created_at"]) if shown.get("created_at") else None} if shown else None,
+        "ai_error": request.query_params.get("ai_error") == "1", "ai_n": blockers.AI_BLOCKERS,
+    })
+
+
+@router.post("/blockers/ai")
+async def project_blockers_ai(
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+    current_user: User = Depends(get_current_user),
+):
+    """One model call: recommendations for the viewer's top blockers, stored for this report date."""
+    from urllib.parse import quote
+    from app.services import blockers
+    form = await request.form()
+    owner = (form.get("owner") or "").strip() or None
+    scope, data, _ = await _blockers_data(session, current_user, owner)
+    done = await blockers.recommend(session, data, blockers.ai_kind(_blockers_scope_key(scope), owner))
+    q = ("?owner=" + quote(owner)) if owner else ""
+    if done is None:
+        q += ("&" if q else "?") + "ai_error=1"
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url=f"/dashboard/projects/blockers{q}#ai", status_code=303)
+
+
 @router.get("/insights", response_class=HTMLResponse)
 async def project_insights_page(
     request: Request,

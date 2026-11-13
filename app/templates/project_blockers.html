@@ -1,0 +1,659 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Shan-AI — חסמים</title>
+    <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500;700;900&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+        /* חסמים — a film in seven scenes. Every number is computed on the server
+           (app/services/blockers.py, no LLM); the order of the blockers is a rule.
+           This page only stages it: a letterboxed frame, one scene per screen, a
+           player that runs them. With motion off (prefers-reduced-motion) every
+           scene is simply there, complete, and the page scrolls like any other. */
+        :root {
+            --ink: #050505; --paper: #f3eee4; --dim: #9a9388; --faint: #5d584f; --line: #26231e;
+            --amber: #ffb020; --red: #ff4d3d; --cyan: #36d6ff;
+            --lv0: #ff4d3d; --lv1: #ff8a2a; --lv2: #f2d03a; --lv3: #35c48a;
+            --ui: 'Heebo', sans-serif; --mono: 'IBM Plex Mono', monospace;
+            --ease: cubic-bezier(.22, 1, .36, 1); --spring: cubic-bezier(.34, 1.56, .64, 1);
+            --bar: 46px;                                   /* the letterbox */
+        }
+        * { box-sizing: border-box; }
+        @view-transition { navigation: auto; }
+        html { scroll-snap-type: y mandatory; scroll-behavior: smooth; background: var(--ink); }
+        html, body { margin: 0; overflow-x: clip; }
+        body { background: var(--ink); color: var(--paper); font-family: var(--ui); }
+        bdi.ltr, .ltr { direction: ltr; unicode-bidi: isolate; }
+        a { color: inherit; }
+        button { font-family: inherit; }
+
+        /* ── the frame: letterbox, grain, a vignette, the camera's HUD ── */
+        .lb { position: fixed; left: 0; right: 0; height: var(--bar); background: #000; z-index: 40; display: flex; align-items: center; padding: 0 1.1rem; gap: 1rem; }
+        .lb.top { top: 0; border-bottom: 1px solid var(--line); justify-content: space-between; }
+        .lb.bot { bottom: 0; border-top: 1px solid var(--line); height: calc(var(--bar) + 10px); }
+        .grain { position: fixed; inset: -50%; z-index: 30; pointer-events: none; opacity: .07; mix-blend-mode: screen;
+                 background-image: repeating-radial-gradient(circle at 17% 32%, #fff 0 .6px, transparent .7px 3px), repeating-radial-gradient(circle at 73% 61%, #fff 0 .5px, transparent .6px 4px);
+                 animation: grain 1.1s steps(6) infinite; }
+        .vig { position: fixed; inset: 0; z-index: 29; pointer-events: none; background: radial-gradient(ellipse at center, transparent 48%, rgba(0,0,0,.72) 100%); }
+        .hud { font-family: var(--mono); font-size: .74rem; letter-spacing: .14em; color: var(--dim); display: flex; align-items: center; gap: .9rem; direction: ltr; }
+        .hud .rec { display: inline-flex; align-items: center; gap: .4rem; color: var(--red); }
+        .hud .rec::before { content: ''; width: 8px; height: 8px; border-radius: 50%; background: var(--red); animation: blink 1.4s steps(2) infinite; }
+        .hud b { color: var(--paper); font-weight: 500; }
+        .nav { display: flex; gap: .5rem; align-items: center; }
+        .pill { font-size: .8rem; color: var(--dim); border: 1px solid var(--line); border-radius: 999px; padding: .26rem .8rem; text-decoration: none; background: transparent; cursor: pointer; transition: color .2s, border-color .2s, background-color .2s; white-space: nowrap; }
+        .pill:hover, .pill:focus-visible { color: var(--paper); border-color: var(--amber); outline: none; }
+        .pill.on { color: #000; background: var(--amber); border-color: var(--amber); font-weight: 700; }
+
+        /* ── the player ── */
+        .play { width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--faint); background: transparent; color: var(--paper); cursor: pointer; font-size: .8rem; flex: none; transition: border-color .2s, transform .2s var(--spring), background-color .2s; }
+        .play:hover, .play:focus-visible { border-color: var(--amber); transform: scale(1.1); outline: none; }
+        .play.on { background: var(--amber); color: #000; border-color: var(--amber); }
+        .chapters { flex: 1; display: flex; gap: 5px; align-items: center; min-width: 0; }
+        .chap { flex: 1; min-width: 0; background: transparent; border: 0; padding: 6px 0 0; cursor: pointer; text-align: right; color: var(--faint); transition: color .2s; }
+        .chap i { display: block; height: 3px; border-radius: 2px; background: var(--line); position: relative; overflow: hidden; }
+        .chap i::after { content: ''; position: absolute; inset: 0; background: var(--amber); transform-origin: right; transform: scaleX(var(--p, 0)); }
+        .chap span { display: block; font-size: .7rem; margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .chap.on { color: var(--paper); } .chap.done i::after { transform: scaleX(1); opacity: .45; }
+        .chap:hover { color: var(--amber); } .chap:focus-visible { outline: 1px solid var(--amber); outline-offset: 3px; }
+
+        /* ── a scene ── */
+        .scene { position: relative; min-height: 100vh; min-height: 100svh; scroll-snap-align: start; scroll-snap-stop: always; display: flex; flex-direction: column; justify-content: center;
+                 padding: calc(var(--bar) + 1.6rem) clamp(1rem, 5vw, 5rem) calc(var(--bar) + 2.2rem); overflow: hidden; }
+        .scene > .in { position: relative; z-index: 2; width: 100%; max-width: 1240px; margin: 0 auto; }
+        .scene::before { content: ''; position: absolute; inset: 0; z-index: 0; background: radial-gradient(ellipse 70% 55% at 70% 40%, var(--glow, rgba(255,176,32,.10)), transparent 70%); }
+        .slate { font-size: .8rem; letter-spacing: .12em; color: var(--amber); margin-bottom: .6rem; font-weight: 500; }
+        h2.title { font-weight: 900; font-size: clamp(2.2rem, 6.2vw, 5.2rem); line-height: 1.02; letter-spacing: -.025em; margin: 0 0 .5rem; }
+        h2.title .w { display: inline-block; overflow: hidden; vertical-align: bottom; }
+        h2.title .w > span { display: inline-block; }
+        .lead { color: var(--dim); font-size: clamp(.95rem, 1.5vw, 1.15rem); max-width: 62ch; margin: 0 0 1.4rem; }
+        .note { color: var(--faint); font-size: .8rem; margin-top: .9rem; }
+        /* the cut: when a scene is on, the camera pushes in and the words rise */
+        .scene.on > .in { animation: push 1.6s var(--ease) backwards; }
+        .scene.on h2.title .w > span { animation: rise .9s var(--ease) backwards; animation-delay: calc(var(--i, 0) * 90ms + 120ms); }
+        .scene.on .slate, .scene.on .lead { animation: fade 1s ease backwards; animation-delay: .5s; }
+        .scene.on .slate { animation-delay: 0s; }
+
+        /* ── scene 1: the cold open ── */
+        .open-num { font-family: var(--mono); font-weight: 600; font-size: clamp(6rem, 22vw, 17rem); line-height: .86; letter-spacing: -.05em; color: var(--amber); text-shadow: 0 0 90px rgba(255,176,32,.45); }
+        .open-row { display: flex; flex-wrap: wrap; align-items: flex-end; gap: .4rem 2.2rem; }
+        .open-say { font-weight: 900; font-size: clamp(1.7rem, 4.4vw, 3.6rem); line-height: 1.05; padding-bottom: .6rem; }
+        .open-say small { display: block; font-weight: 400; font-size: clamp(.95rem, 1.5vw, 1.2rem); color: var(--dim); margin-top: .5rem; }
+        .facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); margin-top: 1.8rem; }
+        .fact { background: #0a0a09; padding: 1rem 1.1rem; text-align: right; border: 0; color: inherit; cursor: pointer; transition: background-color .25s; }
+        .fact:hover, .fact:focus-visible { background: #15130f; outline: none; }
+        .fact b { display: block; font-family: var(--mono); font-size: clamp(1.8rem, 3.4vw, 2.7rem); font-weight: 600; color: var(--tone, var(--paper)); line-height: 1; }
+        .fact span { display: block; color: var(--dim); font-size: .9rem; margin-top: .4rem; }
+        .scene.on .fact { animation: rise 1s var(--ease) backwards; animation-delay: calc(var(--i, 0) * 110ms + 900ms); }
+        .filters { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: 1.5rem; align-items: center; }
+        .filters .lab { color: var(--faint); font-size: .8rem; margin-inline-end: .3rem; }
+        #embers { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 1; pointer-events: none; }
+
+        /* ── canvases and charts ── */
+        .stage { position: relative; width: 100%; height: min(58vh, 560px); min-height: 340px; }
+        .stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; cursor: pointer; }
+        .keys { display: flex; flex-wrap: wrap; gap: .3rem 1.2rem; color: var(--dim); font-size: .82rem; margin-top: .6rem; }
+        .keys i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-inline-end: .35rem; vertical-align: middle; background: var(--c); box-shadow: 0 0 10px var(--c); }
+        svg.chart { width: 100%; display: block; overflow: visible; }
+        svg.chart text { fill: var(--dim); font-family: var(--mono); font-size: 11px; }
+        svg.chart text.big { fill: var(--paper); font-size: 13px; }
+        .scroll-x { overflow-x: auto; }
+        .tl-area { opacity: 0; } .scene.on .tl-area { animation: fade 1.6s ease .5s forwards; }
+        .tl-line { fill: none; stroke: var(--amber); stroke-width: 3; stroke-linejoin: round; stroke-dasharray: 1; stroke-dashoffset: 1; filter: drop-shadow(0 0 8px rgba(255,176,32,.7)); }
+        .scene.on .tl-line { animation: draw 2.4s var(--ease) .3s forwards; }
+        .tl-bar { cursor: pointer; transform-box: fill-box; transition: filter .2s; }
+        .tl-bar.up { transform-origin: bottom; } .tl-bar.dn { transform-origin: top; }
+        .scene.on .tl-bar { animation: growY .8s var(--ease) backwards; animation-delay: calc(var(--i, 0) * 70ms + 600ms); }
+        .tl-bar:hover, .tl-bar:focus-visible { filter: brightness(1.5); outline: none; }
+        .tl-head { fill: var(--paper); transform-box: fill-box; }
+        .scene.on .tl-head { animation: headRun 2.4s var(--ease) .3s backwards; }
+
+        /* ── scene 4: who holds them ── */
+        .reels { display: grid; gap: .15rem; }
+        .reel { display: grid; grid-template-columns: minmax(150px, 1.1fr) minmax(0, 3fr) 70px 110px; gap: 1rem; align-items: center; background: transparent; border: 0; border-bottom: 1px solid var(--line); color: inherit; padding: .28rem .2rem .4rem; text-align: right; cursor: pointer; transition: background-color .2s; }
+        .reel:hover, .reel:focus-visible { background: rgba(255,255,255,.03); outline: none; }
+        .reel .nm { font-weight: 700; font-size: clamp(.95rem, 1.5vw, 1.2rem); line-height: 1.2; }
+        .reel .nm small { display: block; font-weight: 400; color: var(--faint); font-size: .76rem; }
+        .reel .tr { height: 18px; background: #0f0e0c; position: relative; overflow: hidden; }
+        .reel .tr i { position: absolute; inset: 0 0 0 auto; width: var(--w); background: repeating-linear-gradient(90deg, var(--tone) 0 10px, color-mix(in srgb, var(--tone) 55%, #000) 10px 12px); transform-origin: right; }
+        .scene.on .reel .tr i { animation: growX 1.3s var(--ease) backwards; animation-delay: calc(var(--i, 0) * 110ms + 500ms); }
+        .scene.on .reel { animation: fade .8s ease backwards; animation-delay: calc(var(--i, 0) * 110ms + 350ms); }
+        .reel .n { font-family: var(--mono); font-size: 1.35rem; font-weight: 600; color: var(--tone); text-align: left; }
+        .reel .m { font-size: .8rem; color: var(--dim); text-align: left; }
+
+        /* ── scene 5: the long-standing ones ── */
+        .gantt { display: grid; gap: .5rem; }
+        .g-row { display: grid; grid-template-columns: minmax(140px, 1.2fr) minmax(0, 3.4fr) 64px; gap: .9rem; align-items: center; background: transparent; border: 0; color: inherit; padding: .12rem 0; text-align: right; cursor: pointer; }
+        .g-row .nm { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
+        .g-row .nm small { color: var(--faint); font-size: .74rem; margin-inline-start: .4rem; }
+        .g-row .tr { height: 16px; position: relative; background: linear-gradient(90deg, transparent, #0f0e0c 12%); }
+        .g-row .tr i { position: absolute; top: 0; bottom: 0; right: var(--r); width: var(--w); background: var(--tone); border-radius: 2px; transform-origin: right; box-shadow: 0 0 16px color-mix(in srgb, var(--tone) 55%, transparent); }
+        .g-row .tr i.lb-open::before { content: '›'; position: absolute; right: -14px; top: -5px; color: var(--tone); font-size: 1.1rem; }
+        .scene.on .g-row .tr i { animation: growX 1.5s var(--ease) backwards; animation-delay: calc(var(--i, 0) * 90ms + 500ms); }
+        .scene.on .g-row { animation: fade .8s ease backwards; animation-delay: calc(var(--i, 0) * 90ms + 300ms); }
+        .g-row:hover .nm, .g-row:focus-visible .nm { color: var(--amber); } .g-row:focus-visible { outline: none; }
+        .g-row .n { font-family: var(--mono); font-weight: 600; color: var(--tone); text-align: left; }
+        .g-axis { display: grid; grid-template-columns: minmax(140px, 1.2fr) minmax(0, 3.4fr) 64px; gap: .9rem; color: var(--faint); font-size: .72rem; margin-top: .4rem; }
+        .g-axis div:nth-child(2) { display: flex; justify-content: space-between; direction: ltr; }
+
+        /* ── scene 6: yours to handle — the queue rolls like credits ── */
+        .queue { display: grid; gap: .6rem; }
+        .q { display: grid; grid-template-columns: 62px minmax(0, 1fr) auto; gap: 1rem; align-items: center; background: linear-gradient(90deg, rgba(255,255,255,.035), transparent 70%); border: 0; border-inline-start: 3px solid var(--tone); color: inherit; padding: .7rem 1rem; text-align: right; cursor: pointer; transition: background-color .2s, transform .25s var(--ease); }
+        .q:hover, .q:focus-visible { background-color: rgba(255,255,255,.05); transform: translateX(-6px); outline: none; }
+        .scene.on .q { animation: credit .9s var(--ease) backwards; animation-delay: calc(var(--i, 0) * 130ms + 450ms); }
+        .q .rk { font-family: var(--mono); font-size: 2.1rem; font-weight: 600; color: var(--tone); line-height: 1; }
+        .q .t { font-weight: 700; font-size: 1.12rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .q .x { color: var(--dim); font-size: .88rem; display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; }
+        .q .meta { display: flex; gap: .5rem; flex-wrap: wrap; justify-content: flex-end; }
+        .tag { font-size: .74rem; border: 1px solid var(--line); border-radius: 4px; padding: .1rem .45rem; color: var(--dim); white-space: nowrap; }
+        .tag.lv { color: var(--tone); border-color: color-mix(in srgb, var(--tone) 50%, transparent); }
+
+        /* ── scene 7: the AI's recommendations ── */
+        .ai-head { font-weight: 900; font-size: clamp(1.5rem, 3.4vw, 2.6rem); line-height: 1.15; margin: 0 0 .6rem; min-height: 1.2em; }
+        .ai-head.typing::after { content: '▌'; color: var(--amber); animation: blink 1s steps(2) infinite; }
+        .ai-sit { color: var(--dim); max-width: 78ch; margin: 0 0 1.2rem; }
+        .ai-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 330px), 1fr)); gap: .8rem; }
+        .ai-card { border: 1px solid var(--line); background: #0b0a09; padding: .9rem 1rem 1rem; position: relative; }
+        .ai-card::before { content: ''; position: absolute; inset: 0 0 auto 0; height: 2px; background: var(--amber); transform-origin: right; }
+        .scene.on .ai-card { animation: rise .9s var(--ease) backwards; animation-delay: calc(var(--i, 0) * 160ms + 700ms); }
+        .scene.on .ai-card::before { animation: growX 1.2s var(--ease) backwards; animation-delay: calc(var(--i, 0) * 160ms + 900ms); }
+        .ai-card h4 { margin: 0 0 .35rem; font-size: 1.05rem; font-weight: 700; }
+        .ai-card p { margin: 0 0 .5rem; color: var(--dim); font-size: .9rem; }
+        .ai-card .act { color: var(--paper); font-size: .92rem; border-inline-start: 2px solid var(--amber); padding-inline-start: .6rem; }
+        .ai-card .who { color: var(--faint); font-size: .78rem; margin-top: .4rem; }
+        .ai-card .pj { display: flex; flex-wrap: wrap; gap: .3rem; margin-top: .5rem; }
+        .ai-card .pj a { font-size: .76rem; color: var(--cyan); text-decoration: none; border: 1px solid #12323c; border-radius: 4px; padding: .08rem .4rem; }
+        .ai-card .pj a:hover { border-color: var(--cyan); }
+        .ai-list { color: var(--dim); font-size: .9rem; margin: .9rem 0 0; padding-inline-start: 1.1rem; }
+        .ai-list li { margin-bottom: .25rem; }
+        .ai-sub { font-size: .8rem; letter-spacing: .1em; color: var(--amber); margin-top: 1.1rem; font-weight: 500; }
+        .cta { display: inline-flex; align-items: center; gap: .6rem; font-size: 1.1rem; font-weight: 700; color: #000; background: var(--amber); border: 0; padding: .8rem 1.6rem; cursor: pointer; transition: transform .2s var(--spring), box-shadow .3s; }
+        .cta:hover, .cta:focus-visible { transform: translateY(-2px) scale(1.02); box-shadow: 0 10px 50px rgba(255,176,32,.45); outline: none; }
+        .cta[disabled] { opacity: .65; cursor: progress; }
+        .cta.ghost { background: transparent; color: var(--dim); border: 1px solid var(--line); font-size: .85rem; font-weight: 400; padding: .4rem .9rem; }
+        .err { color: var(--red); margin: 0 0 .9rem; }
+
+        /* ── the sheet ── */
+        .tip { position: fixed; z-index: 70; pointer-events: none; background: #000; border: 1px solid var(--faint); padding: .35rem .65rem; font-size: .82rem; opacity: 0; transition: opacity .15s; max-width: 300px; white-space: pre-line; }
+        .tip.on { opacity: 1; }
+        .backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.72); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); opacity: 0; visibility: hidden; transition: opacity .35s, visibility 0s .35s; z-index: 50; }
+        .backdrop.on { opacity: 1; visibility: visible; transition-delay: 0s; }
+        .sheet { position: fixed; inset: 0 auto 0 0; width: min(760px, 100vw); background: #0a0908; border-inline-start: 1px solid var(--faint); z-index: 60; display: flex; flex-direction: column; transform: translateX(-102%); visibility: hidden; transition: transform .55s var(--ease), visibility 0s .55s; }
+        .sheet.on { transform: none; visibility: visible; transition-delay: 0s; }
+        .sheet header { padding: 1.2rem 1.3rem 1rem; border-bottom: 1px solid var(--line); position: relative; }
+        .sheet .crumb { font-size: .76rem; letter-spacing: .1em; color: var(--amber); }
+        .sheet h3 { margin: .2rem 0 .2rem; font-size: 1.5rem; font-weight: 900; line-height: 1.15; }
+        .sheet .sub { color: var(--dim); font-size: .86rem; }
+        .sheet .x { position: absolute; left: 1rem; top: 1rem; width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--faint); background: transparent; color: var(--dim); cursor: pointer; transition: transform .3s var(--spring), color .2s, border-color .2s; }
+        .sheet .x:hover, .sheet .x:focus-visible { transform: rotate(90deg); color: var(--paper); border-color: var(--amber); outline: none; }
+        .sheet .body { overflow-y: auto; padding: .8rem 1rem 2.5rem; flex: 1; overscroll-behavior: contain; }
+        .card { border-bottom: 1px solid var(--line); padding: .8rem .3rem 1rem; animation: fade .5s ease backwards; animation-delay: calc(min(var(--i, 0), 14) * 40ms + 150ms); }
+        .card .top { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; }
+        .card .top b { font-size: 1.05rem; }
+        .card .top .wk { color: var(--tone); font-weight: 700; white-space: nowrap; }
+        .card .txt { color: var(--paper); margin: .45rem 0 .55rem; white-space: pre-line; line-height: 1.5; }
+        .card .row { display: flex; flex-wrap: wrap; gap: .35rem; }
+        .card .why { color: var(--dim); font-size: .84rem; margin-top: .45rem; }
+        .card a.go { display: inline-block; margin-top: .6rem; color: var(--cyan); font-size: .86rem; text-decoration: none; border-bottom: 1px solid transparent; transition: border-color .2s; }
+        .card a.go:hover { border-color: var(--cyan); }
+        .empty { color: var(--faint); padding: 3rem 1rem; text-align: center; }
+
+        @keyframes grain { 0% { transform: translate(0, 0); } 20% { transform: translate(-3%, 2%); } 40% { transform: translate(2%, -4%); } 60% { transform: translate(-4%, -1%); } 80% { transform: translate(3%, 3%); } 100% { transform: translate(0, 0); } }
+        @keyframes blink { 50% { opacity: 0; } }
+        @keyframes push { from { transform: scale(1.07); filter: blur(6px); opacity: 0; } }
+        @keyframes rise { from { transform: translateY(110%); opacity: 0; } }
+        @keyframes fade { from { opacity: 0; } }
+        @keyframes credit { from { transform: translateY(60px); opacity: 0; } }
+        @keyframes growX { from { transform: scaleX(0); } }
+        @keyframes growY { from { transform: scaleY(0); } }
+        @keyframes draw { to { stroke-dashoffset: 0; } }
+        @keyframes headRun { from { transform: translateX(var(--from)); opacity: 0; } 15% { opacity: 1; } }
+
+        @media (max-width: 760px) {
+            :root { --bar: 40px; }
+            .hud .tc, .hud .sc-name, .chap span { display: none; }
+            .reel { grid-template-columns: minmax(0, 1fr) 56px; } .reel .tr { grid-column: 1 / -1; grid-row: 2; } .reel .m { display: none; }
+            .g-row, .g-axis { grid-template-columns: minmax(0, 1fr) 48px; } .g-row .tr { grid-column: 1 / -1; grid-row: 2; } .g-axis div:first-child, .g-axis div:last-child { display: none; }
+            .q { grid-template-columns: 44px minmax(0, 1fr); } .q .meta { grid-column: 2; justify-content: flex-start; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+            html { scroll-snap-type: none; scroll-behavior: auto; }
+            @view-transition { navigation: none; }
+            *, *::before, *::after { animation: none !important; transition: none !important; }
+            .tl-line { stroke-dashoffset: 0; } .tl-area { opacity: 1; } .grain { display: none; }
+        }
+    </style>
+</head>
+<body>
+<div class="grain" aria-hidden="true"></div><div class="vig" aria-hidden="true"></div>
+
+<div class="lb top">
+    <div class="nav">
+        <a class="pill" href="/dashboard/projects">→ פרויקטים</a>
+        <a class="pill" href="/dashboard/projects/delays">⏱ ניתוח עיכובים</a>
+        <a class="pill" href="/dashboard/">דשבורד</a>
+    </div>
+    <div class="hud" aria-hidden="true"><span class="rec">חי</span><span class="sc-name" id="hud-name"></span><span><b id="hud-sc">01</b>/<b id="hud-n">07</b></span><span class="tc" id="hud-tc">00:00:00</span></div>
+</div>
+
+<main id="film">
+    <section class="scene" data-scene="open" data-name="פתיחה" style="--glow: rgba(255,176,32,.14)">
+        <canvas id="embers" aria-hidden="true"></canvas>
+        <div class="in">
+            <div class="slate">חסמים · נכון לדוח <span id="asof"></span></div>
+            <div class="open-row">
+                <div class="open-num"><bdi class="ltr" id="n-open">0</bdi></div>
+                <div class="open-say"><span id="say-main">חסמים פתוחים</span><small id="say-sub"></small></div>
+            </div>
+            <div class="facts" id="facts"></div>
+            <div class="filters" id="filters"></div>
+        </div>
+    </section>
+
+    <section class="scene" data-scene="map" data-name="המפה" style="--glow: rgba(255,77,61,.10)">
+        <div class="in">
+            <div class="slate">סצנה 02 · השדה</div>
+            <h2 class="title" data-words="כל החסמים, במבט אחד"></h2>
+            <p class="lead">כל עיגול הוא חסם פתוח. הגודל: כמה זמן הוא עומד. הצבע: דרגת הטיפול שנקבעה בכללים. הם מתקבצים לפי נושא. לחיצה על עיגול פותחת את החסם.</p>
+            <div class="stage"><canvas id="map" role="img" aria-label="החסמים הפתוחים לפי נושא, משך ודרגת טיפול"></canvas></div>
+            <div class="keys" id="map-keys"></div>
+        </div>
+    </section>
+
+    <section class="scene" data-scene="time" data-name="ציר הזמן" style="--glow: rgba(54,214,255,.08)">
+        <div class="in">
+            <div class="slate">סצנה 03 · עבר והווה</div>
+            <h2 class="title" data-words="מה נפתח, מה נסגר"></h2>
+            <p class="lead">הקו: כמה חסמים עמדו פתוחים בכל דוח שבועי. מעל הקו האמצעי: חסמים שנפתחו באותו דוח. מתחתיו: חסמים שנסגרו. הזמן מתקדם מימין לשמאל.</p>
+            <div class="scroll-x"><svg class="chart" id="time" role="img" aria-label="חסמים פתוחים, שנפתחו ושנסגרו בכל דוח" style="min-width:560px"></svg></div>
+            <div class="note" id="time-note"></div>
+        </div>
+    </section>
+
+    <section class="scene" data-scene="owners" data-name="מי מחזיק" style="--glow: rgba(255,176,32,.10)">
+        <div class="in">
+            <div class="slate">סצנה 04 · מי מחזיק</div>
+            <h2 class="title" data-words="אצל מי הם עומדים"></h2>
+            <p class="lead">לפי העמודה ״לטיפול״ בקובץ. לחיצה על גורם פותחת את החסמים שלו.</p>
+            <div class="reels" id="owners"></div>
+        </div>
+    </section>
+
+    <section class="scene" data-scene="old" data-name="הוותיקים" style="--glow: rgba(255,77,61,.12)">
+        <div class="in">
+            <div class="slate">סצנה 05 · הוותיקים</div>
+            <h2 class="title" data-words="אלה שלא זזים"></h2>
+            <p class="lead">החסמים שעומדים הכי הרבה זמן, מהדוח שבו הופיעו ועד היום. חץ בקצה הימני: החסם כבר היה שם בדוח הראשון שבידינו, כך שגילו האמיתי גדול יותר.</p>
+            <div class="gantt" id="old"></div>
+            <div class="g-axis" id="old-axis"></div>
+        </div>
+    </section>
+
+    <section class="scene" data-scene="queue" data-name="לטיפולך" style="--glow: rgba(255,138,42,.12)">
+        <div class="in">
+            <div class="slate">סצנה 06 · התור שלך</div>
+            <h2 class="title" data-words="לטיפולך, לפי הסדר"></h2>
+            <p class="lead">הסדר נקבע בכללים, לא על ידי מודל: דרגת הטיפול, אחריה הסלמה לסמנכ״ל, אחריה כמה זז היעד מאז שהחסם עומד, ואחריה הוותק.</p>
+            <div class="queue" id="queue"></div>
+            <div style="margin-top:1rem"><button class="cta ghost" id="queue-all" type="button"></button></div>
+        </div>
+    </section>
+
+    <section class="scene" id="ai" data-scene="ai" data-name="המלצות" style="--glow: rgba(54,214,255,.10)">
+        <div class="in">
+            <div class="slate">סצנה 07 · מה עושים</div>
+            <h2 class="title" data-words="מה עושים מחר בבוקר"></h2>
+            {% if ai_error %}<p class="err">המודל לא החזיר תשובה תקינה הפעם. אפשר לנסות שוב בעוד דקה.</p>{% endif %}
+            <div id="ai-body"></div>
+            <form method="post" action="/dashboard/projects/blockers/ai" id="ai-form" style="margin-top:1.1rem">
+                <input type="hidden" name="owner" value="{{ data.owner or '' }}">
+                <button class="cta{% if ai %} ghost{% endif %}" id="ai-go">{{ '↻ נסח מחדש' if ai else '✨ הפק המלצות לטיפול' }}</button>
+            </form>
+            <div class="note">ה-AI מנסח המלצות על {{ ai_n }} החסמים הראשונים בתור שלך. הוא לא קובע את הסדר ולא מחשב מספרים; כל מספר שלא הופיע בנתונים מוחלף ב-[?].{% if ai and ai.created %} נוסח ב-{{ ai.created }}.{% endif %}
+                {% if not whole_division %} מוצגים רק החסמים שבתחומך: הפרויקטים שלך והחסמים שהקובץ מייעד לתפקיד שלך.{% endif %}</div>
+        </div>
+    </section>
+</main>
+
+<div class="lb bot">
+    <button class="play" id="play" type="button" aria-label="הפעלה אוטומטית" title="הפעלה אוטומטית של הסצנות (רווח)">▶</button>
+    <div class="chapters" id="chapters"></div>
+</div>
+
+<div class="tip" id="tip" role="tooltip"></div>
+<div class="backdrop" id="backdrop"></div>
+<aside class="sheet" id="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title" aria-hidden="true">
+    <header>
+        <button class="x" id="sheet-x" aria-label="סגור">✕</button>
+        <div class="crumb" id="sheet-crumb"></div>
+        <h3 id="sheet-title"></h3>
+        <div class="sub" id="sheet-sub"></div>
+    </header>
+    <div class="body" id="sheet-body"></div>
+</aside>
+
+<script type="application/json" id="d-data">{{ data|tojson }}</script>
+<script type="application/json" id="d-ai">{{ (ai.payload if ai else none)|tojson }}</script>
+<script type="application/json" id="d-mine">{{ mine|tojson }}</script>
+<script>
+(function () {
+    'use strict';
+    // Built with createElement + textContent only — a blocker's text never passes through the HTML parser.
+    var D = JSON.parse(document.getElementById('d-data').textContent);
+    var AI = JSON.parse(document.getElementById('d-ai').textContent);
+    var MINE = JSON.parse(document.getElementById('d-mine').textContent);
+    var still = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    var $ = function (id) { return document.getElementById(id); };
+    var el = function (tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined && text !== null) e.textContent = text; return e; };
+    var svg = function (tag, attrs) { var e = document.createElementNS('http://www.w3.org/2000/svg', tag); for (var k in attrs) e.setAttribute(k, attrs[k]); return e; };
+    var clear = function (n) { while (n.firstChild) n.removeChild(n.firstChild); };
+    var ilDate = function (iso) { var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso || ''); return m ? m[3] + '/' + m[2] + '/' + m[1] : '—'; };
+    var ltr = function (text, cls) { return el('bdi', 'ltr' + (cls ? ' ' + cls : ''), text); };
+    var LV = ['#ff4d3d', '#ff8a2a', '#f2d03a', '#35c48a'];
+    var tone = function (level) { var i = (D.order.levels || []).indexOf(level); return LV[i < 0 ? 3 : i]; };
+    var weeksText = function (e) { return (e.lower_bound ? 'לפחות ' : '') + e.weeks + ' שבועות'; };
+    var countUp = function (node, v, delay) {
+        if (still) { node.textContent = String(v); return; }
+        var t0 = performance.now() + (delay || 0), dur = 1600; node.textContent = '0';
+        var tick = function (now) { var t = Math.min(1, Math.max(0, (now - t0) / dur)), e = 1 - Math.pow(1 - t, 4); node.textContent = t >= 1 ? String(v) : String(Math.round(v * e)); if (t < 1) requestAnimationFrame(tick); };
+        requestAnimationFrame(tick);
+    };
+    var tip = $('tip');
+    var showTip = function (text, x, y) { tip.textContent = text; tip.style.left = Math.min(window.innerWidth - 310, Math.max(8, x + 14)) + 'px'; tip.style.top = (y + 16) + 'px'; tip.classList.add('on'); };
+    var hideTip = function () { tip.classList.remove('on'); };
+    var hint = function (node, text) { node.addEventListener('pointermove', function (e) { showTip(text, e.clientX, e.clientY); }); node.addEventListener('pointerleave', hideTip); node.setAttribute('aria-label', text.replace(/\n/g, ' · ')); };
+    var press = function (node, fn) { node.tabIndex = 0; node.setAttribute('role', 'button'); node.addEventListener('click', fn); node.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); fn(); } }); };
+
+    // headlines: one word after another
+    Array.prototype.forEach.call(document.querySelectorAll('h2.title[data-words]'), function (h) {
+        h.dataset.words.split(' ').forEach(function (w, i) { var o = el('span', 'w'), s = el('span', '', w); o.style.setProperty('--i', i); o.appendChild(s); h.appendChild(o); h.appendChild(document.createTextNode(' ')); });
+    });
+
+    var scenes = Array.prototype.slice.call(document.querySelectorAll('.scene'));
+    var empty = !D.reports || !D.open;
+    $('asof').textContent = D.as_of ? ilDate(D.as_of) : '';
+    $('hud-n').textContent = ('0' + scenes.length).slice(-2);
+
+    // ───────────────────────── the sheet
+    var sheet = $('sheet'), backdrop = $('backdrop'), lastFocus = null;
+    var blockerCard = function (e, i) {
+        var c = el('div', 'card'); c.style.setProperty('--i', i); c.style.setProperty('--tone', e.level ? tone(e.level) : '#9a9388');
+        var top = el('div', 'top'); top.appendChild(el('b', '', e.name || e.id));
+        top.appendChild(el('span', 'wk', e.closed ? 'נסגר אחרי ' + e.weeks + ' שבועות' : weeksText(e))); c.appendChild(top);
+        c.appendChild(el('div', 'txt', e.text));
+        var row = el('div', 'row');
+        if (e.level) { var lv = el('span', 'tag lv', D.levels[e.level].icon + ' ' + D.levels[e.level].label); row.appendChild(lv); }
+        [e.id, e.stage, 'לטיפול: ' + e.owner, 'מאז ' + ilDate(e.opened) + (e.closed ? ' עד ' + ilDate(e.closed) : '')].concat(e.topics || []).forEach(function (t) { row.appendChild(el('span', 'tag', t)); });
+        if (e.slip_months) row.appendChild(el('span', 'tag', 'היעד זז ' + e.slip_months + ' חודשים מאז'));
+        if (e.changes) row.appendChild(el('span', 'tag', 'המלל עודכן ' + e.changes + ' פעמים'));
+        if ((e.owners || []).length > 1) row.appendChild(el('span', 'tag', 'עבר בין גורמים: ' + e.owners.join(' ← ')));
+        c.appendChild(row);
+        if (e.reason) c.appendChild(el('div', 'why', 'למה הדרגה הזו: ' + e.reason));
+        var a = el('a', 'go', 'לדף הפרויקט ←'); a.href = '/dashboard/projects/p/' + encodeURIComponent(e.id); c.appendChild(a);
+        return c;
+    };
+    var openSheet = function (crumb, title, sub, list) {
+        lastFocus = document.activeElement; hideTip(); stopPlay();
+        $('sheet-crumb').textContent = crumb; $('sheet-title').textContent = title; $('sheet-sub').textContent = sub || '';
+        var body = $('sheet-body'); clear(body);
+        if (!list.length) body.appendChild(el('div', 'empty', 'אין חסמים ברשימה הזו'));
+        list.forEach(function (e, i) { body.appendChild(blockerCard(e, i)); });
+        body.scrollTop = 0; sheet.classList.add('on'); backdrop.classList.add('on'); sheet.setAttribute('aria-hidden', 'false');
+        document.documentElement.style.overflow = 'hidden'; $('sheet-x').focus();
+    };
+    var closeSheet = function () { sheet.classList.remove('on'); backdrop.classList.remove('on'); sheet.setAttribute('aria-hidden', 'true'); document.documentElement.style.overflow = ''; if (lastFocus && lastFocus.focus) lastFocus.focus(); };
+    $('sheet-x').addEventListener('click', closeSheet); backdrop.addEventListener('click', closeSheet);
+
+    var BUILD = {};
+
+    // ───────────────────────── 1 the cold open
+    BUILD.open = function () {
+        if (empty) { $('say-main').textContent = 'אין חסמים פתוחים'; $('say-sub').textContent = D.reports ? 'בתחום שלך, נכון לדוח האחרון.' : 'אין עדיין דוחות שבועיים.'; return; }
+        countUp($('n-open'), D.now.open, 300);
+        $('say-sub').textContent = 'על ' + D.now.projects + ' פרויקטים' + (D.owner ? ' · לטיפול: ' + D.owner : '') + ' · נכון לדוח ' + ilDate(D.as_of);
+        [
+            { n: D.now.unowned, t: 'בלי גורם מטפל', c: LV[0], f: function (e) { return e.owner === 'ללא גורם מטפל'; } },
+            { n: D.now.chronic, t: 'עומדים ' + D.chronic_weeks + ' שבועות ומעלה', c: LV[1], f: function (e) { return e.weeks >= D.chronic_weeks; } },
+            { n: D.now.top, t: 'הוסלמו לסמנכ״ל', c: LV[0], f: function (e) { return e.top; } },
+            { n: D.now.slip_months, t: 'חודשי הזזת יעד מאז שנפתחו', c: '#ffb020', f: function (e) { return (e.slip_months || 0) > 0; } },
+            { n: D.history.closed, t: 'חסמים שנסגרו בתקופה' + (D.history.median_weeks_closed !== null ? ' · חציון ' + D.history.median_weeks_closed + ' שבועות' : ''), c: LV[3], closed: true },
+        ].forEach(function (k, i) {
+            var b = el('button', 'fact'); b.type = 'button'; b.style.setProperty('--i', i); b.style.setProperty('--tone', k.c);
+            var num = el('b'); num.appendChild(ltr(String(k.n))); b.appendChild(num); b.appendChild(el('span', '', k.t));
+            b.addEventListener('click', function () { k.closed ? openSheet('עבר', 'חסמים שנסגרו', 'מהחדש לישן', D.closed) : openSheet('עכשיו', k.t, '', D.open.filter(k.f)); });
+            $('facts').appendChild(b);
+        });
+        var f = $('filters'); f.appendChild(el('span', 'lab', 'הצג:'));
+        var chip = function (label, owner) {
+            var a = el('a', 'pill' + ((D.owner || null) === owner ? ' on' : ''), label);
+            a.href = '/dashboard/projects/blockers' + (owner ? '?owner=' + encodeURIComponent(owner) : ''); f.appendChild(a);
+        };
+        chip('כל מה שבתחומי', null);
+        (D.owners || []).forEach(function (o) { chip((o.owner === MINE ? '★ לטיפולי: ' : '') + o.owner + ' · ' + o.open, o.owner); });
+
+        if (still) return;                                            // embers: one per open blocker, drifting up
+        var cv = $('embers'), g = cv.getContext('2d'), W = 0, H = 0, parts = [], last = performance.now();
+        var size = function () { var r = cv.getBoundingClientRect(), dpr = Math.min(window.devicePixelRatio || 1, 2); W = r.width; H = r.height; cv.width = W * dpr; cv.height = H * dpr; g.setTransform(dpr, 0, 0, dpr, 0, 0); };
+        size(); window.addEventListener('resize', size);
+        D.open.slice(0, 160).forEach(function (e) { parts.push({ x: Math.random(), y: Math.random(), v: .012 + Math.random() * .03, r: 1 + Math.min(4, e.weeks / 12), c: tone(e.level), ph: Math.random() * 6 }); });
+        var frame = function (now) {
+            var dt = Math.min(.05, (now - last) / 1000); last = now;
+            if (scenes[0].classList.contains('on')) {
+                g.clearRect(0, 0, W, H);
+                parts.forEach(function (p) {
+                    p.y -= p.v * dt; p.ph += dt; if (p.y < -.05) { p.y = 1.05; p.x = Math.random(); }
+                    var x = (p.x + Math.sin(p.ph) * .012) * W, y = p.y * H;
+                    g.globalAlpha = .18 + .5 * Math.max(0, Math.sin(p.ph * 1.7)); g.fillStyle = p.c; g.shadowColor = p.c; g.shadowBlur = 14;
+                    g.beginPath(); g.arc(x, y, p.r, 0, 6.283); g.fill();
+                });
+                g.globalAlpha = 1; g.shadowBlur = 0;
+            }
+            requestAnimationFrame(frame);
+        };
+        requestAnimationFrame(frame);
+    };
+
+    // ───────────────────────── 2 the field: every open blocker, clustered by topic
+    BUILD.map = function () {
+        var cv = $('map'), g = cv.getContext('2d'), W = 0, H = 0, nodes = [], hubs = [], t0 = performance.now(), hover = null;
+        var topicOf = function (e) { return (e.topics && e.topics[0]) || 'ללא נושא מזוהה'; };
+        var names = D.by_topic.map(function (r) { return r.topic; });
+        var layout = function () {
+            var r = cv.getBoundingClientRect(), dpr = Math.min(window.devicePixelRatio || 1, 2); W = r.width; H = r.height; cv.width = W * dpr; cv.height = H * dpr; g.setTransform(dpr, 0, 0, dpr, 0, 0);
+            var n = Math.max(1, names.length), cols = Math.ceil(Math.sqrt(n * W / H)), rows = Math.ceil(n / cols);
+            hubs = names.map(function (name, i) { var c = i % cols, rw = Math.floor(i / cols); return { name: name, x: W - (c + .5) * W / cols, y: (rw + .5) * H / rows, n: 0 }; });
+            var scale = Math.max(.55, Math.min(1.25, Math.sqrt(W * H / 520000) * Math.sqrt(60 / Math.max(20, D.open.length))));
+            nodes = D.open.map(function (e) {
+                var hub = hubs[names.indexOf(topicOf(e))] || hubs[0]; hub.n++;
+                var a = Math.random() * 6.283, d = Math.random() * 30;
+                return { e: e, hub: hub, r: (5 + Math.sqrt(e.weeks + 1) * 2.6) * scale, x: hub.x + Math.cos(a) * d, y: hub.y + Math.sin(a) * d, c: tone(e.level), ph: Math.random() * 6 };
+            });
+            for (var it = 0; it < 140; it++) {                        // settle: pull to the hub, push apart
+                nodes.forEach(function (a) { a.x += (a.hub.x - a.x) * .04; a.y += (a.hub.y - a.y) * .04; });
+                for (var i = 0; i < nodes.length; i++) for (var j = i + 1; j < nodes.length; j++) {
+                    var p = nodes[i], q = nodes[j], dx = q.x - p.x, dy = q.y - p.y, dist = Math.sqrt(dx * dx + dy * dy) || .01, min = p.r + q.r + 2;
+                    if (dist < min) { var push = (min - dist) / 2; dx /= dist; dy /= dist; p.x -= dx * push; p.y -= dy * push; q.x += dx * push; q.y += dy * push; }
+                }
+            }
+            nodes.forEach(function (a) { a.x = Math.max(a.r, Math.min(W - a.r, a.x)); a.y = Math.max(a.r + 16, Math.min(H - a.r, a.y)); });
+            t0 = performance.now(); draw(performance.now());
+        };
+        var draw = function (now) {
+            var age = (now - t0) / 1000; g.clearRect(0, 0, W, H);
+            g.font = '600 13px Heebo, sans-serif'; g.textAlign = 'center';
+            hubs.forEach(function (h) { if (!h.n) return; var ys = nodes.filter(function (n) { return n.hub === h; }).map(function (n) { return n.y - n.r; }); g.fillStyle = 'rgba(243,238,228,.75)'; g.fillText(h.name + ' · ' + h.n, h.x, Math.max(13, Math.min.apply(null, ys) - 8)); });
+            nodes.forEach(function (a, i) {
+                var k = still ? 1 : Math.min(1, Math.max(0, (age - i * .012) / .9)), e = 1 - Math.pow(1 - k, 3);
+                var x = a.hub.x + (a.x - a.hub.x) * e + (still ? 0 : Math.sin(now / 1400 + a.ph) * 1.8), y = a.hub.y + (a.y - a.hub.y) * e + (still ? 0 : Math.cos(now / 1700 + a.ph) * 1.8);
+                a.sx = x; a.sy = y;
+                g.globalAlpha = e * (hover && hover !== a ? .35 : .9); g.fillStyle = a.c; g.shadowColor = a.c; g.shadowBlur = hover === a ? 30 : 12;
+                g.beginPath(); g.arc(x, y, a.r * e * (hover === a ? 1.15 : 1), 0, 6.283); g.fill();
+                if (a.e.top) { g.shadowBlur = 0; g.strokeStyle = '#fff'; g.lineWidth = 1.5; g.beginPath(); g.arc(x, y, a.r * e + 3, 0, 6.283); g.stroke(); }
+            });
+            g.globalAlpha = 1; g.shadowBlur = 0;
+            if (!still && $('map').closest('.scene').classList.contains('on')) requestAnimationFrame(draw);
+        };
+        var pick = function (ev) { var r = cv.getBoundingClientRect(), x = ev.clientX - r.left, y = ev.clientY - r.top, best = null; nodes.forEach(function (a) { var d = Math.hypot(a.sx - x, a.sy - y); if (d <= a.r + 3 && (!best || d < best.d)) best = { a: a, d: d }; }); return best && best.a; };
+        cv.addEventListener('pointermove', function (ev) { hover = pick(ev); if (hover) showTip((hover.e.name || hover.e.id) + '\n' + weeksText(hover.e) + ' · לטיפול: ' + hover.e.owner + '\n' + D.levels[hover.e.level].label, ev.clientX, ev.clientY); else hideTip(); if (still) draw(performance.now()); });
+        cv.addEventListener('pointerleave', function () { hover = null; hideTip(); if (still) draw(performance.now()); });
+        cv.addEventListener('click', function (ev) { var a = pick(ev); if (a) openSheet('חסם', a.e.name || a.e.id, topicOf(a.e), [a.e]); });
+        D.order.levels.forEach(function (lv, i) { var k = el('span'); var dot = el('i'); dot.style.setProperty('--c', LV[i]); k.appendChild(dot); k.appendChild(document.createTextNode(D.levels[lv].label + ' · ' + (D.now.levels[lv] || 0))); $('map-keys').appendChild(k); });
+        $('map-keys').appendChild(el('span', '', 'טבעת לבנה: הוסלם לסמנכ״ל'));
+        layout(); window.addEventListener('resize', layout);
+        BUILD.map.wake = function () { t0 = performance.now(); requestAnimationFrame(draw); };
+    };
+
+    // ───────────────────────── 3 past and present
+    BUILD.time = function () {
+        var F = D.flow, host = $('time'), W = 1000, H = 400, L = 20, R = 20, TOP = 26, LINE_H = 150, MID = 300, BAR = 70, n = F.length;
+        host.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
+        var step = (W - L - R) / Math.max(1, n), X = function (i) { return W - R - (i + .5) * step; };
+        var maxOpen = Math.max.apply(null, F.map(function (f) { return f.open; }).concat([1])), maxBar = Math.max.apply(null, F.map(function (f) { return Math.max(f.opened, f.closed); }).concat([1]));
+        var Y = function (v) { return TOP + LINE_H - v / maxOpen * LINE_H; };
+        var d = '', area = '';
+        F.forEach(function (f, i) { d += (i ? ' L' : 'M') + X(i).toFixed(1) + ' ' + Y(f.open).toFixed(1); });
+        area = d + ' L' + X(n - 1).toFixed(1) + ' ' + (TOP + LINE_H) + ' L' + X(0).toFixed(1) + ' ' + (TOP + LINE_H) + ' Z';
+        var defs = svg('defs', {}), grad = svg('linearGradient', { id: 'tl-fill', x1: 0, y1: 0, x2: 0, y2: 1 });
+        grad.appendChild(svg('stop', { offset: 0, 'stop-color': '#ffb020', 'stop-opacity': .35 })); grad.appendChild(svg('stop', { offset: 1, 'stop-color': '#ffb020', 'stop-opacity': 0 })); defs.appendChild(grad); host.appendChild(defs);
+        host.appendChild(svg('path', { d: area, fill: 'url(#tl-fill)', class: 'tl-area' }));
+        host.appendChild(svg('path', { d: d, class: 'tl-line', pathLength: 1 }));
+        host.appendChild(svg('line', { x1: L, x2: W - R, y1: MID, y2: MID, stroke: '#26231e' }));
+        F.forEach(function (f, i) {
+            var x = X(i), bw = Math.min(34, step * .5);
+            var open = function () {
+                var list = D.open.concat(D.closed).filter(function (e) { return e.opened === f.report || e.closed === f.report; });
+                openSheet('דוח ' + ilDate(f.report), 'מה קרה בדוח ' + ilDate(f.report), f.opened + ' נפתחו · ' + f.closed + ' נסגרו · ' + f.open + ' עמדו פתוחים', list);
+            };
+            var text = 'דוח ' + ilDate(f.report) + '\n' + f.open + ' פתוחים · ' + f.opened + ' נפתחו · ' + f.closed + ' נסגרו';
+            if (f.opened) { var u = svg('rect', { x: x - bw / 2, y: MID - f.opened / maxBar * BAR, width: bw, height: f.opened / maxBar * BAR, fill: '#ff4d3d', class: 'tl-bar up' }); u.style.setProperty('--i', i); hint(u, text); press(u, open); host.appendChild(u); }
+            if (f.closed) { var c = svg('rect', { x: x - bw / 2, y: MID + 1, width: bw, height: f.closed / maxBar * BAR, fill: '#35c48a', class: 'tl-bar dn' }); c.style.setProperty('--i', i); hint(c, text); press(c, open); host.appendChild(c); }
+            var dot = svg('circle', { cx: x, cy: Y(f.open), r: 3.5, fill: '#ffb020' }); hint(dot, text); host.appendChild(dot);
+            if (i === 0 || i === n - 1 || f.open === maxOpen) { var t = svg('text', { x: x, y: Y(f.open) - 10, 'text-anchor': 'middle', class: 'big' }); t.textContent = String(f.open); host.appendChild(t); }
+            if (n <= 10 || i % 2 === 0) { var lab = svg('text', { x: x, y: H - 6, 'text-anchor': 'middle', direction: 'ltr' }); lab.textContent = ilDate(f.report).slice(0, 5); host.appendChild(lab); }
+        });
+        if (!still && n > 1) { var head = svg('circle', { cx: X(n - 1), cy: Y(F[n - 1].open), r: 7, class: 'tl-head' }); head.style.setProperty('--from', (X(0) - X(n - 1)) + 'px'); head.style.filter = 'drop-shadow(0 0 12px #ffb020)'; host.appendChild(head); }
+        var first = F[0], lastF = F[n - 1];
+        $('time-note').textContent = 'בדוח הראשון (' + ilDate(first.report) + ') עמדו ' + first.open + ' חסמים פתוחים; בדוח האחרון ' + lastF.open + '. בסך הכול נפתחו בתקופה ' + D.history.ever + ' חסמים ו-' + D.history.closed + ' מהם נסגרו. חסם נחשב סגור כשתא הסיכונים של הפרויקט מתרוקן.';
+    };
+
+    // ───────────────────────── 4 who holds them
+    BUILD.owners = function () {
+        var max = Math.max.apply(null, D.by_owner.map(function (r) { return r.open; }).concat([1]));
+        D.by_owner.forEach(function (r, i) {
+            var b = el('button', 'reel'); b.type = 'button'; b.style.setProperty('--i', i); b.style.setProperty('--tone', r.owner === 'ללא גורם מטפל' ? LV[0] : (r.owner === MINE ? '#36d6ff' : '#ffb020'));
+            var nm = el('span', 'nm', (r.owner === MINE ? '★ ' : '') + r.owner); nm.appendChild(el('small', '', 'הוותיק ביותר: ' + r.oldest_weeks + ' שבועות' + (r.slip_months ? ' · ' + r.slip_months + ' חודשי הזזת יעד' : ''))); b.appendChild(nm);
+            var tr = el('span', 'tr'), fill = el('i'); fill.style.setProperty('--w', (r.open / max * 100).toFixed(1) + '%'); tr.appendChild(fill); b.appendChild(tr);
+            b.appendChild(ltr(String(r.open), 'n')); b.appendChild(el('span', 'm', 'חציון ' + r.median_weeks + ' שב׳'));
+            b.addEventListener('click', function () { openSheet('גורם מטפל', r.owner, r.open + ' חסמים פתוחים · לפי סדר העדיפות', D.open.filter(function (e) { return e.owner === r.owner; })); });
+            $('owners').appendChild(b);
+        });
+    };
+
+    // ───────────────────────── 5 the long-standing
+    BUILD.old = function () {
+        var list = D.open.slice().sort(function (a, b) { return b.weeks - a.weeks; }).slice(0, 10);
+        var day = function (iso) { return Date.parse(iso) / 864e5; }, x0 = day(D.first_report), x1 = day(D.as_of), span = Math.max(1, x1 - x0);
+        list.forEach(function (e, i) {
+            var b = el('button', 'g-row'); b.type = 'button'; b.style.setProperty('--i', i); b.style.setProperty('--tone', tone(e.level));
+            var nm = el('span', 'nm', e.name || e.id); nm.appendChild(el('small', '', e.owner)); b.appendChild(nm);
+            var tr = el('span', 'tr'), bar = el('i', e.lower_bound ? 'lb-open' : ''); bar.style.setProperty('--r', ((day(e.opened) - x0) / span * 100).toFixed(1) + '%'); bar.style.setProperty('--w', Math.max(1.5, (x1 - day(e.opened)) / span * 100).toFixed(1) + '%'); tr.appendChild(bar); b.appendChild(tr);
+            b.appendChild(ltr((e.lower_bound ? '≥' : '') + e.weeks, 'n'));
+            hint(b, (e.name || e.id) + '\n' + weeksText(e) + ' · מאז ' + ilDate(e.opened));
+            b.addEventListener('click', function () { openSheet('חסם', e.name || e.id, weeksText(e), [e]); });
+            $('old').appendChild(b);
+        });
+        var ax = $('old-axis'); ax.appendChild(el('div')); var mid = el('div'); mid.appendChild(el('span', '', ilDate(D.as_of))); mid.appendChild(el('span', '', ilDate(D.first_report))); ax.appendChild(mid); ax.appendChild(el('div', '', 'שבועות'));
+    };
+
+    // ───────────────────────── 6 yours to handle
+    BUILD.queue = function () {
+        D.open.slice(0, 6).forEach(function (e, i) {
+            var b = el('button', 'q'); b.type = 'button'; b.style.setProperty('--i', i); b.style.setProperty('--tone', tone(e.level));
+            b.appendChild(ltr(('0' + e.rank).slice(-2), 'rk'));
+            var mid = el('span'); mid.appendChild(el('div', 't', e.name || e.id)); mid.appendChild(el('div', 'x', e.text)); b.appendChild(mid);
+            var meta = el('span', 'meta'); meta.appendChild(el('span', 'tag lv', D.levels[e.level].icon + ' ' + D.levels[e.level].label)); meta.appendChild(el('span', 'tag', weeksText(e))); meta.appendChild(el('span', 'tag', e.owner));
+            if (e.slip_months) meta.appendChild(el('span', 'tag', 'יעד +' + e.slip_months + ' ח׳')); b.appendChild(meta);
+            b.addEventListener('click', function () { openSheet('מקום ' + e.rank, e.name || e.id, 'מקום ' + e.rank + ' בתור', [e]); });
+            $('queue').appendChild(b);
+        });
+        var all = $('queue-all'); all.textContent = 'כל ' + D.open.length + ' החסמים בתור ←';
+        all.addEventListener('click', function () { openSheet('התור', 'התור המלא', D.open.length + ' חסמים פתוחים, לפי סדר העדיפות', D.open); });
+    };
+
+    // ───────────────────────── 7 what to do
+    BUILD.ai = function () {
+        var body = $('ai-body');
+        if (!AI) { body.appendChild(el('p', 'ai-sit', empty ? 'אין חסמים פתוחים לנסח עליהם המלצות.' : 'עוד לא נוסחו המלצות לדוח הזה. לחיצה על הכפתור שולחת למודל את החסמים הראשונים בתור שלך, והוא מחזיר לכל אחד מה לעשות, מי, ועד מתי.')); if (empty) $('ai-form').hidden = true; return; }
+        var head = el('div', 'ai-head'); body.appendChild(head);
+        var full = AI.headline || '';
+        if (still || !full) head.textContent = full; else {                // the headline is typed, then stays
+            head.classList.add('typing'); var i = 0;
+            var type = function () { head.textContent = full.slice(0, ++i); if (i < full.length) setTimeout(type, 26); else setTimeout(function () { head.classList.remove('typing'); }, 900); };
+            setTimeout(type, 500);
+        }
+        if (AI.situation) body.appendChild(el('p', 'ai-sit', AI.situation));
+        var grid = el('div', 'ai-grid');
+        (AI.findings || []).forEach(function (f, i) {
+            var c = el('div', 'ai-card'); c.style.setProperty('--i', i);
+            c.appendChild(el('h4', '', f.title || '')); if (f.analysis) c.appendChild(el('p', '', f.analysis));
+            if (f.action) c.appendChild(el('div', 'act', '👉 ' + f.action)); if (f.owner) c.appendChild(el('div', 'who', 'בעלים: ' + f.owner));
+            if ((f.projects || []).length) { var pj = el('div', 'pj'); f.projects.forEach(function (id) { var e = D.open.filter(function (x) { return x.id === id; })[0]; var a = el('a', '', (e && e.name) ? e.name.slice(0, 34) : id); a.href = '/dashboard/projects/p/' + encodeURIComponent(id); pj.appendChild(a); }); c.appendChild(pj); }
+            grid.appendChild(c);
+        });
+        body.appendChild(grid);
+        [['דפוסים חוזרים', AI.patterns], ['שאלות לישיבת הסטטוס', AI.questions]].forEach(function (s) {
+            if (!s[1] || !s[1].length) return; body.appendChild(el('div', 'ai-sub', s[0])); var ul = el('ul', 'ai-list'); s[1].forEach(function (t) { ul.appendChild(el('li', '', t)); }); body.appendChild(ul);
+        });
+    };
+    $('ai-form').addEventListener('submit', function () { var b = $('ai-go'); b.disabled = true; b.textContent = 'המודל מנסח… עד חצי דקה'; });
+
+    // ───────────────────────── the player: scenes come on as they fill the frame
+    var current = 0, playing = false, timer = 0, started = performance.now(), SCENE_MS = 9000, progress = 0, lastTick = 0;
+    var chapters = $('chapters');
+    scenes.forEach(function (s, i) {
+        var c = el('button', 'chap'); c.type = 'button'; c.appendChild(el('i')); c.appendChild(el('span', '', (i + 1) + ' · ' + s.dataset.name));
+        c.addEventListener('click', function () { go(i); }); chapters.appendChild(c);
+    });
+    var mark = function () {
+        Array.prototype.forEach.call(chapters.children, function (c, i) { c.classList.toggle('on', i === current); c.classList.toggle('done', i < current); c.firstChild.style.setProperty('--p', i === current ? progress : 0); });
+        $('hud-sc').textContent = ('0' + (current + 1)).slice(-2); $('hud-name').textContent = '';
+    };
+    var activate = function (i) {
+        current = i; progress = 0;
+        scenes.forEach(function (s, j) { s.classList.toggle('on', j === i); });
+        var s = scenes[i], name = s.dataset.scene;
+        if (!s.dataset.done) { s.dataset.done = '1'; if (!(empty && name !== 'open' && name !== 'ai')) BUILD[name](); else s.querySelector('.in').appendChild(el('p', 'lead', 'אין חסמים פתוחים להציג כאן.')); }
+        else if (BUILD[name].wake) BUILD[name].wake();
+        mark();
+    };
+    var go = function (i) { i = Math.max(0, Math.min(scenes.length - 1, i)); scenes[i].scrollIntoView({ behavior: still ? 'auto' : 'smooth' }); };
+    if (still || !('IntersectionObserver' in window)) { scenes.forEach(function (s, i) { activate(i); }); scenes.forEach(function (s) { s.classList.add('on'); }); current = 0; mark(); }
+    else {
+        var io = new IntersectionObserver(function (entries) { entries.forEach(function (en) { if (en.isIntersecting && en.intersectionRatio >= .55) activate(scenes.indexOf(en.target)); }); }, { threshold: [.55] });
+        scenes.forEach(function (s) { io.observe(s); });
+        if (location.hash === '#ai') setTimeout(function () { go(scenes.length - 1); }, 60); else activate(0);
+    }
+    function stopPlay() { playing = false; $('play').classList.remove('on'); $('play').textContent = '▶'; }
+    var tick = function (now) {
+        var dt = now - (lastTick || now); lastTick = now;
+        var s = Math.floor((now - started) / 1000); $('hud-tc').textContent = [Math.floor(s / 3600), Math.floor(s / 60) % 60, s % 60].map(function (v) { return ('0' + v).slice(-2); }).join(':');
+        if (playing) {
+            progress = Math.min(1, progress + dt / SCENE_MS);
+            if (chapters.children[current]) chapters.children[current].firstChild.style.setProperty('--p', progress);
+            if (progress >= 1) { if (current < scenes.length - 1) { progress = 0; go(current + 1); } else stopPlay(); }
+        }
+        requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+    $('play').addEventListener('click', function () { playing = !playing; $('play').classList.toggle('on', playing); $('play').textContent = playing ? '❚❚' : '▶'; if (playing && current === scenes.length - 1) go(0); });
+    document.addEventListener('keydown', function (e) {
+        if (sheet.classList.contains('on')) { if (e.key === 'Escape') closeSheet(); return; }
+        if (/INPUT|TEXTAREA|SELECT/.test((e.target.tagName || ''))) return;
+        if (e.key === ' ') { e.preventDefault(); $('play').click(); }
+        else if (e.key === 'ArrowDown' || e.key === 'PageDown' || e.key === 'ArrowLeft') { e.preventDefault(); go(current + 1); }
+        else if (e.key === 'ArrowUp' || e.key === 'PageUp' || e.key === 'ArrowRight') { e.preventDefault(); go(current - 1); }
+    });
+})();
+</script>
+</body>
+</html>

@@ -114,6 +114,24 @@ def sees_project(scope: Scope, sectors, manager: str | None) -> bool:
             or manager in scope.managers)
 
 
+# The file's "לטיפול" column names a ROLE ("חסם לטיפול מנהל מגזר תכנון"). A sector
+# manager is that role by the admin's own sector assignment — not by a name match.
+OWNER_WORD = {ss.PLANNING: "תכנון", ss.EXECUTION: "ביצוע", ss.SUPERVISION: "פיקוח", ss.PM_DEPT: "מחלקה"}
+
+
+def owns_blocker(scope: Scope, owner: str | None) -> bool:
+    """Is a blocker's handler ("לטיפול") this viewer's own role?"""
+    word = OWNER_WORD.get(scope.sector or "")
+    return bool(word and owner and word in owner)
+
+
+def sees_blocker(scope: Scope, sectors, manager: str | None, owner: str | None) -> bool:
+    """A blocker is in the viewer's scope when its project is (sees_project), or
+    when the file assigns it to the viewer's role — even on a project whose
+    current stage belongs to another sector (it is theirs to handle)."""
+    return sees_project(scope, sectors, manager) or owns_blocker(scope, owner)
+
+
 def view_for(scope: Scope, p: dict) -> dict:
     """What this viewer gets from the engine output `p`."""
     all_projects = p.get("projects", [])
