@@ -642,6 +642,29 @@ async def startup():
                 if await exec_summary.reread_if_unresolved(session):
                     print("exec_summary: re-read the master file — more summary cards now open their projects")
                 summary = await exec_summary.latest(session) or {}
+            # one-off: the shape of the risks / "to handle" columns, to design the blockers page
+            try:
+                from collections import Counter as _Counter
+                from app.services import pattern_service as _ps
+                async with async_session_maker() as session:
+                    _frames, _p = await _ps.frames_and_patterns(session)
+                _s = _ps.canonical_snaps(_frames.snaps)
+                _last = _s[_s["report_date"] == _s["report_date"].max()]
+                _txt = lambda v: v.strip() if isinstance(v, str) and v.strip() else None   # noqa: E731
+                _handle = _Counter(_txt(v)[:70] for v in _last["to_handle"] if _txt(v))
+                _per_report = {str(d): int(g["risks"].map(lambda v: bool(_txt(v))).sum()) for d, g in _s.groupby("report_date")}
+                _lens = sorted(len(_txt(v)) for v in _last["risks"] if _txt(v))
+                _users = _Counter()
+                print("BLOCKERS_SHAPE " + _json.dumps({
+                    "reports": len(_per_report), "with_risk_per_report": _per_report,
+                    "to_handle_distinct": len(_handle), "to_handle_top": _handle.most_common(45),
+                    "risk_len": {"n": len(_lens), "median": _lens[len(_lens) // 2] if _lens else 0, "max": _lens[-1] if _lens else 0},
+                    "risk_multiline_share": round(sum(1 for v in _last["risks"] if _txt(v) and "\n" in v) / max(1, len(_lens)), 2),
+                    "topics": {k: v.get("value") if isinstance(v, dict) else v for k, v in list((_p.get("risk_topics") or {}).items())[:14]} if isinstance(_p.get("risk_topics"), dict) else str(type(_p.get("risk_topics")))[:40],
+                    "p_keys": list(_p.keys())[:40],
+                }, ensure_ascii=False, default=str), flush=True)
+            except Exception as e:
+                print(f"Warning: blockers shape look failed: {e}")
             print("EXEC_SUMMARY_CARDS " + _json.dumps(
                 {"sheet": summary.get("sheet"), "cards": [
                     {"label": k.get("label"), "value": k.get("value"), "formula": k.get("formula"),
