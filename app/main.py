@@ -642,6 +642,40 @@ async def startup():
                 if await exec_summary.reread_if_unresolved(session):
                     print("exec_summary: re-read the master file — more summary cards now open their projects")
                 summary = await exec_summary.latest(session) or {}
+            # one-off look at how earlier files defined the same cards, and at the record
+            # sheet's column names — to give the typed-number cards a definition in code
+            try:
+                from sqlalchemy import select as _select
+                from app.models import KnowledgeFile, ProjectExecSummary
+                async with async_session_maker() as session:
+                    old = (await session.execute(_select(ProjectExecSummary.sheet_name, ProjectExecSummary.payload)
+                                                 .order_by(ProjectExecSummary.id.desc()).limit(40))).all()
+                    kf = (await session.execute(_select(KnowledgeFile).where(KnowledgeFile.is_master)
+                                                .order_by(KnowledgeFile.created_at.desc()).limit(1))).scalars().first()
+                seen, hist = set(), []
+                for sheet_name, payload in old:
+                    if sheet_name in seen:
+                        continue
+                    seen.add(sheet_name)
+                    hist.append({"sheet": sheet_name, "cards": [[k.get("label"), k.get("value"), k.get("formula")]
+                                                                 for k in (payload or {}).get("kpis") or []]})
+                print("EXEC_SUMMARY_HISTORY " + _json.dumps(hist[:6], ensure_ascii=False), flush=True)
+                if kf and kf.file_path:
+                    def _headers(path):
+                        import openpyxl
+                        wb = openpyxl.load_workbook(path, data_only=True, read_only=True)
+                        try:
+                            rec = next((n for n in wb.sheetnames if exec_summary.RECORD_MARKER in n
+                                        and exec_summary.DRAFT_MARKER not in n), None)
+                            rows = [list(r) for r in wb[rec].iter_rows(min_row=1, max_row=6, values_only=True)] if rec else []
+                            head = next((r for r in rows if any(isinstance(v, str) and v.strip() == "זיהוי" for v in r)), [])
+                            return {"sheets": wb.sheetnames, "record": rec, "headers": [str(v) if v is not None else None for v in head]}
+                        finally:
+                            wb.close()
+                    print("RECORD_HEADERS " + _json.dumps(await asyncio.get_running_loop().run_in_executor(None, _headers, kf.file_path),
+                                                          ensure_ascii=False), flush=True)
+            except Exception as e:
+                print(f"Warning: summary history look failed: {e}")
             print("EXEC_SUMMARY_CARDS " + _json.dumps(
                 {"sheet": summary.get("sheet"), "cards": [
                     {"label": k.get("label"), "value": k.get("value"), "formula": k.get("formula"),
