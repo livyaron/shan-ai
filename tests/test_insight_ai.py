@@ -329,3 +329,38 @@ async def test_a_failed_call_is_retried_a_minute_later(monkeypatch):
     monkeypatch.setattr(ai, "_ask", lambda *a: (_ for _ in ()).throw(RuntimeError("down")))
     with pytest.raises(RuntimeError):
         await ai._ask_retrying("s", "c", "area", attempts=1)
+
+
+# ── projects are called by name in the prose (display only) ───────────────
+
+NAMES = {"WBE-087": "תחמ״ש גליל מערבי — הרחבת שדה 161", "WBE-08": "תחנה קצרה", "WBC-119": "תחנת משנה עם שם ארוך מאוד שלא נכנס במשפט אחד בשום אופן"}
+
+
+def test_an_identifier_alone_gets_the_projects_name():
+    from app.services import insight_ai as ai
+    out = ai.name_projects("ב-WBE-087 ההיתר מתעכב, וכך גם ב-[WBE-08].", NAMES)
+    assert out == "ב-תחמ״ש גליל מערבי — הרחבת שדה 161 (WBE-087) ההיתר מתעכב, וכך גם ב-תחנה קצרה (WBE-08)."
+
+
+def test_a_long_name_is_cut_on_a_word_and_an_unknown_identifier_is_left_alone():
+    from app.services import insight_ai as ai
+    assert ai.short_name(NAMES["WBC-119"]) == "תחנת משנה עם שם ארוך מאוד שלא נכנס…"
+    assert ai.name_projects("WBC-119 ו-WBX-999", NAMES) == "תחנת משנה עם שם ארוך מאוד שלא נכנס… (WBC-119) ו-WBX-999"
+    assert ai.name_projects("XWBE-087 / WBE-0871", NAMES) == "XWBE-087 / WBE-0871"      # part of another token
+
+
+def test_text_that_already_names_the_project_is_not_doubled():
+    from app.services import insight_ai as ai
+    text = "תחמ״ש גליל מערבי (WBE-087) ממתין להיתר"
+    assert ai.name_projects(text, NAMES) == text
+
+
+def test_for_display_names_the_prose_but_keeps_the_project_lists_as_identifiers():
+    from app.services import insight_ai as ai
+    row = {"payload": {"headline": "WBE-08 בסיכון", "findings": [{"analysis": "ראו WBE-087", "projects": ["WBE-087"]}], "_aliases": {}}}
+    shown = ai.for_display(row, NAMES)["payload"]
+    assert shown["headline"] == "תחנה קצרה (WBE-08) בסיכון"
+    assert shown["findings"][0]["analysis"].startswith("ראו תחמ״ש גליל מערבי")
+    assert shown["findings"][0]["projects"] == ["WBE-087"]                     # the template links these itself
+    assert row["payload"]["headline"] == "WBE-08 בסיכון"                        # the stored reply is untouched
+    assert ai.for_display(row)["payload"]["headline"] == "WBE-08 בסיכון"        # no names given → as before

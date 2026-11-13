@@ -634,6 +634,17 @@ async def startup():
             from app.services import forecast_reliability      # same idea, for the projects' forecasts
             async with async_session_maker() as session:
                 await forecast_reliability.snapshot(session)
+            # the summary cards: which of the file's formulas could be re-run (a card
+            # whose formula could not opens no project list) — labels and formulas only
+            import json as _json
+            from app.services import exec_summary
+            async with async_session_maker() as session:
+                summary = await exec_summary.latest(session) or {}
+            print("EXEC_SUMMARY_CARDS " + _json.dumps(
+                {"sheet": summary.get("sheet"), "cards": [
+                    {"label": k.get("label"), "value": k.get("value"), "formula": k.get("formula"),
+                     "listed": None if k.get("ids") is None else len(k["ids"])}
+                    for k in summary.get("kpis") or []]}, ensure_ascii=False), flush=True)
         except Exception as e:
             print(f"Warning: lessons process metrics failed: {e}")
     asyncio.create_task(_log_lessons_process())
