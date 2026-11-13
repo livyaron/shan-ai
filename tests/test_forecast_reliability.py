@@ -1,0 +1,94 @@
+"""Forecast reliability — pure `compute` over a small synthetic history. No DB."""
+import json
+from datetime import date
+from pathlib import Path
+
+import pandas as pd
+
+from app.services import forecast_reliability as fr
+from app.services import pattern_service as ps
+
+D1, D2, D3 = date(2026, 3, 25), date(2026, 7, 8), date(2026, 9, 16)
+
+
+def _snap(pid, d, stage, fc, dev):
+    return {"project_id": pid, "snapshot_date": d, "stage": stage, "fc": fc, "dev": dev,
+            "risks": None, "to_handle": None, "finish_date_text": None}
+
+
+def _frames() -> ps.Frames:
+    snaps = [
+        # P1 (planning): the forecast slips ~6 months twice; the baseline follows once.
+        _snap(1, D1, "תכנון", date(2026, 12, 31), date(2026, 12, 31)),
+        _snap(1, D2, "תכנון", date(2027, 6, 30), date(2027, 6, 30)),
+        _snap(1, D3, "בדיקות", date(2027, 12, 31), date(2027, 6, 30)),
+        # P2 (permit): dates never move.
+        *[_snap(2, d, "קבלת היתר", date(2027, 3, 1), date(2027, 3, 1)) for d in (D1, D2, D3)],
+        # P3: finished — its fixed date must not dilute anything.
+        *[_snap(3, d, "הסתיים", date(2026, 1, 1), date(2026, 1, 1)) for d in (D1, D2, D3)],
+        # P4: no dated forecast at all.
+        *[_snap(4, d, "עבודה אזרחית והרכבות", None, date(2027, 1, 1)) for d in (D1, D2, D3)],
+    ]
+    projects = [{"project_id": i, "identifier": f"P-{i}", "name": "x", "manager": f"מנהל {i}",
+                 "project_type": t, "is_active": True} for i, t in ((1, "הרחבה"), (2, "הקמה"), (3, "הרחבה"), (4, "שוש"))]
+    return ps.Frames(pd.DataFrame(snaps), pd.DataFrame(projects),
+                     pd.DataFrame(columns=["project_id", "week_date", "text", "text_hash"]))
+
+
+R = fr.compute(_frames())
+
+
+def test_span_and_population():
+    assert (R["reports"], R["first_report"], R["last_report"]) == (3, "2026-03-25", "2026-09-16")
+    assert R["projects_with_two_dated_reports"] == 2            # P1 and P2; P3 is finished, P4 undated
+
+
+def test_a_move_belongs_to_the_stage_the_project_was_in():
+    plan, permit = R["by_stage"]["תכנון"], R["by_stage"]["קבלת היתר"]
+    assert (plan["intervals"], plan["moved_later"], plan["moved_later_pct"]) == (2, 2, 100)
+    assert plan["median_move_months"] == 6.0                    # 181 and 184 days
+    assert (permit["intervals"], permit["moved_later"], permit["slip_months_per_year"]) == (2, 0, 0.0)
+    assert "בדיקות" not in R["by_stage"]                         # nothing was measured FROM that stage
+    assert "הסתיים" not in R["by_stage"]
+
+
+def test_slip_per_year_and_the_realism_factor():
+    plan = R["by_stage"]["תכנון"]
+    # 365 days of slip in 175 days of calendar → 25 months a year: no factor can fix that
+    assert plan["slip_months_per_year"] == 25.0 and plan["realism_factor"] is None
+    assert R["by_stage"]["קבלת היתר"]["realism_factor"] == 1.0
+    whole = R["all"]
+    assert whole["slip_months_per_year"] == 12.5 and whole["realism_factor"] is None
+    assert fr._rate([(61, 365.25, 1)])["realism_factor"] == 1.2   # 2 months a year → ×1.2
+
+
+def test_small_samples_are_marked_not_hidden():
+    assert R["by_stage"]["תכנון"]["small_sample"] is True
+
+
+def test_by_how_far_ahead_the_first_forecast_looked():
+    h = R["by_first_forecast_horizon"]
+    assert list(h) == ["6–12 חודשים"]                            # P1 looked 9 months ahead, P2 11
+    b = h["6–12 חודשים"]
+    assert (b["projects"], b["moved_later_pct"]) == (2, 50)
+    assert (b["median_drift_months"], b["p75_drift_months"]) == (6.0, 9.0)    # 0 and 12 months
+    assert b["median_months_observed"] == 5.7
+
+
+def test_a_baseline_that_moved_with_the_forecast_is_counted():
+    assert R["baseline_moved_with_forecast"] == {"forecast_later": 1, "baseline_also_later": 1, "pct": 100}
+
+
+def test_empty_history():
+    empty = ps.Frames(pd.DataFrame(columns=["project_id", "snapshot_date", "stage", "fc", "dev", "risks",
+                                            "to_handle", "finish_date_text"]),
+                      pd.DataFrame(columns=["project_id", "identifier", "name", "manager", "project_type", "is_active"]),
+                      pd.DataFrame(columns=["project_id", "week_date", "text", "text_hash"]))
+    assert fr.compute(empty) == {"reports": 0}
+
+
+def test_no_project_or_person_in_the_result_and_no_constant_respelled():
+    blob = json.dumps(ps._plain(R), ensure_ascii=False)
+    assert "P-1" not in blob and "מנהל 1" not in blob
+    src = Path(fr.__file__).read_text(encoding="utf-8")
+    assert "ps.MOVE_DAYS" in src and "ps.MONTH_DAYS" in src and "30.44" not in src and "= 15" not in src
