@@ -1,0 +1,621 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Shan-AI — ניתוח עיכובים</title>
+    <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        /* ניתוח עיכובים. Every number comes from forecast_reliability (server, no LLM);
+           this page only draws it. Motion is decoration: with it switched off
+           (prefers-reduced-motion) every figure, bar and table is already in place. */
+        :root {
+            --bg-deep: #070b12; --bg-card: #0f1826; --bg-raise: #131f31; --border: #1a2d47; --border-hi: #1e3a5f;
+            --cyan: #00d4ff; --purple: #8b9cf4;
+            --ok: #199e70; --warn: #e0a030; --bad: #e2533a;          /* the slip scale: none → heavy */
+            --text-1: #e2e8f0; --text-2: #94a3b8; --text-3: #64748b;
+            --mono: 'IBM Plex Mono', monospace; --ui: 'Heebo', sans-serif;
+            --ease: cubic-bezier(.22, 1, .36, 1);
+        }
+        html, body { overflow-x: clip; }
+        body { background: var(--bg-deep); color: var(--text-1); font-family: var(--ui); }
+        .wrap { max-width: 1320px; margin: 0 auto; padding: 1.5rem 1rem 5rem; }
+        bdi.ltr, .ltr { direction: ltr; unicode-bidi: isolate; }
+        .mono { font-family: var(--mono); }
+
+        /* ── header ── */
+        .da-head { display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: .8rem; margin-bottom: 1.4rem; }
+        .da-head h1 { font-size: clamp(1.5rem, 3vw, 2.1rem); font-weight: 800; margin: 0; letter-spacing: -.01em;
+                      background: linear-gradient(90deg, #fff 0%, var(--cyan) 55%, var(--purple) 100%);
+                      -webkit-background-clip: text; background-clip: text; color: transparent; }
+        .da-sub { color: var(--text-2); font-size: .9rem; margin-top: .25rem; }
+        .da-span { color: var(--text-3); font-size: .8rem; margin-top: .15rem; }
+
+        /* ── the four headline figures ── */
+        .da-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: .9rem; margin-bottom: 1.4rem; }
+        .da-kpi { position: relative; text-align: right; background: var(--bg-card); border: 1px solid var(--border);
+                  border-radius: 14px; padding: 1rem 1.1rem 1.05rem; color: inherit; overflow: hidden;
+                  transition: border-color .25s, box-shadow .3s, transform .2s var(--ease);
+                  animation: daRise .6s var(--ease) backwards; animation-delay: calc(var(--i, 0) * 70ms); }
+        button.da-kpi { cursor: pointer; }
+        button.da-kpi:hover, button.da-kpi:focus-visible { border-color: var(--cyan); box-shadow: 0 0 34px rgba(0,212,255,.14); transform: translateY(-2px); outline: none; }
+        .da-kpi::before { content: ''; position: absolute; inset: 0 0 auto 0; height: 2px;
+                          background: linear-gradient(90deg, transparent, var(--tone, var(--cyan)), transparent);
+                          background-size: 200% 100%; animation: daSweep 5s linear infinite; }
+        .da-kpi .num { font-family: var(--mono); font-weight: 600; font-size: clamp(2rem, 4vw, 2.8rem); line-height: 1.05; color: var(--tone, var(--cyan));
+                       text-shadow: 0 0 26px color-mix(in srgb, var(--tone, var(--cyan)) 45%, transparent); }
+        .da-kpi .unit { font-size: .95rem; color: var(--text-2); font-family: var(--ui); margin-inline-start: .3rem; }
+        .da-kpi .lbl { color: var(--text-1); font-size: .95rem; margin-top: .35rem; font-weight: 500; }
+        .da-kpi .hint { color: var(--text-3); font-size: .78rem; margin-top: .15rem; }
+        .da-kpi .go { display: block; margin-top: .55rem; color: var(--text-3); font-size: .78rem; transition: color .2s, transform .25s var(--ease); }
+        button.da-kpi:hover .go { color: var(--cyan); transform: translateX(-4px); }
+
+        /* ── panels ── */
+        .da-panel { background: var(--bg-card); border: 1px solid var(--border); border-radius: 14px; padding: 1.15rem 1.2rem 1.25rem; margin-bottom: 1.4rem; }
+        .da-panel h2 { font-size: 1.12rem; font-weight: 700; color: var(--cyan); margin: 0; }
+        .da-panel .lead { color: var(--text-2); font-size: .88rem; margin: .2rem 0 1rem; max-width: 80ch; }
+        .da-note { color: var(--text-3); font-size: .8rem; margin-top: .8rem; }
+
+        /* ── the project's path: where the time leaks ── */
+        .da-pipe-scroll { overflow-x: auto; overflow-y: hidden; padding-bottom: .3rem; }
+        .da-pipe { position: relative; min-width: 860px; height: 330px; }   /* the script sets the height from the tallest station */
+        .da-pipe canvas { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+        .da-stations { position: absolute; inset: 0; display: flex; align-items: stretch; }
+        .da-station { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; align-items: center; padding: 0 .25rem; }
+        .da-station > * { flex: none; }      /* a tall stack of chips must not squeeze the node off the line */
+        .da-station .step { color: var(--text-3); font-family: var(--mono); font-size: .68rem; letter-spacing: .12em; height: 22px; }
+        .da-station .node { margin-top: 56px; width: 16px; height: 16px; border-radius: 50%; background: var(--bg-deep);
+                            border: 2px solid var(--tone, var(--cyan)); box-shadow: 0 0 0 5px rgba(0,0,0,.35), 0 0 18px var(--tone, var(--cyan)); flex: none; }
+        .da-station .chips { margin-top: 118px; display: flex; flex-direction: column; gap: .35rem; width: 100%; align-items: center; }
+        .da-chip { width: 100%; max-width: 150px; background: var(--bg-raise); border: 1px solid var(--border-hi); border-radius: 10px;
+                   color: var(--text-1); padding: .32rem .45rem .38rem; text-align: center; cursor: pointer; line-height: 1.15;
+                   transition: border-color .2s, box-shadow .25s, transform .18s var(--ease); }
+        .da-chip:hover, .da-chip:focus-visible { border-color: var(--tone); box-shadow: 0 0 22px color-mix(in srgb, var(--tone) 35%, transparent); transform: translateY(-2px); outline: none; }
+        .da-chip .nm { display: block; font-size: .78rem; color: var(--text-2); }
+        .da-chip .v { display: block; font-family: var(--mono); font-weight: 600; font-size: 1.02rem; color: var(--tone); }
+        .da-legend { display: flex; flex-wrap: wrap; gap: .4rem 1.2rem; color: var(--text-3); font-size: .78rem; margin-top: .6rem; align-items: center; }
+        .da-legend .scale { width: 140px; height: 6px; border-radius: 3px; background: linear-gradient(270deg, var(--ok), var(--warn), var(--bad)); }
+
+        /* ── tabs + bar rows ── */
+        .da-tabs { display: flex; flex-wrap: wrap; gap: .4rem; margin: .2rem 0 1rem; }
+        .da-tab { background: transparent; border: 1px solid var(--border-hi); color: var(--text-2); border-radius: 999px; padding: .32rem .95rem; font-size: .88rem;
+                  cursor: pointer; transition: color .2s, border-color .2s, background-color .2s, box-shadow .25s; }
+        .da-tab:hover { color: var(--text-1); border-color: var(--cyan); }
+        .da-tab[aria-selected="true"] { color: #04121a; background: var(--cyan); border-color: var(--cyan); font-weight: 600; box-shadow: 0 0 22px rgba(0,212,255,.35); }
+        .da-tab:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
+        .da-rows { display: grid; gap: .3rem; }
+        .da-rowhead, .da-row { display: grid; grid-template-columns: minmax(150px, 1.25fr) minmax(120px, 3fr) 92px 74px 84px 70px; gap: .7rem; align-items: center; }
+        .da-rowhead { color: var(--text-3); font-size: .76rem; padding: 0 .7rem .25rem; border-bottom: 1px solid var(--border); }
+        .da-rowhead span:nth-child(n+3), .da-row .c { text-align: left; }
+        .da-row { width: 100%; background: transparent; border: 1px solid transparent; border-radius: 10px; color: inherit; padding: .5rem .7rem; text-align: right; cursor: pointer;
+                  transition: background-color .18s, border-color .18s; animation: daRise .5s var(--ease) backwards; animation-delay: calc(var(--i, 0) * 38ms); }
+        .da-row:hover, .da-row:focus-visible { background: rgba(0,212,255,.045); border-color: var(--border-hi); outline: none; }
+        .da-row .nm { font-weight: 500; }
+        .da-row .small { display: inline-block; margin-inline-start: .4rem; font-size: .68rem; color: var(--warn); border: 1px solid color-mix(in srgb, var(--warn) 45%, transparent); border-radius: 5px; padding: 0 .3rem; }
+        .da-row .track { position: relative; height: 12px; border-radius: 6px; background: rgba(255,255,255,.045); overflow: hidden; }
+        .da-row .fill { position: absolute; inset: 0 0 0 auto; width: var(--w, 0%); border-radius: 6px; background: linear-gradient(270deg, color-mix(in srgb, var(--tone) 55%, transparent), var(--tone));
+                        box-shadow: 0 0 14px color-mix(in srgb, var(--tone) 55%, transparent); transform-origin: right center; animation: daGrow .9s var(--ease) backwards; animation-delay: calc(var(--i, 0) * 38ms + 120ms); }
+        .da-row .fill.neg { background: repeating-linear-gradient(135deg, var(--ok) 0 5px, transparent 5px 9px); box-shadow: none; opacity: .8; }
+        .da-row .c { font-family: var(--mono); font-size: .9rem; color: var(--text-2); white-space: nowrap; }
+        .da-row .c.main { color: var(--tone); font-weight: 600; font-size: 1.02rem; }
+        .da-row .arrow { color: var(--text-3); transition: transform .25s var(--ease), color .2s; }
+        .da-row:hover .arrow { color: var(--cyan); transform: translateX(-4px); }
+
+        /* ── all projects (the table twin) ── */
+        .da-search { background: var(--bg-deep); border: 1px solid var(--border-hi); color: var(--text-1); border-radius: 9px; padding: .42rem .8rem; width: min(340px, 100%); font-size: .9rem; }
+        .da-search:focus { outline: none; border-color: var(--cyan); box-shadow: 0 0 0 3px rgba(0,212,255,.16); }
+        .da-tablewrap { overflow-x: auto; margin-top: .8rem; }
+        table.da-t { width: 100%; border-collapse: collapse; font-size: .88rem; min-width: 760px; }
+        table.da-t th { color: var(--text-2); font-weight: 500; text-align: right; border-bottom: 1px solid var(--border-hi); padding: .5rem .55rem; white-space: nowrap; cursor: pointer; user-select: none; }
+        table.da-t th[aria-sort] { color: var(--cyan); }
+        table.da-t th .dir { font-size: .7rem; margin-inline-start: .25rem; }
+        table.da-t td { border-bottom: 1px solid var(--border); padding: .5rem .55rem; vertical-align: middle; }
+        table.da-t td.n { font-family: var(--mono); white-space: nowrap; }
+        table.da-t tbody tr { cursor: pointer; transition: background-color .15s; }
+        table.da-t tbody tr:hover, table.da-t tbody tr:focus-visible { background: rgba(0,212,255,.05); outline: none; }
+        .da-id { font-family: var(--mono); color: var(--text-3); font-size: .78rem; }
+        .da-more { margin-top: .8rem; }
+
+        /* ── the drill sheet ── */
+        .da-backdrop { position: fixed; inset: 0; background: rgba(3,6,12,.62); backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
+                       opacity: 0; visibility: hidden; transition: opacity .3s, visibility 0s .3s; z-index: 1190; }
+        .da-backdrop.on { opacity: 1; visibility: visible; transition-delay: 0s; }
+        .da-sheet { position: fixed; inset: 0 auto 0 0; width: min(820px, 100vw); background: linear-gradient(180deg, #0d1626, #090f1a);
+                    border-inline-start: 1px solid var(--border-hi); box-shadow: 30px 0 80px rgba(0,0,0,.6); z-index: 1200; display: flex; flex-direction: column;
+                    transform: translateX(-102%); visibility: hidden; transition: transform .45s var(--ease), visibility 0s .45s; }
+        .da-sheet.on { transform: none; visibility: visible; transition-delay: 0s; }
+        .da-sheet header { padding: 1.1rem 1.2rem .9rem; border-bottom: 1px solid var(--border); position: relative; }
+        .da-sheet header::after { content: ''; position: absolute; inset: auto 0 -1px 0; height: 1px; background: linear-gradient(90deg, transparent, var(--tone, var(--cyan)), transparent); }
+        .da-sheet .crumb { color: var(--text-3); font-size: .78rem; }
+        .da-sheet h3 { font-size: 1.3rem; font-weight: 700; margin: .1rem 0 .25rem; color: var(--tone, var(--cyan)); }
+        .da-sheet .facts { display: flex; flex-wrap: wrap; gap: .3rem 1.1rem; color: var(--text-2); font-size: .85rem; }
+        .da-sheet .facts b { font-family: var(--mono); color: var(--text-1); font-weight: 600; }
+        .da-close { position: absolute; left: 1rem; top: 1rem; width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--border-hi); background: transparent; color: var(--text-2); cursor: pointer; font-size: 1rem; transition: color .2s, border-color .2s, transform .25s var(--ease); }
+        .da-close:hover, .da-close:focus-visible { color: #fff; border-color: var(--cyan); transform: rotate(90deg); outline: none; }
+        .da-sheet .tools { padding: .75rem 1.2rem; display: flex; gap: .6rem; align-items: center; flex-wrap: wrap; border-bottom: 1px solid var(--border); }
+        .da-sheet .body { overflow-y: auto; padding: .6rem .7rem 2rem; flex: 1; overscroll-behavior: contain; }
+        .da-proj { border: 1px solid transparent; border-radius: 12px; margin-bottom: .25rem; animation: daRise .45s var(--ease) backwards; animation-delay: calc(min(var(--i, 0), 14) * 30ms); }
+        .da-proj.open { border-color: var(--border-hi); background: rgba(255,255,255,.018); }
+        .da-proj > button { width: 100%; display: grid; grid-template-columns: 30px minmax(0, 1fr) 150px 22px; gap: .7rem; align-items: center; background: transparent; border: 0; color: inherit; padding: .55rem .6rem; text-align: right; cursor: pointer; border-radius: 12px; transition: background-color .18s; }
+        .da-proj > button:hover, .da-proj > button:focus-visible { background: rgba(0,212,255,.05); outline: none; }
+        .da-proj .rank { font-family: var(--mono); color: var(--text-3); font-size: .8rem; }
+        .da-proj .title { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .da-proj .tags { color: var(--text-3); font-size: .78rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .da-proj .val { text-align: left; }
+        .da-proj .val .v { font-family: var(--mono); font-weight: 600; color: var(--tone); }
+        .da-proj .val .track { height: 5px; border-radius: 3px; background: rgba(255,255,255,.05); margin-top: .3rem; position: relative; overflow: hidden; }
+        .da-proj .val .fill { position: absolute; inset: 0 0 0 auto; width: var(--w, 0%); background: var(--tone); border-radius: 3px; transform-origin: right center; animation: daGrow .7s var(--ease) backwards; }
+        .da-proj .caret { color: var(--text-3); transition: transform .3s var(--ease); }
+        .da-proj.open .caret { transform: rotate(-90deg); color: var(--cyan); }
+        .da-detail { padding: .2rem .9rem 1rem; animation: daFade .35s ease backwards; }
+        .da-detail .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: .5rem .9rem; margin-bottom: .8rem; font-size: .84rem; color: var(--text-2); }
+        .da-detail .grid b { display: block; color: var(--text-1); font-weight: 500; }
+        .da-spark { width: 100%; height: 170px; display: block; background: rgba(0,0,0,.22); border: 1px solid var(--border); border-radius: 10px; }
+        .da-spark .line { fill: none; stroke: var(--cyan); stroke-width: 2.2; stroke-linejoin: round; stroke-dasharray: 1; stroke-dashoffset: 1; animation: daDraw 1.1s var(--ease) .1s forwards; filter: drop-shadow(0 0 5px rgba(0,212,255,.6)); }
+        .da-spark .dot { animation: daFade .4s ease backwards; }
+        .da-spark text { fill: var(--text-3); font-family: var(--mono); font-size: 10.5px; }
+        .da-events { width: 100%; border-collapse: collapse; font-size: .83rem; margin-top: .7rem; }
+        .da-events th { color: var(--text-3); font-weight: 500; text-align: right; padding: .3rem .4rem; border-bottom: 1px solid var(--border); white-space: nowrap; }
+        .da-events td { padding: .32rem .4rem; border-bottom: 1px solid rgba(26,45,71,.6); white-space: nowrap; }
+        .da-events td.n { font-family: var(--mono); }
+        .da-link { display: inline-block; margin-top: .8rem; color: var(--cyan); text-decoration: none; border: 1px solid var(--border-hi); border-radius: 9px; padding: .38rem .9rem; font-size: .88rem; transition: border-color .2s, box-shadow .25s, transform .18s var(--ease); }
+        .da-link:hover { border-color: var(--cyan); box-shadow: 0 0 22px rgba(0,212,255,.2); transform: translateY(-1px); color: #fff; }
+        .da-empty { color: var(--text-3); padding: 2rem 1rem; text-align: center; }
+
+        @keyframes daRise { from { opacity: 0; transform: translateY(14px); } }
+        @keyframes daFade { from { opacity: 0; } }
+        @keyframes daGrow { from { transform: scaleX(0); } }
+        @keyframes daDraw { to { stroke-dashoffset: 0; } }
+        @keyframes daSweep { from { background-position: 100% 0; } to { background-position: -100% 0; } }
+
+        @media (max-width: 760px) {
+            .da-rowhead { display: none; }
+            .da-row { grid-template-columns: minmax(0, 1fr) 84px; row-gap: .35rem; }
+            .da-row .track { grid-column: 1 / -1; grid-row: 2; }
+            .da-row .c:not(.main), .da-row .arrow { display: none; }
+            .da-proj > button { grid-template-columns: 24px minmax(0, 1fr) 96px 16px; gap: .45rem; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+            *, *::before, *::after { animation: none !important; transition: none !important; }
+            .da-spark .line { stroke-dashoffset: 0; }
+        }
+    </style>
+</head>
+<body>
+{% include "_navbar.html" %}
+<div class="wrap">
+    <div class="da-head">
+        <div>
+            <h1>⏱ ניתוח עיכובים</h1>
+            <div class="da-sub">כמה זז יעד החשמול המסתמן, איפה בדרך, ובאילו פרויקטים — מחושב מהדוחות השבועיים בלבד, ללא מודל שפה.</div>
+            <div class="da-span" id="da-span"></div>
+        </div>
+        <div class="d-flex gap-2 flex-wrap">
+            <a href="/dashboard/projects/insights" class="btn btn-outline-info btn-sm">🧠 דפוסים וסיכונים</a>
+            <a href="/dashboard/projects" class="btn btn-outline-secondary btn-sm">→ חזרה לפרויקטים</a>
+        </div>
+    </div>
+
+    <div id="da-root">
+        <div class="da-kpis" id="da-kpis"></div>
+
+        <section class="da-panel" aria-labelledby="da-h-pipe">
+            <h2 id="da-h-pipe">הדרך לחשמול — איפה הזמן דולף</h2>
+            <p class="lead">כל תחנה היא שלב בדרך. המספר הוא כמה חודשים זז יעד החשמול לכל שנה שפרויקט שוהה בשלב. ככל שהשלב דולף יותר, הזרם בו איטי יותר והטפטוף חזק יותר. לחיצה על שלב פותחת את הפרויקטים שמאחוריו.</p>
+            <div class="da-pipe-scroll"><div class="da-pipe" id="da-pipe"><canvas id="da-canvas" aria-hidden="true"></canvas><div class="da-stations" id="da-stations"></div></div></div>
+            <div class="da-legend"><span>ללא הזזה</span><span class="scale" aria-hidden="true"></span><span>8 חודשים לשנה ומעלה</span><span id="da-offladder"></span></div>
+        </section>
+
+        <section class="da-panel" aria-labelledby="da-h-cut">
+            <h2 id="da-h-cut">חיתוכים</h2>
+            <p class="lead" id="da-cut-lead"></p>
+            <div class="da-tabs" role="tablist" id="da-tabs"></div>
+            <div class="da-rowhead" id="da-rowhead"></div>
+            <div class="da-rows" id="da-rows" role="tabpanel"></div>
+            <div class="da-note" id="da-cut-note"></div>
+        </section>
+
+        <section class="da-panel" aria-labelledby="da-h-all">
+            <h2 id="da-h-all">כל הפרויקטים</h2>
+            <p class="lead">מהיעד הראשון שנמסר לכל פרויקט ועד האחרון. לחיצה על שורה פותחת את סיפור ההזזות שלו.</p>
+            <input class="da-search" id="da-q" type="search" placeholder="חיפוש: שם, מזהה, שלב, מנהל פרויקט" aria-label="חיפוש פרויקט">
+            <div class="da-tablewrap"><table class="da-t" id="da-table"><thead><tr id="da-thead"></tr></thead><tbody id="da-tbody"></tbody></table></div>
+            <button class="btn btn-outline-secondary btn-sm da-more" id="da-more" hidden>הצג עוד</button>
+        </section>
+
+        <div class="da-note">
+            כל המספרים הם חסם תחתון: ההזזה נמדדת מול התחזית האחרונה, לא מול חשמול בפועל. הזזה נספרת בשלב שבו הפרויקט היה כשנרשמה — הסיבה לה יכולה להיות מוקדמת יותר.
+            {% if not whole_division %}מוצגים ומחושבים רק הפרויקטים שבתחומך.{% endif %}
+        </div>
+    </div>
+</div>
+
+<div class="da-backdrop" id="da-backdrop"></div>
+<aside class="da-sheet" id="da-sheet" role="dialog" aria-modal="true" aria-labelledby="da-sheet-title" aria-hidden="true">
+    <header>
+        <button class="da-close" id="da-close" aria-label="סגור">✕</button>
+        <div class="crumb" id="da-sheet-crumb"></div>
+        <h3 id="da-sheet-title"></h3>
+        <div class="facts" id="da-sheet-facts"></div>
+    </header>
+    <div class="tools">
+        <input class="da-search" id="da-sheet-q" type="search" placeholder="חיפוש בתוך הרשימה" aria-label="חיפוש בתוך הרשימה">
+        <span class="da-span" id="da-sheet-count"></span>
+    </div>
+    <div class="body" id="da-sheet-body"></div>
+</aside>
+
+<script type="application/json" id="da-data">{{ data|tojson }}</script>
+<script>
+(function () {
+    'use strict';
+    // Everything is built with createElement + textContent — project names and report text never pass through the HTML parser.
+    var D = JSON.parse(document.getElementById('da-data').textContent);
+    var still = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    var $ = function (id) { return document.getElementById(id); };
+    var el = function (tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined && text !== null) e.textContent = text; return e; };
+    var svg = function (tag, attrs) { var e = document.createElementNS('http://www.w3.org/2000/svg', tag); for (var k in attrs) e.setAttribute(k, attrs[k]); return e; };
+    var ilDate = function (iso) { var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso || ''); return m ? m[3] + '/' + m[2] + '/' + m[1] : '—'; };
+    var signed = function (v) { return v === null || v === undefined ? '—' : (v > 0 ? '+' : '') + v.toFixed(1); };
+    var ltr = function (text, cls) { var b = el('bdi', 'ltr' + (cls ? ' ' + cls : ''), text); return b; };
+
+    // The slip scale: 0 → green, 4 → amber, 8+ → red (months a year). Earlier than planned is green too.
+    var STOPS = [[0, [25, 158, 112]], [4, [224, 160, 48]], [8, [226, 83, 58]]];
+    var heat = function (v) {
+        if (v === null || v === undefined || v <= 0) return 'rgb(25,158,112)';
+        if (v >= 8) return 'rgb(226,83,58)';
+        var a = v < 4 ? STOPS[0] : STOPS[1], b = v < 4 ? STOPS[1] : STOPS[2], t = (v - a[0]) / (b[0] - a[0]);
+        return 'rgb(' + a[1].map(function (c, i) { return Math.round(c + (b[1][i] - c) * t); }).join(',') + ')';
+    };
+
+    if (!D.reports || !D.projects || !D.projects.length) {
+        var root = $('da-root');
+        while (root.firstChild) root.removeChild(root.firstChild);
+        root.appendChild(el('div', 'da-panel da-empty', 'אין עדיין מספיק דוחות שבועיים עם יעד חשמול מתוארך כדי למדוד הזזות.'));
+        return;
+    }
+
+    var P = D.projects;
+    var MOVE_MONTHS = D.move_days / 30.44;
+    var slipped = function (p) { return p.net_months > MOVE_MONTHS; };
+    $('da-span').textContent = D.reports + ' דוחות שבועיים · ' + ilDate(D.first_report) + ' עד ' + ilDate(D.last_report) + ' · ' + P.length + ' פרויקטים עם שני יעדים מתוארכים לפחות';
+
+    // ───────────────────────── the headline figures
+    var nSlipped = P.filter(slipped).length;
+    var base = D.baseline_moved_with_forecast;
+    var kpis = [
+        { v: D.all.slip_months_per_year, dec: 1, unit: 'חודשים', lbl: 'הזזת יעד לכל שנת פרויקט', hint: 'נטו, על פני ' + D.all.project_years + ' שנות פרויקט', tone: heat(D.all.slip_months_per_year), drill: null },
+        { v: Math.round(100 * nSlipped / P.length), dec: 0, unit: '%', lbl: 'מהפרויקטים — היעד נדחה', hint: nSlipped + ' מתוך ' + P.length, tone: 'var(--warn)',
+          drill: function () { openDrill({ crumb: 'כלל הפרויקטים', title: 'פרויקטים שהיעד שלהם נדחה', tone: 'var(--warn)', rows: P.filter(slipped).map(function (p) { return { p: p, v: p.net_months }; }), facts: [['פרויקטים', nSlipped]] }); } },
+        { v: base.pct === null ? null : base.pct, dec: 0, unit: '%', lbl: 'מהנדחים — גם הבסיס זז', hint: base.baseline_also_later + ' מתוך ' + base.forecast_later + ' · איחור שלא נראה מול התכנית', tone: 'var(--bad)',
+          drill: function () { var r = P.filter(function (p) { return slipped(p) && p.baseline_later; }); openDrill({ crumb: 'כלל הפרויקטים', title: 'היעד נדחה והבסיס זז איתו', tone: 'var(--bad)', rows: r.map(function (p) { return { p: p, v: p.net_months }; }), facts: [['פרויקטים', r.length]] }); } },
+        { v: D.all.median_move_months, dec: 1, unit: 'חודשים', lbl: 'גודל הזזה חציוני', hint: D.all.moved_later + ' דחיות · ' + D.all.moved_earlier + ' הקדמות', tone: 'var(--cyan)',
+          drill: function () { openDrill({ crumb: 'כלל הפרויקטים', title: 'כל הפרויקטים', tone: 'var(--cyan)', rows: P.map(function (p) { return { p: p, v: p.net_months }; }), facts: [['פרויקטים', P.length]] }); } },
+    ];
+    kpis.forEach(function (k, i) {
+        var card = el(k.drill ? 'button' : 'div', 'da-kpi');
+        card.style.setProperty('--i', i); card.style.setProperty('--tone', k.tone);
+        var num = el('div', 'num');
+        var val = ltr(k.v === null || k.v === undefined ? '—' : k.v.toFixed(k.dec));
+        num.appendChild(val); num.appendChild(el('span', 'unit', k.unit));
+        card.appendChild(num); card.appendChild(el('div', 'lbl', k.lbl)); card.appendChild(el('div', 'hint', k.hint));
+        if (k.drill) { card.type = 'button'; card.appendChild(el('span', 'go', 'לפרויקטים ←')); card.addEventListener('click', k.drill); }
+        $('da-kpis').appendChild(card);
+        if (!still && typeof k.v === 'number') {                      // count up to the figure; the final text is the exact server value
+            var t0 = performance.now() + i * 70, dur = 900;
+            var tick = function (now) {
+                var t = Math.min(1, Math.max(0, (now - t0) / dur)), e = 1 - Math.pow(1 - t, 3);
+                val.textContent = t >= 1 ? k.v.toFixed(k.dec) : (k.v * e).toFixed(k.dec);
+                if (t < 1) requestAnimationFrame(tick);
+            };
+            val.textContent = (0).toFixed(k.dec); requestAnimationFrame(tick);
+        }
+    });
+
+    // ───────────────────────── drills
+    var stageRows = function (stage) { return P.filter(function (p) { return stage in p.stages; }).map(function (p) { return { p: p, v: p.stages[stage] }; }); };
+    var sectorRows = function (sector) {
+        return P.map(function (p) {
+            var hit = false, sum = 0;
+            for (var s in p.stages) if ((D.stage_sectors[s] || []).indexOf(sector) >= 0) { hit = true; sum += p.stages[s]; }
+            return hit ? { p: p, v: Math.round(sum * 10) / 10 } : null;
+        }).filter(Boolean);
+    };
+    var rateFacts = function (g) { return [['חודשי הזזה לשנה', signed(g.slip_months_per_year)], ['פרויקטים', g.projects], ['דחיות', g.moved_later], ['הקדמות', g.moved_earlier], ['הזזה חציונית (חודשים)', g.median_move_months === null ? '—' : g.median_move_months]]; };
+    var drillStage = function (name) { var g = D.by_stage[name]; openDrill({ crumb: 'שלב', title: name, tone: heat(g.slip_months_per_year), rows: stageRows(name), facts: rateFacts(g), valueNote: 'הזזה שנרשמה בזמן השלב' }); };
+
+    // ───────────────────────── the path to energization
+    var ranks = {};
+    Object.keys(D.by_stage).forEach(function (s) { var r = D.stage_rank[s]; if (r !== null && r !== undefined) (ranks[r] = ranks[r] || []).push(s); });
+    var order = Object.keys(ranks).map(Number).sort(function (a, b) { return a - b; });
+    var stations = order.map(function (r, i) {
+        var names = ranks[r].sort(function (a, b) { return (D.by_stage[b].slip_months_per_year || 0) - (D.by_stage[a].slip_months_per_year || 0); });
+        var worst = Math.max.apply(null, names.map(function (s) { return D.by_stage[s].slip_months_per_year || 0; }));
+        var box = el('div', 'da-station'); box.style.setProperty('--tone', heat(worst));
+        box.appendChild(el('div', 'step', 'שלב ' + (i + 1)));
+        var node = el('div', 'node'); box.appendChild(node);
+        var chips = el('div', 'chips');
+        names.forEach(function (s) {
+            var g = D.by_stage[s], b = el('button', 'da-chip'); b.type = 'button'; b.style.setProperty('--tone', heat(g.slip_months_per_year));
+            b.appendChild(el('span', 'nm', s)); b.appendChild(ltr(signed(g.slip_months_per_year), 'v'));
+            b.title = g.projects + ' פרויקטים · ' + g.moved_later + ' דחיות';
+            b.addEventListener('click', function () { drillStage(s); });
+            chips.appendChild(b);
+        });
+        box.appendChild(chips); $('da-stations').appendChild(box);
+        return { node: node, slip: Math.max(0, worst), tone: heat(worst), n: names.length };
+    });
+    $('da-pipe').style.height = (230 + 52 * Math.max.apply(null, stations.map(function (s) { return s.n; }).concat([1]))) + 'px';
+    var off = Object.keys(D.by_stage).filter(function (s) { return D.stage_rank[s] === null || D.stage_rank[s] === undefined; });
+    if (off.length) $('da-offladder').textContent = 'מחוץ למסלול (בלשונית "לפי שלב"): ' + off.join(' · ');
+
+    (function pipe() {
+        var cv = $('da-canvas'), host = $('da-pipe'), g = cv.getContext('2d');
+        var W = 0, H = 0, pts = [], parts = [], drips = [], last = performance.now(), raf = 0;
+        var layout = function () {
+            var r = host.getBoundingClientRect(), dpr = Math.min(window.devicePixelRatio || 1, 2);
+            W = r.width; H = r.height; cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr); g.setTransform(dpr, 0, 0, dpr, 0, 0);
+            pts = stations.map(function (s) { var b = s.node.getBoundingClientRect(); return { x: b.left - r.left + b.width / 2, y: b.top - r.top + b.height / 2, slip: s.slip, tone: s.tone }; });
+            if (still) frame(performance.now());
+        };
+        var at = function (t) {                       // t in [0, n-1] along the stations
+            var i = Math.min(pts.length - 2, Math.floor(t)), f = t - i, a = pts[i], b = pts[i + 1];
+            return { x: a.x + (b.x - a.x) * f, y: a.y, i: i };
+        };
+        for (var k = 0; k < 46; k++) parts.push({ t: Math.random() * Math.max(1, stations.length - 1), w: .6 + Math.random() * .8 });
+        var frame = function (now) {
+            var dt = Math.min(.05, (now - last) / 1000); last = now;
+            g.clearRect(0, 0, W, H);
+            if (pts.length < 2) return;
+            // the line, coloured by the station it leaves
+            for (var i = 0; i < pts.length - 1; i++) {
+                var a = pts[i], b = pts[i + 1], grad = g.createLinearGradient(a.x, 0, b.x, 0);
+                grad.addColorStop(0, a.tone); grad.addColorStop(1, b.tone);
+                g.strokeStyle = grad; g.globalAlpha = .55; g.lineWidth = 3; g.beginPath(); g.moveTo(a.x, a.y); g.lineTo(b.x, b.y); g.stroke(); g.globalAlpha = 1;
+            }
+            // the leak under each station: a column whose depth is the slip
+            pts.forEach(function (p) {
+                var depth = Math.min(96, 8 + p.slip * 8.5), grad = g.createLinearGradient(0, p.y + 12, 0, p.y + 12 + depth);
+                grad.addColorStop(0, p.tone); grad.addColorStop(1, 'rgba(0,0,0,0)');
+                g.fillStyle = grad; g.globalAlpha = .5; g.fillRect(p.x - 13, p.y + 12, 26, depth); g.globalAlpha = 1;
+            });
+            if (still) return;
+            // projects flowing: slower where the stage leaks
+            parts.forEach(function (q) {
+                var here = at(q.t), slow = 1 + pts[here.i].slip / 2.6;
+                q.t += dt * .34 * q.w / slow;
+                if (q.t >= pts.length - 1) q.t = 0;
+                var p = at(q.t);
+                g.fillStyle = pts[p.i].tone; g.shadowColor = pts[p.i].tone; g.shadowBlur = 9;
+                g.beginPath(); g.arc(p.x, p.y, 2.3, 0, 6.283); g.fill(); g.shadowBlur = 0;
+            });
+            // drips: the time that falls out of the schedule
+            pts.forEach(function (p) {
+                if (p.slip > .3 && Math.random() < dt * p.slip * .9) drips.push({ x: p.x + (Math.random() - .5) * 16, y: p.y + 14, v: 26 + Math.random() * 30, life: 1, tone: p.tone, max: Math.min(96, 8 + p.slip * 8.5) });
+            });
+            drips = drips.filter(function (d) {
+                d.y += d.v * dt; d.v += 70 * dt; d.life -= dt * 1.1;
+                if (d.life <= 0 || d.y > pts[0].y + 14 + d.max) return false;
+                g.globalAlpha = Math.max(0, d.life) * .9; g.fillStyle = d.tone; g.beginPath(); g.arc(d.x, d.y, 1.7, 0, 6.283); g.fill(); g.globalAlpha = 1;
+                return true;
+            });
+            raf = requestAnimationFrame(frame);
+        };
+        layout();
+        window.addEventListener('resize', layout);
+        if (document.fonts && document.fonts.ready) document.fonts.ready.then(layout);
+        if (!still) {
+            raf = requestAnimationFrame(frame);
+            document.addEventListener('visibilitychange', function () { cancelAnimationFrame(raf); if (!document.hidden) { last = performance.now(); raf = requestAnimationFrame(frame); } });
+        }
+    })();
+
+    // ───────────────────────── the cuts
+    var stageOrder = Object.keys(D.by_stage).sort(function (a, b) {
+        var ra = D.stage_rank[a], rb = D.stage_rank[b];
+        return (ra === null || ra === undefined ? 99 : ra) - (rb === null || rb === undefined ? 99 : rb) || (D.by_stage[b].slip_months_per_year || 0) - (D.by_stage[a].slip_months_per_year || 0);
+    });
+    var bySlip = function (o) { return Object.keys(o).sort(function (a, b) { return (o[b].slip_months_per_year || 0) - (o[a].slip_months_per_year || 0); }); };
+    var RATE_HEAD = ['', 'חודשי הזזה לשנת פרויקט', 'חודשים לשנה', 'פרויקטים', 'דחיות / מדידות', ''];
+    var TABS = [
+        { key: 'stage', label: 'לפי שלב', lead: 'לפי סדר הדרך לחשמול. הזזה נספרת בשלב שבו הפרויקט היה כשהיעד זז.', head: RATE_HEAD, keys: stageOrder, src: D.by_stage,
+          open: drillStage },
+        { key: 'sector', label: 'לפי מגזר', lead: 'לפי המגזר שהשלב שייך אליו.', head: RATE_HEAD, keys: bySlip(D.by_sector), src: D.by_sector,
+          note: 'שלב יכול להיות שייך לשני מגזרים, ולכן המגזרים אינם מסתכמים לסך האגף.',
+          open: function (n) { var g = D.by_sector[n]; openDrill({ crumb: 'מגזר', title: n, tone: heat(g.slip_months_per_year), rows: sectorRows(n), facts: rateFacts(g), valueNote: 'הזזה שנרשמה בשלבי המגזר' }); } },
+        { key: 'type', label: 'לפי סוג פרויקט', lead: 'לפי סוג הפרויקט בקובץ המאסטר.', head: RATE_HEAD, keys: bySlip(D.by_project_type), src: D.by_project_type,
+          open: function (n) { var g = D.by_project_type[n]; openDrill({ crumb: 'סוג פרויקט', title: n, tone: heat(g.slip_months_per_year), rows: P.filter(function (p) { return p.type === n; }).map(function (p) { return { p: p, v: p.net_months }; }), facts: rateFacts(g) }); } },
+        { key: 'horizon', label: 'לפי מרחק התחזית', lead: 'כמה רחוק הביט היעד הראשון שנמסר לפרויקט, ומה קרה לו מאז.', horizon: true,
+          head: ['', 'שיעור הפרויקטים שהיעד שלהם נדחה', 'נדחו', 'פרויקטים', 'חציון', 'רבעון עליון'], keys: Object.keys(D.by_first_forecast_horizon), src: D.by_first_forecast_horizon,
+          note: 'חציון ורבעון עליון: חודשי הזזה מהיעד הראשון ועד האחרון. יעד רחוק שלא זז יכול להיות יעד שפשוט לא מתוחזק.',
+          open: function (n) { var g = D.by_first_forecast_horizon[n]; openDrill({ crumb: 'מרחק התחזית הראשונה', title: n, tone: 'var(--cyan)', rows: P.filter(function (p) { return p.horizon === n; }).map(function (p) { return { p: p, v: p.net_months }; }),
+              facts: [['פרויקטים', g.projects], ['נדחו', g.moved_later_pct + '%'], ['חציון (חודשים)', signed(g.median_drift_months)], ['רבעון עליון (חודשים)', signed(g.p75_drift_months)]] }); } },
+    ];
+    var showTab = function (tab) {
+        Array.prototype.forEach.call($('da-tabs').children, function (b) { b.setAttribute('aria-selected', b.dataset.key === tab.key ? 'true' : 'false'); });
+        $('da-cut-lead').textContent = tab.lead; $('da-cut-note').textContent = tab.note || '';
+        var head = $('da-rowhead'), rows = $('da-rows');
+        while (head.firstChild) head.removeChild(head.firstChild);
+        while (rows.firstChild) rows.removeChild(rows.firstChild);
+        tab.head.forEach(function (h) { head.appendChild(el('span', '', h)); });
+        var max = Math.max.apply(null, tab.keys.map(function (k) { return Math.abs(tab.horizon ? tab.src[k].moved_later_pct : (tab.src[k].slip_months_per_year || 0)); }).concat([tab.horizon ? 100 : 1]));
+        tab.keys.forEach(function (k, i) {
+            var g = tab.src[k], v = tab.horizon ? g.moved_later_pct : g.slip_months_per_year;
+            var tone = tab.horizon ? heat(g.moved_later_pct / 100 * 8) : heat(v);
+            var row = el('button', 'da-row'); row.type = 'button'; row.style.setProperty('--i', i); row.style.setProperty('--tone', tone);
+            var name = el('span', 'nm', k); if (g.small_sample) name.appendChild(el('span', 'small', 'מדגם קטן'));
+            row.appendChild(name);
+            var track = el('span', 'track'), fill = el('span', 'fill' + (v < 0 ? ' neg' : '')); fill.style.setProperty('--w', (Math.abs(v || 0) / max * 100).toFixed(1) + '%'); track.appendChild(fill); row.appendChild(track);
+            row.appendChild(ltr(tab.horizon ? v + '%' : signed(v), 'c main'));
+            row.appendChild(ltr(String(g.projects), 'c'));
+            row.appendChild(ltr(tab.horizon ? signed(g.median_drift_months) : g.moved_later + ' / ' + g.intervals, 'c'));
+            if (tab.horizon) row.appendChild(ltr(signed(g.p75_drift_months), 'c')); else row.appendChild(el('span', 'c arrow', '←'));
+            row.addEventListener('click', function () { tab.open(k); });
+            rows.appendChild(row);
+        });
+    };
+    TABS.forEach(function (tab) {
+        var b = el('button', 'da-tab', tab.label); b.type = 'button'; b.setAttribute('role', 'tab'); b.dataset.key = tab.key;
+        b.addEventListener('click', function () { showTab(tab); });
+        $('da-tabs').appendChild(b);
+    });
+    showTab(TABS[0]);
+
+    // ───────────────────────── all projects
+    var COLS = [
+        { k: 'name', t: 'פרויקט', get: function (p) { return p.name; } },
+        { k: 'stage', t: 'שלב נוכחי', get: function (p) { return p.stage; } },
+        { k: 'type', t: 'סוג', get: function (p) { return p.type; } },
+        { k: 'manager', t: 'מנהל פרויקט', get: function (p) { return p.manager; } },
+        { k: 'net_months', t: 'הזזה (חודשים)', num: true, get: function (p) { return p.net_months; } },
+        { k: 'later', t: 'דחיות', num: true, get: function (p) { return p.later; } },
+        { k: 'fc_last', t: 'יעד נוכחי', date: true, get: function (p) { return p.fc_last; } },
+    ];
+    var sort = { k: 'net_months', dir: -1 }, shown = 40, query = '';
+    var matches = function (p, q) { return !q || (p.name + ' ' + p.id + ' ' + p.stage + ' ' + p.type + ' ' + p.manager).toLowerCase().indexOf(q) >= 0; };
+    var drawTable = function () {
+        var head = $('da-thead'), body = $('da-tbody');
+        while (head.firstChild) head.removeChild(head.firstChild);
+        while (body.firstChild) body.removeChild(body.firstChild);
+        COLS.forEach(function (c) {
+            var th = el('th', '', c.t); th.scope = 'col'; th.tabIndex = 0;
+            if (sort.k === c.k) { th.setAttribute('aria-sort', sort.dir < 0 ? 'descending' : 'ascending'); th.appendChild(el('span', 'dir', sort.dir < 0 ? '▼' : '▲')); }
+            var go = function () { sort = { k: c.k, dir: sort.k === c.k ? -sort.dir : (c.num ? -1 : 1) }; drawTable(); };
+            th.addEventListener('click', go); th.addEventListener('keydown', function (e) { if (e.key === 'Enter') go(); });
+            head.appendChild(th);
+        });
+        var col = COLS.filter(function (c) { return c.k === sort.k; })[0];
+        var list = P.filter(function (p) { return matches(p, query); }).sort(function (a, b) {
+            var x = col.get(a), y = col.get(b);
+            return (col.num ? x - y : String(x).localeCompare(String(y), 'he')) * sort.dir;
+        });
+        list.slice(0, shown).forEach(function (p) {
+            var tr = el('tr'); tr.tabIndex = 0;
+            COLS.forEach(function (c) {
+                var td = el('td', c.num || c.date ? 'n' : '');
+                if (c.k === 'name') { td.appendChild(el('div', '', p.name || p.id)); td.appendChild(el('div', 'da-id', p.id)); }
+                else if (c.k === 'net_months') { var b = ltr(signed(p.net_months)); b.style.color = heat(p.net_months); td.appendChild(b); }
+                else if (c.date) td.appendChild(ltr(ilDate(c.get(p))));
+                else td.textContent = c.get(p) === '' ? '—' : c.get(p);
+                tr.appendChild(td);
+            });
+            var open = function () { openDrill({ crumb: 'פרויקט', title: p.name || p.id, tone: heat(p.net_months), rows: [{ p: p, v: p.net_months }], facts: [['מזהה', p.id]], expand: true }); };
+            tr.addEventListener('click', open); tr.addEventListener('keydown', function (e) { if (e.key === 'Enter') open(); });
+            body.appendChild(tr);
+        });
+        if (!list.length) { var tr = el('tr'), td = el('td', 'da-empty', 'לא נמצאו פרויקטים'); td.colSpan = COLS.length; tr.appendChild(td); body.appendChild(tr); }
+        $('da-more').hidden = list.length <= shown;
+        $('da-more').textContent = 'הצג עוד (' + (list.length - shown) + ')';
+    };
+    $('da-q').addEventListener('input', function (e) { query = e.target.value.trim().toLowerCase(); shown = 40; drawTable(); });
+    $('da-more').addEventListener('click', function () { shown += 60; drawTable(); });
+    drawTable();
+
+    // ───────────────────────── the sheet: a group's projects, then one project's story
+    var sheet = $('da-sheet'), backdrop = $('da-backdrop'), lastFocus = null, current = null;
+    var spark = function (p) {
+        var Wd = 640, Hd = 170, L = 14, R = 14, T = 22, B = 24;
+        var s = svg('svg', { viewBox: '0 0 ' + Wd + ' ' + Hd, class: 'da-spark', role: 'img', 'aria-label': 'יעד החשמול לאורך הדוחות' });
+        var day = function (iso) { return Date.parse(iso) / 864e5; };
+        var x0 = day(D.first_report), x1 = day(D.last_report), ys = p.series.map(function (r) { return day(r[1]); });
+        var y0 = Math.min.apply(null, ys), y1 = Math.max.apply(null, ys); if (y1 - y0 < 30) { y0 -= 15; y1 += 15; }
+        var X = function (d) { return Wd - R - (d - x0) / Math.max(1, x1 - x0) * (Wd - L - R); };     // RTL: time runs right → left
+        var Y = function (d) { return Hd - B - (d - y0) / (y1 - y0) * (Hd - T - B); };                 // up = a later target
+        var path = '';
+        p.series.forEach(function (r, i) {
+            var x = X(day(r[0])), y = Y(day(r[1]));
+            path += i === 0 ? 'M' + x.toFixed(1) + ' ' + y.toFixed(1) : ' H' + x.toFixed(1) + ' V' + y.toFixed(1);
+        });
+        s.appendChild(svg('path', { d: path, class: 'line', pathLength: 1 }));
+        p.series.forEach(function (r, i) {
+            var prev = p.series[i - 1], moved = prev && Math.abs(day(r[1]) - day(prev[1])) > D.move_days;
+            if (i && !moved && i !== p.series.length - 1) return;
+            var c = svg('circle', { cx: X(day(r[0])).toFixed(1), cy: Y(day(r[1])).toFixed(1), r: moved ? 4.2 : 3, fill: moved ? (day(r[1]) > day(prev[1]) ? '#e2533a' : '#199e70') : '#00d4ff', class: 'dot' });
+            c.style.animationDelay = (0.25 + i * 0.05) + 's';
+            var tip = svg('title', {}); tip.textContent = 'דוח ' + ilDate(r[0]) + ' · יעד ' + ilDate(r[1]); c.appendChild(tip);
+            s.appendChild(c);
+        });
+        var label = function (x, y, text, anchor) { var t = svg('text', { x: x, y: y, 'text-anchor': anchor, direction: 'ltr' }); t.textContent = text; s.appendChild(t); };
+        label(Wd - R, 14, 'יעד ראשון ' + ilDate(p.fc_first), 'end');
+        label(L, 14, 'יעד נוכחי ' + ilDate(p.fc_last), 'start');
+        label(Wd - R, Hd - 7, ilDate(p.series[0][0]), 'end');
+        label(L, Hd - 7, ilDate(p.series[p.series.length - 1][0]), 'start');
+        return s;
+    };
+    var detail = function (p) {
+        var box = el('div', 'da-detail'), grid = el('div', 'grid');
+        [['שלב נוכחי', p.stage], ['סוג', p.type], ['מנהל פרויקט', p.manager || '—'], ['הזזה כוללת (חודשים)', signed(p.net_months)], ['תקופת מדידה (חודשים)', String(p.observed_months)], ['בסיס התכנית', p.baseline_later ? 'זז גם הוא' : 'לא זז']]
+            .forEach(function (f) { var c = el('div', '', f[0]); c.appendChild(el('b', '', f[1])); grid.appendChild(c); });
+        box.appendChild(grid); box.appendChild(spark(p));
+        if (p.events.length) {
+            var t = el('table', 'da-events'), hr = el('tr');
+            ['בין הדוחות', 'בשלב', 'מיעד', 'ליעד', 'חודשים'].forEach(function (h) { hr.appendChild(el('th', '', h)); });
+            var th = el('thead'); th.appendChild(hr); t.appendChild(th);
+            var tb = el('tbody');
+            p.events.slice().reverse().forEach(function (e) {
+                var tr = el('tr');
+                var a = el('td', 'n'); a.appendChild(ltr(ilDate(e.from_report) + ' – ' + ilDate(e.to_report))); tr.appendChild(a);
+                tr.appendChild(el('td', '', e.stage));
+                var b = el('td', 'n'); b.appendChild(ltr(ilDate(e.fc_from))); tr.appendChild(b);
+                var c = el('td', 'n'); c.appendChild(ltr(ilDate(e.fc_to))); tr.appendChild(c);
+                var d = el('td', 'n'), m = ltr(signed(e.months)); m.style.color = e.months > 0 ? '#e2533a' : '#199e70'; d.appendChild(m); tr.appendChild(d);
+                tb.appendChild(tr);
+            });
+            t.appendChild(tb); box.appendChild(t);
+        } else box.appendChild(el('div', 'da-note', 'היעד לא זז ביותר מ-' + D.move_days + ' ימים בין שני דוחות.'));
+        var a = el('a', 'da-link', 'לדף הפרויקט המלא ←'); a.href = '/dashboard/projects/p/' + encodeURIComponent(p.id); box.appendChild(a);
+        return box;
+    };
+    var drawSheet = function () {
+        var body = $('da-sheet-body'), q = $('da-sheet-q').value.trim().toLowerCase();
+        while (body.firstChild) body.removeChild(body.firstChild);
+        var rows = current.rows.filter(function (r) { return matches(r.p, q); });
+        var max = Math.max.apply(null, rows.map(function (r) { return Math.abs(r.v); }).concat([1]));
+        $('da-sheet-count').textContent = rows.length + ' פרויקטים · המספר ליד כל פרויקט: ' + (current.valueNote || 'הזזת היעד') + ', בחודשים';
+        rows.forEach(function (r, i) {
+            var p = r.p, card = el('div', 'da-proj'); card.style.setProperty('--i', i); card.style.setProperty('--tone', heat(r.v));
+            var btn = el('button'); btn.type = 'button'; btn.setAttribute('aria-expanded', 'false');
+            btn.appendChild(el('span', 'rank', String(i + 1)));
+            var mid = el('span'); mid.appendChild(el('div', 'title', p.name || p.id)); mid.appendChild(el('div', 'tags', [p.id, p.stage, p.type, p.manager].filter(Boolean).join(' · '))); btn.appendChild(mid);
+            var val = el('span', 'val'); val.appendChild(ltr(signed(r.v), 'v'));
+            var track = el('div', 'track'), fill = el('div', 'fill'); fill.style.setProperty('--w', (Math.abs(r.v) / max * 100).toFixed(1) + '%'); track.appendChild(fill); val.appendChild(track); btn.appendChild(val);
+            btn.appendChild(el('span', 'caret', '‹'));
+            var toggle = function () {
+                var open = card.classList.toggle('open'); btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+                if (open) card.appendChild(detail(p)); else if (card.lastChild !== btn) card.removeChild(card.lastChild);
+            };
+            btn.addEventListener('click', toggle);
+            card.appendChild(btn); body.appendChild(card);
+            if (current.expand && rows.length === 1) toggle();
+        });
+        if (!rows.length) body.appendChild(el('div', 'da-empty', 'אין פרויקטים ברשימה הזו'));
+    };
+    function openDrill(d) {
+        d.rows.sort(function (a, b) { return b.v - a.v; });
+        current = d; lastFocus = document.activeElement;
+        sheet.style.setProperty('--tone', d.tone || 'var(--cyan)');
+        $('da-sheet-crumb').textContent = d.crumb; $('da-sheet-title').textContent = d.title;
+        var facts = $('da-sheet-facts'); while (facts.firstChild) facts.removeChild(facts.firstChild);
+        (d.facts || []).forEach(function (f) { var s = el('span', '', f[0] + ' '); s.appendChild(ltr(String(f[1]))); s.lastChild.style.fontWeight = '600'; s.lastChild.style.color = 'var(--text-1)'; s.lastChild.style.fontFamily = 'var(--mono)'; facts.appendChild(s); });
+        $('da-sheet-q').value = '';
+        drawSheet();
+        $('da-sheet-body').scrollTop = 0;
+        sheet.classList.add('on'); backdrop.classList.add('on'); sheet.setAttribute('aria-hidden', 'false');
+        document.documentElement.style.overflow = 'hidden';
+        $('da-close').focus();
+    }
+    var closeDrill = function () {
+        sheet.classList.remove('on'); backdrop.classList.remove('on'); sheet.setAttribute('aria-hidden', 'true');
+        document.documentElement.style.overflow = '';
+        if (lastFocus && lastFocus.focus) lastFocus.focus();
+    };
+    $('da-close').addEventListener('click', closeDrill);
+    backdrop.addEventListener('click', closeDrill);
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && sheet.classList.contains('on')) closeDrill(); });
+    $('da-sheet-q').addEventListener('input', drawSheet);
+})();
+</script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

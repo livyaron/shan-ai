@@ -213,6 +213,30 @@ async def backfill_status(current_user: User = Depends(get_current_user)):
     return JSONResponse(BACKFILL_STATUS)
 
 
+@router.get("/delays", response_class=HTMLResponse)
+async def project_delays_page(
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+    current_user: User = Depends(get_current_user),
+):
+    """ניתוח עיכובים: how far the energization forecast moves, drilled down to
+    the project. Every figure is computed over the projects this viewer may see
+    (insight_access.sees_project) — so nothing on the page can describe a
+    project outside their scope. No LLM; forecast_reliability does the maths."""
+    from app.services import forecast_reliability, insight_access, pattern_service
+    scope = await insight_access.scope_for(session, current_user)
+    if not scope.allowed:
+        raise HTTPException(status_code=403, detail="אין לך עדיין שיוך לתצוגת הדפוסים — פנה למנהל המערכת")
+    frames = await pattern_service.load_frames(session)
+    allowed = None if insight_access.sees_all(scope) else forecast_reliability.visible_ids(
+        frames, lambda sectors, manager: insight_access.sees_project(scope, sectors, manager))
+    data = pattern_service._plain(forecast_reliability.analyse(frames, allowed=allowed, with_projects=True))
+    return templates.TemplateResponse("project_delays.html", {
+        "request": request, "current_user": current_user, "data": data,
+        "whole_division": allowed is None,
+    })
+
+
 @router.get("/insights", response_class=HTMLResponse)
 async def project_insights_page(
     request: Request,
