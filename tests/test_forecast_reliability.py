@@ -92,3 +92,53 @@ def test_no_project_or_person_in_the_result_and_no_constant_respelled():
     assert "P-1" not in blob and "מנהל 1" not in blob
     src = Path(fr.__file__).read_text(encoding="utf-8")
     assert "ps.MOVE_DAYS" in src and "ps.MONTH_DAYS" in src and "30.44" not in src and "= 15" not in src
+
+
+# ── the page's detail (drill-down) and viewer scoping ─────────────────────
+
+DETAIL = fr.analyse(_frames(), with_projects=True)
+
+
+def test_detail_has_one_row_per_measured_project_with_its_moves():
+    rows = {p["id"]: p for p in DETAIL["projects"]}
+    assert set(rows) == {"P-1", "P-2"}                           # finished and undated projects are not rows
+    p1 = rows["P-1"]
+    assert (p1["net_months"], p1["later"], p1["earlier"], p1["baseline_later"]) == (12.0, 2, 0, True)
+    assert p1["stages"] == {"תכנון": 12.0} and len(p1["events"]) == 2
+    assert p1["series"][0] == ["2026-03-25", "2026-12-31"] and p1["fc_last"] == "2027-12-31"
+    assert rows["P-2"]["stages"] == {"קבלת היתר": 0.0} and rows["P-2"]["events"] == []
+
+
+def test_every_group_number_is_the_number_of_rows_behind_it():
+    for stage, g in DETAIL["by_stage"].items():
+        assert g["projects"] == sum(1 for p in DETAIL["projects"] if stage in p["stages"]), stage
+    for kind, g in DETAIL["by_project_type"].items():
+        assert g["projects"] == sum(1 for p in DETAIL["projects"] if p["type"] == kind), kind
+    for label, g in DETAIL["by_first_forecast_horizon"].items():
+        assert g["projects"] == sum(1 for p in DETAIL["projects"] if p["horizon"] == label), label
+
+
+def test_the_logged_result_never_carries_projects():
+    assert "projects" not in fr.compute(_frames()) and "stage_rank" not in fr.compute(_frames())
+
+
+def test_a_scoped_viewer_gets_figures_over_their_projects_only():
+    frames = _frames()
+    ids = fr.visible_ids(frames, lambda sectors, manager: manager == "מנהל 2")
+    assert ids == {2}
+    scoped = fr.analyse(frames, allowed=ids, with_projects=True)
+    assert [p["id"] for p in scoped["projects"]] == ["P-2"]
+    assert scoped["all"]["projects"] == 1 and scoped["all"]["moved_later"] == 0
+    assert "תכנון" not in scoped["by_stage"]                      # another manager's stage is not even named
+    assert fr.analyse(frames, allowed=set()) == {"reports": 0}
+
+
+def test_the_page_is_gated_scoped_and_built_without_the_html_parser():
+    root = Path(fr.__file__).resolve().parents[2]
+    route = (root / "app/routers/projects.py").read_text(encoding="utf-8")
+    body = route[route.index("async def project_delays_page"):route.index('@router.get("/insights"')]
+    assert "scope.allowed" in body and "insight_access.sees_project" in body and "sees_all" in body
+    page = (root / "app/templates/project_delays.html").read_text(encoding="utf-8")
+    assert "innerHTML" not in page and "{{ data|tojson }}" in page
+    assert "'/dashboard/projects/p/' + encodeURIComponent(p.id)" in page       # the drill ends at the project page
+    assert "prefers-reduced-motion" in page

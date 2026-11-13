@@ -57,38 +57,86 @@ def _rate(rows: list[tuple[float, float, Any]]) -> dict[str, Any]:
     }
 
 
-def compute(frames: ps.Frames) -> dict[str, Any]:
+def _horizon(months: float) -> str:
+    for label, lo, hi in HORIZONS:
+        if (lo == float("-inf") or months > lo) and months <= hi:
+            return label
+    return HORIZONS[-1][0]
+
+
+def analyse(frames: ps.Frames, allowed: set | None = None, with_projects: bool = False) -> dict[str, Any]:
+    """The figures, over every project or only the `allowed` project ids.
+
+    `with_projects` adds one row per project (name, manager, its moves and the
+    forecast at every dated report) — that is what the page drills into, and it
+    is never logged. A viewer's page passes the ids that viewer may see, so no
+    number on it can describe a project outside their scope.
+    """
     snaps = ps.canonical_snaps(frames.snaps)
+    if allowed is not None:
+        snaps = snaps[snaps["project_id"].isin(allowed)]
     if snaps.empty:
         return {"reports": 0}
     rdates = sorted(snaps["report_date"].unique())
-    types = frames.projects.set_index("project_id")["project_type"].to_dict()
+    info = frames.projects.set_index("project_id").to_dict("index")
 
     by_stage: dict[str, list] = defaultdict(list)
     by_sector: dict[str, list] = defaultdict(list)
     by_type: dict[str, list] = defaultdict(list)
     everything: list = []
     first_last: list[tuple[float, float, float, bool]] = []   # horizon_m, drift_days, observed_days, baseline_moved_later
+    projects: list[dict[str, Any]] = []
 
+    current_stage = snaps.sort_values("report_date").groupby("project_id")["stage"].last().to_dict()
     dated = snaps.dropna(subset=["fc"]).sort_values("report_date")
     for pid, g in dated.groupby("project_id"):
         rows = list(zip(g["report_date"], g["fc"], g["stage"], g["dev"]))
         rows = [r for r in rows if not ss.is_closed(r[2])]      # a finished project's date no longer "holds"
+        ptype = (info.get(pid) or {}).get("project_type") or "ללא סוג"
+        in_stage: dict[str, float] = defaultdict(float)
+        events = []
         for (d0, fc0, stage0, _), (d1, fc1, _, _) in zip(rows, rows[1:]):
-            item = ((fc1 - fc0).days, (d1 - d0).days, pid)
+            stage = stage0 or "ללא סטטוס"
+            move = (fc1 - fc0).days
+            item = (move, (d1 - d0).days, pid)
             everything.append(item)
-            by_stage[stage0 or "ללא סטטוס"].append(item)
+            by_stage[stage].append(item)
             for sector in ss.sectors_for(stage0):
                 by_sector[ss.SECTORS.get(sector, sector)].append(item)
-            by_type[types.get(pid) or "ללא סוג"].append(item)
-        if len(rows) >= 2:
-            (d0, fc0, _, dev0), (d1, fc1, _, dev1) = rows[0], rows[-1]
-            base_later = bool(pd.notna(dev0) and pd.notna(dev1) and (dev1 - dev0).days > ps.MOVE_DAYS)
-            first_last.append(((fc0 - pd.Timestamp(d0)).days / ps.MONTH_DAYS, (fc1 - fc0).days, (d1 - d0).days, base_later))
+            by_type[ptype].append(item)
+            in_stage[stage] += 0.0                                # the project was measured in this stage
+            if abs(move) > ps.MOVE_DAYS:
+                in_stage[stage] += move
+                events.append({"from_report": d0.isoformat(), "to_report": d1.isoformat(), "stage": stage,
+                               "fc_from": fc0.date().isoformat(), "fc_to": fc1.date().isoformat(),
+                               "months": round(move / ps.MONTH_DAYS, 1)})
+        if len(rows) < 2:
+            continue
+        (d0, fc0, _, dev0), (d1, fc1, _, dev1) = rows[0], rows[-1]
+        base_later = bool(pd.notna(dev0) and pd.notna(dev1) and (dev1 - dev0).days > ps.MOVE_DAYS)
+        horizon_m = (fc0 - pd.Timestamp(d0)).days / ps.MONTH_DAYS
+        first_last.append((horizon_m, (fc1 - fc0).days, (d1 - d0).days, base_later))
+        if with_projects:
+            p = info.get(pid) or {}
+            stage_now = current_stage.get(pid) or "ללא סטטוס"
+            projects.append({
+                "id": p.get("identifier") or str(pid), "name": p.get("name") or "", "manager": p.get("manager") or "",
+                "type": ptype, "stage": stage_now,
+                "sectors": [ss.SECTORS.get(x, x) for x in ss.sectors_for(stage_now)],
+                "net_months": round((fc1 - fc0).days / ps.MONTH_DAYS, 1),
+                "later": sum(1 for e in events if e["months"] > 0),
+                "earlier": sum(1 for e in events if e["months"] < 0),
+                "fc_first": fc0.date().isoformat(), "fc_last": fc1.date().isoformat(),
+                "observed_months": round((d1 - d0).days / ps.MONTH_DAYS, 1),
+                "horizon": _horizon(horizon_m), "baseline_later": base_later,
+                "stages": {k: round(v / ps.MONTH_DAYS, 1) for k, v in in_stage.items()},
+                "events": events,
+                "series": [[d.isoformat(), fc.date().isoformat()] for d, fc, _, _ in rows],
+            })
 
     horizons = {}
-    for label, lo, hi in HORIZONS:
-        rows = [r for r in first_last if lo < r[0] <= hi] if lo != float("-inf") else [r for r in first_last if r[0] <= hi]
+    for label, _lo, _hi in HORIZONS:
+        rows = [r for r in first_last if _horizon(r[0]) == label]
         if not rows:
             continue
         drift = pd.Series([r[1] for r in rows]) / ps.MONTH_DAYS
@@ -103,7 +151,7 @@ def compute(frames: ps.Frames) -> dict[str, Any]:
 
     slipped = [r for r in first_last if r[1] > ps.MOVE_DAYS]
     order = lambda d: dict(sorted(d.items(), key=lambda kv: -(kv[1]["project_years"])))   # noqa: E731
-    return {
+    out: dict[str, Any] = {
         "reports": len(rdates),
         "first_report": rdates[0].isoformat(),
         "last_report": rdates[-1].isoformat(),
@@ -119,6 +167,29 @@ def compute(frames: ps.Frames) -> dict[str, Any]:
             "pct": round(100 * sum(1 for r in slipped if r[3]) / len(slipped)) if slipped else None,
         },
     }
+    if with_projects:
+        out["projects"] = sorted(projects, key=lambda r: -r["net_months"])
+        # where each stage sits on the way to energization (stage_sectors.STAGE_RANK); off-ladder = None
+        out["stage_rank"] = {k: ss.STAGE_RANK.get(k) for k in out["by_stage"]}
+        out["stage_sectors"] = {k: [ss.SECTORS.get(x, x) for x in ss.sectors_for(k)] for k in out["by_stage"]}
+        out["move_days"] = ps.MOVE_DAYS
+    return out
+
+
+def compute(frames: ps.Frames) -> dict[str, Any]:
+    """Numbers only, every project — what is written to the log."""
+    return analyse(frames)
+
+
+def visible_ids(frames: ps.Frames, sees) -> set:
+    """Project ids a viewer may see: `sees(sectors_of_current_stage, manager)` is
+    insight_access.sees_project with the viewer's scope bound."""
+    snaps = ps.canonical_snaps(frames.snaps)
+    if snaps.empty:
+        return set()
+    stage = snaps.sort_values("report_date").groupby("project_id")["stage"].last().to_dict()
+    managers = frames.projects.set_index("project_id")["manager"].to_dict()
+    return {pid for pid, st in stage.items() if sees(ss.sectors_for(st), managers.get(pid))}
 
 
 async def snapshot(session, log: bool = True) -> dict[str, Any]:
