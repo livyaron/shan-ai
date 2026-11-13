@@ -171,6 +171,10 @@ def parse_rows(rows: list[list], sheet: str = "", formula_rows: list[list] | Non
 # PROJECTS behind each number, so the dashboard counts them over the ACTIVE
 # projects only (user decision 2026-10-16) and every card opens its own list.
 _FUNC = re.compile(r"^=\s*(COUNTA|COUNTIFS|COUNTIF)\s*\((.*)\)\s*$", re.I | re.S)
+# A structured reference to a column of the record sheet's table — טבלה13[[חוסר בבודקים ]] /
+# Table1[Column]. The file moved to these on 10.11.26; with only cell ranges read,
+# every such card lost its project list. Special items ([#All], [@col]) are not re-run.
+_TABLE_COL = re.compile(r"^[^\[\]!'\s]+\[\[?([^\[\]#@]+?)\]?\]$")
 _RANGE = re.compile(r"^(?:'((?:[^']|'')+)'|([^!'\s]+))!\$?([A-Z]{1,3})\$?(\d+):\$?([A-Z]{1,3})\$?(\d+)$")
 
 
@@ -236,6 +240,14 @@ def resolve(formula: str | None, sheet: str, rows: list[list], ident_col: int) -
     else:
         return None
     for rng, crit in pairs:
+        t = _TABLE_COL.match(rng.strip())
+        if t:
+            span = _table_column(rows, t.group(1))
+            test = _filled if crit is None else _criterion(crit)
+            if span is None or test is None:
+                return None
+            conds.append((*span, test))
+            continue
         r = _RANGE.match(rng.strip())
         if not r:
             return None
@@ -258,6 +270,19 @@ def resolve(formula: str | None, sheet: str, rows: list[list], ident_col: int) -
             if _filled(ident):
                 ids.append(str(ident).strip())
     return ids
+
+
+def _table_column(rows: list[list], column: str) -> tuple[int, int, int] | None:
+    """(col, first Excel row, last Excel row) of a record-table column named in
+    a structured reference: the header row is the one holding "זיהוי", the name
+    is compared trimmed (the file writes "חוסר בבודקים " with a trailing space),
+    and it must appear exactly once — otherwise the card is not re-run."""
+    want = column.strip()
+    for h, row in enumerate(rows[:6]):
+        if any(isinstance(v, str) and v.strip() == "זיהוי" for v in row):
+            hits = [i for i, v in enumerate(row) if isinstance(v, str) and v.strip() == want]
+            return (hits[0], h + 2, len(rows)) if len(hits) == 1 and len(rows) > h + 1 else None
+    return None
 
 
 def _ident_col(rows: list[list]) -> int | None:
@@ -334,6 +359,38 @@ async def save_from_file(file_path: str, source_file: str | None) -> None:
                 await save(session, payload, source_file)
     except Exception:
         logger.exception("exec_summary: save_from_file failed")
+
+
+def unresolved(payload: dict | None) -> int:
+    """How many of the summary's cards have a formula that was not re-run."""
+    return sum(1 for k in (payload or {}).get("kpis") or [] if k.get("formula") and k.get("ids") is None)
+
+
+async def reread_if_unresolved(session: AsyncSession) -> bool:
+    """After a deploy that taught `resolve` a new formula shape: re-read the
+    newest master file from disk and save its summary again, ONLY when that
+    opens more cards than the stored one. Never raises; False = nothing changed."""
+    import asyncio
+    import os
+
+    from app.models import KnowledgeFile
+    try:
+        stored = await latest(session)
+        if not unresolved(stored):
+            return False
+        kf = (await session.execute(select(KnowledgeFile).where(KnowledgeFile.is_master)
+                                    .order_by(KnowledgeFile.created_at.desc()).limit(1))).scalars().first()
+        if not kf or not kf.file_path or not os.path.exists(kf.file_path):
+            logger.info("exec_summary: master file is not on disk — cards stay as stored until the next upload")
+            return False
+        fresh = await asyncio.get_running_loop().run_in_executor(None, read_file, kf.file_path)
+        if not fresh or fresh.get("sheet") != stored.get("sheet") or unresolved(fresh) >= unresolved(stored):
+            return False
+        await save(session, fresh, kf.original_name)
+        return True
+    except Exception:
+        logger.exception("exec_summary: reread_if_unresolved failed")
+        return False
 
 
 async def latest(session: AsyncSession) -> dict | None:

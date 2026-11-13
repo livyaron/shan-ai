@@ -137,3 +137,44 @@ def test_master_upload_syncs_the_record_sheet_only():
     block = src[src.index("Sync to Projects table"):src.index("except Exception as sync_err")]
     assert "pick_master_sheet" in block
     assert not re.search(r"for \w+ in xls\.sheet_names", block)
+
+
+# ── structured table references (the file's shape since 10.11.26) ─────────
+
+TABLE_RECORD = [
+    ["junk"],
+    ["זיהוי", "פרויקט", "חוסר בבודקים ", "חוסר במשגיחים ", "סיכון"],      # the file writes a trailing space
+    ["A-1", "תחנה א", "כן", "לא", "קבלן"],
+    ["A-2", "תחנה ב", "לא", "כן", None],
+    ["A-3", "תחנה ג", "כן", None, "היתר"],
+    [None, "סה״כ", "כן", None, None],                                     # a totals row has no identifier
+]
+
+
+@pytest.mark.parametrize("formula, ids", [
+    ('=COUNTIF(טבלה13[[חוסר בבודקים ]],"כן")', ["A-1", "A-3"]),          # exactly as the file writes it
+    ('=COUNTIF(טבלה13[חוסר במשגיחים],"כן")', ["A-2"]),                   # single brackets, no trailing space
+    ('=COUNTA(Table1[סיכון])', ["A-1", "A-3"]),
+    ('=COUNTIFS(טבלה13[[חוסר בבודקים ]],"כן",טבלה13[סיכון],"<>")', ["A-1", "A-3"]),
+])
+def test_a_table_column_reference_is_re_run_over_the_record_sheet(formula, ids):
+    assert es.resolve(formula, SHEET, TABLE_RECORD, 0) == ids
+
+
+@pytest.mark.parametrize("formula", [
+    '=COUNTIF(טבלה13[[עמודה שאין]],"כן")',                                # no such column
+    '=COUNTIF(טבלה13[[#All],[חוסר בבודקים ]],"כן")',                      # a special item is not re-run
+    '=COUNTIF(טבלה13[@[חוסר בבודקים ]],"כן")',
+])
+def test_a_table_reference_that_cannot_be_repeated_exactly_is_refused(formula):
+    assert es.resolve(formula, SHEET, TABLE_RECORD, 0) is None
+
+
+def test_a_column_name_that_appears_twice_is_refused():
+    rows = [["זיהוי", "סיכון", "סיכון"], ["A-1", "x", None]]
+    assert es.resolve('=COUNTA(T[סיכון])', SHEET, rows, 0) is None
+
+
+def test_unresolved_counts_only_cards_that_have_a_formula():
+    payload = {"kpis": [{"formula": None, "ids": None}, {"formula": "=COUNTIF(x)", "ids": None}, {"formula": "=COUNTA(y)", "ids": ["A"]}]}
+    assert es.unresolved(payload) == 1 and es.unresolved(None) == 0
