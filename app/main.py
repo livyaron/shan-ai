@@ -621,6 +621,20 @@ async def startup():
             print(f"Warning: pattern engine warmup failed: {e}")
     asyncio.create_task(_warm_patterns())
 
+    # One line of lessons-process numbers in the log after each start (counts and
+    # days only — lessons_process_metrics). It is how the process can be measured
+    # from a session that cannot reach the database.
+    async def _log_lessons_process():
+        try:
+            await asyncio.sleep(45)          # after the warm-ups; nothing waits for it
+            from app.database import async_session_maker
+            from app.services import lessons_process_metrics
+            async with async_session_maker() as session:
+                await lessons_process_metrics.snapshot(session)
+        except Exception as e:
+            print(f"Warning: lessons process metrics failed: {e}")
+    asyncio.create_task(_log_lessons_process())
+
     # Migrate user passwords (set default for users without password_hash)
     try:
         from app.database import async_session_maker

@@ -74,6 +74,7 @@ jobs:
             tests/test_project_visual.py \
             tests/test_lessons_app_login.py \
             tests/test_lessons_bootstrap.py \
+            tests/test_lessons_process_metrics.py \
             tests/test_shan_ui_layer.py \
             tests/test_login_page.py \
             tests/test_files_open.py \
