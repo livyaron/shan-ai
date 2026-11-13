@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 ENGINE_FLAG = "answer_engine"
 MODES = ("off", "admins", "all")
 # Admins first: they compare real answers before everyone is moved over.
-DEFAULT_MODE = "admins"
+DEFAULT_MODE = "all"   # everyone, since 2026-11-13 (user decision after the admins-only trial); `/engine` still overrides
 MODE_CACHE_SECONDS = 30
 
 CHAT_REPLY = "שלום! אפשר לשאול אותי על פרויקטים, נהלים והחלטות — או לכתוב החלטה לתיעוד."
