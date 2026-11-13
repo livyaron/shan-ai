@@ -110,8 +110,8 @@ async def test_a_failed_or_unparsed_plan_is_none_so_the_old_router_takes_over(mo
     ("off", True, False), ("off", False, False),
     ("admins", True, True), ("admins", False, False),
     ("all", True, True), ("all", False, True),
-    (None, True, True), (None, False, False),          # unset → DEFAULT_MODE (admins)
-    ("garbage", False, False),
+    (None, True, True), (None, False, True),           # unset → DEFAULT_MODE (all)
+    ("garbage", False, True),                          # an unknown value is treated as unset
 ])
 def test_who_gets_the_engine(mode, is_admin, on):
     assert agent.engine_applies(mode, SimpleNamespace(is_admin=is_admin)) is on
