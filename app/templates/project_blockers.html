@@ -26,7 +26,9 @@
         }
         * { box-sizing: border-box; }
         @view-transition { navigation: auto; }
-        html, body { margin: 0; height: 100%; overflow: hidden; background: var(--ink); color: var(--paper); font-family: var(--ui); }
+        html, body { margin: 0; height: 100%; overflow: hidden; background: var(--ink); color: var(--paper); font-family: var(--ui); overscroll-behavior: none; }
+        body { position: fixed; inset: 0; touch-action: none; -webkit-user-select: none; user-select: none; }   /* iPad Safari scrolled the whole film under the canvas */
+        .ai-scroll, .sum-scroll, .sheet .body { touch-action: pan-y; -webkit-user-select: text; user-select: text; }
         bdi.ltr, .ltr { direction: ltr; unicode-bidi: isolate; }
         a { color: inherit; }
         button { font-family: inherit; }
@@ -71,8 +73,8 @@
                  padding: clamp(.9rem, 2.4vh, 1.8rem) clamp(1rem, 4vw, 4rem) clamp(.6rem, 1.6vh, 1.2rem); visibility: hidden; pointer-events: none; }
         .scene.on, .scene.out { visibility: visible; }
         .scene > .in { position: relative; width: 100%; max-width: 1320px; margin: 0 auto; display: flex; flex-direction: column; min-height: 0; }
-        .scene button, .scene a, .scene form, .scene input, .scene .ai-scroll { pointer-events: auto; }
-        .scene:not(.on) button, .scene:not(.on) a, .scene:not(.on) form, .scene:not(.on) .ai-scroll { pointer-events: none; }
+        .scene button, .scene a, .scene form, .scene input, .scene .ai-scroll, .scene .sum-scroll { pointer-events: auto; }
+        .scene:not(.on) button, .scene:not(.on) a, .scene:not(.on) form, .scene:not(.on) .ai-scroll, .scene:not(.on) .sum-scroll { pointer-events: none; }
         .plot { position: relative; flex: 1; min-height: 0; }
         .head { flex: none; }
         /* every word and block rises in, and lifts away on the cut */
@@ -149,7 +151,27 @@
         .tag.lv { color: var(--tone); border-color: color-mix(in srgb, var(--tone) 50%, transparent); }
 
         /* ── 7 · what to do ── */
-        .ai-scroll { overflow-y: auto; min-height: 0; flex: 1; padding-inline-end: .3rem; overscroll-behavior: contain; }
+        .ai-scroll { overflow-y: auto; min-height: 0; flex: 1; padding-inline-end: .3rem; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
+
+        /* ── 8 · the whole list ── */
+        .sum-chips { display: flex; flex-wrap: wrap; gap: .4rem; margin: 0 0 .7rem; flex: none; }
+        .sum-chip { font-size: .82rem; border: 1px solid color-mix(in srgb, var(--tone) 45%, transparent); color: var(--tone); padding: .18rem .65rem; border-radius: 999px; background: rgba(0,0,0,.45); }
+        .sum-chip b { font-family: var(--mono); margin-inline-start: .3rem; }
+        .sum-scroll { overflow: auto; min-height: 0; flex: 1; border: 1px solid var(--line); background: rgba(6,6,5,.82); backdrop-filter: blur(6px); overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
+        table.sum { width: 100%; border-collapse: collapse; font-size: .86rem; min-width: 820px; }
+        table.sum th { position: sticky; top: 0; z-index: 1; background: #0d0c0a; color: var(--dim); font-weight: 500; text-align: right; padding: .55rem .6rem; border-bottom: 1px solid var(--faint); white-space: nowrap; cursor: pointer; }
+        table.sum th[aria-sort] { color: var(--amber); }
+        table.sum td { padding: .5rem .6rem; border-bottom: 1px solid rgba(38,35,30,.8); vertical-align: top; }
+        table.sum td.n { font-family: var(--mono); white-space: nowrap; text-align: left; }
+        table.sum td.nm { font-weight: 600; white-space: nowrap; }
+        table.sum td.nm small { display: block; font-weight: 400; color: var(--faint); font-size: .74rem; font-family: var(--mono); }
+        table.sum td.tx { color: var(--dim); max-width: 46ch; }
+        table.sum td.lv { white-space: nowrap; color: var(--tone); }
+        table.sum td.lv i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: var(--tone); box-shadow: 0 0 8px var(--tone); margin-inline-end: .4rem; }
+        table.sum tbody tr { cursor: pointer; transition: background-color .15s; }
+        table.sum tbody tr:hover, table.sum tbody tr:focus-visible { background: rgba(255,176,32,.06); outline: none; }
+        .scene.on table.sum tbody tr { animation: rowIn .6s var(--ease) backwards; animation-delay: calc(min(var(--i, 0), 24) * 35ms + 500ms); }
+        @keyframes rowIn { from { opacity: 0; transform: translateX(-30px); } }
         .ai-head { font-weight: 900; font-size: clamp(1.3rem, 2.8vw, 2.2rem); line-height: 1.15; margin: 0 0 .5rem; min-height: 1.2em; max-width: 34ch; }
         .ai-head.typing::after { content: '▌'; color: var(--amber); animation: blink 1s steps(2) infinite; }
         .ai-sit { color: var(--dim); max-width: 74ch; margin: 0 0 1rem; }
@@ -315,6 +337,19 @@
         </div>
     </section>
 
+    <section class="scene" data-scene="sum" data-name="סיכום">
+        <div class="wm">08</div>
+        <div class="in">
+            <div class="head">
+                <div class="slate rv">סצנה 08 · כל החסמים</div>
+                <h2 class="title" data-words="כל החסמים, בטבלה אחת"></h2>
+                <p class="lead rv" style="--d:420" id="sum-lead"></p>
+            </div>
+            <div class="sum-chips rv" id="sum-chips" style="--d:520"></div>
+            <div class="sum-scroll rv" style="--d:650"><table class="sum" id="sum"><thead><tr id="sum-head"></tr></thead><tbody id="sum-body"></tbody></table></div>
+        </div>
+    </section>
+
     <section class="scene" id="ai" data-scene="ai" data-name="המלצות">
         <div class="wm">07</div>
         <div class="in">
@@ -335,7 +370,7 @@
 </main>
 
 <div class="lb bot">
-    <button class="play" id="play" type="button" aria-label="הפעלה והשהיה" title="הפעלה / השהיה (רווח) · מעבר בין סצנות: גלגלת, חיצים או החלקה">▶</button>
+    <button class="play" id="play" type="button" aria-label="הפעלה והשהיה" title="הפעלה / השהיה (רווח) · מעבר בין סצנות: גלגלת, חיצים או החלקה">&#9654;&#xFE0E;</button>
     <div class="chapters" id="chapters"></div>
 </div>
 
@@ -394,7 +429,14 @@
     Array.prototype.forEach.call(document.querySelectorAll('h2.title[data-words]'), function (h) {
         h.dataset.words.split(' ').forEach(function (w, i) { var o = el('span', 'w'), s = el('span', '', w); o.style.setProperty('--i', i); o.appendChild(s); h.appendChild(o); h.appendChild(document.createTextNode(' ')); });
     });
+    // one handler (a filtered view, or a viewer whose blockers all sit with one role): "who holds them" says nothing
+    if ((D.by_owner || []).length <= 1) { var ow = document.querySelector('[data-scene="owners"]'); ow.parentNode.removeChild(ow); }
     var scenes = Array.prototype.slice.call(document.querySelectorAll('.scene'));
+    scenes.forEach(function (s, i) {
+        var n = ('0' + (i + 1)).slice(-2), sl = s.querySelector('.slate');
+        s.querySelector('.wm').textContent = n;
+        if (i && sl) sl.textContent = sl.textContent.replace(/^סצנה \d+/, 'סצנה ' + n);
+    });
     var NAMES = scenes.map(function (s) { return s.dataset.scene; });
     $('hud-n').textContent = ('0' + scenes.length).slice(-2);
 
@@ -417,14 +459,15 @@
         return c;
     };
     var openSheet = function (crumb, title, sub, list) {
-        lastFocus = document.activeElement; hideTip(); setPlaying(false);
+        lastFocus = document.activeElement; hideTip(); resumeAfter = resumeAfter || playing; setPlaying(false);
         $('sheet-crumb').textContent = crumb; $('sheet-title').textContent = title; $('sheet-sub').textContent = sub || '';
         var body = $('sheet-body'); clear(body);
         if (!list.length) body.appendChild(el('div', 'empty', 'אין חסמים ברשימה הזו'));
         list.forEach(function (e, i) { body.appendChild(blockerCard(e, i)); });
         body.scrollTop = 0; sheet.classList.add('on'); backdrop.classList.add('on'); sheet.setAttribute('aria-hidden', 'false'); $('sheet-x').focus();
     };
-    var closeSheet = function () { sheet.classList.remove('on'); backdrop.classList.remove('on'); sheet.setAttribute('aria-hidden', 'true'); if (lastFocus && lastFocus.focus) lastFocus.focus(); };
+    var resumeAfter = false;
+    var closeSheet = function () { sheet.classList.remove('on'); backdrop.classList.remove('on'); sheet.setAttribute('aria-hidden', 'true'); if (lastFocus && lastFocus.focus) lastFocus.focus(); if (resumeAfter) { resumeAfter = false; setPlaying(true); } };
     var sheetOpen = function () { return sheet.classList.contains('on'); };
     $('sheet-x').addEventListener('click', closeSheet); backdrop.addEventListener('click', closeSheet);
 
@@ -479,7 +522,7 @@
     };
     var mapLabels = [];
     var layoutMap = function () {
-        var r = $('plot-map').getBoundingClientRect(); if (!r.width || !OPEN.length) return;
+        var r = rectOf($('plot-map')); if (!r.width || !OPEN.length) return;
         var names = (D.by_topic || []).map(function (t) { return t.topic; });
         var topicOf = function (e) { return (e.topics && e.topics[0]) || 'ללא נושא מזוהה'; };
         var n = Math.max(1, names.length), cols = clamp(Math.round(Math.sqrt(n * r.width / Math.max(1, r.height))), 1, n), rows = Math.ceil(n / cols);
@@ -604,6 +647,45 @@
     };
     $('ai-form').addEventListener('submit', function () { var b = $('ai-go'); b.disabled = true; b.textContent = 'המודל מנסח… עד חצי דקה'; });
 
+    // ───────────────────────── 8 the whole list, in the queue's order
+    BUILD.sum = function () {
+        $('sum-lead').textContent = empty ? 'אין חסמים פתוחים.' : (OPEN.length + ' חסמים פתוחים' + (D.owner ? ' לטיפול ' + D.owner : ' בתחום שלך') + ', לפי סדר העדיפות. לחיצה על כותרת ממיינת, לחיצה על שורה פותחת את החסם.');
+        LEVELS.forEach(function (lv, i) { var n = OPEN.filter(function (e) { return e.level === lv; }).length; if (!n) return; var c = el('span', 'sum-chip', D.levels[lv].icon + ' ' + D.levels[lv].label); c.style.setProperty('--tone', css(i)); c.appendChild(ltr(String(n))); $('sum-chips').appendChild(c); });
+        var COLS = [
+            { t: '#', n: true, v: function (e) { return e.rank; } },
+            { t: 'פרויקט', v: function (e) { return e.name || e.id; } },
+            { t: 'החסם', v: function (e) { return e.text; } },
+            { t: 'לטיפול', v: function (e) { return e.owner; } },
+            { t: 'דרגה', v: function (e) { return LVK(e.level); }, n: true },
+            { t: 'שבועות', n: true, v: function (e) { return e.weeks; } },
+            { t: 'הזזת יעד (ח׳)', n: true, v: function (e) { return e.slip_months || 0; } },
+        ];
+        var sort = { i: 0, dir: 1 };
+        var draw = function () {
+            var head = $('sum-head'), body = $('sum-body'); clear(head); clear(body);
+            COLS.forEach(function (c, i) {
+                var th = el('th', '', c.t); th.tabIndex = 0; if (sort.i === i) th.setAttribute('aria-sort', sort.dir > 0 ? 'ascending' : 'descending');
+                var go = function () { sort = { i: i, dir: sort.i === i ? -sort.dir : (i >= 5 ? -1 : 1) }; draw(); };
+                th.addEventListener('click', go); th.addEventListener('keydown', function (e) { if (e.key === 'Enter') go(); }); head.appendChild(th);
+            });
+            var col = COLS[sort.i];
+            OPEN.slice().sort(function (a, b) { var x = col.v(a), y = col.v(b); return (col.n ? x - y : String(x).localeCompare(String(y), 'he')) * sort.dir || a.rank - b.rank; }).forEach(function (e, i) {
+                var tr = el('tr'); tr.tabIndex = 0; tr.style.setProperty('--i', i); tr.style.setProperty('--tone', tone(e.level));
+                tr.appendChild(el('td', 'n', String(e.rank)));
+                var nm = el('td', 'nm', e.name || e.id); nm.appendChild(el('small', '', e.id + ' · ' + e.stage)); tr.appendChild(nm);
+                tr.appendChild(el('td', 'tx', e.text.length > 140 ? e.text.slice(0, 140) + '…' : e.text));
+                tr.appendChild(el('td', '', e.owner));
+                var lv = el('td', 'lv'); lv.appendChild(el('i')); lv.appendChild(document.createTextNode(D.levels[e.level].label)); tr.appendChild(lv);
+                tr.appendChild(el('td', 'n', (e.lower_bound ? '≥' : '') + e.weeks));
+                tr.appendChild(el('td', 'n', e.slip_months ? '+' + e.slip_months : '—'));
+                var open = function () { openSheet('חסם', e.name || e.id, weeksText(e) + ' · מקום ' + e.rank + ' בתור', [e]); };
+                tr.addEventListener('click', open); tr.addEventListener('keydown', function (ev) { if (ev.key === 'Enter') open(); });
+                body.appendChild(tr);
+            });
+        };
+        if (!empty) draw();
+    };
+
     NAMES.forEach(function (n) { BUILD[n](); });
 
     // ───────────────────────── formations: where each blocker stands in each scene
@@ -613,7 +695,11 @@
         gr.addColorStop(0, 'rgba(' + c.join(',') + ',1)'); gr.addColorStop(.22, 'rgba(' + c.join(',') + ',.38)'); gr.addColorStop(1, 'rgba(' + c.join(',') + ',0)');
         x.fillStyle = gr; x.fillRect(0, 0, 64, 64); return s;
     });
-    var rectOf = function (node) { return node.getBoundingClientRect(); };
+    var origin = { x: 0, y: 0 };
+    var rectOf = function (node) {
+        var r = node.getBoundingClientRect(), x = r.left - origin.x, y = r.top - origin.y;
+        return { left: x, top: y, right: x + r.width, bottom: y + r.height, width: r.width, height: r.height };
+    };
     var dust = function (p, T) { return { x: p.dx * W + Math.sin(T / 4200 + p.ph) * 18, y: p.dy * H + Math.cos(T / 5100 + p.ph) * 14, r: 1 + p.seed * .7, a: .13, k: 6, len: 0 }; };
     var frameCtx = {};
     var ctxFor = function (name) {
@@ -663,6 +749,9 @@
             var rad = 26 + t * c.R;
             return { x: c.cx + Math.cos(ang) * rad, y: c.cy + Math.sin(ang) * rad * .56, r: p.open ? 2.3 : 1.3, a: p.open ? .62 : .3, k: p.open ? p.k : 6, len: 0 };
         },
+        sum: function (p, T) {                                          // the cast drifts behind the table, the open ones still lit
+            var d = dust(p, T); if (p.open) { d.r = 1.8 + (3 - p.ring) * .5; d.a = .42; d.k = p.k; } return d;
+        },
     };
     // what the canvas draws besides the cast, per scene (fades with the scene)
     var enterT = {};
@@ -696,7 +785,9 @@
     var playing = false, progress = 0, outTimer = 0;
     NAMES.forEach(function (n) { pres[n] = 0; });
     var resize = function () {
-        dpr = Math.min(window.devicePixelRatio || 1, 2); W = window.innerWidth; H = window.innerHeight;
+        var box = cv.getBoundingClientRect();
+        dpr = Math.min(window.devicePixelRatio || 1, 2); W = box.width || window.innerWidth; H = box.height || window.innerHeight;
+        origin = { x: box.left, y: box.top };
         cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.fillStyle = '#040404'; g.fillRect(0, 0, W, H);
         layoutMap();
     };
@@ -730,10 +821,22 @@
         if (s.ring || hot) { g.strokeStyle = hot ? '#fff' : 'rgba(255,255,255,.85)'; g.lineWidth = hot ? 2 : 1.4; g.beginPath(); g.arc(s.x, s.y, r + 3.5, 0, 6.283); g.stroke(); }
         g.globalAlpha = 1;
     };
+    // a sonar ring from the gravest blockers — they are the ones still calling for someone
+    var ping = function (s, now, p) {
+        var period = 2600, t = ((now + p.seed * period) % period) / period; if (t > .7) return;
+        var k = t / .7, R = s.r + 4 + k * (16 + s.r * 2.2);
+        g.globalCompositeOperation = 'lighter'; g.globalAlpha = s.a * .55 * (1 - k) * (1 - k); g.strokeStyle = css(s.k); g.lineWidth = 1.6 * (1 - k) + .4;
+        g.beginPath(); g.arc(s.x, s.y, R, 0, 6.283); g.stroke(); g.globalCompositeOperation = 'source-over'; g.globalAlpha = 1;
+    };
     var chapters = $('chapters');
     var last = performance.now();
     var frame = function (now) {
+        try { render(now); } catch (err) { if (window.console) console.error(err); }
+        requestAnimationFrame(frame);
+    };
+    var render = function (now) {
         var dt = Math.min(.05, (now - last) / 1000); last = now; frameCtx = {};
+        origin.y = cv.getBoundingClientRect().top; 
         var name = NAMES[Math.max(0, current)], T = still ? 0 : now;
         NAMES.forEach(function (n) { pres[n] = still ? (n === name ? 1 : 0) : clamp(pres[n] + (n === name ? 1 : -1) * dt * 2.2, 0, 1); });
         moving = !still && PS.some(function (p) { return p.from && now < p.t0 + p.dur; });
@@ -745,7 +848,12 @@
         g.setTransform(dpr * ca, dpr * cb, -dpr * cb, dpr * ca, dpr * (cx - ca * cx + cb * cy), dpr * (cy - cb * cx - ca * cy));
         NAMES.forEach(function (n) { if (pres[n] > .01 && DECOR[n]) DECOR[n](ctxFor(n), pres[n], now); });
         var c = ctxFor(name);
-        for (var i = 0; i < PS.length; i++) { var p = PS[i], s = stateOf(p, T, name, c); p.cur = s; draw(s, p === hover); }
+        for (var i = 0; i < PS.length; i++) {
+            var p = PS[i], s = stateOf(p, T, name, c); p.cur = s;
+            if (p.open && !still) { var beat = .5 + .5 * Math.sin(now / (380 + p.ring * 260) + p.ph); s = Object.assign({}, s, { r: s.r * (1 + .14 * beat), a: Math.min(1, s.a * (.82 + .18 * beat)) }); }
+            draw(s, p === hover || (hover && hover.open && p.open && p.e.owner === hover.e.owner && name !== 'owners'));
+            if (p.open && !still && s.a > .5 && (p.ring === 0 || p.e.top) && !s.len) ping(s, now, p);
+        }
         // the clock and the chapter in progress
         var secs = Math.floor((now - startT) / 1000);
         $('hud-tc').textContent = [Math.floor(secs / 3600), Math.floor(secs / 60) % 60, secs % 60].map(function (v) { return ('0' + v).slice(-2); }).join(':');
@@ -754,7 +862,6 @@
             if (chapters.children[current]) chapters.children[current].firstChild.style.setProperty('--p', progress);
             if (progress >= 1) { if (current < scenes.length - 1) go(current + 1); else setPlaying(false); }
         }
-        requestAnimationFrame(frame);
     };
 
     // ───────────────────────── cuts
@@ -789,21 +896,21 @@
         Array.prototype.forEach.call(chapters.children, function (ch, j) { ch.classList.toggle('on', j === i); ch.classList.toggle('done', j < i); ch.firstChild.style.setProperty('--p', 0); });
         $('hud-sc').textContent = ('0' + (i + 1)).slice(-2);
     }
-    function setPlaying(on) { playing = on; $('play').classList.toggle('on', on); $('play').textContent = on ? '❚❚' : '▶'; }
+    function setPlaying(on) { playing = on; $('play').classList.toggle('on', on); $('play').textContent = on ? '\u275A\u275A\uFE0E' : '\u25B6\uFE0E'; }
     $('play').addEventListener('click', function () { if (!playing && current === scenes.length - 1) go(0); setPlaying(!playing); });
 
     // the viewer moves through the film: wheel, keys, swipe — each a cut, never a scroll
     var wheelAcc = 0, wheelLock = 0;
     window.addEventListener('wheel', function (e) {
         if (sheetOpen()) return;
-        var sc = e.target.closest && e.target.closest('.ai-scroll');
+        var sc = e.target.closest && e.target.closest('.ai-scroll, .sum-scroll');
         if (sc && sc.scrollHeight > sc.clientHeight + 2) { var atTop = sc.scrollTop <= 0, atBot = sc.scrollTop + sc.clientHeight >= sc.scrollHeight - 2; if ((e.deltaY < 0 && !atTop) || (e.deltaY > 0 && !atBot)) return; }
         var now = performance.now(); if (now < wheelLock) return;
         wheelAcc += e.deltaY;
         if (Math.abs(wheelAcc) > 45) { go(current + (wheelAcc > 0 ? 1 : -1)); wheelAcc = 0; wheelLock = now + 1150; }
     }, { passive: true });
     var touchY = null;
-    window.addEventListener('touchstart', function (e) { touchY = e.target.closest('.ai-scroll, .sheet') ? null : e.touches[0].clientY; }, { passive: true });
+    window.addEventListener('touchstart', function (e) { touchY = e.target.closest('.ai-scroll, .sum-scroll, .sheet') ? null : e.touches[0].clientY; }, { passive: true });
     window.addEventListener('touchend', function (e) { if (touchY === null) return; var d = touchY - e.changedTouches[0].clientY; if (Math.abs(d) > 60) go(current + (d > 0 ? 1 : -1)); touchY = null; }, { passive: true });
     document.addEventListener('keydown', function (e) {
         if (sheetOpen()) { if (e.key === 'Escape') closeSheet(); return; }
@@ -819,18 +926,19 @@
         PS.forEach(function (p) { var s = p.cur; if (!s || s.a < .45) return; var d = Math.hypot(s.x - x, s.y - y), hitR = s.r + 5; if (s.len > 1 && y > s.y - s.r - 4 && y < s.y + s.r + 4 && x <= s.x + 4 && x >= s.x - s.len) d = 0; if (d <= hitR && (!best || d < best.d)) best = { p: p, d: d }; });
         return best && best.p;
     };
-    var blocked = function (t) { return t.closest && t.closest('button, a, input, form, .sheet, .lb, .ai-scroll, .tip'); };
+    var blocked = function (t) { return t.closest && t.closest('button, a, input, form, .sheet, .lb, .ai-scroll, .sum-scroll, .tip'); };
     window.addEventListener('pointermove', function (e) {
         if (sheetOpen() || blocked(e.target)) { if (hover) { hover = null; hideTip(); document.body.style.cursor = ''; } return; }
-        hover = pick(e.clientX, e.clientY); document.body.style.cursor = hover ? 'pointer' : '';
+        hover = pick(e.clientX - origin.x, e.clientY - origin.y); document.body.style.cursor = hover ? 'pointer' : '';
         if (hover) { var x = hover.e; showTip((x.name || x.id) + '\n' + (hover.open ? weeksText(x) + ' · לטיפול: ' + x.owner + '\n' + D.levels[x.level].icon + ' ' + D.levels[x.level].label : 'נסגר אחרי ' + x.weeks + ' שבועות'), e.clientX, e.clientY); } else hideTip();
     });
     window.addEventListener('click', function (e) {
         if (sheetOpen() || blocked(e.target)) return;
-        var p = pick(e.clientX, e.clientY); if (p) openSheet(p.open ? 'חסם' : 'חסם שנסגר', p.e.name || p.e.id, p.open ? weeksText(p.e) + ' · מקום ' + p.e.rank + ' בתור' : 'נסגר ב-' + ilDate(p.e.closed), [p.e]);
+        var p = pick(e.clientX - origin.x, e.clientY - origin.y); if (p) openSheet(p.open ? 'חסם' : 'חסם שנסגר', p.e.name || p.e.id, p.open ? weeksText(p.e) + ' · מקום ' + p.e.rank + ' בתור' : 'נסגר ב-' + ilDate(p.e.closed), [p.e]);
     });
 
-    resize(); window.addEventListener('resize', resize);
+    resize(); window.addEventListener('resize', resize); window.addEventListener('orientationchange', function () { setTimeout(resize, 300); });
+    if (window.visualViewport) window.visualViewport.addEventListener('resize', resize);
     if (document.fonts && document.fonts.ready) document.fonts.ready.then(layoutMap);
     PS.forEach(function (p) { p.cur = dust(p, performance.now()); });
     go(location.hash === '#ai' ? scenes.length - 1 : 0);

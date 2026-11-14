@@ -137,7 +137,7 @@ def test_the_page_is_gated_scoped_and_reachable_from_the_dashboard():
     assert "scope.allowed" in body and "insight_access.sees_blocker" in body and "frames_and_patterns" in body
     page = (root / "app/templates/project_blockers.html").read_text(encoding="utf-8")
     assert "innerHTML" not in page and "{{ data|tojson }}" in page and "prefers-reduced-motion" in page
-    for scene in ("open", "map", "time", "owners", "old", "queue", "ai"):
+    for scene in ("open", "map", "time", "owners", "old", "queue", "sum", "ai"):
         assert f'data-scene="{scene}"' in page and f"BUILD.{scene} = " in page
     dash = (root / "app/templates/dashboard.html").read_text(encoding="utf-8")
     assert 'href="/dashboard/projects/blockers"' in dash and 'href="/dashboard/projects/delays"' in dash
