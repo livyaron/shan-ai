@@ -32,7 +32,17 @@ logger = logging.getLogger(__name__)
 NO_OWNER = "ללא גורם מטפל"
 _PREFIX = re.compile(r"^\s*חסם לטיפול\s*")
 # the file's wording → the role's name as the division says it (ירון, 15/11: "מנהל מגזר פיקוח")
-OWNER_NAMES = {"מנהל מגזר בפיקוח": "מנהל מגזר פיקוח"}
+OWNER_NAMES = {"מנהל מגזר בפיקוח": "מנהל מגזר פיקוח", "מנהלת מחלקה": "מנהלת מחלקת פרויקטים"}
+# the handlers top-down (ירון, 15/11: "לפי רמת ההיררכיה"); a role the file adds later goes after these, by count
+HIERARCHY = ('סמנכ"ל', "מנהל אגף", "מנהל אגף תפעול השנאה", "מנהל מגזר תכנון", "מנהל מגזר ביצוע", "מנהל מגזר פיקוח",
+             "מנהלת מחלקת פרויקטים", "רב פרויקטלי", "אחר", NO_OWNER)
+
+
+def by_hierarchy(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Owner rows top-down; unknown roles after the known ones, the bigger first."""
+    rank = {name: i for i, name in enumerate(HIERARCHY)}
+    unknown = len(HIERARCHY) - 2                                         # before "אחר" and "ללא גורם מטפל"
+    return sorted(rows, key=lambda r: (rank.get(r["owner"], unknown - .5), -r["open"], r["owner"]))
 AGES: tuple[tuple[str, float], ...] = (                 # weeks open (upper bound)
     ("עד חודש", 4), ("חודש עד 3 חודשים", 13), ("3 עד 6 חודשים", 26), ("מעל חצי שנה", float("inf")),
 )
@@ -179,7 +189,7 @@ def analyse(frames: ps.Frames, p: dict, sees: Callable[[list, str | None, str | 
             rows.append({"owner": name, "open": len(hit), "median_weeks": _spread_weeks([e["weeks"] for e in hit]),
                          "oldest_weeks": max(e["weeks"] for e in hit),
                          "slip_months": round(sum(max(0, e["slip_months"] or 0) for e in hit), 1)})
-        return sorted(rows, key=lambda r: -r["open"])
+        return by_hierarchy(rows)
 
     ages = dict.fromkeys((label for label, _ in AGES), 0)
     for e in open_eps:
@@ -203,7 +213,7 @@ def analyse(frames: ps.Frames, p: dict, sees: Callable[[list, str | None, str | 
 
     return {
         "reports": len(rdates), "first_report": rdates[0].isoformat(), "as_of": rdates[-1].isoformat(),
-        "owner": owner, "owners": sorted(({"owner": k, "open": v} for k, v in owners_all.items()), key=lambda r: -r["open"]),
+        "owner": owner, "owners": by_hierarchy([{"owner": k, "open": v} for k, v in owners_all.items()]),
         "now": {
             "open": len(open_eps), "projects": len({e["id"] for e in open_eps}),
             "unowned": sum(1 for e in open_eps if e["owner"] == NO_OWNER),

@@ -108,7 +108,10 @@
         .fact b { display: block; font-family: var(--mono); font-size: clamp(1.5rem, 2.8vw, 2.4rem); font-weight: 600; color: var(--tone, var(--paper)); line-height: 1; }
         .fact span { display: block; color: var(--dim); font-size: .84rem; margin-top: .35rem; }
         .filters { display: flex; flex-wrap: wrap; gap: .35rem; margin-top: .7rem; align-items: center; flex: none; }
-        .filters .lab { color: var(--faint); font-size: .8rem; margin-inline-end: .3rem; }
+        .filters .lab { color: var(--faint); font-size: .95rem; margin-inline-end: .3rem; }
+        .filters { gap: .5rem; }
+        .filters .pill { font-size: 1rem; padding: .45rem 1.05rem; color: var(--paper); border-color: var(--faint); background: rgba(0,0,0,.5); }
+        .filters .pill.on { color: #000; background: var(--amber); border-color: var(--amber); }
 
         /* ── legends ── */
         .keys { display: flex; flex-wrap: wrap; gap: .3rem 1.2rem; color: var(--dim); font-size: .82rem; margin-top: .4rem; flex: none; }
@@ -526,14 +529,21 @@
         var names = (D.by_topic || []).map(function (t) { return t.topic; });
         var topicOf = function (e) { return (e.topics && e.topics[0]) || 'ללא נושא מזוהה'; };
         var n = Math.max(1, names.length), cols = clamp(Math.round(Math.sqrt(n * r.width / Math.max(1, r.height))), 1, n), rows = Math.ceil(n / cols);
-        var hubs = names.map(function (name, i) { return { name: name, x: r.right - ((i % cols) + .5) * r.width / cols, y: r.top + 22 + (Math.floor(i / cols) + .5) * (r.height - 22) / rows, n: 0 }; });
+        var cw = r.width / cols, chh = r.height / rows, LH = 30;              // LH: the cell's head, where its label lives
+        var hubs = names.map(function (name, i) {
+            var x0 = r.right - (i % cols + 1) * cw, y0 = r.top + Math.floor(i / cols) * chh;
+            return { name: name, x0: x0 + 6, x1: x0 + cw - 6, y0: y0 + LH, y1: y0 + chh - 4, x: x0 + cw / 2, y: y0 + LH + (chh - LH) / 2, ly: y0 + 18, n: 0, area: 0 };
+        });
         var nodes = PS.filter(function (p) { return p.open; });
-        var area = nodes.reduce(function (a, p) { var r0 = 4 + Math.sqrt(p.e.weeks + 1) * 1.9; return a + Math.PI * r0 * r0; }, 0);
-        var scale = clamp(Math.sqrt(.26 * r.width * r.height / Math.max(1, area)), .45, 2.2);
+        var r0 = function (p) { return 4 + Math.sqrt(p.e.weeks + 1) * 1.9; };
+        nodes.forEach(function (p) { var h = hubs[names.indexOf(topicOf(p.e))] || hubs[0]; h.area += Math.PI * r0(p) * r0(p); });
+        var area = nodes.reduce(function (a, p) { return a + Math.PI * r0(p) * r0(p); }, 0);
+        var fit = hubs.reduce(function (m, h) { return h.area ? Math.min(m, Math.sqrt(.5 * (h.x1 - h.x0) * (h.y1 - h.y0) / h.area)) : m; }, 9);
+        var scale = clamp(Math.min(Math.sqrt(.26 * r.width * r.height / Math.max(1, area)), fit), .3, 2.2);
         nodes.forEach(function (p) {
             var hub = hubs[names.indexOf(topicOf(p.e))] || hubs[0]; hub.n++;
             var a = p.seed * 6.283, d = p.ph * 6;
-            p.hub = hub; p.mr = (4 + Math.sqrt(p.e.weeks + 1) * 1.9) * scale; p.mx = hub.x + Math.cos(a) * d; p.my = hub.y + Math.sin(a) * d;
+            p.hub = hub; p.mr = r0(p) * scale; p.mx = hub.x + Math.cos(a) * d; p.my = hub.y + Math.sin(a) * d;
         });
         for (var it = 0; it < 160; it++) {
             nodes.forEach(function (a) { a.mx += (a.hub.x - a.mx) * .05; a.my += (a.hub.y - a.my) * .05; });
@@ -541,12 +551,9 @@
                 var p = nodes[i], q = nodes[j], dx = q.mx - p.mx, dy = q.my - p.my, dist = Math.sqrt(dx * dx + dy * dy) || .01, min = p.mr + q.mr + 3;
                 if (dist < min) { var push = (min - dist) / 2; dx /= dist; dy /= dist; p.mx -= dx * push; p.my -= dy * push; q.mx += dx * push; q.my += dy * push; }
             }
+            nodes.forEach(function (a) { var h = a.hub; a.mx = clamp(a.mx, h.x0 + a.mr, Math.max(h.x0 + a.mr, h.x1 - a.mr)); a.my = clamp(a.my, h.y0 + a.mr, Math.max(h.y0 + a.mr, h.y1 - a.mr)); });
         }
-        nodes.forEach(function (a) { a.mx = clamp(a.mx, r.left + a.mr, r.right - a.mr); a.my = clamp(a.my, r.top + 22 + a.mr, r.bottom - a.mr); });
-        mapLabels = hubs.filter(function (h) { return h.n; }).map(function (h) {
-            var mine = nodes.filter(function (p) { return p.hub === h; });
-            return { text: h.name + ' · ' + h.n, x: h.x, y: Math.min.apply(null, mine.map(function (p) { return p.my - p.mr; })) - 12 };
-        });
+        mapLabels = hubs.filter(function (h) { return h.n; }).map(function (h) { return { text: h.name + ' · ' + h.n, x: h.x, y: h.ly }; });
     };
 
     // ───────────────────────── 3 past and present (columns by the report a blocker opened in)
@@ -756,9 +763,15 @@
     // what the canvas draws besides the cast, per scene (fades with the scene)
     var enterT = {};
     var DECOR = {
-        map: function (c, a) {
-            g.font = '600 13px Heebo, sans-serif'; g.textAlign = 'center'; g.direction = 'rtl'; g.fillStyle = 'rgba(243,238,228,' + (.8 * a) + ')';
-            mapLabels.forEach(function (l) { g.fillText(l.text, l.x, l.y); });
+        mapTop: function (c, a) {
+            g.font = '700 15px Heebo, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.direction = 'rtl';
+            mapLabels.forEach(function (l) {
+                var w = g.measureText(l.text).width + 22;
+                g.globalAlpha = .82 * a; g.fillStyle = '#060605'; g.beginPath();
+                if (g.roundRect) g.roundRect(l.x - w / 2, l.y - 13, w, 26, 13); else g.rect(l.x - w / 2, l.y - 13, w, 26); g.fill();
+                g.globalAlpha = a; g.fillStyle = '#f3eee4'; g.fillText(l.text, l.x, l.y + 1);
+            });
+            g.globalAlpha = 1; g.textBaseline = 'alphabetic';
         },
         time: function (c, a, T) {
             if (!FLOW.length) return;
@@ -821,6 +834,29 @@
         if (s.ring || hot) { g.strokeStyle = hot ? '#fff' : 'rgba(255,255,255,.85)'; g.lineWidth = hot ? 2 : 1.4; g.beginPath(); g.arc(s.x, s.y, r + 3.5, 0, 6.283); g.stroke(); }
         g.globalAlpha = 1;
     };
+    var ptr = null;
+    var watchers = PS.filter(function (p) { return p.open; }).sort(function (a, b) { return a.seed - b.seed; });
+    watchers.slice(0, clamp(Math.round(watchers.length * .18), Math.min(3, watchers.length), 14)).forEach(function (p) { p.eyes = { blink: 2600 + p.seed * 3400, wink: p.seed < .5 ? 1 : -1 }; });
+    var eyes = function (s, now, p, at) {
+        var r = s.r, gap = r * .36, er = r * .27, pr = er * .55, y = s.y - r * .14;
+        // where to look: the pointer when it is near, otherwise darting glances of its own
+        var dx = at.x - s.x, dy = at.y - s.y, d = Math.hypot(dx, dy);
+        if (!ptr || d > 360) { var slot = Math.floor((now + p.seed * 9000) / (1100 + p.seed * 900)), h = Math.sin(slot * 12.9898 + p.seed * 78.233) * 43758.5453; h -= Math.floor(h); dx = Math.cos(h * 6.283); dy = Math.sin(h * 6.283) * .7; d = 1; }
+        var ox = d ? dx / Math.max(d, 1) : 0, oy = d ? dy / Math.max(d, 1) : 0, reach = er - pr * .9;
+        // a blink every few seconds; every third one is a wink
+        var cyc = (now + p.seed * 7000) % p.eyes.blink, n = Math.floor((now + p.seed * 7000) / p.eyes.blink), shut = cyc < 160 ? Math.sin(Math.PI * cyc / 160) : 0, wink = n % 3 === 2;
+        g.globalCompositeOperation = 'source-over'; g.globalAlpha = Math.min(1, s.a);
+        [-1, 1].forEach(function (side) {
+            var ex = s.x + side * gap, close = (!wink || side === p.eyes.wink) ? shut : 0, sy = Math.max(.08, 1 - close);
+            g.save(); g.translate(ex, y); g.scale(1, sy);
+            g.fillStyle = '#fbf8f2'; g.beginPath(); g.arc(0, 0, er, 0, 6.283); g.fill();
+            g.fillStyle = '#0b0a08'; g.beginPath(); g.arc(ox * reach, oy * reach, pr, 0, 6.283); g.fill();
+            g.fillStyle = 'rgba(255,255,255,.9)'; g.beginPath(); g.arc(ox * reach - pr * .35, oy * reach - pr * .35, pr * .3, 0, 6.283); g.fill();
+            g.restore();
+            if (close > .6) { g.strokeStyle = '#0b0a08'; g.lineWidth = Math.max(1, r * .06); g.beginPath(); g.moveTo(ex - er, y); g.quadraticCurveTo(ex, y + er * .5, ex + er, y); g.stroke(); }
+        });
+        g.globalAlpha = 1;
+    };
     // a sonar ring from the gravest blockers — they are the ones still calling for someone
     var ping = function (s, now, p) {
         var period = 2600, t = ((now + p.seed * period) % period) / period; if (t > .7) return;
@@ -847,13 +883,16 @@
         var cx = W / 2, cy = H / 2, ca = cs * Math.cos(cr), cb = cs * Math.sin(cr);
         g.setTransform(dpr * ca, dpr * cb, -dpr * cb, dpr * ca, dpr * (cx - ca * cx + cb * cy), dpr * (cy - cb * cx - ca * cy));
         NAMES.forEach(function (n) { if (pres[n] > .01 && DECOR[n]) DECOR[n](ctxFor(n), pres[n], now); });
+        var lookAt = ptr || { x: W * (.5 + .35 * Math.sin(now / 5300)), y: H * (.5 + .3 * Math.cos(now / 4100)) };
         var c = ctxFor(name);
         for (var i = 0; i < PS.length; i++) {
             var p = PS[i], s = stateOf(p, T, name, c); p.cur = s;
             if (p.open && !still) { var beat = .5 + .5 * Math.sin(now / (380 + p.ring * 260) + p.ph); s = Object.assign({}, s, { r: s.r * (1 + .14 * beat), a: Math.min(1, s.a * (.82 + .18 * beat)) }); }
             draw(s, p === hover || (hover && hover.open && p.open && p.e.owner === hover.e.owner && name !== 'owners'));
             if (p.open && !still && s.a > .5 && (p.ring === 0 || p.e.top) && !s.len) ping(s, now, p);
+            if (p.eyes && !s.len && s.r >= 8 && s.a > .6) eyes(s, now, p, lookAt);
         }
+        if (pres.map > .01) DECOR.mapTop(ctxFor('map'), pres.map, now);
         // the clock and the chapter in progress
         var secs = Math.floor((now - startT) / 1000);
         $('hud-tc').textContent = [Math.floor(secs / 3600), Math.floor(secs / 60) % 60, secs % 60].map(function (v) { return ('0' + v).slice(-2); }).join(':');
@@ -929,6 +968,7 @@
     var blocked = function (t) { return t.closest && t.closest('button, a, input, form, .sheet, .lb, .ai-scroll, .sum-scroll, .tip'); };
     window.addEventListener('pointermove', function (e) {
         if (sheetOpen() || blocked(e.target)) { if (hover) { hover = null; hideTip(); document.body.style.cursor = ''; } return; }
+        ptr = { x: e.clientX - origin.x, y: e.clientY - origin.y };
         hover = pick(e.clientX - origin.x, e.clientY - origin.y); document.body.style.cursor = hover ? 'pointer' : '';
         if (hover) { var x = hover.e; showTip((x.name || x.id) + '\n' + (hover.open ? weeksText(x) + ' · לטיפול: ' + x.owner + '\n' + D.levels[x.level].icon + ' ' + D.levels[x.level].label : 'נסגר אחרי ' + x.weeks + ' שבועות'), e.clientX, e.clientY); } else hideTip();
     });

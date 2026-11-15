@@ -116,7 +116,7 @@ def sees_project(scope: Scope, sectors, manager: str | None) -> bool:
 
 # The file's "לטיפול" column names a ROLE ("חסם לטיפול מנהל מגזר תכנון"). A sector
 # manager is that role by the admin's own sector assignment — not by a name match.
-OWNER_WORD = {ss.PLANNING: "תכנון", ss.EXECUTION: "ביצוע", ss.SUPERVISION: "פיקוח", ss.PM_DEPT: "מחלקה"}
+OWNER_WORD = {ss.PLANNING: "תכנון", ss.EXECUTION: "ביצוע", ss.SUPERVISION: "פיקוח", ss.PM_DEPT: "מחלק"}   # the file says "מחלקה", the page "מחלקת פרויקטים" (blockers.OWNER_NAMES)
 
 
 def owns_blocker(scope: Scope, owner: str | None) -> bool:
