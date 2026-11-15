@@ -31,6 +31,8 @@ logger = logging.getLogger(__name__)
 
 NO_OWNER = "ללא גורם מטפל"
 _PREFIX = re.compile(r"^\s*חסם לטיפול\s*")
+# the file's wording → the role's name as the division says it (ירון, 15/11: "מנהל מגזר פיקוח")
+OWNER_NAMES = {"מנהל מגזר בפיקוח": "מנהל מגזר פיקוח"}
 AGES: tuple[tuple[str, float], ...] = (                 # weeks open (upper bound)
     ("עד חודש", 4), ("חודש עד 3 חודשים", 13), ("3 עד 6 חודשים", 26), ("מעל חצי שנה", float("inf")),
 )
@@ -45,7 +47,8 @@ def owner_of(to_handle: object) -> str:
     """The handler as the file names it, without the "חסם לטיפול" prefix."""
     if not isinstance(to_handle, str) or not to_handle.strip():
         return NO_OWNER
-    return _PREFIX.sub("", to_handle).strip() or NO_OWNER
+    name = " ".join(_PREFIX.sub("", to_handle).split())
+    return OWNER_NAMES.get(name, name) or NO_OWNER
 
 
 def _text(v: object) -> str | None:
