@@ -167,3 +167,9 @@ def test_the_ai_reply_is_validated_and_a_failed_call_stores_nothing(monkeypatch)
     monkeypatch.setattr(insight_ai, "_ask", boom)
     stored.clear()
     assert asyncio.run(bl.recommend(None, DATA, "k")) is None and not stored
+
+
+def test_owner_name_is_the_divisions_wording():
+    assert bl.owner_of("חסם לטיפול מנהל מגזר בפיקוח") == "מנהל מגזר פיקוח"
+    assert bl.owner_of("חסם לטיפול  מנהל מגזר  תכנון ") == "מנהל מגזר תכנון"
+    assert bl.owner_of(None) == bl.NO_OWNER
