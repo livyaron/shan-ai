@@ -173,3 +173,11 @@ def test_owner_name_is_the_divisions_wording():
     assert bl.owner_of("חסם לטיפול מנהל מגזר בפיקוח") == "מנהל מגזר פיקוח"
     assert bl.owner_of("חסם לטיפול  מנהל מגזר  תכנון ") == "מנהל מגזר תכנון"
     assert bl.owner_of(None) == bl.NO_OWNER
+
+
+def test_department_name_and_the_hierarchy_order():
+    assert bl.owner_of("חסם לטיפול מנהלת מחלקה") == "מנהלת מחלקת פרויקטים"
+    assert ia.owns_blocker(ia.Scope(sector=ss.PM_DEPT), bl.owner_of("חסם לטיפול מנהלת מחלקה"))
+    assert ia.owns_blocker(ia.Scope(sector=ss.SUPERVISION), bl.owner_of("חסם לטיפול מנהל מגזר בפיקוח"))
+    rows = [{"owner": o, "open": n} for o, n in ((bl.NO_OWNER, 9), ("תפקיד חדש", 2), ("מנהל מגזר תכנון", 30), ('סמנכ"ל', 1), ("אחר", 4))]
+    assert [r["owner"] for r in bl.by_hierarchy(rows)] == ['סמנכ"ל', "מנהל מגזר תכנון", "תפקיד חדש", "אחר", bl.NO_OWNER]
