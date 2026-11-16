@@ -1,0 +1,40 @@
+name: db-tests
+# The tests conftest marks `db` (they request the Postgres engine) run here,
+# against a throwaway Postgres that lives only inside this job. It never sees
+# Railway, has no Telegram token, and is deleted when the job ends.
+# Deliberately a separate workflow: deploy.yml waits only for docker-build, so
+# a red run here reports a problem without blocking a deploy.
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  db-tests:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: shan_user
+          POSTGRES_DB: shan_ai
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U shan_user -d shan_ai"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      DATABASE_URL: postgresql+asyncpg://shan_user@localhost:5432/shan_ai
+      TEST_DATABASE_URL: postgresql+asyncpg://shan_user@localhost:5432/shan_ai
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: pip install --no-cache-dir -r requirements.txt
+      - name: Build the schema the way production startup does
+        run: python scripts/ci_prepare_test_db.py
+      - name: Run the tests that need Postgres
+        run: python -m pytest -q -m db -rfE tests/
