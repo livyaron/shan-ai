@@ -1,14 +1,15 @@
 """Shared test fixtures.
 
 DB-backed tests need a reachable Postgres via TEST_DATABASE_URL / DATABASE_URL.
-There is no local database (see CLAUDE.md, Safety), so CI runs only the no-DB
-file list in .github/workflows/docker-build.yml. Each test gets a fresh transaction that rolls back at
+There is no local database (see CLAUDE.md, Safety): tests that request the
+engine are marked `db` below, and CI runs `pytest -m "not db" tests/`. Each test gets a fresh transaction that rolls back at
 teardown so we never persist test data — including data written by code-
 under-test that opens its own session via app.database.async_session_maker.
 """
 import os
 from unittest.mock import patch
 
+import pytest
 import pytest_asyncio
 from sqlalchemy import event
 from sqlalchemy.ext.asyncio import (
@@ -117,3 +118,15 @@ async def mock_llm_chat():
         return ""
     with patch("app.services.llm_router.llm_chat", side_effect=_default) as m:
         yield m
+
+
+def pytest_collection_modifyitems(items):
+    """Mark every test that needs Postgres as `db`.
+
+    There is no local database (CLAUDE.md, Safety), so CI runs `-m "not db"`
+    over the whole tests/ tree. A test needs Postgres iff it requests the
+    session engine, directly or through db_session.
+    """
+    for item in items:
+        if "_test_engine" in getattr(item, "fixturenames", ()):
+            item.add_marker(pytest.mark.db)

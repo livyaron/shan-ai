@@ -15,7 +15,7 @@ Decision intelligence for electrical substation projects at an electric utility.
 
 ## Commands
 - One test file: `python -m pytest -q tests/test_<name>.py`
-- CI's no-DB suite = the explicit file list in `.github/workflows/docker-build.yml`. Run the whole list before merging (~30 s). A new test file that needs no DB must be added to it, or CI never runs it; a file using `db_session` can't go in.
+- CI's no-DB suite: `python -m pytest -q -m "not db" tests/` (~30 s) — run it before merging. `tests/conftest.py` marks a test `db` when it requests the Postgres engine (`db_session`); every other test runs in CI automatically. A test that needs Postgres must use `db_session`, or it breaks CI.
 - Lint the Python files you changed: `ruff check --isolated --select F <files>`. The repo isn't clean under wider rule sets — don't mass-fix.
 - Lessons UI: `cd lessons_ui && npm run build | npm test | npm run lint`
 - Production DB: `psql "$RAILWAY_DATABASE_URL" -c "..."` — the URL lives in the local `.env`, never in the repo.
@@ -39,7 +39,7 @@ Decision intelligence for electrical substation projects at an electric utility.
 - Never hardcode the public URL in `app/` — use `settings.public_base_url` (a test enforces it).
 
 ## Ship: branch → test → merge → verify
-1. Feature branch; run the relevant tests, then the full CI list.
+1. Feature branch; run the relevant tests, then the full no-DB suite.
 2. Green → merge to `master` and push. **Standing authorization — don't ask.** (Lessons module: PR, auto-merged once CI is green.)
 3. A push to `master` deploys itself: `docker-build.yml` (image + no-DB tests) → `deploy.yml` (`railway up`, then polls `/health` until it reports the new commit). **A green deploy job = the commit is serving.**
 4. **Verify every deploy without asking** — a failed deploy is silent and production keeps the old commit. Never `curl /health` from a remote sandbox (it can't reach Railway and always looks down). Use the GitHub MCP tools (`actions_list` → `get_job_logs` failed_only → `actions_run_trigger`); without them, `gh run list` / `gh run view --log-failed` / `gh run rerun`.
