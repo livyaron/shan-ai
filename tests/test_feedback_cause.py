@@ -14,3 +14,15 @@ def test_cause_keyboard_has_three_causes_plus_skip():
 
 def test_cause_map_values_match_taxonomy():
     assert set(CAUSE_MAP.keys()) == {"WRONG_PROJECT", "MISSING_DATA", "HALLUCINATION"}
+
+
+def test_cause_keyboard_offers_free_text():
+    datas = [b.callback_data for row in _cause_keyboard(42).inline_keyboard for b in row]
+    assert "lfc:42:TEXT" in datas
+    assert datas[-1] == "lfc:42:SKIP"  # skip stays last
+
+
+def test_after_a_cause_the_user_can_still_add_words():
+    from app.services.telegram_polling import _comment_keyboard
+    [[btn]] = _comment_keyboard(42).inline_keyboard
+    assert btn.callback_data == "lfc:42:TEXT"

@@ -95,6 +95,24 @@ def apply_action_edit(result: dict, text: str) -> dict:
     return edited
 
 
+# { telegram_id (int): (query_log_id, monotonic deadline) }  — pressed "✍️ כתוב בעצמי"
+# after 👎 on an answer; the next text message is the user's own words on what was wrong.
+_awaiting_answer_comment: dict[int, tuple[int, float]] = {}
+
+
+def expect_answer_comment(telegram_id: int, log_id: int, now: float) -> None:
+    _awaiting_answer_comment[telegram_id] = (log_id, now + NEW_DECISION_WAIT_SECONDS)
+
+
+def take_answer_comment(telegram_id: int, now: float) -> int | None:
+    """The query_log id the user's next message comments on — once, and only within
+    NEW_DECISION_WAIT_SECONDS of the press."""
+    entry = _awaiting_answer_comment.pop(telegram_id, None)
+    if entry is None or now > entry[1]:
+        return None
+    return entry[0]
+
+
 # { telegram_id (int): {"question": str} }  — manager mid /gold edit
 _awaiting_gold_text: dict[int, dict] = {}
 

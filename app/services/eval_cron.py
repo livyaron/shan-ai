@@ -129,6 +129,11 @@ def start_scheduler() -> None:
     # Second brain (Option D): nightly rolling conversation summaries.
     sch.add_job(_session_summaries_run, CronTrigger(hour=0, minute=45),
                 id="session_summaries", replace_existing=True)
+    # Learning from 👎 + the users' own words: turns the day's negative feedback into
+    # learned answering rules (__global_instructions__, synonyms). Up to 50 logs →
+    # ≤6 small LLM calls a night; it used to run only from the dashboard button.
+    sch.add_job(_feedback_optimization_run, CronTrigger(hour=2, minute=30),
+                id="feedback_optimization", replace_existing=True)
     sch.start()
     _scheduler = sch
     logger.info("eval_cron: scheduler started (%d jobs; gold-eval jobs %s)",
@@ -211,6 +216,20 @@ async def _memory_weekly_digest() -> None:
         await send_weekly_digest()
     except Exception as e:
         logger.exception(f"memory_weekly_digest run failed: {e}")
+
+
+async def _feedback_optimization_run() -> None:
+    """Nightly learning from negative answer feedback (02:30 UTC)."""
+    from app.database import async_session_maker
+    from app.services.optimization_service import run_optimization
+    try:
+        async with async_session_maker() as s:
+            result = await run_optimization(s)
+        logger.info("feedback_optimization: %s — %s logs, %s instructions",
+                    result.get("status"), result.get("logs_processed"),
+                    result.get("instructions_collected", 0))
+    except Exception as e:
+        logger.exception(f"feedback_optimization run failed: {e}")
 
 
 async def _session_summaries_run() -> None:
