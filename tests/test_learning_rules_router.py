@@ -35,6 +35,7 @@ async def test_get_rules_page_returns_html(db_session):
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("seed_project")
 async def test_create_project_alias(db_session):
     await _seed_admin(db_session)
     pid = (await db_session.execute(text(
@@ -63,6 +64,7 @@ async def test_create_project_alias(db_session):
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("seed_project")
 async def test_delete_project_alias(db_session):
     await _seed_admin(db_session)
     pid = (await db_session.execute(text(

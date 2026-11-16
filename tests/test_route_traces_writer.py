@@ -10,6 +10,7 @@ from app.services import knowledge_service as _ks
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("seed_project")
 async def test_route_writes_trace_for_project_alias_branch(db_session):
     """When alias-resolve path fires + answer_project_query returns a log_id,
     the trace row links the alias's project."""
@@ -36,7 +37,7 @@ async def test_route_writes_trace_for_project_alias_branch(db_session):
     await db_session.commit()
     await db_session.refresh(log)
 
-    async def fake_apq(text_, sess, user_data, *, user_id, precomputed_intent=None, precomputed_param=None):
+    async def fake_apq(text_, sess, user_data, *, user_id, precomputed_intent=None, precomputed_param=None, **_kw):
         return ("answer-ok", log.id)
 
     with patch("app.services.project_tools.answer_project_query", new=fake_apq):

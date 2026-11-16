@@ -7,6 +7,7 @@ from app.services import knowledge_service as ks
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("seed_project")
 async def test_aliases_loaded_into_cache(db_session):
     # Seed one alias row pointing to whatever project exists
     await db_session.execute(text(
