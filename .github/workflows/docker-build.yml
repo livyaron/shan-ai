@@ -35,76 +35,9 @@ jobs:
       - name: Import the app the way uvicorn does
         run: python -c "import app.main; print('app imports cleanly')"
       - name: Run the tests that need no database
-        run: |
-          python -m pytest -q \
-            tests/test_missions_menu_service.py \
-            tests/test_missions_report_service.py \
-            tests/test_missions_telegram.py \
-            tests/test_dashboard_ai_analysis.py \
-            tests/test_dashboard_live.py \
-            tests/test_dashboard_stations.py \
-            tests/test_create_rights.py \
-            tests/test_exec_summary.py \
-            tests/test_contracts_sheet.py \
-            tests/test_target_reading.py \
-            tests/test_llm_fallback.py \
-            tests/test_health_provenance.py \
-            tests/test_war_room_styles.py \
-            tests/test_war_room_upgrades.py \
-            tests/test_war_room_filters.py \
-            tests/test_war_room_wall.py \
-            tests/test_war_room_return.py \
-            tests/test_war_room_motto.py \
-            tests/test_groq_retry.py \
-            tests/test_key_redaction.py \
-            tests/test_secret_guard.py \
-            tests/test_users_admin_guard.py \
-            tests/test_llm_health_report.py \
-            tests/test_telegram_webhook_watchdog.py \
-            tests/test_project_sync_capture.py \
-            tests/test_pattern_service.py \
-            tests/test_insight_access.py \
-            tests/test_insight_ai.py \
-            tests/test_lessons_module.py \
-            tests/test_lessons_project_link.py \
-            tests/test_lessons_link_sheet.py \
-            tests/test_job_titles.py \
-            tests/test_project_lessons.py \
-            tests/test_project_links.py \
-            tests/test_project_visual.py \
-            tests/test_lessons_app_login.py \
-            tests/test_lessons_bootstrap.py \
-            tests/test_blockers.py \
-            tests/test_forecast_reliability.py \
-            tests/test_lessons_process_metrics.py \
-            tests/test_shan_ui_layer.py \
-            tests/test_login_page.py \
-            tests/test_files_open.py \
-            tests/test_conversation_context.py \
-            tests/test_disambiguation.py \
-            tests/test_eval_uses_ask_router.py \
-            tests/test_eval_weekly_summary.py \
-            tests/test_fact_based_compare.py \
-            tests/test_feedback_cause.py \
-            tests/test_inventory_api.py \
-            tests/test_is_relevant.py \
-            tests/test_judge_tightening.py \
-            tests/test_missions_api.py \
-            tests/test_project_learning.py \
-            tests/test_project_report_service.py \
-            tests/test_viewer_role.py \
-            tests/test_scheduler_start.py \
-            tests/test_login_security.py \
-            tests/test_security_guards.py \
-            tests/test_telegram_add_decision.py \
-            tests/test_answer_path_stage_a.py \
-            tests/test_answer_agent.py \
-            tests/test_menu_shortcuts.py \
-            tests/test_manager_lookup.py \
-            tests/test_edit_recommended_action.py \
-            tests/test_perf_dashboard_gzip.py \
-            tests/test_weekly_report_cron.py \
-            tests/test_raci_learning.py
+        # Every test under tests/ except those conftest marks `db` (they request
+        # the Postgres engine). No hand-kept file list: a new test runs by default.
+        run: python -m pytest -q -m "not db" tests/
 
   lessons-ui:
     # The Docker build only runs `vite build`, which checks no types and runs no
