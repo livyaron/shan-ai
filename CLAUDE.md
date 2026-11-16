@@ -16,6 +16,7 @@ Decision intelligence for electrical substation projects at an electric utility.
 ## Commands
 - One test file: `python -m pytest -q tests/test_<name>.py`
 - CI's no-DB suite: `python -m pytest -q -m "not db" tests/` (~30 s) — run it before merging. `tests/conftest.py` marks a test `db` when it requests the Postgres engine (`db_session`); every other test runs in CI automatically. A test that needs Postgres must use `db_session`, or it breaks CI.
+- CI's DB suite: `db-tests.yml` runs `pytest -m db` on a Postgres container that exists only inside the GitHub Actions job (schema from `scripts/ci_prepare_test_db.py`). It doesn't gate deploys — check it anyway. A db test needs its own rows: use `seed_project` / `seed_users`, never production data.
 - Lint the Python files you changed: `ruff check --isolated --select F <files>`. The repo isn't clean under wider rule sets — don't mass-fix.
 - Lessons UI: `cd lessons_ui && npm run build | npm test | npm run lint`
 - Production DB: `psql "$RAILWAY_DATABASE_URL" -c "..."` — the URL lives in the local `.env`, never in the repo.
@@ -32,7 +33,7 @@ Decision intelligence for electrical substation projects at an electric utility.
 - Prefix every bot message with `‏`. Before sending user text to an LLM replace `"` → `״` and `'` → `׳` (straight quotes break the JSON reply). Dates a person reads: `DD/MM/YYYY`, Israel time; stored dates stay ISO.
 
 ## Safety (IMPORTANT)
-- **No local database or app stack, anywhere** — not even a throwaway Postgres in a remote session. A local Telegram poller deletes the production webhook and double-sends the 07:00 digest and overdue alerts. Real-data checks run in production only.
+- **No local database or app stack, anywhere** — not even a throwaway Postgres in a remote session. (The only allowed throwaway is the `db-tests.yml` service container on GitHub's runner.) A local Telegram poller deletes the production webhook and double-sends the 07:00 digest and overdue alerts. Real-data checks run in production only.
 - Destructive SQL (DROP / TRUNCATE / DELETE without WHERE) or touching the Railway Postgres volume → the user's explicit confirmation first.
 - The repo is **public**: never commit a secret, a `.env` or a DB URL with a password. `.claude/hooks/secret_guard.py` blocks it — fix the content, never bypass the hook.
 - Cron work week = `eval_cron.WORK_WEEK`, never `"sun-thu"` (inverted in APScheduler; it stopped the whole scheduler). `/health` → `scheduler_running`.

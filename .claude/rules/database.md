@@ -13,7 +13,7 @@ paths:
 
 `Base.metadata.create_all` creates missing tables at startup but never alters an existing one, so every new column on an existing table is an `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` in `app/main.py` startup (or run once on the Railway DB).
 
-- **No local database, anywhere (user instruction 2026-09-26).** Not Docker, and not a throwaway Postgres inside a remote session either. Verify logic with the synthetic-frame tests; real-data checks happen in production only.
+- **No local database, anywhere (user instruction 2026-09-26).** Not Docker, and not a throwaway Postgres inside a remote session either. Exception approved 2026-11-16: the `db-tests.yml` service container on the GitHub Actions runner (no Telegram token, no Railway access, deleted with the job). Verify logic with the synthetic-frame tests; real-data checks happen in production only.
 - **The "BIGINT" Fix:** On a restored old dump, run:
   `psql "$RAILWAY_DATABASE_URL" -c "ALTER TABLE users ALTER COLUMN telegram_id TYPE BIGINT;"`
 - **is_relevant columns:** On a restored old dump:
