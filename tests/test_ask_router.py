@@ -152,6 +152,7 @@ async def test_route_intent_override_skips_llm_intent_detection(db_session):
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("seed_project")
 async def test_route_project_alias_bypasses_intent_detection(db_session):
     """When an alias matches the question, route() must skip LLM intent detection
     and call answer_project_query with precomputed_intent=by_identifier and

@@ -16,8 +16,9 @@ def test_report_history_model_importable():
 # ── Task 2 ──────────────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
-async def test_generate_report_returns_sections_dict(db_session):
+async def test_generate_report_returns_sections_dict(db_session, seed_users):
     """generate_report_for_user returns a dict with 5 keys."""
+    await seed_users(99991)
     from app.services.weekly_report_service import generate_report_for_user
     from app.models import User, RoleEnum
 
@@ -44,8 +45,9 @@ async def test_generate_report_returns_sections_dict(db_session):
 
 
 @pytest.mark.asyncio
-async def test_generate_report_saves_history_row(db_session):
+async def test_generate_report_saves_history_row(db_session, seed_users):
     """generate_report_for_user persists a ReportHistory row."""
+    await seed_users(99992, 1)
     from app.services.weekly_report_service import generate_report_for_user
     from app.models import User, RoleEnum, ReportHistory
     from sqlalchemy import select
@@ -72,8 +74,9 @@ async def test_generate_report_saves_history_row(db_session):
 
 
 @pytest.mark.asyncio
-async def test_generate_report_fallback_on_llm_error(db_session):
+async def test_generate_report_fallback_on_llm_error(db_session, seed_users):
     """When LLM raises, sections has a non-empty prologue and others are None."""
+    await seed_users(99993)
     from app.services.weekly_report_service import generate_report_for_user
     from app.models import User, RoleEnum
 

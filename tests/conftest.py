@@ -112,6 +112,37 @@ async def db_session(_test_engine, monkeypatch) -> AsyncSession:
 
 
 @pytest_asyncio.fixture
+async def seed_project(db_session) -> int:
+    """Return a project id, inserting a placeholder row if the DB has none.
+
+    Some tests borrow "any project" (`SELECT id FROM projects LIMIT 1`). On
+    CI's empty database that is NULL, so they get this row instead; it is
+    rolled back with the test like everything else.
+    """
+    from sqlalchemy import text
+    pid = (await db_session.execute(text("SELECT id FROM projects LIMIT 1"))).scalar()
+    if pid is None:
+        pid = (await db_session.execute(text(
+            "INSERT INTO projects (project_identifier, name, is_active) "
+            "VALUES ('CI-PLACEHOLDER', 'CI placeholder', true) RETURNING id"
+        ))).scalar_one()
+    return pid
+
+
+@pytest_asyncio.fixture
+async def seed_users(db_session):
+    """Return an async function that makes sure users rows exist for the given ids."""
+    from app.models import User
+
+    async def _ensure(*ids: int) -> None:
+        for uid in ids:
+            if await db_session.get(User, uid) is None:
+                db_session.add(User(id=uid, username=f"ci_user_{uid}",
+                                    password_hash="", is_admin=False))
+        await db_session.flush()
+    return _ensure
+
+@pytest_asyncio.fixture
 async def mock_llm_chat():
     """Patch app.services.llm_router.llm_chat with a programmable async mock."""
     async def _default(*args, **kwargs):

@@ -31,6 +31,7 @@ def test_patch_to_shadow_intent_override():
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("seed_project")
 async def test_apply_project_alias_writes_row(db_session):
     pid = (await db_session.execute(text(
         "SELECT id FROM projects LIMIT 1"
@@ -93,6 +94,7 @@ from app.services.per_question_loop_service import _unapply_patch
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("seed_project")
 async def test_unapply_project_alias_deletes_row(db_session):
     pid = (await db_session.execute(text(
         "SELECT id FROM projects LIMIT 1"
