@@ -107,11 +107,13 @@ def test_get_raci_patterns_uses_corrections_not_feedback_gate():
     assert "feedback_score >= 4" not in src.replace(" ", "").replace("\n", "") or "RACISuggestion" in src
 
 
-def test_few_shots_prioritizes_edited_and_raises_limit():
+def test_few_shots_prioritizes_edited_and_caps_limit():
     import inspect
     from app.services import raci_service
     src = inspect.getsource(raci_service._get_raci_few_shots)
-    assert "limit: int = 8" in src, "few-shot limit should be raised to 8"
+    # 64946a9 raised the limit to 8; ef5b377 deliberately cut it back to 4 to
+    # stop Groq 429 token bursts. This file was outside CI, so nothing noticed.
+    assert "limit: int = 4" in src, "few-shot limit is capped at 4 (Groq token budget)"
     assert "EDITED" in src
 
 
