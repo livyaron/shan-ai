@@ -12,7 +12,6 @@ A backend system for organizational decision intelligence in electrical infrastr
 ## PHASE 1: Infrastructure Setup (COMPLETED)
 
 ### Files Created:
-- `docker-compose.yml` - PostgreSQL + pgvector + FastAPI services
 - `requirements.txt` - Python dependencies
 - `Dockerfile` - FastAPI container configuration
 - `app/main.py` - FastAPI application entry point
@@ -34,15 +33,9 @@ A backend system for organizational decision intelligence in electrical infrastr
    cp .env.example .env
    ```
 
-2. **Start services** (requires Docker & Docker Compose):
-   ```bash
-   docker-compose up -d
-   ```
-
-3. **Access**:
-   - FastAPI Docs: http://localhost:8000/docs
-   - Health Check: http://localhost:8000/health
-   - Database: localhost:5432 (shan_user / your_db_password_here)
+2. **Run**: there is no local stack. The app runs on Railway only; a push to
+   `master` builds the `Dockerfile` and deploys (see `CLAUDE.md`, Ship).
+   - Health check: https://shan-ai.up.railway.app/health
 
 ## Project Structure
 ```
@@ -53,7 +46,6 @@ SHAN-AI/
 │   ├── config.py        # Settings
 │   ├── database.py      # DB connection
 │   └── models.py        # SQLAlchemy models
-├── docker-compose.yml   # Compose config
 ├── Dockerfile          # FastAPI image
 ├── requirements.txt     # Python deps
 ├── .env.example        # Env template

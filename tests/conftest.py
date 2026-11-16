@@ -1,7 +1,8 @@
 """Shared test fixtures.
 
-Tests run against the same Postgres container the app uses (docker-compose
-service `postgres`). Each test gets a fresh transaction that rolls back at
+DB-backed tests need a reachable Postgres via TEST_DATABASE_URL / DATABASE_URL.
+There is no local database (see CLAUDE.md, Safety), so CI runs only the no-DB
+file list in .github/workflows/docker-build.yml. Each test gets a fresh transaction that rolls back at
 teardown so we never persist test data — including data written by code-
 under-test that opens its own session via app.database.async_session_maker.
 """
@@ -15,7 +16,7 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlalchemy.pool import NullPool
 
-# Inherit DATABASE_URL from the running app env (loaded via docker-compose).
+# Inherit DATABASE_URL from the environment.
 # A no-credential placeholder is the final fallback — it will fail auth, which
 # is the right behavior when env is missing rather than silently leaking creds.
 TEST_DB_URL = os.environ.get("TEST_DATABASE_URL") or os.environ.get(

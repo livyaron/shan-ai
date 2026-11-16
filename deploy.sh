@@ -2,7 +2,7 @@
 set -euo pipefail
 
 git add app/ docs/ static/ vault/ tests/ scripts/ .github/ \
-        requirements.txt Dockerfile docker-compose.yml docker-compose.staging.yml \
+        requirements.txt Dockerfile \
         run_server.py check_rag.py reprocess_file.py ruff.toml pytest.ini \
         CLAUDE.md .env.example railway.toml
 
