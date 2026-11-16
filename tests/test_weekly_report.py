@@ -17,7 +17,7 @@ def test_report_history_model_importable():
 
 @pytest.mark.asyncio
 async def test_generate_report_returns_sections_dict(db_session, seed_users):
-    """generate_report_for_user returns a dict with 5 keys."""
+    """generate_report_for_user returns the four sections (decisions-only report since 7b11d1c)."""
     await seed_users(99991)
     from app.services.weekly_report_service import generate_report_for_user
     from app.models import User, RoleEnum
@@ -39,7 +39,7 @@ async def test_generate_report_returns_sections_dict(db_session, seed_users):
     assert isinstance(sections, dict)
     assert "prologue" in sections
     assert "decisions" in sections
-    assert "projects" in sections
+    assert "projects" not in sections  # removed on purpose in 7b11d1c
     assert "summary" in sections
     assert "delta" in sections
 
