@@ -104,6 +104,7 @@ jobs:
             tests/test_edit_recommended_action.py \
             tests/test_perf_dashboard_gzip.py \
             tests/test_weekly_report_cron.py
+            tests/test_raci_learning.py
 
   lessons-ui:
     # The Docker build only runs `vite build`, which checks no types and runs no
