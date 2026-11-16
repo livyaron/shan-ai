@@ -18,7 +18,7 @@ from app.models import QueryLog, QuerySynonym
 logger = logging.getLogger(__name__)
 
 OPTIMIZATION_SYSTEM_PROMPT = """אתה מומחה בשיפור מנועי חיפוש RAG לעברית.
-קיבלת רשימה של שאלות שנכשלו — כל אחת עם שאלת המשתמש, תשובת ה-AI, ואם יש — הערת מנהל.
+קיבלת רשימה של שאלות שנכשלו — כל אחת עם שאלת המשתמש, תשובת ה-AI, ואם יש — הערת מנהל, הערת משתמש וסוג התקלה שהמשתמש סימן.
 
 המשימה שלך: עבור כל לוג, קבע את סוג הכשל:
 - TERMINOLOGY: המשתמש השתמש במונח שאינו מופיע ישירות בנתונים (מילה נרדפת, ראשי תיבות, שם חלופי)
@@ -60,7 +60,8 @@ OPTIMIZATION_SYSTEM_PROMPT = """אתה מומחה בשיפור מנועי חיפ
 - עבור TERMINOLOGY: alternatives חייב להכיל לפחות 2 ערכים שונים.
 - אם הכשל אינו ברור, השתמש ב-STRUCTURE כברירת מחדל.
 - אם אין כשלים ברורים בכלל, החזר: {"analysis": []}
-- אם יש הערת מנהל — חלץ ממנה את העיקרון הכללי ונסח אותו ככלל ישים (אל תעתיק את ההערה כמו שהיא)."""
+- אם יש הערת מנהל — חלץ ממנה את העיקרון הכללי ונסח אותו ככלל ישים (אל תעתיק את ההערה כמו שהיא).
+- הערת משתמש היא עדות ישירה למה שהשתבש — התייחס אליה כמו להערת מנהל וחלץ ממנה כלל כללי."""
 
 
 REORGANIZE_SYNONYMS_PROMPT = """אתה עורך מילון נרדפות לחיפוש בעברית.
@@ -212,6 +213,21 @@ async def run_optimization(session: AsyncSession) -> dict:
     # Build a quick id→log map for later updates
     log_map = {log.id: log for log in logs}
 
+    # 1a. The users' own words after 👎 (Telegram "✍️ כתוב בעצמי" → answer_feedback)
+    from app.models import AnswerFeedback
+    user_comments: dict[int, list[str]] = {}
+    fb_rows = (await session.execute(
+        select(AnswerFeedback.query_log_id, AnswerFeedback.correction_text)
+        .where(AnswerFeedback.query_log_id.in_(list(log_map)))
+        .where(AnswerFeedback.correction_text.isnot(None))
+        .order_by(AnswerFeedback.id)
+    )).all()
+    for fb_log_id, fb_text in fb_rows:
+        if fb_text and fb_text.strip():
+            # Straight quotes break the JSON reply (CLAUDE.md → Hebrew & formatting)
+            user_comments.setdefault(fb_log_id, []).append(
+                fb_text.strip().replace('"', "״").replace("'", "׳"))
+
     # 1b. Pre-collect admin notes from ALL fetched logs BEFORE the LLM call
     # These serve as a safety net: if the LLM skips a log, we still capture the admin's feedback.
     # Stored as (log_id, note) tuples so we can check which were already processed by the LLM.
@@ -222,6 +238,10 @@ async def run_optimization(session: AsyncSession) -> dict:
             pre_collected_admin_notes.append((log.id, log.admin_note.strip()))
             admin_note_log_ids.add(log.id)
             logger.info(f"  ✓ Pre-collected admin note from log {log.id}: {log.admin_note[:80]}…")
+        # A user's comment is the same kind of signal: never lost if the LLM skips the log.
+        for comment in user_comments.get(log.id, []):
+            pre_collected_admin_notes.append((log.id, comment))
+            admin_note_log_ids.add(log.id)
 
     # 2. Build examples for the LLM (include log_id so LLM can reference each one)
     examples = []
@@ -230,6 +250,10 @@ async def run_optimization(session: AsyncSession) -> dict:
         if log.admin_note:
             entry += f"\nהערת מנהל: {log.admin_note}"
         entry += f"\nפידבק משתמש: {'שלילי' if log.user_feedback == -1 else 'ניטרלי'}"
+        if log.failure_type:
+            entry += f"\nסוג תקלה שהמשתמש סימן: {log.failure_type}"
+        for comment in user_comments.get(log.id, []):
+            entry += f"\nהערת משתמש: {comment}"
         examples.append(entry)
 
     # 3. Call LLM for dual-classification — in batches of 10 to avoid token truncation

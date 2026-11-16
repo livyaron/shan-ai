@@ -133,8 +133,18 @@ def _cause_keyboard(log_id: int) -> InlineKeyboardMarkup:
     """Follow-up after 👎: one tap classifies the failure cause."""
     rows = [[InlineKeyboardButton(label, callback_data=f"lfc:{log_id}:{code}")]
             for code, label in CAUSE_MAP.items()]
+    rows.append([InlineKeyboardButton(COMMENT_BUTTON_LABEL, callback_data=f"lfc:{log_id}:TEXT")])
     rows.append([InlineKeyboardButton("דלג", callback_data=f"lfc:{log_id}:SKIP")])
     return InlineKeyboardMarkup(rows)
+
+
+COMMENT_BUTTON_LABEL = "✍️ כתוב בעצמי"
+
+
+def _comment_keyboard(log_id: int) -> InlineKeyboardMarkup:
+    """After a cause was picked: one more tap to add the user's own words."""
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton("✍️ הוסף פירוט", callback_data=f"lfc:{log_id}:TEXT")]])
 
 
 class TelegramPollingBot:
@@ -828,6 +838,21 @@ class TelegramPollingBot:
                 await update.message.reply_text("‏✅ תשובת הזהב נשמרה. שלח /gold להמשך.")
                 return
 
+            # "✍️ כתוב בעצמי" after 👎: this message is the user's own words on the answer.
+            # A reply-keyboard tap is not a comment — it just ends the wait.
+            import time as _t
+            from app.services.telegram_state import take_answer_comment
+            from app.services.telegram_routing import menu_shortcut as _menu_tap
+            _comment_log_id = take_answer_comment(telegram_id, _t.monotonic())
+            if _comment_log_id is not None and _menu_tap(text) is None and text.strip():
+                from app.services.answer_feedback_service import record_answer_comment
+                async with async_session_maker() as cs:
+                    saved = await record_answer_comment(cs, _comment_log_id, user.id, text)
+                await update.message.reply_text(
+                    "‏✅ תודה, המשוב נשמר. הבוט לומד ממנו בעיבוד הלילי ומשפר את התשובות הבאות."
+                    if saved else "‏❌ לא נמצאה התשובה שעליה המשוב — נסה שוב מהכפתור 👎.")
+                return
+
             # Optional project link — a typed project search
             from app.services.telegram_state import _project_link_state
             if (_project_link_state.get(telegram_id) or {}).get("mode") == "search":
@@ -1351,9 +1376,11 @@ class TelegramPollingBot:
             from app.services.telegram_state import _project_link_state
             _project_link_state.pop(telegram_id, None)
         # Likewise a pending "➕ הוספת החלטה": pressing anything else cancels it.
-        from app.services.telegram_state import _awaiting_action_edit, _awaiting_new_decision
+        from app.services.telegram_state import (_awaiting_action_edit, _awaiting_answer_comment,
+                                                 _awaiting_new_decision)
         _awaiting_new_decision.pop(telegram_id, None)
         _awaiting_action_edit.pop(telegram_id, None)
+        _awaiting_answer_comment.pop(telegram_id, None)
         if data.startswith("pl:"):
             async with async_session_maker() as _pl_session:
                 _pl_user = await _pl_session.scalar(select(User).where(User.telegram_id == telegram_id))
@@ -1595,6 +1622,26 @@ class TelegramPollingBot:
             if len(parts) != 3:
                 return
             _, lfc_log_id, lfc_code = parts
+            if lfc_code == "TEXT":
+                # Free text: the user's next message is saved on this answer's log
+                # (answer_feedback_service.record_answer_comment).
+                try:
+                    _lfc_id = int(lfc_log_id)
+                except ValueError:
+                    return
+                import time as _t
+                from app.services.telegram_state import expect_answer_comment
+                expect_answer_comment(telegram_id, _lfc_id, _t.monotonic())
+                try:
+                    await query.edit_message_reply_markup(reply_markup=None)
+                except Exception:
+                    pass
+                await context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text=("‏✍️ כתוב בהודעה הבאה מה היה לא בסדר בתשובה — "
+                          "או מה התשובה הנכונה. המשוב ייכנס ללמידה הלילית של הבוט."),
+                )
+                return
             if lfc_code in CAUSE_MAP:
                 async with async_session_maker() as session:
                     try:
@@ -1611,6 +1658,7 @@ class TelegramPollingBot:
             await context.bot.send_message(
                 chat_id=update.effective_chat.id,
                 text="\u200Fתודה! זה עוזר לשפר את המערכת.",
+                reply_markup=_comment_keyboard(int(lfc_log_id)) if lfc_code in CAUSE_MAP else None,
             )
             return
 

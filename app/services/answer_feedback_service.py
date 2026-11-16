@@ -74,6 +74,33 @@ async def record_thumbs_up(
     return fb
 
 
+async def record_answer_comment(
+    session: AsyncSession,
+    log_id: int,
+    user_id: int | None,
+    comment: str,
+) -> AnswerFeedback | None:
+    """The user's free-text words after 👎 (Telegram "✍️ כתוב בעצמי").
+
+    Unlike record_thumbs_down this does NOT become gold: the text is a complaint
+    or a hint ("זה פרויקט אחר", "חסר תאריך האנרגוז"), not a verified answer.
+    The log is re-opened (analyzed=False) so the nightly run_optimization reads
+    the comment and turns it into a learned answering rule."""
+    text = (comment or "").strip()
+    if not text:
+        return None
+    log = await session.get(QueryLog, log_id)
+    if log is None:
+        return None
+    fb = AnswerFeedback(query_log_id=log_id, user_id=user_id, vote="down",
+                        correction_text=text[:2000])
+    session.add(fb)
+    log.user_feedback = -1
+    log.analyzed = False
+    await session.commit()
+    return fb
+
+
 async def record_thumbs_down(
     session: AsyncSession,
     log_id: int,
