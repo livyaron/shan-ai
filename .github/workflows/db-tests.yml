@@ -27,6 +27,7 @@ jobs:
     env:
       DATABASE_URL: postgresql+asyncpg://shan_user@localhost:5432/shan_ai
       TEST_DATABASE_URL: postgresql+asyncpg://shan_user@localhost:5432/shan_ai
+      PYTHONPATH: .   # the script imports app.*
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
