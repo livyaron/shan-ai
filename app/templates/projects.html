@@ -583,7 +583,14 @@
                 grid-template-columns: 1fr;
             }
         }
-    </style>
+        .pj-analysis { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: .6rem; margin: 0 0 1.2rem; }
+    .pj-an { display: grid; grid-template-columns: auto 1fr; column-gap: .7rem; align-items: center; padding: .9rem 1rem; border-radius: 12px; text-decoration: none;
+             color: #e6edf7; border: 1px solid #0dcaf0; background: linear-gradient(135deg, rgba(11,53,80,.9), rgba(11,36,64,.9)); transition: transform .15s, box-shadow .15s; }
+    .pj-an:hover, .pj-an:focus-visible { color: #fff; transform: translateY(-2px); box-shadow: 0 0 18px rgba(13,202,240,.3); outline: none; }
+    .pj-an span { grid-row: 1 / 3; font-size: 1.7rem; line-height: 1; }
+    .pj-an b { font-size: 1.05rem; }
+    .pj-an small { color: #b0bfd2; font-size: .8rem; }
+</style>
 </head>
 <body>
 
@@ -673,12 +680,6 @@
     <div class="d-flex justify-content-between align-items-center mb-3" style="flex-wrap: wrap; gap: 1rem;">
         <h4 class="section-title mb-0">📂 ניהול פרויקטים</h4>
         <div style="display:flex; gap:0.5rem;">
-            <a class="btn btn-outline-info" href="/dashboard/projects/contracts">🤝 התקשרויות ותיחורים</a>
-            {% if insights_allowed %}
-            <a class="btn btn-outline-info" href="/dashboard/projects/insights">🧠 דפוסים וסיכונים</a>
-            <a class="btn btn-outline-info" href="/dashboard/projects/delays">⏱ ניתוח עיכובים</a>
-            <a class="btn btn-outline-info" href="/dashboard/projects/blockers">🚧 חסמים</a>
-            {% endif %}
             {% if current_user.is_admin %}
             <button class="btn btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#backfillModal">
                 📚 טעינת היסטוריה
@@ -689,6 +690,16 @@
             </button>
         </div>
     </div>
+
+    {# the analysis pages, first thing on the page (user, 2026-11-17) #}
+    <nav class="pj-analysis" aria-label="דפי ניתוח">
+        {% if insights_allowed %}
+        <a class="pj-an" href="/dashboard/projects/blockers"><span>🚧</span><b>חסמים</b><small>מה תקוע ואצל מי</small></a>
+        <a class="pj-an" href="/dashboard/projects/delays"><span>⏱</span><b>ניתוח עיכובים</b><small>כמה זז יעד החשמול</small></a>
+        <a class="pj-an" href="/dashboard/projects/insights"><span>🧠</span><b>דפוסים וסיכונים</b><small>המנוע וניתוח ה-AI</small></a>
+        {% endif %}
+        <a class="pj-an" href="/dashboard/projects/contracts"><span>🤝</span><b>התקשרויות ותיחורים</b><small>קבלנים ומכרזים</small></a>
+    </nav>
 
     {% if master_synced_at %}
     <div class="mb-4 px-1" style="font-size:0.87rem; color:#64748b; display:flex; align-items:center; gap:0.5rem;">

@@ -30,6 +30,10 @@ from app.services import stage_sectors as ss
 ADMIN_SECTIONS = frozenset({"leading", "risk", "waves", "health", "lists"})
 
 
+# the one refusal for the analysis pages (patterns · delays · blockers · project page); main.py draws it as a page
+NO_ACCESS = "אין לך עדיין שיוך לתצוגת הדפוסים — פנה למנהל המערכת"
+
+
 @dataclass(frozen=True)
 class Scope:
     admin: bool = False

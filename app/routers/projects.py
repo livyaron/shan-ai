@@ -226,7 +226,7 @@ async def project_delays_page(
     from app.services import forecast_reliability, insight_access, pattern_service
     scope = await insight_access.scope_for(session, current_user)
     if not scope.allowed:
-        raise HTTPException(status_code=403, detail="אין לך עדיין שיוך לתצוגת הדפוסים — פנה למנהל המערכת")
+        raise HTTPException(status_code=403, detail=insight_access.NO_ACCESS)
     frames, _ = await pattern_service.frames_and_patterns(session)
     allowed = None if insight_access.sees_all(scope) else forecast_reliability.visible_ids(
         frames, lambda sectors, manager: insight_access.sees_project(scope, sectors, manager))
@@ -252,7 +252,7 @@ async def _blockers_data(session: AsyncSession, current_user: User, owner: str |
     from app.services import blockers, insight_access, pattern_service
     scope = await insight_access.scope_for(session, current_user)
     if not scope.allowed:
-        raise HTTPException(status_code=403, detail="אין לך עדיין שיוך לתצוגת הדפוסים — פנה למנהל המערכת")
+        raise HTTPException(status_code=403, detail=insight_access.NO_ACCESS)
     frames, p = await pattern_service.frames_and_patterns(session)
     data = pattern_service._plain(blockers.analyse(
         frames, p, lambda sectors, manager, own: insight_access.sees_blocker(scope, sectors, manager, own), owner or None))
@@ -317,7 +317,7 @@ async def project_insights_page(
     from app.services.pattern_service import compute
     scope = await insight_access.scope_for(session, current_user)
     if not scope.allowed:
-        raise HTTPException(status_code=403, detail="אין לך עדיין שיוך לתצוגת הדפוסים — פנה למנהל המערכת")
+        raise HTTPException(status_code=403, detail=insight_access.NO_ACCESS)
     p = await compute(session)
     preview, preview_label, options = None, None, None
     if scope.admin:
@@ -399,7 +399,7 @@ async def _visible_project(session: AsyncSession, current_user: User, identifier
     from app.services import insight_access, pattern_service, stage_sectors
     scope = await insight_access.scope_for(session, current_user)
     if not scope.allowed:
-        raise HTTPException(status_code=403, detail="אין לך עדיין שיוך לתצוגת הדפוסים — פנה למנהל המערכת")
+        raise HTTPException(status_code=403, detail=insight_access.NO_ACCESS)
     frames, p = await pattern_service.frames_and_patterns(session)
     view = insight_access.view_for(scope, p)
     full = scope.admin or scope.sector == stage_sectors.PM_DEPT

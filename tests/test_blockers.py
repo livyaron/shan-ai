@@ -181,3 +181,28 @@ def test_department_name_and_the_hierarchy_order():
     assert ia.owns_blocker(ia.Scope(sector=ss.SUPERVISION), bl.owner_of("חסם לטיפול מנהל מגזר בפיקוח"))
     rows = [{"owner": o, "open": n} for o, n in ((bl.NO_OWNER, 9), ("תפקיד חדש", 2), ("מנהל מגזר תכנון", 30), ('סמנכ"ל', 1), ("אחר", 4))]
     assert [r["owner"] for r in bl.by_hierarchy(rows)] == ['סמנכ"ל', "מנהל מגזר תכנון", "תפקיד חדש", "אחר", bl.NO_OWNER]
+
+
+def test_no_access_is_a_page_for_a_browser_and_json_for_a_script():
+    import asyncio
+    from types import SimpleNamespace
+    from fastapi import HTTPException
+    from app.main import _analysis_refusal_as_page
+    refuse = HTTPException(status_code=403, detail=ia.NO_ACCESS)
+    ask = lambda accept: SimpleNamespace(headers={"accept": accept})   # noqa: E731
+    page = asyncio.run(_analysis_refusal_as_page(ask("text/html,application/xhtml+xml"), refuse))
+    assert page.status_code == 403 and "עדיין אין לך שיוך" in page.body.decode() and "/dashboard/projects" in page.body.decode()
+    js = asyncio.run(_analysis_refusal_as_page(ask("application/json"), refuse))
+    assert js.status_code == 403 and ia.NO_ACCESS in js.body.decode()
+    other = asyncio.run(_analysis_refusal_as_page(ask("text/html"), HTTPException(status_code=403)))
+    assert "עדיין אין לך שיוך" not in other.body.decode()
+
+
+def test_analysis_buttons_open_both_projects_pages():
+    root = Path(__file__).resolve().parents[1]
+    for page, strip in (("dashboard.html", "zv-analysis"), ("projects.html", "pj-analysis")):
+        html = (root / "app/templates" / page).read_text(encoding="utf-8")
+        top = html[html.index(f'<nav class="{strip}"'):]
+        top = top[:top.index("</nav>")]
+        for href in ("/blockers", "/delays", "/insights", "/contracts"):
+            assert "/dashboard/projects" + href in top

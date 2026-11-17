@@ -397,6 +397,11 @@
         .zm-body { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 22px 24px 40px; }
         .zv[hidden] { display: none; }
         .zv-new { display: flex; gap: 10px; justify-content: flex-start; margin-bottom: 14px; flex-wrap: wrap; position: relative; z-index: 1; }
+        .zv-analysis { position: relative; z-index: 1; display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px; margin: 6px 0 18px; }
+        .zv-an { display: grid; grid-template-columns: auto 1fr; grid-template-rows: auto auto; column-gap: 10px; row-gap: 2px; align-items: center; padding: 14px 16px; border-color: var(--energy); background: linear-gradient(135deg, rgba(11,53,80,.85), rgba(11,36,64,.85)); }
+        .zv-an span { grid-row: 1 / 3; font-size: 1.7rem; line-height: 1; }
+        .zv-an b { font-size: 1.08rem; }
+        .zv-an small { color: var(--t2, #9fb3c8); font-weight: 400; font-size: .8rem; }
         .zv-foot { display: flex; gap: 10px; justify-content: flex-end; margin-top: 18px; flex-wrap: wrap; }
         .zv-key { font-size: .86rem; color: var(--t2); margin-inline-start: 8px; }
         .zv-key i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin: 0 8px 0 4px; }
@@ -829,6 +834,13 @@
     <section class="zv" data-view="projects" data-title="פרויקטים · {{ 'בתחום שלי' if scope == 'mine' else 'כל האגף' }}" hidden>
         <canvas class="zv-scene" data-scene="xfmr" aria-hidden="true"></canvas>
         {{ new_btns(['decisions', 'missions', 'lessons']) }}
+        {# the analysis pages, first thing in the view (user, 2026-11-17) #}
+        <nav class="zv-analysis" aria-label="דפי ניתוח">
+            <a class="sb-btn zv-an" href="/dashboard/projects/blockers"><span>🚧</span><b>חסמים</b><small>מה תקוע ואצל מי</small></a>
+            <a class="sb-btn zv-an" href="/dashboard/projects/delays"><span>⏱</span><b>ניתוח עיכובים</b><small>כמה זז יעד החשמול</small></a>
+            <a class="sb-btn zv-an" href="/dashboard/projects/insights"><span>🧠</span><b>דפוסים וסיכונים</b><small>המנוע וניתוח ה-AI</small></a>
+            <a class="sb-btn zv-an" href="/dashboard/projects/contracts"><span>🤝</span><b>התקשרויות ותיחורים</b><small>קבלנים ומכרזים</small></a>
+        </nav>
     {% if ps.ok %}
         {# Cards only — every list is one click away (user, 2026-10-16). Every number is
            project_kpis over the patterns-page rows, and its list has exactly that many rows. #}
@@ -873,7 +885,7 @@
             <div class="sb-panel" id="zm-p-storage" hidden><h3>הסכם אגירת אנרגיה</h3><div id="zm-b-storage"></div></div>
             <div class="sb-panel" id="zm-p-mobile" hidden><h3>ניידות (לפי שלב)</h3><div id="zm-b-mobile"></div></div>
         </div>
-        <div class="zv-foot"><a class="sb-btn" href="/dashboard/projects/blockers">🚧 חסמים</a><a class="sb-btn" href="/dashboard/projects/delays">⏱ ניתוח עיכובים</a><a class="sb-btn" href="/dashboard/projects/insights">🧠 דפוסים וסיכונים</a><a class="sb-btn primary" href="/dashboard/projects">לכל הפרויקטים ←</a></div>
+        <div class="zv-foot"><a class="sb-btn primary" href="/dashboard/projects">לכל הפרויקטים ←</a></div>
     {% else %}<div class="sb-empty">התחנה לא זמינה כרגע</div>{% endif %}
     </section>
 

@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from starlette.middleware.gzip import GZipMiddleware
 from fastapi.responses import RedirectResponse
 from fastapi.requests import Request
@@ -77,6 +77,27 @@ app = FastAPI(
     redoc_url=None,
     openapi_url=None if _ON_RAILWAY else "/openapi.json",
 )
+
+
+@app.exception_handler(HTTPException)
+async def _analysis_refusal_as_page(request: Request, exc: HTTPException):
+    """An analysis page a viewer has no role for (insight_access.NO_ACCESS) is a
+    page saying why — not a bare JSON line on an iPad. Every other error as before."""
+    from fastapi.exception_handlers import http_exception_handler
+    from app.services.insight_access import NO_ACCESS
+    if exc.status_code == 403 and exc.detail == NO_ACCESS and "text/html" in request.headers.get("accept", ""):
+        from fastapi.responses import HTMLResponse
+        from html import escape
+        return HTMLResponse(status_code=403, content=(
+            '<!doctype html><html lang="he" dir="rtl"><head><meta charset="utf-8">'
+            '<meta name="viewport" content="width=device-width,initial-scale=1"><title>Shan-AI — אין שיוך</title>'
+            '<style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#0b0a08;color:#f3eee4;'
+            'font-family:Heebo,Arial,sans-serif;padding:16px}main{max-width:34rem;text-align:center}'
+            'h1{font-size:1.6rem}p{color:#b9b1a3;line-height:1.6}a{color:#ffb020}</style></head><body><main>'
+            '<h1>🔒 עדיין אין לך שיוך לדפי הניתוח</h1>'
+            f'<p>{escape(NO_ACCESS)}.<br>מנהל המערכת משייך מגזר או שם מנהל פרויקט בדף ״הרשאות דפוסים״, ומיד אחר כך הדף ייפתח.</p>'
+            '<p><a href="/dashboard/projects">← חזרה לפרויקטים</a></p></main></body></html>'))
+    return await http_exception_handler(request, exc)
 
 
 class _TextGZip(GZipMiddleware):
