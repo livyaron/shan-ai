@@ -397,7 +397,7 @@ async def add_instruction(
         select(QuerySynonym).where(QuerySynonym.original == "__global_instructions__")
     )
     if row:
-        row.synonyms = list(row.synonyms) + [body.text.strip()]
+        row.synonyms = [body.text.strip()] + list(row.synonyms)  # newest first — injected [:6]
     else:
         row = QuerySynonym(
             original="__global_instructions__",

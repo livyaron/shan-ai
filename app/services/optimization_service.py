@@ -9,6 +9,7 @@ STRUCTURE   → mark log with failure_type + fix_suggestion for manual re-parse
 """
 
 import json
+import re
 import logging
 from sqlalchemy import select, or_
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -135,8 +136,44 @@ MERGE_SYSTEM_PROMPT = """אתה עורך הוראות מערכת ל-AI שמנת�
 """
 
 
-async def _merge_and_store_instructions(session: AsyncSession, new_instructions: list[str]) -> None:
-    """Merge new instructions with existing ones, deduplicate, and store in __global_instructions__."""
+# A learned rule the answering model can't act on: "ודא שהמידע מדויק" adds nothing,
+# and a prompt can't create a button. Seen in the first nightly run (2026-11-17).
+_VAGUE_RULE = re.compile(
+    r"^ו?ודא\s+ש.{0,40}(מדויק|נכון|מעודכן|אמיתי|הנכון|תקין)"
+)
+_UI_REQUEST = re.compile(r"כפתור|קישור|לינק")
+
+
+def is_actionable_instruction(text: str) -> bool:
+    """False for empty, too-short, generic ("ודא ש…נכון") or UI-feature rules."""
+    t = " ".join((text or "").split())
+    if len(t.split()) < 5:
+        return False
+    core = t.split(",", 1)[-1].strip() if t.startswith("כאשר") else t
+    if _VAGUE_RULE.search(core) or _UI_REQUEST.search(t):
+        return False
+    return True
+
+
+def clean_instructions(items: list[str]) -> list[str]:
+    """Order-preserving: drop non-actionable rules and exact duplicates (whitespace-normalized).
+    Order matters — _get_learned_instructions injects only the first 6."""
+    seen: set[str] = set()
+    out: list[str] = []
+    for it in items:
+        t = " ".join((it or "").split())
+        if t in seen or not is_actionable_instruction(t.removeprefix("[פידבק גולמי]").strip()):
+            continue
+        seen.add(t)
+        out.append(t)
+    return out
+
+
+async def _merge_and_store_instructions(session: AsyncSession, new_instructions: list[str]) -> bool:
+    """Merge new instructions with existing ones, deduplicate, and store in __global_instructions__.
+
+    Returns False when the merge LLM failed — the stored rules are then left untouched
+    (no blind append: that is how duplicates and contradictions piled up)."""
     from app.services.llm_router import llm_chat
 
     # Fetch existing global instructions
@@ -167,7 +204,10 @@ New instructions discovered:
             temperature=0.1,
         )
         merged_data = json.loads(merged_json) if isinstance(merged_json, str) else merged_json
-        merged_instructions = merged_data.get("instructions", new_instructions)
+        merged_instructions = clean_instructions(merged_data.get("instructions") or [])
+        if not merged_instructions:
+            logger.warning("Instruction merge returned nothing actionable — keeping the stored rules")
+            return False
 
         if existing_row:
             existing_row.synonyms = merged_instructions
@@ -179,18 +219,10 @@ New instructions discovered:
                 source="instruction",
             ))
             logger.info(f"  ✓ Created __global_instructions__ with {len(merged_instructions)} entries")
+        return True
     except Exception as e:
-        logger.warning(f"Instruction merge LLM call failed, falling back to simple append: {e}")
-        # Fallback: just append new instructions
-        merged = list(set(existing_instructions + new_instructions))
-        if existing_row:
-            existing_row.synonyms = merged
-        else:
-            session.add(QuerySynonym(
-                original="__global_instructions__",
-                synonyms=merged,
-                source="instruction",
-            ))
+        logger.warning(f"Instruction merge LLM call failed — stored rules unchanged, retry next run: {e}")
+        return False
 
 
 async def run_optimization(session: AsyncSession) -> dict:
@@ -370,9 +402,13 @@ async def run_optimization(session: AsyncSession) -> dict:
         f"[פידבק גולמי] {note}" for log_id, note in pre_collected_admin_notes
         if log_id not in llm_instruction_log_ids
     ]
-    all_instructions = new_instructions + unprocessed_admin_notes
-    if all_instructions:
-        await _merge_and_store_instructions(session, all_instructions)
+    all_instructions = clean_instructions(new_instructions) + unprocessed_admin_notes
+    if all_instructions and not await _merge_and_store_instructions(session, all_instructions):
+        # Nothing was stored — re-open these logs so tomorrow's run tries again.
+        for log in logs:
+            if log.id in llm_instruction_log_ids or log.id in admin_note_log_ids:
+                log.analyzed = False
+                processed_log_ids.discard(log.id)
 
     # Mark only processed logs as analyzed — unprocessed ones stay for next run
     for log in logs:
@@ -525,7 +561,7 @@ async def reorganize_knowledge(session: AsyncSession) -> dict:
     if instructions and not isinstance(inst_raw, BaseException) and inst_raw is not None:
         try:
             data = json.loads(inst_raw) if isinstance(inst_raw, str) else inst_raw
-            new_instructions = data.get("instructions", instructions)
+            new_instructions = clean_instructions(data.get("instructions") or []) or instructions
 
             if global_instr_row:
                 global_instr_row.synonyms = new_instructions

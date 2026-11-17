@@ -1833,7 +1833,10 @@ async def _get_learned_instructions(session: AsyncSession) -> list[str]:
         # Cap at 6 — the full list (16+) bloats the system prompt and eats per-minute
         # token budget. Most-recent first (newest learnings carry the most signal).
         instructions = row.synonyms if row and row.synonyms else []
-        return instructions[-6:]
+        # The merge/reorganize prompts keep the list newest/most-important FIRST, and
+        # the admin "add" prepends — so the head is what counts (was [-6:], i.e. the
+        # oldest/least important six, until 2026-11-17).
+        return instructions[:6]
     except Exception as e:
         logger.warning(f"_get_learned_instructions failed: {e}")
         return []

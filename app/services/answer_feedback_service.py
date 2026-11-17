@@ -98,6 +98,7 @@ async def record_answer_comment(
     log.user_feedback = -1
     log.analyzed = False
     await session.commit()
+    logger.info("answer_comment: saved on log %s (user %s, %d chars)", log_id, user_id, len(text))
     return fb
 
 
