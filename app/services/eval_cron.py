@@ -228,6 +228,12 @@ async def _feedback_optimization_run() -> None:
         logger.info("feedback_optimization: %s — %s logs, %s instructions",
                     result.get("status"), result.get("logs_processed"),
                     result.get("instructions_collected", 0))
+        # Quality gate on the whole stored list, nightly — also catches rules an
+        # admin added by hand and runs when no new instruction triggered a merge.
+        from app.services.optimization_service import tidy_stored_instructions
+        async with async_session_maker() as s:
+            before, after = await tidy_stored_instructions(s)
+        logger.info("feedback_optimization: rules tidy %d → %d", before, after)
     except Exception as e:
         logger.exception(f"feedback_optimization run failed: {e}")
 
