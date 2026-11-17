@@ -30,6 +30,12 @@ from app.services import stage_sectors as ss
 ADMIN_SECTIONS = frozenset({"leading", "risk", "waves", "health", "lists"})
 
 
+# A role above the sectors: the division head (user, 2026-11-17). Stored in users.sector,
+# but NOT a stage_sectors key — it owns no stage, so no sector table ever counts it.
+DIVISION_HEAD = "division_head"
+DIVISION_HEAD_OWNER = "מנהל אגף"          # the file's לטיפול role it handles (exact; "מנהל אגף תפעול השנאה" is another)
+ROLES: dict[str, str] = {**ss.ASSIGNABLE_SECTORS, DIVISION_HEAD: "מנהל אגף"}   # what an admin can assign
+
 # the one refusal for the analysis pages (patterns · delays · blockers · project page); main.py draws it as a page
 NO_ACCESS = "אין לך עדיין שיוך לתצוגת הדפוסים — פנה למנהל המערכת"
 
@@ -42,7 +48,7 @@ class Scope:
 
     @property
     def allowed(self) -> bool:
-        return self.admin or self.sector in ss.ASSIGNABLE_SECTORS or bool(self.managers)
+        return self.admin or self.sector in ROLES or bool(self.managers)
 
 
 async def scope_for(session: AsyncSession, user: User) -> Scope:
@@ -50,7 +56,7 @@ async def scope_for(session: AsyncSession, user: User) -> Scope:
         select(ManagerAlias.alias).where(ManagerAlias.user_id == user.id))).scalars().all()
     sector = getattr(user, "sector", None)
     return Scope(admin=bool(user.is_admin),
-                 sector=sector if sector in ss.ASSIGNABLE_SECTORS else None,
+                 sector=sector if sector in ROLES else None,
                  managers=frozenset(names))
 
 
@@ -68,8 +74,8 @@ async def preview_scope(session: AsyncSession, as_user: str | None, as_sector: s
         if user is not None:
             sc = await scope_for(session, user)
             return Scope(admin=False, sector=sc.sector, managers=sc.managers), f"משתמש: {user.username}"
-    if as_sector in ss.ASSIGNABLE_SECTORS:
-        return Scope(sector=as_sector), ss.SECTORS[as_sector]
+    if as_sector in ROLES:
+        return Scope(sector=as_sector), ROLES[as_sector]
     if as_manager:
         return Scope(managers=frozenset({as_manager})), f'מנה"פ: {as_manager}'
     return None
@@ -81,9 +87,9 @@ async def preview_options(session: AsyncSession, p: dict) -> dict:
     linked = set((await session.execute(select(ManagerAlias.user_id).where(ManagerAlias.user_id.isnot(None)))).scalars())
     users = (await session.execute(select(User).order_by(User.username))).scalars().all()
     return {
-        "users": [{"id": u.id, "name": u.username, "sector": ss.SECTORS.get(getattr(u, "sector", None) or "", "")}
-                  for u in users if (getattr(u, "sector", None) in ss.ASSIGNABLE_SECTORS or u.id in linked)],
-        "sectors": ss.ASSIGNABLE_SECTORS,
+        "users": [{"id": u.id, "name": u.username, "sector": ROLES.get(getattr(u, "sector", None) or "", "")}
+                  for u in users if (getattr(u, "sector", None) in ROLES or u.id in linked)],
+        "sectors": ROLES,
         "managers": sorted({r["manager"] for r in p.get("league", []) if r.get("manager")}),
     }
 
@@ -106,8 +112,8 @@ def summarize(projects: list[dict], as_of: str | None) -> dict:
 
 
 def sees_all(scope: Scope) -> bool:
-    """Admin and the PM department see every project."""
-    return scope.admin or scope.sector == ss.PM_DEPT
+    """Admin, the division head and the PM department see every project."""
+    return scope.admin or scope.sector in (ss.PM_DEPT, DIVISION_HEAD)
 
 
 def sees_project(scope: Scope, sectors, manager: str | None) -> bool:
@@ -125,6 +131,8 @@ OWNER_WORD = {ss.PLANNING: "תכנון", ss.EXECUTION: "ביצוע", ss.SUPERVIS
 
 def owns_blocker(scope: Scope, owner: str | None) -> bool:
     """Is a blocker's handler ("לטיפול") this viewer's own role?"""
+    if scope.sector == DIVISION_HEAD:
+        return owner == DIVISION_HEAD_OWNER
     word = OWNER_WORD.get(scope.sector or "")
     return bool(word and owner and word in owner)
 
@@ -158,8 +166,8 @@ def view_for(scope: Scope, p: dict) -> dict:
 
     if scope.admin:
         title = "כל האגף"
-    elif scope.sector == ss.PM_DEPT:
-        title = ss.SECTORS[ss.PM_DEPT]
+    elif scope.sector in (ss.PM_DEPT, DIVISION_HEAD):
+        title = ROLES[scope.sector]
     elif scope.sector:
         title = ss.SECTORS[scope.sector]
     else:
@@ -186,7 +194,7 @@ def ai_kinds_for(scope: Scope) -> list[str]:
     """Which stored AI analyses this viewer may read (PLAN.md P5). Levels 1–2
     only; level 3 follows the project page's own visibility rule."""
     from app.services import insight_ai as ai
-    if scope.admin or scope.sector == ss.PM_DEPT:
+    if sees_all(scope):
         return [ai.DIVISION] + [ai.sector_kind(k) for k in ai.AREA_SECTORS]
     if scope.sector in ai.AREA_SECTORS:
         return [ai.sector_kind(scope.sector)]

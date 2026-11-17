@@ -396,13 +396,13 @@ async def insights_ai_status(current_user: User = Depends(get_current_user)):
 
 async def _visible_project(session: AsyncSession, current_user: User, identifier: str):
     """(frames, p) when this viewer may open the project page, else HTTP error."""
-    from app.services import insight_access, pattern_service, stage_sectors
+    from app.services import insight_access, pattern_service
     scope = await insight_access.scope_for(session, current_user)
     if not scope.allowed:
         raise HTTPException(status_code=403, detail=insight_access.NO_ACCESS)
     frames, p = await pattern_service.frames_and_patterns(session)
     view = insight_access.view_for(scope, p)
-    full = scope.admin or scope.sector == stage_sectors.PM_DEPT
+    full = insight_access.sees_all(scope)
     if not full and identifier not in {x["identifier"] for x in view["projects"]}:
         raise HTTPException(status_code=404, detail="הפרויקט לא נמצא בתצוגה שלך")
     return frames, p
@@ -520,7 +520,7 @@ async def insights_access_page(
     from rapidfuzz import process as rf_process
     from sqlalchemy import func
     from app.models import ManagerAlias
-    from app.services import stage_sectors
+    from app.services import insight_access
     names = (await session.execute(
         select(Project.manager, func.count()).where(Project.is_active, Project.manager.isnot(None))
         .group_by(Project.manager).order_by(func.count().desc()))).all()
@@ -534,7 +534,7 @@ async def insights_access_page(
                      "hint": usernames.get(hint[2]) if hint else None})
     return templates.TemplateResponse("project_insights_access.html", {
         "request": request, "current_user": current_user, "rows": rows, "users": users,
-        "sectors": stage_sectors.ASSIGNABLE_SECTORS, "saved": request.query_params.get("saved"),
+        "sectors": insight_access.ROLES, "saved": request.query_params.get("saved"),
     })
 
 
@@ -551,7 +551,7 @@ async def insights_access_save(
     from fastapi.responses import RedirectResponse
     from sqlalchemy.dialects.postgresql import insert as pg_insert
     from app.models import ManagerAlias
-    from app.services import stage_sectors
+    from app.services import insight_access
     form = await request.form()
     user_ids = set((await session.execute(select(User.id))).scalars().all())
     for key, value in form.multi_items():
@@ -565,7 +565,7 @@ async def insights_access_save(
             uid_s = key[len("sector::"):]
             if uid_s.isdigit() and int(uid_s) in user_ids:
                 user = await session.get(User, int(uid_s))
-                user.sector = value if value in stage_sectors.ASSIGNABLE_SECTORS else None
+                user.sector = value if value in insight_access.ROLES else None
     await session.commit()
     return RedirectResponse("/dashboard/projects/insights/access?saved=1", status_code=303)
 
