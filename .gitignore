@@ -77,3 +77,14 @@ static/lessons/
 
 # Uploaded knowledge files live on the Railway volume, never in git.
 uploads/
+
+# graphify: commit graph.json, GRAPH_REPORT.md, manifest.json, labels, cache/semantic only
+app/graphify-out/graph.html
+app/graphify-out/cache/ast/
+app/graphify-out/cache/stat-index.json
+app/graphify-out/.graphify_root
+app/graphify-out/.graphify_python
+app/graphify-out/.graphify_build_state.json
+app/graphify-out/.graphify_labels.pending.json
+app/graphify-out/[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]/
+app/graphify-out/cache/last_query_stamp

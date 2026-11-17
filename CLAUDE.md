@@ -62,5 +62,11 @@ Decision intelligence for electrical substation projects at an electric utility.
 - Domain not covered here or in the rules? Check `.claude/skills/` (includes find-skills). Install skills project-scoped only; read every SKILL.md before committing it.
 - ECC agents/skills in `.claude/` are a vetted subset, and **this file and `.claude/rules/` override them**: no local DB, synthetic-fixture tests (no 80% coverage target), minimal diffs, `$RAILWAY_DATABASE_URL` not `$DATABASE_URL`. Ignore their "MUST BE USED / PROACTIVELY" — use an agent when asked or when a fresh-context review is worth its cost.
 
+## Code graph (graphify)
+- `app/graphify-out/graph.json` = knowledge graph of `app/` (Python AST + templates). Use it for structure: who calls X, what a change breaks, how modules connect. One lookup (where is X) → `grep`.
+- Run graphify from inside `app/` (it reads `./graphify-out`). Refresh before use (AST only, no LLM, ~10 s): `pip install -q graphifyy && cd app && graphify update .`. Then `graphify query "<question>"` / `graphify path "A" "B"` / `graphify explain "X"`; overview in `app/graphify-out/GRAPH_REPORT.md`.
+- Don't commit a routine refresh. Commit the graph only after a template re-extraction.
+- Template (`app/templates/`) changes are not picked up by `update`. Re-extracting them (`/graphify . --update` from inside `app/`) costs LLM tokens — the user's confirmation first; a full `/graphify` rebuild (~800K tokens) never without it.
+
 ## When compacting
 Preserve: files changed, the branch name, commits pushed to `master`, and whether each deploy was verified green.
