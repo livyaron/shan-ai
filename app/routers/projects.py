@@ -520,7 +520,7 @@ async def insights_access_page(
     from rapidfuzz import process as rf_process
     from sqlalchemy import func
     from app.models import ManagerAlias
-    from app.services import insight_access
+    from app.services import stage_sectors
     names = (await session.execute(
         select(Project.manager, func.count()).where(Project.is_active, Project.manager.isnot(None))
         .group_by(Project.manager).order_by(func.count().desc()))).all()
@@ -534,7 +534,7 @@ async def insights_access_page(
                      "hint": usernames.get(hint[2]) if hint else None})
     return templates.TemplateResponse("project_insights_access.html", {
         "request": request, "current_user": current_user, "rows": rows, "users": users,
-        "sectors": insight_access.ROLES, "saved": request.query_params.get("saved"),
+        "sectors": stage_sectors.ASSIGNABLE_SECTORS, "saved": request.query_params.get("saved"),
     })
 
 
@@ -551,7 +551,7 @@ async def insights_access_save(
     from fastapi.responses import RedirectResponse
     from sqlalchemy.dialects.postgresql import insert as pg_insert
     from app.models import ManagerAlias
-    from app.services import insight_access
+    from app.services import stage_sectors
     form = await request.form()
     user_ids = set((await session.execute(select(User.id))).scalars().all())
     for key, value in form.multi_items():
@@ -565,7 +565,7 @@ async def insights_access_save(
             uid_s = key[len("sector::"):]
             if uid_s.isdigit() and int(uid_s) in user_ids:
                 user = await session.get(User, int(uid_s))
-                user.sector = value if value in insight_access.ROLES else None
+                user.sector = value if value in stage_sectors.ASSIGNABLE_SECTORS else None
     await session.commit()
     return RedirectResponse("/dashboard/projects/insights/access?saved=1", status_code=303)
 

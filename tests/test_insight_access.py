@@ -230,12 +230,11 @@ def test_the_fyi_column_names_its_projects():
         assert "לכל פרויקט פעיל הופעל לפחות כלל אחד" in col
 
 
-def test_division_head_sees_everything_and_owns_only_the_division_heads_blockers():
-    head = ia.Scope(sector=ia.DIVISION_HEAD)
+def test_division_manager_role_sees_everything_and_owns_only_the_division_heads_blockers():
+    head = ia.Scope(division=True)                         # users.role == DIVISION_MANAGER — no new role, no sector
     assert head.allowed and ia.sees_all(head) and not head.admin
     assert ia.sees_project(head, (ss.PLANNING,), "מישהו")
     assert ia.owns_blocker(head, "מנהל אגף")
     assert not ia.owns_blocker(head, "מנהל אגף תפעול השנאה") and not ia.owns_blocker(head, "מנהל מגזר תכנון")
-    assert ia.DIVISION_HEAD not in ss.SECTORS             # never a sector row or a stage count
     assert ia.ai_kinds_for(head) == ia.ai_kinds_for(ia.Scope(sector=ss.PM_DEPT))
-    assert len(ia.DIVISION_HEAD) <= 16                    # users.sector is String(16)
+    assert ia.view_for(head, {"projects": []})["title"] == "כל האגף"
