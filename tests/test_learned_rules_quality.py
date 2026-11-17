@@ -74,6 +74,30 @@ def test_merge_output_is_cleaned(monkeypatch):
 
 def test_bot_injects_the_head_of_the_list():
     from app.services.knowledge_service import _get_learned_instructions
-    row = SimpleNamespace(synonyms=[f"rule {i}" for i in range(10)])
-    got = asyncio.run(_get_learned_instructions(_Session(row)))
-    assert got == [f"rule {i}" for i in range(6)]
+    rules = [f"כאשר מבקשים דוח מספר {i}, הצג את כל השדות" for i in range(10)]
+    row = SimpleNamespace(synonyms=rules)
+    assert asyncio.run(_get_learned_instructions(_Session(row))) == rules[:6]
+
+
+def test_retired_rule_is_gone_and_stays_gone():
+    retired = "כאשר נשאלת שאלה על כמות, ענה במשפט אחד ללא רשימה מפורטת"
+    assert not is_actionable_instruction(retired)
+    assert clean_instructions([retired, GOOD[0]]) == [GOOD[0]]
+
+
+def test_tidy_cleans_the_stored_list_in_order():
+    class _S(_Session):
+        committed = False
+
+        async def commit(self):
+            self.committed = True
+    row = SimpleNamespace(synonyms=[VAGUE[0], GOOD[1], VAGUE[4], GOOD[0]])
+    s = _S(row)
+    assert asyncio.run(opt.tidy_stored_instructions(s)) == (4, 2)
+    assert row.synonyms == [GOOD[1], GOOD[0]] and s.committed
+
+
+def test_read_time_gate_skips_bad_stored_rules():
+    from app.services.knowledge_service import _get_learned_instructions
+    row = SimpleNamespace(synonyms=[VAGUE[0], GOOD[0], VAGUE[1], GOOD[1]])
+    assert asyncio.run(_get_learned_instructions(_Session(row))) == [GOOD[0], GOOD[1]]

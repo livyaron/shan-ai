@@ -1836,7 +1836,9 @@ async def _get_learned_instructions(session: AsyncSession) -> list[str]:
         # The merge/reorganize prompts keep the list newest/most-important FIRST, and
         # the admin "add" prepends — so the head is what counts (was [-6:], i.e. the
         # oldest/least important six, until 2026-11-17).
-        return instructions[:6]
+        # Gate at read time too — a stored rule that fails it is never injected.
+        from app.services.optimization_service import clean_instructions
+        return clean_instructions(instructions)[:6]
     except Exception as e:
         logger.warning(f"_get_learned_instructions failed: {e}")
         return []

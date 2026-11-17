@@ -693,6 +693,18 @@ async def startup():
             print(f"Warning: password default-flag backfill failed: {e}")
     asyncio.create_task(_backfill_password_flags())
 
+    # Learned answer rules: drop the ones the quality gate rejects (idempotent).
+    async def _tidy_learned_rules():
+        try:
+            from app.database import async_session_maker
+            from app.services.optimization_service import tidy_stored_instructions
+            async with async_session_maker() as session:
+                before, after = await tidy_stored_instructions(session)
+            print(f"Learned rules tidy: {before} → {after}")
+        except Exception as e:
+            print(f"Warning: learned rules tidy failed: {e}")
+    asyncio.create_task(_tidy_learned_rules())
+
     # Start Telegram bot — polling locally, webhook on Railway. A failed start
     # (one network blip to api.telegram.org at boot) used to leave the bot dead
     # until the next deploy, with the site itself green (2026-10-10). It now
