@@ -101,3 +101,44 @@ def test_read_time_gate_skips_bad_stored_rules():
     from app.services.knowledge_service import _get_learned_instructions
     row = SimpleNamespace(synonyms=[VAGUE[0], GOOD[0], VAGUE[1], GOOD[1]])
     assert asyncio.run(_get_learned_instructions(_Session(row))) == [GOOD[0], GOOD[1]]
+
+
+# ── relevance pick (2026-11-17): the rules closest to the question, not the first six ──
+
+def test_pick_relevant_keeps_closest_in_priority_order():
+    from app.services.knowledge_service import pick_relevant_rules
+    rules = ["a", "b", "c", "d"]
+    vecs = [[1, 0], [0, 1], [0.9, 0.1], [0.1, 0.9]]
+    assert pick_relevant_rules(rules, vecs, [1, 0], k=2) == ["a", "c"]
+    assert pick_relevant_rules(rules, vecs, [0, 1], k=2) == ["b", "d"]
+    assert pick_relevant_rules(rules[:2], vecs[:2], [0, 1], k=6) == ["a", "b"]
+
+
+def _ten_rules():
+    return [f"כאשר מבקשים דוח מספר {i}, הצג את כל השדות" for i in range(10)]
+
+
+def test_question_routes_through_the_embedding(monkeypatch):
+    from app.services import knowledge_service as ks
+    rules = _ten_rules()
+
+    async def fake_rules(rs):
+        return [[1.0, 0.0] if i >= 4 else [0.0, 1.0] for i, _ in enumerate(rs)]
+
+    async def fake_embed(_q):
+        return [1.0, 0.0]
+    monkeypatch.setattr(ks, "_embed_rules", fake_rules)
+    monkeypatch.setattr("app.services.embedding_service.embed", fake_embed)
+    got = asyncio.run(ks._get_learned_instructions(_Session(SimpleNamespace(synonyms=rules)), "שאלה"))
+    assert got == rules[4:10]
+
+
+def test_embedding_failure_falls_back_to_the_head(monkeypatch):
+    from app.services import knowledge_service as ks
+    rules = _ten_rules()
+
+    async def boom(_rs):
+        raise RuntimeError("model not loaded")
+    monkeypatch.setattr(ks, "_embed_rules", boom)
+    got = asyncio.run(ks._get_learned_instructions(_Session(SimpleNamespace(synonyms=rules)), "שאלה"))
+    assert got == rules[:6]
