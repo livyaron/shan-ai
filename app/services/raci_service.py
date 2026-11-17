@@ -1164,6 +1164,18 @@ def build_new_user_role_picker(decision_id: int, user_id: int, user_name: str):
     return text, InlineKeyboardMarkup(keyboard)
 
 
+def parse_user_ids(raw: str | None) -> list[int]:
+    """User ids from a comma-separated RACI form field; non-numeric parts are dropped."""
+    return [int(p.strip()) for p in (raw or "").split(",") if p.strip().isdigit()]
+
+
+def accountable_error(accountable_ids: list[int]) -> str | None:
+    """The one-Accountable rule: a decision has exactly one A. Hebrew error text, or None."""
+    if len(accountable_ids) != 1:
+        return "חייב להיות בעל סמכות אחד בדיוק (A)"
+    return None
+
+
 async def get_accountable_user_id(decision_id: int, session: AsyncSession) -> int | None:
     """Return the user_id of the Accountable (A) for a decision, or None if not assigned."""
     return await session.scalar(

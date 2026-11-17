@@ -1602,6 +1602,13 @@ async def confirm_decision(
     """Save a pre-analyzed decision after the user reviews and confirms it, including RACI assignments."""
     _require_decision_writer(current_user)
     from app.models import DecisionRaciRole, RaciRoleEnum
+    from app.services.raci_service import accountable_error, parse_user_ids
+
+    # The browser checks this too, but a direct POST must not create a decision
+    # with no A or several (get_accountable_user_id would pick one arbitrarily).
+    raci_error = accountable_error(parse_user_ids(raci_a))
+    if raci_error:
+        raise HTTPException(status_code=400, detail=raci_error)
 
     decision = Decision(
         submitter_id=current_user.id,
