@@ -1823,25 +1823,72 @@ async def _apply_learned_synonyms(question: str, session: AsyncSession) -> str:
     return question
 
 
-async def _get_learned_instructions(session: AsyncSession) -> list[str]:
-    """Load answer-improvement instructions from the consolidated __global_instructions__ row."""
+# How many learned rules go into one answer prompt. Groq's free tier is 8,000
+# tokens/min counting prompt + max_tokens; the answer call already spends ~5,100
+# (6,000 context chars) + 2,000 — six short rules (~350 tokens) is what fits.
+LEARNED_RULES_MAX = 6
+
+# rule text → its embedding. Rules change about once a night, so this stays tiny.
+_RULE_VEC_CACHE: dict[str, list[float]] = {}
+
+
+def _cosine(a: list[float], b: list[float]) -> float:
+    import math
+    dot = sum(x * y for x, y in zip(a, b))
+    na = math.sqrt(sum(x * x for x in a))
+    nb = math.sqrt(sum(y * y for y in b))
+    return dot / (na * nb) if na and nb else 0.0
+
+
+def pick_relevant_rules(rules: list[str], rule_vecs: list[list[float]],
+                        question_vec: list[float], k: int = LEARNED_RULES_MAX) -> list[str]:
+    """The k rules closest in meaning to the question, returned in the list's own
+    (priority) order. Pure — no model, no DB."""
+    if len(rules) <= k:
+        return list(rules)
+    ranked = sorted(range(len(rules)), key=lambda i: _cosine(rule_vecs[i], question_vec), reverse=True)
+    keep = set(ranked[:k])
+    return [r for i, r in enumerate(rules) if i in keep]
+
+
+async def _embed_rules(rules: list[str]) -> list[list[float]]:
+    missing = [r for r in rules if r not in _RULE_VEC_CACHE]
+    if missing:
+        import asyncio as _aio
+        from app.services.embedding_service import _get_model
+
+        def _batch() -> list[list[float]]:
+            return [list(v) for v in _get_model().embed(missing)]
+        for r, v in zip(missing, await _aio.get_event_loop().run_in_executor(None, _batch)):
+            _RULE_VEC_CACHE[r] = v
+    return [_RULE_VEC_CACHE[r] for r in rules]
+
+
+async def _get_learned_instructions(session: AsyncSession, question: str | None = None) -> list[str]:
+    """Learned answer rules for this question: all of __global_instructions__ that pass
+    the quality gate, narrowed to the LEARNED_RULES_MAX closest to the question
+    (fastembed, local — no LLM call). No question / embedding failure → the head of
+    the list (it is kept newest/most-important first)."""
     try:
         from app.models import QuerySynonym
+        from app.services.optimization_service import clean_instructions
         row = await session.scalar(
             select(QuerySynonym).where(QuerySynonym.original == "__global_instructions__")
         )
-        # Cap at 6 — the full list (16+) bloats the system prompt and eats per-minute
-        # token budget. Most-recent first (newest learnings carry the most signal).
-        instructions = row.synonyms if row and row.synonyms else []
-        # The merge/reorganize prompts keep the list newest/most-important FIRST, and
-        # the admin "add" prepends — so the head is what counts (was [-6:], i.e. the
-        # oldest/least important six, until 2026-11-17).
-        # Gate at read time too — a stored rule that fails it is never injected.
-        from app.services.optimization_service import clean_instructions
-        return clean_instructions(instructions)[:6]
+        rules = clean_instructions(row.synonyms if row and row.synonyms else [])
     except Exception as e:
         logger.warning(f"_get_learned_instructions failed: {e}")
         return []
+    if not question or len(rules) <= LEARNED_RULES_MAX:
+        return rules[:LEARNED_RULES_MAX]
+    try:
+        from app.services.embedding_service import embed
+        picked = pick_relevant_rules(rules, await _embed_rules(rules), await embed(question))
+        logger.info(f"learned rules: {len(picked)} of {len(rules)} picked by relevance")
+        return picked
+    except Exception as e:
+        logger.warning(f"learned rules relevance pick failed, using the head: {e}")
+        return rules[:LEARNED_RULES_MAX]
 
 
 _FULL_LIST_TRIGGERS = ['כמה', 'סה"כ', "סה''כ", 'רשימה', 'כל הפרויקטים', 'כל פרויקט',
@@ -2009,7 +2056,7 @@ async def answer_with_full_context(
     search_question = await _apply_learned_synonyms(question, session)
 
     # Load learned answer-improvement instructions (injected into system prompt)
-    learned_instructions = await _get_learned_instructions(session)
+    learned_instructions = await _get_learned_instructions(session, question)
 
     # Step 1: Expand the query for better search
     # Skip expansion for full-list queries — keywords suffice and we save a Groq call
