@@ -144,10 +144,18 @@ _VAGUE_RULE = re.compile(
 _UI_REQUEST = re.compile(r"כפתור|קישור|לינק")
 
 
+# Rules retired by a person — never stored or injected again. Exact text,
+# whitespace-normalized. 2026-11-17 (ירון: "תעשה בעצמך"): contradicted
+# "כאשר נשאל על מספר פרויקטים באיחור… ענה עם רשימת הפרויקטים".
+RETIRED_INSTRUCTIONS: frozenset[str] = frozenset({
+    "כאשר נשאלת שאלה על כמות, ענה במשפט אחד ללא רשימה מפורטת",
+})
+
+
 def is_actionable_instruction(text: str) -> bool:
     """False for empty, too-short, generic ("ודא ש…נכון") or UI-feature rules."""
     t = " ".join((text or "").split())
-    if len(t.split()) < 5:
+    if len(t.split()) < 5 or t in RETIRED_INSTRUCTIONS:
         return False
     core = t.split(",", 1)[-1].strip() if t.startswith("כאשר") else t
     if _VAGUE_RULE.search(core) or _UI_REQUEST.search(t):
@@ -167,6 +175,23 @@ def clean_instructions(items: list[str]) -> list[str]:
         seen.add(t)
         out.append(t)
     return out
+
+
+async def tidy_stored_instructions(session: AsyncSession) -> tuple[int, int]:
+    """Apply clean_instructions to the stored list (order kept). Idempotent — runs at
+    startup so a rule that fails the gate leaves the list without waiting for a merge.
+    Returns (before, after)."""
+    row = await session.scalar(
+        select(QuerySynonym).where(QuerySynonym.original == "__global_instructions__")
+    )
+    before = list(row.synonyms) if row and row.synonyms else []
+    after = clean_instructions(before)
+    if row is not None and after != before:
+        row.synonyms = after
+        await session.commit()
+        dropped = [r for r in before if " ".join(r.split()) not in after]
+        logger.info("tidy_stored_instructions: %d → %d; dropped: %s", len(before), len(after), dropped)
+    return len(before), len(after)
 
 
 async def _merge_and_store_instructions(session: AsyncSession, new_instructions: list[str]) -> bool:
